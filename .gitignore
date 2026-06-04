@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnp.*
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Builds
+dist/
+build/
+.next/
+out/
+DerivedData/
+*.xcuserstate
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
