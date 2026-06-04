@@ -1,0 +1,11 @@
+{
+  "name": "@owner-operator/harness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Owner Operator agentic core (\"PI\") — read/triage layer built on the pi coding agent toolkit.",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.78.0",
+    "@earendil-works/pi-ai": "0.78.0"
+  }
+}
