@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 
 const scriptDir = path.dirname(new URL(import.meta.url).pathname);
 const keywordCsvPath = path.join(scriptDir, 'keywords.csv');
@@ -20,11 +21,21 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--source') opts.source = args[++i];
   else if (a === '--since') opts.since = args[++i];
   else if (a === '--json') opts.json = true;
+  else if (a === '--add') opts.add = true;
+  else if (a === '--description') opts.description = args[++i];
   else if (a === '--help' || a === '-h') usage(0);
   else usage(1, `Unknown arg: ${a}`);
 }
 
-const keywords = loadKeywords(keywordCsvPath);
+const db = openKeywordDb(path.join(os.homedir(), '.owner-operator', 'keywords.db'), keywordCsvPath);
+if (opts.add) {
+  if (!opts.keyword) usage(1, '--add requires --keyword NAME');
+  const name = normalizeKeyword(opts.keyword);
+  addKeyword(db, name, opts.description || '');
+  console.log(`added *${name}*${opts.description ? `: ${opts.description}` : ''}`);
+  process.exit(0);
+}
+const keywords = loadKeywordsDb(db);
 if (opts.list) {
   if (opts.json) console.log(JSON.stringify({ keywords }, null, 2));
   else for (const k of keywords) console.log(`${k.keyword}: ${k.description}`);
@@ -168,6 +179,27 @@ function loadKeywords(file) {
   }));
 }
 
+function openKeywordDb(dbFile, csvSeed) {
+  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+  const db = new DatabaseSync(dbFile);
+  db.exec("CREATE TABLE IF NOT EXISTS keywords (keyword TEXT PRIMARY KEY, description TEXT, created_at TEXT DEFAULT (datetime('now')))");
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM keywords').get();
+  if (n === 0) {
+    const ins = db.prepare('INSERT OR IGNORE INTO keywords (keyword, description) VALUES (?, ?)');
+    for (const k of loadKeywords(csvSeed)) ins.run(k.keyword, k.description);
+  }
+  return db;
+}
+
+function loadKeywordsDb(db) {
+  return db.prepare('SELECT keyword, description FROM keywords ORDER BY keyword').all()
+    .map((r) => ({ keyword: r.keyword, description: r.description || '' }));
+}
+
+function addKeyword(db, keyword, description) {
+  db.prepare("INSERT INTO keywords (keyword, description) VALUES (?, ?) ON CONFLICT(keyword) DO UPDATE SET description = excluded.description").run(keyword, description);
+}
+
 function findKeyword(keywords, value) {
   const target = normalizeKeyword(value || '');
   return keywords.find((k) => k.keyword === target);
@@ -224,6 +256,7 @@ function escapeRegex(value) {
 
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: session-keywords.mjs (--keyword NAME | --list) [--since today|7d|YYYY-MM-DD] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|all] [--json]');
+  console.error('Usage: session-keywords.mjs (--keyword NAME | --list | --add --keyword NAME --description "...") [--since today|7d|YYYY-MM-DD] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|all] [--json]');
+  console.error('Keyword definitions live in ~/.owner-operator/keywords.db (seeded from keywords.csv on first run).');
   process.exit(code);
 }

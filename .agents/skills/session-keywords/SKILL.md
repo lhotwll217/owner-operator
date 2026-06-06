@@ -12,15 +12,17 @@ moment and its surrounding context.
 
 ## Source of Truth
 
-`keywords.csv` is the source of truth for known keywords.
+Keyword definitions live in a durable SQLite store at `~/.owner-operator/keywords.db`
+(auto-created and seeded from the versioned `keywords.csv` on first run — zero external deps,
+uses Node's built-in `node:sqlite`). `keywords.csv` is the committed seed.
 
-Each row defines:
+Each keyword has:
 
 - `keyword` - the canonical keyword
-- `description` - what the keyword means and when to use it
+- `description` - what it means and when to use it
 
-Do not hard-code keyword meanings in this skill. Read `keywords.csv` when keyword semantics
-matter.
+Use the `session-keywords.mjs` script to read, search, and add keywords — don't read the
+store directly, and don't hard-code keyword meanings here.
 
 ## Keyword Shape
 
@@ -43,12 +45,17 @@ noise from common speech, while still being forgiving across case and whitespace
 
 ## How to Use
 
-When asked to find a keyword breadcrumb:
+Run the script from the repo root:
 
-1. Read `keywords.csv` to resolve the keyword and its meaning.
-2. Search sessions for marker-notation matches of that keyword.
-3. Return bounded surrounding context, not full transcripts.
-4. Prefer recent matches first when no stronger filter is given.
+- **List known keywords**: `node .agents/skills/session-keywords/session-keywords.mjs --list`
+- **Find a breadcrumb**: `… --keyword "NAME"` (optionally `--since 7d`, `--source claude|codex`,
+  `--before N`, `--after N`, `--json`) — searches sessions for `*NAME*` marker notation and
+  returns bounded before/after context.
+- **Add a keyword (durable)**: `… --add --keyword "NAME" --description "..."` — persists to the
+  SQLite store.
+
+Resolve the keyword via `--list` first, then search. Return bounded context, never full
+transcripts. Prefer recent matches when no stronger filter is given.
 
 ## Output Rules
 
