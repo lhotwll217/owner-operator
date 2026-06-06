@@ -21,10 +21,10 @@ The session transcripts are **huge** — loading them overflows the model and wa
 thread's topic + last few messages). You only read that small digest.
 
 ```bash
-node /Users/otwell/Development/owner-operator/.agents/skills/get-active-threads/get-active-threads.mjs --since today --last 6
+node /Users/otwell/Development/owner-operator/.agents/skills/get-active-threads/get-active-threads.mjs --since today --sample 4
 ```
 
-(See the skill's `SKILL.md` for flags: `--since`, `--last`, `--limit`, `--all`, `--json`.)
+(See the skill's `SKILL.md` for flags: `--since`, `--sample`, `--limit`, `--all`, `--json`.)
 
 **Do NOT** read session files yourself, and **do NOT** call `ai-sessions` `get_session` to
 build an overview. The script already gives you the tail.

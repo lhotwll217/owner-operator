@@ -3,13 +3,14 @@
 //
 // Reads Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session files,
 // finds recently-active threads, and prints a COMPACT digest: topic, light metadata, and
-// message "bookends" (first few + last few user-facing turns) so an agent can triage
-// "what's ongoing" WITHOUT loading full transcripts into an expensive model.
+// a sample of each thread's messages (its opening few + most-recent few) so an agent can
+// triage "what's ongoing" WITHOUT loading full transcripts into an expensive model.
 //
 // Usage:
-//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--bookends 4]
+//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--sample 4]
 //                               [--limit 40] [--all] [--json] [--truncate 280]
-//   (--last is accepted as an alias for --bookends)
+//   --sample N keeps the first N + most-recent N messages of each thread
+//   (--bookends / --last are accepted as aliases for --sample)
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
@@ -25,7 +26,8 @@ const val = (name, def) => {
 const has = (name) => args.includes(`--${name}`);
 
 const sinceArg = String(val("since", "today"));
-const bookN = parseInt(val("bookends", val("last", "4")), 10); // first N + last N turns
+// How many messages to keep from each end of a thread (opening N + most-recent N).
+const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10);
 const limit = parseInt(val("limit", "40"), 10);
 const truncate = parseInt(val("truncate", "280"), 10);
 const includeAll = has("all");
@@ -161,11 +163,11 @@ function parseSession({ file, source, mtime }) {
   const createdTs = firstTs || mtime;
   const lastMsgTs = lastMsg.ts || lastTs || mtime;
 
-  // bookends: first N + last N real turns (no overlap)
+  // Keep the opening N + most-recent N real messages (no overlap); count what's skipped.
   const shape = (m) => ({ role: m.role, text: clip(m.text), at: m.ts ? iso(m.ts) : null });
-  let first, last, omitted;
-  if (convo.length <= bookN * 2) { first = convo.map(shape); last = []; omitted = 0; }
-  else { first = convo.slice(0, bookN).map(shape); last = convo.slice(-bookN).map(shape); omitted = convo.length - bookN * 2; }
+  let firstMessages, recentMessages, omittedMessageCount;
+  if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
+  else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
 
   return {
     id: sessionId,
@@ -184,7 +186,9 @@ function parseSession({ file, source, mtime }) {
     automated,
     link: guiLink(source, sessionId, project),
     file,
-    bookends: { first, last, omitted },
+    firstMessages,          // earliest messages in the thread (array)
+    recentMessages,         // most-recent messages in the thread (array)
+    omittedMessageCount,    // messages skipped between the two ends
     _sort: lastMsgTs,
   };
 }
@@ -223,9 +227,9 @@ if (asJson) {
       console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)} (${t.lastRole === "user" ? "you spoke last" : "agent spoke last"})`);
       console.log(`  Next          : ${t.lastRole === "user" ? "agent's move — working / left mid-task" : "your move — reply to drive it forward"}`);
       console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);
-      for (const m of t.bookends.first) console.log(line(m));
-      if (t.bookends.omitted) console.log(`    ⋯ ${t.bookends.omitted} more turns ⋯`);
-      for (const m of t.bookends.last) console.log(line(m));
+      for (const m of t.firstMessages) console.log(line(m));
+      if (t.omittedMessageCount) console.log(`    ⋯ ${t.omittedMessageCount} more messages ⋯`);
+      for (const m of t.recentMessages) console.log(line(m));
     }
     console.log("");
   }

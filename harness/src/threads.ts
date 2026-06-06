@@ -31,16 +31,18 @@ const passthrough = argv.filter((a) => a !== "--plain"); // forward --since / --
 interface Turn { role: string; text: string; at: string | null }
 interface Thread {
   id: string;
-  repo: string;          // Repo Name
-  ui: string;            // App the session was made from
-  createdAt: string;     // Day created (ISO)
-  lastMessageAt: string; // Last message sent (ISO)
+  repo: string;            // Repo Name
+  ui: string;              // App the session was made from
+  createdAt: string;       // Day created (ISO)
+  lastMessageAt: string;   // Last message sent (ISO)
   secondsSinceLastMessage: number;
   lastRole: string;
   messageCount: number;
   topic: string;
   link: string | null;
-  bookends: { first: Turn[]; last: Turn[]; omitted: number };
+  firstMessages: Turn[];   // earliest messages in the thread
+  recentMessages: Turn[];  // most-recent messages in the thread
+  omittedMessageCount: number;
 }
 
 function gather(): { since: string; threads: Thread[] } {
@@ -68,9 +70,9 @@ const LABEL_W = 13; // "Last message" + padding
 const field = (label: string, value: string) => `${dim(label.padEnd(LABEL_W))}${value}`;
 const clip = (s: string, n = 200) => { s = String(s ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
 
-// The latest turn = the best deterministic read on current state / what's next.
+// The latest message = the best deterministic read on current state / what's next.
 function latest(t: Thread): Turn | null {
-  const arr = t.bookends?.last?.length ? t.bookends.last : (t.bookends?.first ?? []);
+  const arr = t.recentMessages?.length ? t.recentMessages : (t.firstMessages ?? []);
   return arr.length ? arr[arr.length - 1] : null;
 }
 // Whose move it is now — the actionable "next step" signal.
