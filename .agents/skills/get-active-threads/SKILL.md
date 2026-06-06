@@ -25,12 +25,12 @@ Run the bundled script. **Do this instead of reading session files or calling se
 tools yourself** — those overflow context and cost tokens.
 
 ```bash
-node /Users/otwell/Development/owner-operator/.agents/skills/get-active-threads/get-active-threads.mjs --since today --last 6
+node /Users/otwell/Development/owner-operator/.agents/skills/get-active-threads/get-active-threads.mjs --since today --sample 4
 ```
 
 Flags:
 - `--since today | 7d | 2026-06-04` — window (default `today`)
-- `--last N` — trailing messages per thread (default 6)
+- `--sample N` — keep the first N + most-recent N messages per thread (default 4; `--bookends`/`--last` are aliases)
 - `--limit N` — max threads (default 40)
 - `--all` — include automated/worker one-shots (hidden by default)
 - `--json` — machine-readable output (use when you want to post-process)

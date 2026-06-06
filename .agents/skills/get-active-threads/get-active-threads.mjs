@@ -3,13 +3,14 @@
 //
 // Reads Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session files,
 // finds recently-active threads, and prints a COMPACT digest: topic, light metadata, and
-// message "bookends" (first few + last few user-facing turns) so an agent can triage
-// "what's ongoing" WITHOUT loading full transcripts into an expensive model.
+// a sample of each thread's messages (its opening few + most-recent few) so an agent can
+// triage "what's ongoing" WITHOUT loading full transcripts into an expensive model.
 //
 // Usage:
-//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--bookends 4]
+//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--sample 4]
 //                               [--limit 40] [--all] [--json] [--truncate 280]
-//   (--last is accepted as an alias for --bookends)
+//   --sample N keeps the first N + most-recent N messages of each thread
+//   (--bookends / --last are accepted as aliases for --sample)
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
@@ -25,7 +26,8 @@ const val = (name, def) => {
 const has = (name) => args.includes(`--${name}`);
 
 const sinceArg = String(val("since", "today"));
-const bookN = parseInt(val("bookends", val("last", "4")), 10); // first N + last N turns
+// How many messages to keep from each end of a thread (opening N + most-recent N).
+const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10);
 const limit = parseInt(val("limit", "40"), 10);
 const truncate = parseInt(val("truncate", "280"), 10);
 const includeAll = has("all");
@@ -146,6 +148,8 @@ function parseSession({ file, source, mtime }) {
 
   if (!sessionId) sessionId = basename(file).replace(/\.jsonl$/, "");
   if (!project) project = "(unknown)";
+  // Repo name = the leaf folder of the session's cwd (the worktree/repo it lives in).
+  const repo = project === "(unknown)" ? "(unknown)" : basename(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
   const convo = msgs.filter((m) => !isBoiler(m.text));
@@ -159,16 +163,17 @@ function parseSession({ file, source, mtime }) {
   const createdTs = firstTs || mtime;
   const lastMsgTs = lastMsg.ts || lastTs || mtime;
 
-  // bookends: first N + last N real turns (no overlap)
+  // Keep the opening N + most-recent N real messages (no overlap); count what's skipped.
   const shape = (m) => ({ role: m.role, text: clip(m.text), at: m.ts ? iso(m.ts) : null });
-  let first, last, omitted;
-  if (convo.length <= bookN * 2) { first = convo.map(shape); last = []; omitted = 0; }
-  else { first = convo.slice(0, bookN).map(shape); last = convo.slice(-bookN).map(shape); omitted = convo.length - bookN * 2; }
+  let firstMessages, recentMessages, omittedMessageCount;
+  if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
+  else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
 
   return {
     id: sessionId,
     source,
-    ui: detectUi(source, project, entrypoint),
+    repo,                                              // Repo Name (leaf folder of cwd)
+    ui: detectUi(source, project, entrypoint),         // App the session was made from
     entrypoint: entrypoint || (source === "codex" ? "codex" : null),
     project,
     topic: clip(topicMsg.text, 140),
@@ -177,11 +182,14 @@ function parseSession({ file, source, mtime }) {
     lastRole: lastMsg.role,
     createdAt: iso(createdTs),
     lastMessageAt: iso(lastMsgTs),
+    secondsSinceCreated: Math.max(0, Math.round((Date.now() - createdTs) / 1000)),
     secondsSinceLastMessage: Math.max(0, Math.round((Date.now() - lastMsgTs) / 1000)),
     automated,
     link: guiLink(source, sessionId, project),
     file,
-    bookends: { first, last, omitted },
+    firstMessages,          // earliest messages in the thread (array)
+    recentMessages,         // most-recent messages in the thread (array)
+    omittedMessageCount,    // messages skipped between the two ends
     _sort: lastMsgTs,
   };
 }
@@ -196,23 +204,30 @@ threads.forEach((t) => delete t._sort);
 if (asJson) {
   process.stdout.write(JSON.stringify({ since: sinceArg, count: threads.length, threads }, null, 2) + "\n");
 } else {
-  const rel = (s) => (s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`);
-  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const dt = (isoStr) => { const d = new Date(isoStr); return `${MON[d.getMonth()]} ${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const rel = (s) => {
+    if (s < 45) return "just now";
+    const m = Math.round(s / 60); if (s < 3600) return `${m} minute${m === 1 ? "" : "s"} ago`;
+    const h = Math.round(s / 3600); if (s < 86400) return `${h} hour${h === 1 ? "" : "s"} ago`;
+    const d = Math.round(s / 86400); return `${d} day${d === 1 ? "" : "s"} ago`;
+  };
   const line = (m) => `    ${m.role === "user" ? "you " : "asst"}> ${m.text}`;
   if (threads.length === 0) { console.log(`No active threads since ${sinceArg}.`); process.exit(0); }
   const byProj = new Map();
-  for (const t of threads) { if (!byProj.has(t.project)) byProj.set(t.project, []); byProj.get(t.project).push(t); }
+  for (const t of threads) { if (!byProj.has(t.repo)) byProj.set(t.repo, []); byProj.get(t.repo).push(t); }
   console.log(`# Active threads since ${sinceArg} — ${threads.length} thread(s), newest first\n`);
-  for (const [proj, ts] of byProj) {
-    console.log(`## ${proj}`);
+  for (const [repo, ts] of byProj) {
+    console.log(`## ${repo}`);
     for (const t of ts) {
       console.log(`\n● ${t.topic}`);
-      console.log(`  ${t.ui} · ${t.messageCount} msgs · created ${dt(t.createdAt)} · last ${rel(t.secondsSinceLastMessage)} · ${t.lastRole === "user" ? "you spoke last" : "agent spoke last"}`);
-      if (t.link) console.log(`  ↳ open: ${t.link}`);
-      for (const m of t.bookends.first) console.log(line(m));
-      if (t.bookends.omitted) console.log(`    ⋯ ${t.bookends.omitted} more turns ⋯`);
-      for (const m of t.bookends.last) console.log(line(m));
+      // Structured fields the operator triages on. Times are relative ("2 days ago").
+      console.log(`  Repo Name     : ${t.repo}`);
+      console.log(`  App           : ${t.ui}`);
+      console.log(`  Created       : ${rel(t.secondsSinceCreated)}`);
+      console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)}`);
+      console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);
+      for (const m of t.firstMessages) console.log(line(m));
+      if (t.omittedMessageCount) console.log(`    ⋯ ${t.omittedMessageCount} more messages ⋯`);
+      for (const m of t.recentMessages) console.log(line(m));
     }
     console.log("");
   }
