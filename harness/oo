@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Owner Operator launcher.
+# Starts pi as your chief-of-staff agent from this directory, so it loads the
+# Owner Operator role (harness/AGENTS.md) and the ai-sessions MCP server
+# (harness/.mcp.json, surfaced via pi-mcp-adapter).
+#
+# Usage:
+#   ./harness/oo                       # interactive TUI
+#   ./harness/oo "what's ongoing today?"   # one-shot question
+#
+# First run only: inside pi, run /login and pick your Claude/Codex subscription.
+cd "$(dirname "$0")" || exit 1
+exec pi "$@"
