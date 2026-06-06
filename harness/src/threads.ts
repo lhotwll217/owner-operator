@@ -94,8 +94,8 @@ function cardLines(t: Thread): string[] {
     field("App", cyan(t.ui)),
     field("Day created", day(t.createdAt)),
     field("Last message", `${rel(t.secondsSinceLastMessage)} ${dim(`· ${t.lastRole === "user" ? "you spoke last" : "agent spoke last"}`)}`),
-    dim(`${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`),
   ];
+  if (t.link) lines.push(dim(`open: ${t.link}`));
   return lines;
 }
 
