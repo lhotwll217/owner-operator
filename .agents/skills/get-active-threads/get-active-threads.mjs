@@ -199,9 +199,14 @@ threads.forEach((t) => delete t._sort);
 if (asJson) {
   process.stdout.write(JSON.stringify({ since: sinceArg, count: threads.length, threads }, null, 2) + "\n");
 } else {
-  const rel = (s) => (s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`);
+  const rel = (s) => {
+    if (s < 45) return "just now";
+    const m = Math.round(s / 60); if (s < 3600) return `${m} minute${m === 1 ? "" : "s"} ago`;
+    const h = Math.round(s / 3600); if (s < 86400) return `${h} hour${h === 1 ? "" : "s"} ago`;
+    const d = Math.round(s / 86400); return `${d} day${d === 1 ? "" : "s"} ago`;
+  };
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const dt = (isoStr) => { const d = new Date(isoStr); return `${MON[d.getMonth()]} ${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const day = (isoStr) => { const d = new Date(isoStr), n = new Date(); const b = `${MON[d.getMonth()]} ${d.getDate()}`; return d.getFullYear() === n.getFullYear() ? b : `${b}, ${d.getFullYear()}`; };
   const line = (m) => `    ${m.role === "user" ? "you " : "asst"}> ${m.text}`;
   if (threads.length === 0) { console.log(`No active threads since ${sinceArg}.`); process.exit(0); }
   const byProj = new Map();
@@ -211,11 +216,12 @@ if (asJson) {
     console.log(`## ${repo}`);
     for (const t of ts) {
       console.log(`\n● ${t.topic}`);
-      // Structured fields — the four the operator triages on.
+      // Structured fields the operator triages on. "Last message" is relative-only.
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);
-      console.log(`  Day created   : ${dt(t.createdAt)}`);
-      console.log(`  Last message  : ${dt(t.lastMessageAt)} (${rel(t.secondsSinceLastMessage)}, ${t.lastRole === "user" ? "you spoke last" : "agent spoke last"})`);
+      console.log(`  Day created   : ${day(t.createdAt)}`);
+      console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)} (${t.lastRole === "user" ? "you spoke last" : "agent spoke last"})`);
+      console.log(`  Next          : ${t.lastRole === "user" ? "agent's move — working / left mid-task" : "your move — reply to drive it forward"}`);
       console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);
       for (const m of t.bookends.first) console.log(line(m));
       if (t.bookends.omitted) console.log(`    ⋯ ${t.bookends.omitted} more turns ⋯`);

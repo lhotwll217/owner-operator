@@ -28,6 +28,7 @@ const plain = argv.includes("--plain");
 const passthrough = argv.filter((a) => a !== "--plain"); // forward --since / --last / --all / …
 
 // ---------- gather (deterministic skill → JSON) ----------
+interface Turn { role: string; text: string; at: string | null }
 interface Thread {
   id: string;
   repo: string;          // Repo Name
@@ -39,6 +40,7 @@ interface Thread {
   messageCount: number;
   topic: string;
   link: string | null;
+  bookends: { first: Turn[]; last: Turn[]; omitted: number };
 }
 
 function gather(): { since: string; threads: Thread[] } {
@@ -48,29 +50,51 @@ function gather(): { since: string; threads: Thread[] } {
 
 // ---------- formatting ----------
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function dt(isoStr: string): string {
-  const d = new Date(isoStr);
-  return `${MON[d.getMonth()]} ${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+// "Day created" — day only, no clock noise (year only when it isn't this year).
+function day(isoStr: string): string {
+  const d = new Date(isoStr), now = new Date();
+  const base = `${MON[d.getMonth()]} ${d.getDate()}`;
+  return d.getFullYear() === now.getFullYear() ? base : `${base}, ${d.getFullYear()}`;
 }
+// "Last message" — relative only ("53 minutes ago", "2 hours ago", "1 day ago").
 function rel(s: number): string {
-  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago`
-    : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60); if (s < 3600) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  const h = Math.round(s / 3600); if (s < 86400) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const d = Math.round(s / 86400); return `${d} day${d === 1 ? "" : "s"} ago`;
 }
 
 const LABEL_W = 13; // "Last message" + padding
 const field = (label: string, value: string) => `${dim(label.padEnd(LABEL_W))}${value}`;
+const clip = (s: string, n = 200) => { s = String(s ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
 
-// The four structured fields the operator triages on, one card per thread.
+// The latest turn = the best deterministic read on current state / what's next.
+function latest(t: Thread): Turn | null {
+  const arr = t.bookends?.last?.length ? t.bookends.last : (t.bookends?.first ?? []);
+  return arr.length ? arr[arr.length - 1] : null;
+}
+// Whose move it is now — the actionable "next step" signal.
+function nextStep(t: Thread): string {
+  return t.lastRole === "user"
+    ? "agent's move — it's working / left mid-task"
+    : "your move — reply to drive it forward";
+}
+
+// One card per thread. Leads with Topic + current State/Next (the signals that matter),
+// then the structured fields. "Last message" is relative-only on purpose.
 function cardLines(t: Thread): string[] {
-  const turn = t.lastRole === "user" ? "you spoke last" : "agent spoke last";
-  return [
+  const cur = latest(t);
+  const lines = [
     bold(`● ${t.topic}`),
+    field("State", cur ? `${dim(cur.role === "user" ? "you›" : "asst›")} ${clip(cur.text)}` : dim("(no messages)")),
+    field("Next", yellow(nextStep(t))),
     field("Repo Name", green(t.repo)),
     field("App", cyan(t.ui)),
-    field("Day created", dt(t.createdAt)),
-    field("Last message", `${dt(t.lastMessageAt)} ${dim(`· ${rel(t.secondsSinceLastMessage)} · ${turn}`)}`),
+    field("Day created", day(t.createdAt)),
+    field("Last message", `${rel(t.secondsSinceLastMessage)} ${dim(`· ${t.lastRole === "user" ? "you spoke last" : "agent spoke last"}`)}`),
     dim(`${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`),
   ];
+  return lines;
 }
 
 // ---------- plain (no TUI) ----------
