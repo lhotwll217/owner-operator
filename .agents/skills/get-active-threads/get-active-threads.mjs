@@ -146,6 +146,8 @@ function parseSession({ file, source, mtime }) {
 
   if (!sessionId) sessionId = basename(file).replace(/\.jsonl$/, "");
   if (!project) project = "(unknown)";
+  // Repo name = the leaf folder of the session's cwd (the worktree/repo it lives in).
+  const repo = project === "(unknown)" ? "(unknown)" : basename(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
   const convo = msgs.filter((m) => !isBoiler(m.text));
@@ -168,7 +170,8 @@ function parseSession({ file, source, mtime }) {
   return {
     id: sessionId,
     source,
-    ui: detectUi(source, project, entrypoint),
+    repo,                                              // Repo Name (leaf folder of cwd)
+    ui: detectUi(source, project, entrypoint),         // App the session was made from
     entrypoint: entrypoint || (source === "codex" ? "codex" : null),
     project,
     topic: clip(topicMsg.text, 140),
@@ -202,14 +205,18 @@ if (asJson) {
   const line = (m) => `    ${m.role === "user" ? "you " : "asst"}> ${m.text}`;
   if (threads.length === 0) { console.log(`No active threads since ${sinceArg}.`); process.exit(0); }
   const byProj = new Map();
-  for (const t of threads) { if (!byProj.has(t.project)) byProj.set(t.project, []); byProj.get(t.project).push(t); }
+  for (const t of threads) { if (!byProj.has(t.repo)) byProj.set(t.repo, []); byProj.get(t.repo).push(t); }
   console.log(`# Active threads since ${sinceArg} — ${threads.length} thread(s), newest first\n`);
-  for (const [proj, ts] of byProj) {
-    console.log(`## ${proj}`);
+  for (const [repo, ts] of byProj) {
+    console.log(`## ${repo}`);
     for (const t of ts) {
       console.log(`\n● ${t.topic}`);
-      console.log(`  ${t.ui} · ${t.messageCount} msgs · created ${dt(t.createdAt)} · last ${rel(t.secondsSinceLastMessage)} · ${t.lastRole === "user" ? "you spoke last" : "agent spoke last"}`);
-      if (t.link) console.log(`  ↳ open: ${t.link}`);
+      // Structured fields — the four the operator triages on.
+      console.log(`  Repo Name     : ${t.repo}`);
+      console.log(`  App           : ${t.ui}`);
+      console.log(`  Day created   : ${dt(t.createdAt)}`);
+      console.log(`  Last message  : ${dt(t.lastMessageAt)} (${rel(t.secondsSinceLastMessage)}, ${t.lastRole === "user" ? "you spoke last" : "agent spoke last"})`);
+      console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);
       for (const m of t.bookends.first) console.log(line(m));
       if (t.bookends.omitted) console.log(`    ⋯ ${t.bookends.omitted} more turns ⋯`);
       for (const m of t.bookends.last) console.log(line(m));

@@ -2,9 +2,13 @@
 # Owner Operator launcher — TypeScript runtime via tsx (pi SDK is the engine).
 #   ./harness/oo                      → branded TUI (interactive, pi-tui)
 #   ./harness/oo "what's ongoing?"    → plain one-shot
+#   ./harness/oo threads [flags]      → structured thread cards (Repo · App · Created · Last msg)
 #   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
 DIR="$(dirname "$0")"
-if [ "$#" -gt 0 ]; then
+if [ "$1" = "threads" ]; then
+  shift
+  exec npx tsx "$DIR/src/threads.ts" "$@"
+elif [ "$#" -gt 0 ]; then
   exec npx tsx "$DIR/src/oo.ts" "$@"
 else
   exec npx tsx "$DIR/src/tui.ts"
