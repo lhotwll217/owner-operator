@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createAgentSession,
+  defineTool,
   DefaultResourceLoader,
   getAgentDir,
   SessionManager,
@@ -14,9 +15,40 @@ import {
   AuthStorage,
   ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
+import { Type, type Static } from "@earendil-works/pi-ai";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..", "..");
+
+// ---- Structured triage output -------------------------------------------------
+// The model emits its thread triage as a tool call (structured JSON) instead of prose;
+// the TUI renders the payload as cards. This is the "structured output, rendered
+// differently" path — the model fills the fields, the surface decides how to show them.
+const ThreadCard = Type.Object({
+  topic: Type.String({ description: "Short title of what the thread is about" }),
+  summary: Type.String({ description: "One sentence on what has generally happened / current state" }),
+  nextSteps: Type.String({ description: "One short clause: the concrete next action" }),
+  repo: Type.String({ description: "Repo name" }),
+  app: Type.String({ description: "App / GUI the session was made from" }),
+  created: Type.String({ description: "Relative time created, e.g. '2 hours ago' (copy from the digest)" }),
+  lastActive: Type.String({ description: "Relative time of the last message, e.g. 'just now' (copy from the digest)" }),
+  link: Type.Optional(Type.String({ description: "Deep link to open the session, if the digest gives one" })),
+});
+const PresentThreadsParams = Type.Object({ threads: Type.Array(ThreadCard) });
+export type PresentedThread = Static<typeof ThreadCard>;
+
+export const presentThreadsTool = defineTool({
+  name: "present_threads",
+  label: "Present threads",
+  description:
+    "Render the triaged active threads to the operator as structured cards. Call this " +
+    "INSTEAD of writing the triage as prose. One entry per thread, ordered most-urgent first.",
+  parameters: PresentThreadsParams,
+  async execute(_id, params) {
+    const n = params.threads.length;
+    return { content: [{ type: "text" as const, text: `Rendered ${n} thread card(s) for the operator.` }], details: undefined };
+  },
+});
 
 export interface OwnerOperatorSession {
   session: Awaited<ReturnType<typeof createAgentSession>>["session"];
@@ -47,7 +79,10 @@ export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession
     sessionManager: SessionManager.inMemory(repoRoot),
     authStorage,
     modelRegistry,
-    tools: ["read", "grep", "find", "ls", "bash"], // read-only + bash to run the skills
+    customTools: [presentThreadsTool],
+    // read-only + bash to run the skills, plus our structured-output tool. (This is an
+    // allowlist, so present_threads must be listed or it would be disabled.)
+    tools: ["read", "grep", "find", "ls", "bash", "present_threads"],
   });
 
   let modelLabel = "model from .pi/settings.json";

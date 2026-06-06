@@ -1,11 +1,14 @@
 // Owner Operator — branded terminal UI on pi-tui (the renderer pi/openclaw use).
-// Header brand + streaming Markdown answers + a working-spinner + input. Agent core: agent.ts.
+// Header brand + streaming Markdown answers + a working-spinner + input. When the model
+// triages threads it calls the `present_threads` tool (structured output); we render that
+// payload as cards instead of prose. Agent core: agent.ts.
 
 import {
   TUI,
   ProcessTerminal,
   Text,
   Box,
+  Spacer,
   Markdown,
   Editor,
   Loader,
@@ -13,7 +16,7 @@ import {
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
-import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText, type PresentedThread } from "./agent";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
@@ -63,15 +66,52 @@ tui.addInputListener((data: string) => {
   return undefined; // don't consume other keys — let the editor handle them
 });
 
-interface Turn { md: Markdown; acc: string; loader: Loader; added: boolean }
+// ---- structured thread cards (rendered from the present_threads tool call) ----
+const LABEL_W = 13; // fits "Last active" / "Next steps" + padding
+const tfield = (label: string, value: string) => new Text(`${dim(label.padEnd(LABEL_W))}${value}`);
+
+function renderThreadCards(threads: PresentedThread[]): void {
+  if (!threads.length) { log.addChild(new Text(dim("(no active threads)"))); tui.requestRender(); return; }
+  for (const t of threads) {
+    const card = new Box(2, 0);
+    card.addChild(new Text(bold(`● ${t.topic}`)));
+    card.addChild(tfield("Summary", t.summary));
+    card.addChild(tfield("Next steps", yellow(t.nextSteps)));
+    card.addChild(tfield("Repo Name", green(t.repo)));
+    card.addChild(tfield("App", cyan(t.app)));
+    card.addChild(tfield("Created", t.created));
+    card.addChild(tfield("Last active", t.lastActive));
+    if (t.link) card.addChild(new Text(dim(`open: ${t.link}`)));
+    log.addChild(card);
+    log.addChild(new Spacer(1));
+  }
+  tui.requestRender();
+}
+
+interface Turn { md: Markdown; acc: string; loader: Loader; loaderRemoved: boolean; mdAdded: boolean; cardsShown: boolean }
 let current: Turn | null = null;
 let busy = false;
 
+function removeLoader(): void {
+  if (current && !current.loaderRemoved) { log.removeChild(current.loader); current.loaderRemoved = true; }
+}
+
 session.subscribe((event: any) => {
+  if (!current) return;
+
+  // Model presented its triage as structured output → render cards, not prose.
+  if (event.type === "tool_execution_start" && event.toolName === "present_threads") {
+    removeLoader();
+    renderThreadCards(event.args?.threads ?? []);
+    current.cardsShown = true;
+    return;
+  }
+
   const ame = event.assistantMessageEvent;
-  if (current && event.type === "message_update" && ame?.type === "text_delta") {
+  if (event.type === "message_update" && ame?.type === "text_delta") {
     current.acc += ame.delta;
-    if (!current.added) { log.removeChild(current.loader); log.addChild(current.md); current.added = true; }
+    removeLoader();
+    if (!current.mdAdded) { log.addChild(current.md); current.mdAdded = true; }
     current.md.setText(current.acc);
     tui.requestRender();
   }
@@ -88,18 +128,21 @@ async function handleSubmit(text: string): Promise<void> {
   log.addChild(new Text(`${bold(blue("you"))} › ${q}`));
   const loader = new Loader(tui, cyan, dim, "working…");
   log.addChild(loader);
-  current = { md: new Markdown("", 0, 0, mdTheme), acc: "", loader, added: false };
+  current = { md: new Markdown("", 0, 0, mdTheme), acc: "", loader, loaderRemoved: false, mdAdded: false, cardsShown: false };
   tui.requestRender();
 
   try {
     await session.prompt(q);
-    if (current && !current.added) {
-      log.removeChild(loader);
+    // No streamed prose and no cards: fall back to the final assistant text.
+    if (current && !current.mdAdded && !current.cardsShown) {
+      removeLoader();
       current.md.setText(lastAssistantText(session) || dim("(no response)"));
       log.addChild(current.md);
+    } else {
+      removeLoader();
     }
   } catch (e: any) {
-    if (current && !current.added) log.removeChild(loader);
+    removeLoader();
     log.addChild(new Text(yellow(`⚠ ${e?.message ?? e}`)));
   } finally {
     current = null;
