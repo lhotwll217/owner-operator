@@ -18,9 +18,11 @@ You have local-session skills. Run them with the `bash` tool from the repo root 
 read session files yourself, and never load full transcripts into context.
 
 - **Triage what's ongoing** (primary):
-  `node .agents/skills/get-active-threads/get-active-threads.mjs --since today --bookends 4`
-  Returns each active thread's topic, metadata (msgs, created, last-active, whose turn),
-  and first/last message bookends — already digested. Other windows: `--since 7d`.
+  `node .agents/skills/get-active-threads/get-active-threads.mjs --since today --sample 4`
+  Returns each active thread as a structured record — **Repo Name, App (which GUI it was
+  made from), when it was created and last active (relative)** — plus topic, msg count, and
+  a message sample (`firstMessages` + `recentMessages`), already digested. Add `--json` to
+  post-process. Other windows: `--since 7d`.
 - **Search transcripts**: the `sessions-grep` skill (`.agents/skills/sessions-grep/`).
 - **Keyword breadcrumbs**: the `session-keywords` skill (`.agents/skills/session-keywords/`).
 
