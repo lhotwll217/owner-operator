@@ -13,14 +13,12 @@ import {
   Editor,
   Loader,
   matchesKey,
-  visibleWidth,
-  truncateToWidth,
-  wrapTextWithAnsi,
   type Component,
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
 import { createOwnerOperatorSession, lastAssistantText, type PresentedThread } from "./agent";
+import { buildCard } from "./cards";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
@@ -33,11 +31,6 @@ const sgr = (...c: number[]): Styler => (s) => `\x1b[${c.join(";")}m${s}\x1b[0m`
 const dim = sgr(2), bold = sgr(1), italic = sgr(3), underline = sgr(4), strike = sgr(9);
 const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), red = sgr(1, 31), brand = sgr(1, 35);
 
-// Priority badge: 5 is loudest, 1 fades out.
-const prioBadge = (p: number): string => {
-  const s = `P${p}`;
-  return p >= 5 ? red(s) : p === 4 ? yellow(s) : p === 3 ? cyan(s) : dim(s);
-};
 
 const mdTheme: MarkdownTheme = {
   heading: (t) => bold(cyan(t)), link: blue, linkUrl: dim, code: yellow, codeBlock: green,
@@ -77,46 +70,7 @@ tui.addInputListener((data: string) => {
 });
 
 // ---- structured thread cards (rendered from the present_threads tool call) ----
-// A real bordered card, drawn to the current viewport width. Long values wrap inside the
-// border; everything stays aligned by measuring *visible* width (ANSI-aware).
-const LABEL_W = 12;        // "Last active" / "Next steps"
-const MAX_W = 96;          // don't stretch cards across an ultra-wide terminal
-const B = { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│" };
-
-const padTo = (s: string, w: number): string => {
-  const vis = visibleWidth(s);
-  return vis >= w ? s : s + " ".repeat(w - vis);
-};
-
-function buildCard(t: PresentedThread, width: number): string[] {
-  const W = Math.max(40, Math.min(width, MAX_W));
-  const inner = W - 4;                       // "│ " + content + " │"
-  const out: string[] = [];
-
-  // top border carries the priority + topic as a title
-  let title = `${prioBadge(t.priority)} ${bold(t.topic)}`;
-  if (visibleWidth(title) > W - 5) title = truncateToWidth(title, W - 5);
-  const fill = Math.max(0, W - 3 - visibleWidth(title));
-  out.push(dim(B.tl + B.h) + " " + title + " " + dim(B.h.repeat(Math.max(0, fill - 1)) + B.tr));
-
-  const row = (s: string) => out.push(dim(B.v) + " " + padTo(s, inner) + " " + dim(B.v));
-  const field = (label: string, value: string) => {
-    const lab = dim(label.padEnd(LABEL_W));
-    const segs = wrapTextWithAnsi(value, inner - LABEL_W);
-    (segs.length ? segs : [""]).forEach((seg, i) => row((i ? " ".repeat(LABEL_W) : lab) + seg));
-  };
-
-  field("Summary", t.summary);
-  field("Next steps", yellow(t.nextSteps));
-  field("Repo", green(t.repo));
-  field("App", cyan(t.app));
-  field("Updated", `${t.lastActive}  ${dim("· created " + t.created)}`);
-  if (t.link) field("Open", dim(t.link));
-
-  out.push(dim(B.bl + B.h.repeat(W - 2) + B.br));
-  return out;
-}
-
+// Card layout lives in cards.ts (so it's previewable without a TTY).
 class Card implements Component {
   constructor(private readonly t: PresentedThread) {}
   invalidate(): void { /* stateless */ }
