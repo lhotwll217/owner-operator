@@ -6,6 +6,7 @@ description: >-
   do I have today", "what needs me", "what did I leave open", or to summarize/prioritize
   active work across sessions. Runs a cheap deterministic scan; never loads full transcripts
   into the model.
+allowed-tools: bash present_threads
 ---
 
 # get-active-threads
@@ -36,17 +37,24 @@ Flags:
 - `--json` — machine-readable output (use when you want to post-process)
 - `--truncate N` — per-message char cap (default 280)
 
-## Then: present a prioritized summary
+## Then: present via the `present_threads` tool (required)
 
-Read the digest and hand the user a prioritized, terse summary:
+**You MUST present the result by calling the `present_threads` tool. Do NOT write the
+triage as prose, a list, or a table — the only way threads reach the operator is the tool
+call.** The UI renders the tool payload as cards.
 
-- **Lead with what needs them now** — threads mid-conversation where the last turn implies a
-  pending decision, a draft to approve, or an MR/PR to review. Infer "what it's waiting on"
-  from the tail.
-- One line per thread: `project · topic · what it's waiting on · weight ("just say go" vs
-  "needs review")`. Then a short **FYI/closed** group for resolved ones (e.g. last turn was
-  a thank-you / "done").
-- Give the `id` + `source` so they can drill in. Never paste the raw tail back verbatim.
+For each thread, reason over its `firstMessages` (what it was about) and `recentMessages`
+(where it stands now) and fill one entry:
+
+- `topic` — what the thread is about.
+- `summary` — one sentence on what has generally gone on / current state.
+- `nextSteps` — one short clause: the concrete next action (what's it waiting on).
+- `repo`, `app` — copy from the digest.
+- `created`, `lastActive` — copy the **relative** times from the digest ("2 hours ago").
+- `link` — only if the digest gives one.
+
+Order the array most-urgent first (mid-conversation threads waiting on a decision/approval
+/ MR review before resolved or "done" ones). Never paste the raw tail back verbatim.
 
 ## Drilling into one thread
 

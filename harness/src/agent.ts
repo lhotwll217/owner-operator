@@ -43,6 +43,10 @@ export const presentThreadsTool = defineTool({
   description:
     "Render the triaged active threads to the operator as structured cards. Call this " +
     "INSTEAD of writing the triage as prose. One entry per thread, ordered most-urgent first.",
+  promptSnippet: "present_threads — render triaged active threads as cards (use instead of prose)",
+  promptGuidelines: [
+    "When presenting active-thread triage, ALWAYS call present_threads — never write the threads as prose, a list, or a table.",
+  ],
   parameters: PresentThreadsParams,
   async execute(_id, params) {
     const n = params.threads.length;
