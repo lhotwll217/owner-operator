@@ -8,9 +8,10 @@
 //
 // Usage:
 //   node get-active-threads.mjs [--since today|7d|2026-06-04] [--sample 4]
-//                               [--limit 40] [--all] [--json] [--truncate 280]
-//   --sample N keeps the first N + most-recent N messages of each thread
-//   (--bookends / --last are accepted as aliases for --sample)
+//                               [--thread <id>] [--limit 40] [--all] [--json] [--truncate 280]
+//   --sample N    keeps the first N + most-recent N messages of each thread
+//   --thread <id> drills into ONE thread (id prefix ok); pair with a bigger --sample to
+//                 expand just that thread's ends. (--bookends / --last alias --sample.)
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
@@ -28,6 +29,9 @@ const has = (name) => args.includes(`--${name}`);
 const sinceArg = String(val("since", "today"));
 // How many messages to keep from each end of a thread (opening N + most-recent N).
 const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10);
+// Drill into ONE thread by id (prefix ok). Expands just that thread — pair with a bigger
+// --sample — without re-scanning/reprinting everything. Bypasses the automated/limit cuts.
+const threadArg = val("thread", val("id", null));
 const limit = parseInt(val("limit", "40"), 10);
 const truncate = parseInt(val("truncate", "280"), 10);
 const includeAll = has("all");
@@ -195,9 +199,15 @@ function parseSession({ file, source, mtime }) {
 }
 
 let threads = candidates.map(parseSession).filter(Boolean);
-if (!includeAll) threads = threads.filter((t) => !t.automated);
+if (threadArg) {
+  // Single-thread drill-in: match by full or prefix id (or file basename); keep it even
+  // if it's an automated one-shot, and don't apply the limit.
+  threads = threads.filter((t) => t.id === threadArg || t.id.startsWith(threadArg) || basename(t.file).startsWith(threadArg));
+} else if (!includeAll) {
+  threads = threads.filter((t) => !t.automated);
+}
 threads.sort((a, b) => b._sort - a._sort);
-threads = threads.slice(0, limit);
+if (!threadArg) threads = threads.slice(0, limit);
 threads.forEach((t) => delete t._sort);
 
 // ---------- output ----------
@@ -220,6 +230,7 @@ if (asJson) {
     for (const t of ts) {
       console.log(`\n● ${t.topic}`);
       // Structured fields the operator triages on. Times are relative ("2 days ago").
+      console.log(`  id            : ${t.id}   (drill in: --thread ${t.id} --sample 15)`);
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);
       console.log(`  Created       : ${rel(t.secondsSinceCreated)}`);

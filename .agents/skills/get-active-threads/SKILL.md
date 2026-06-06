@@ -32,6 +32,7 @@ node /Users/otwell/Development/owner-operator/.agents/skills/get-active-threads/
 Flags:
 - `--since today | 7d | 2026-06-04` — window (default `today`)
 - `--sample N` — keep the first N + most-recent N messages per thread (default 4; `--bookends`/`--last` are aliases)
+- `--thread <id>` — drill into ONE thread (id prefix ok); pair with a bigger `--sample` to expand just that thread
 - `--limit N` — max threads (default 40)
 - `--all` — include automated/worker one-shots (hidden by default)
 - `--json` — machine-readable output (use when you want to post-process)
@@ -55,6 +56,19 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 
 Order the array most-urgent first (mid-conversation threads waiting on a decision/approval
 / MR review before resolved or "done" ones). Never paste the raw tail back verbatim.
+
+### If a thread's ends are too vague to summarize
+
+You don't have to guess. Before the final `present_threads` call, take an intermediate step:
+re-run this script on just that thread with a wider window, using the `id` from the digest:
+
+```bash
+node .../get-active-threads.mjs --thread <id> --sample 15
+```
+
+That expands only that thread's opening + most-recent messages (still no middle dump). Read
+the wider sample, then proceed to `present_threads` for the whole set. Expand as many
+individual threads as you need across turns; `present_threads` is the last call, not the first.
 
 ## Drilling into one thread
 
