@@ -13,6 +13,10 @@ import {
   Editor,
   Loader,
   matchesKey,
+  visibleWidth,
+  truncateToWidth,
+  wrapTextWithAnsi,
+  type Component,
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
@@ -73,23 +77,57 @@ tui.addInputListener((data: string) => {
 });
 
 // ---- structured thread cards (rendered from the present_threads tool call) ----
-const LABEL_W = 13; // fits "Last active" / "Next steps" + padding
-const tfield = (label: string, value: string) => new Text(`${dim(label.padEnd(LABEL_W))}${value}`);
+// A real bordered card, drawn to the current viewport width. Long values wrap inside the
+// border; everything stays aligned by measuring *visible* width (ANSI-aware).
+const LABEL_W = 12;        // "Last active" / "Next steps"
+const MAX_W = 96;          // don't stretch cards across an ultra-wide terminal
+const B = { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│" };
+
+const padTo = (s: string, w: number): string => {
+  const vis = visibleWidth(s);
+  return vis >= w ? s : s + " ".repeat(w - vis);
+};
+
+function buildCard(t: PresentedThread, width: number): string[] {
+  const W = Math.max(40, Math.min(width, MAX_W));
+  const inner = W - 4;                       // "│ " + content + " │"
+  const out: string[] = [];
+
+  // top border carries the priority + topic as a title
+  let title = `${prioBadge(t.priority)} ${bold(t.topic)}`;
+  if (visibleWidth(title) > W - 5) title = truncateToWidth(title, W - 5);
+  const fill = Math.max(0, W - 3 - visibleWidth(title));
+  out.push(dim(B.tl + B.h) + " " + title + " " + dim(B.h.repeat(Math.max(0, fill - 1)) + B.tr));
+
+  const row = (s: string) => out.push(dim(B.v) + " " + padTo(s, inner) + " " + dim(B.v));
+  const field = (label: string, value: string) => {
+    const lab = dim(label.padEnd(LABEL_W));
+    const segs = wrapTextWithAnsi(value, inner - LABEL_W);
+    (segs.length ? segs : [""]).forEach((seg, i) => row((i ? " ".repeat(LABEL_W) : lab) + seg));
+  };
+
+  field("Summary", t.summary);
+  field("Next steps", yellow(t.nextSteps));
+  field("Repo", green(t.repo));
+  field("App", cyan(t.app));
+  field("Updated", `${t.lastActive}  ${dim("· created " + t.created)}`);
+  if (t.link) field("Open", dim(t.link));
+
+  out.push(dim(B.bl + B.h.repeat(W - 2) + B.br));
+  return out;
+}
+
+class Card implements Component {
+  constructor(private readonly t: PresentedThread) {}
+  invalidate(): void { /* stateless */ }
+  render(width: number): string[] { return buildCard(this.t, width); }
+}
 
 function renderThreadCards(threads: PresentedThread[]): void {
   if (!threads.length) { log.addChild(new Text(dim("(no active threads)"))); tui.requestRender(); return; }
   const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // highest priority first
   for (const t of sorted) {
-    const card = new Box(2, 0);
-    card.addChild(new Text(`${prioBadge(t.priority)} ${bold(t.topic)}`));
-    card.addChild(tfield("Summary", t.summary));
-    card.addChild(tfield("Next steps", yellow(t.nextSteps)));
-    card.addChild(tfield("Repo Name", green(t.repo)));
-    card.addChild(tfield("App", cyan(t.app)));
-    card.addChild(tfield("Created", t.created));
-    card.addChild(tfield("Last active", t.lastActive));
-    if (t.link) card.addChild(new Text(dim(`open: ${t.link}`)));
-    log.addChild(card);
+    log.addChild(new Card(t));
     log.addChild(new Spacer(1));
   }
   tui.requestRender();

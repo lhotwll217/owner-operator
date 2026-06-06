@@ -118,6 +118,21 @@ function guiLink(source, id, cwd) {
 
 const iso = (ms) => new Date(ms).toISOString();
 
+// Resolve the real repo name for a cwd. Normal checkout → its own folder. Git worktree
+// (Conductor workspace) → <cwd>/.git is a FILE "gitdir: <repo>/.git/worktrees/<name>", so
+// take the repo from that path instead of the worktree codename. Best-effort; falls back
+// to the cwd leaf when the dir is gone or not a worktree.
+function realRepo(cwd) {
+  try {
+    const dotGit = join(cwd, ".git");
+    if (statSync(dotGit).isFile()) {
+      const m = /gitdir:\s*(.+?)\/\.git\/worktrees\//.exec(readFileSync(dotGit, "utf8"));
+      if (m) return basename(m[1].trim());
+    }
+  } catch { /* dir gone or not a worktree → fall through */ }
+  return basename(cwd);
+}
+
 // ---------- parse one session ----------
 function parseSession({ file, source, mtime }) {
   let raw;
@@ -152,8 +167,9 @@ function parseSession({ file, source, mtime }) {
 
   if (!sessionId) sessionId = basename(file).replace(/\.jsonl$/, "");
   if (!project) project = "(unknown)";
-  // Repo name = the leaf folder of the session's cwd (the worktree/repo it lives in).
-  const repo = project === "(unknown)" ? "(unknown)" : basename(project);
+  // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
+  // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer.
+  const repo = project === "(unknown)" ? "(unknown)" : realRepo(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
   const convo = msgs.filter((m) => !isBoiler(m.text));
