@@ -18,6 +18,7 @@ When you triage active threads, **do not write them out as prose.** Call the
 the cards. For each thread, reason over its opening + most-recent messages and provide:
 
 - `topic` — what the thread is about.
+- `priority` — integer **5 (highest, needs the operator now) down to 1 (lowest)**.
 - `summary` — one sentence on what has generally gone on / where it stands now.
 - `nextSteps` — one short clause: the concrete next action.
 - `repo`, `app` — copy from the digest.

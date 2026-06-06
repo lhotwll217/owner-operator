@@ -48,14 +48,17 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 (where it stands now) and fill one entry:
 
 - `topic` — what the thread is about.
+- `priority` — integer **5 (highest, needs the operator now) → 1 (lowest)**.
 - `summary` — one sentence on what has generally gone on / current state.
 - `nextSteps` — one short clause: the concrete next action (what's it waiting on).
 - `repo`, `app` — copy from the digest.
 - `created`, `lastActive` — copy the **relative** times from the digest ("2 hours ago").
 - `link` — only if the digest gives one.
 
-Order the array most-urgent first (mid-conversation threads waiting on a decision/approval
-/ MR review before resolved or "done" ones). Never paste the raw tail back verbatim.
+Set `priority` by how much it needs the operator now — 5 for mid-conversation threads
+waiting on a decision/approval/MR review, low for things ticking along on their own. Drop
+resolved / "done" threads entirely. Order the array highest-priority first. Never paste the
+raw tail back verbatim.
 
 ### If a thread's ends are too vague to summarize
 

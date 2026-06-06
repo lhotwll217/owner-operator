@@ -27,7 +27,13 @@ if (!process.stdout.isTTY) {
 type Styler = (s: string) => string;
 const sgr = (...c: number[]): Styler => (s) => `\x1b[${c.join(";")}m${s}\x1b[0m`;
 const dim = sgr(2), bold = sgr(1), italic = sgr(3), underline = sgr(4), strike = sgr(9);
-const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), brand = sgr(1, 35);
+const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), red = sgr(1, 31), brand = sgr(1, 35);
+
+// Priority badge: 5 is loudest, 1 fades out.
+const prioBadge = (p: number): string => {
+  const s = `P${p}`;
+  return p >= 5 ? red(s) : p === 4 ? yellow(s) : p === 3 ? cyan(s) : dim(s);
+};
 
 const mdTheme: MarkdownTheme = {
   heading: (t) => bold(cyan(t)), link: blue, linkUrl: dim, code: yellow, codeBlock: green,
@@ -72,9 +78,10 @@ const tfield = (label: string, value: string) => new Text(`${dim(label.padEnd(LA
 
 function renderThreadCards(threads: PresentedThread[]): void {
   if (!threads.length) { log.addChild(new Text(dim("(no active threads)"))); tui.requestRender(); return; }
-  for (const t of threads) {
+  const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // highest priority first
+  for (const t of sorted) {
     const card = new Box(2, 0);
-    card.addChild(new Text(bold(`● ${t.topic}`)));
+    card.addChild(new Text(`${prioBadge(t.priority)} ${bold(t.topic)}`));
     card.addChild(tfield("Summary", t.summary));
     card.addChild(tfield("Next steps", yellow(t.nextSteps)));
     card.addChild(tfield("Repo Name", green(t.repo)));
