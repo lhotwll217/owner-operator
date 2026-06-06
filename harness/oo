@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Owner Operator launcher.
-# Starts pi as your chief-of-staff agent from this directory, so it loads the
-# Owner Operator role (harness/AGENTS.md) and the ai-sessions MCP server
-# (harness/.mcp.json, surfaced via pi-mcp-adapter).
-#
-# Usage:
-#   ./harness/oo                       # interactive TUI
-#   ./harness/oo "what's ongoing today?"   # one-shot question
-#
-# First run only: inside pi, run /login and pick your Claude/Codex subscription.
-cd "$(dirname "$0")" || exit 1
-exec pi "$@"
+# Owner Operator launcher — TypeScript runtime via tsx (pi SDK is the engine).
+#   ./harness/oo                      → branded TUI (interactive, pi-tui)
+#   ./harness/oo "what's ongoing?"    → plain one-shot
+#   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
+DIR="$(dirname "$0")"
+if [ "$#" -gt 0 ]; then
+  exec npx tsx "$DIR/src/oo.ts" "$@"
+else
+  exec npx tsx "$DIR/src/tui.ts"
+fi

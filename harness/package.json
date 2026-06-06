@@ -1,11 +1,23 @@
 {
   "name": "@owner-operator/harness",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Owner Operator agentic core (\"PI\") — read/triage layer built on the pi coding agent toolkit.",
+  "description": "Owner Operator — an opinionated local chief-of-staff agent built on the pi SDK.",
   "type": "module",
+  "bin": { "oo": "./oo" },
+  "scripts": {
+    "oo": "tsx src/oo.ts",
+    "tui": "tsx src/tui.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.78.0",
-    "@earendil-works/pi-ai": "0.78.0"
+    "@earendil-works/pi-coding-agent": "0.78.0",
+    "@earendil-works/pi-ai": "0.78.0",
+    "@earendil-works/pi-tui": "0.78.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4",
+    "typescript": "^5"
   }
 }
