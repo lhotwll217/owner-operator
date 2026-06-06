@@ -36,7 +36,7 @@ Flags:
 - `--json` — machine-readable output (use when you want to post-process)
 - `--truncate N` — per-message char cap (default 280)
 
-## Then: present as leaves
+## Then: present a prioritized summary
 
 Read the digest and hand the user a prioritized, terse summary:
 
