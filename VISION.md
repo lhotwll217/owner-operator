@@ -2,85 +2,92 @@
 
 ## One line
 
-A local-first **chief of staff** for everything running on your machine. It reads,
-organizes, and triages all of your CLI agent sessions and the signal around them
-(PRs/MRs, Slack, email, calendar) so you can **glance → drill into the right thread →
-drop a prompt → pull back up** — with minimal cognitive load, and without an
-intermediary agent re-driving your work.
+A local-first **chief of staff** for everything running on your machine — across every
+coding agent you use — that tells you **the most valuable thing to work on next** and
+makes it frictionless to act on it.
+
+## Who it's for
+
+People who do the bulk of their coding through agents, locally, across multiple tools
+(Claude Code, Codex, OpenCode, Conductor, and friends) — parallelizing more sessions and
+threads, across more projects, than one head can keep up with.
 
 ## The problem
 
-- You run many agent sessions in parallel — the "branches" — across Claude Code,
-  Codex, and friends. Each one is doing real implementation work.
-- Your high-level "main chat" is great for **branching** and **reading**, but bad for
-  **writing/directing**: you don't want an intermediary agent re-prompting your
-  sub-agents, because that degrades the work. When you write, you want to be *in* the
-  branch.
-- You hold enormous context — standups, Slack threads you're tagged in, open PRs,
-  emails — but it lives in your head. Things slip ("I said I'd land this PR today" →
-  forgotten by EOD).
-- Context-switching is expensive **and uneven**: some threads need a one-word "yes,
-  merge it," others need a real plan review. You need to know which is which *without*
-  paying the cost of opening each one.
+- **No global view.** At any moment you don't know what's blocked, what's waiting on a
+  reply, or what needs attention. The state lives in your head, and it slips.
+- **No prioritization.** Even when you can see everything, you don't know *which* thread
+  is the most valuable thing to touch right now.
+- **No interrupt scheduler.** You can multithread, but you have nothing that diverts your
+  attention to the right thread at the right interval to keep work moving.
+- **Isolated agents.** Each session is amnesiac and walled off — it relearns from scratch
+  and can't benefit from what a sibling thread already figured out, even when they inform
+  one another.
+- **Scattered knowledge.** Skills, learnings, patterns, and rules are smeared across
+  agents, repos, and threads, with no shared place they accrue.
+- **No single surface.** There's no one place to see and move every moving piece of your
+  local work.
 
 ## The idea
 
 Owner Operator is the surface that sits **above** all your agents and **below** your
-attention.
+attention. Three things make it work:
 
-- **It reads and organizes — it does not drive.** It is *not* an intermediary that
-  re-prompts your sub-agents. When you drill into a session and type, your input goes
-  to *that* session as *your* prompt. The operator's job is reading, reporting,
-  organizing, and prioritizing — never doing the writing for you. (V1 is read-only by
-  design.)
-- **High signal, low noise.** The top level shows the **leaves** — the ends of each
-  branch: *"this thread is here; do you need to act, or can it wait?"* The details stay
-  in the branch.
-- **Rank what to touch next.** Order threads by urgency and how much attention each
-  needs, and (later) nudge proactively on a schedule: *"this branch has been lagging,"*
-  *"you committed to this PR in standup."*
-- **Glance → drill → prompt → pull back up.** The core loop. A mobile/widget glance for
-  when you're in the zone; a localhost UI for when you want to read deeply.
+- **Triage & prioritization.** It reads across every session and ranks what to touch next
+  by urgency and how much attention each needs — the leaves, not the transcripts. *"This
+  thread is here; act now, or it can wait?"*
+- **An interrupt scheduler.** It watches the situation and nudges you to the right thread
+  at the right time — *"this branch is lagging," "you committed to this PR in standup"* —
+  so your attention goes where it's most valuable instead of round-robin.
+- **A shared memory layer.** Keywords, learnings, patterns, and rules live in one durable
+  place agents and threads can draw on, so context is recovered instead of relearned and
+  one thread's discovery is available to the next.
+
+**The loop:** `glance → drill into the right thread → drop a prompt → pull back up`. A
+mobile/widget glance for when you're in the zone; a localhost UI for when you want to read
+deeply.
 
 ## Principles
 
 1. **Local-first.** Runs in the local context of your machine and leverages the tools
-   already there (your existing CLIs, Slack, email, calendar).
-2. **No telephone game.** The operator never ghost-writes into a branch. Drilling in
-   puts *you* in the driver's seat — your prompt, your branch.
-3. **Concise above all.** The operator is terse and high-signal; verbosity lives in the
-   branches.
-4. **Read before write.** V1 reads and triages. Writing and direction come once the
-   reading is trustworthy.
-5. **Conductor is the closest UX reference** (diff view, comment-on-diff tied to lines)
-   — but with a triage/prioritization layer on top, not just session management.
+   already there. It can see across all your work, so it stays on your machine.
+2. **Most-valuable-next.** Everything serves one question: what is the highest-value thing
+   to work on right now?
+3. **High signal, low noise.** Surfaces show the state of each thread, never raw
+   transcripts. Depth is one drill away.
+4. **One surface.** A single agentic control surface for every moving piece — as
+   frictionless as possible.
 
 ## Components
 
-1. **Harness "PI"** — the agentic core. Runs locally with a **strict command set**,
+1. **Harness "PI"** — the agentic core. Runs locally with a strict command set,
    deterministic workflow scripts, and scheduling to *"monitor the situation."* It
    bootstraps the cross-agent read from the [`ai-sessions` MCP](https://) (Claude Code,
    Codex, Gemini CLI, opencode, Copilot CLI, …). → [`harness/`](harness/)
-2. **macOS widget** — always-there, glanceable triage. Threads started today, ongoing
+2. **macOS widget** — always-there, glanceable triage. Threads from today, ongoing
    threads, prioritized. One panel to drop a prompt to the right agent.
    → [`apps/widget/`](apps/widget/)
-3. **localhost web UI** — drill into a session, see exactly where it left off, read
-   level first. Later: diff review with inline comments (Conductor-style), possibly via
-   draft PRs to start. → [`apps/web/`](apps/web/)
+3. **localhost web UI** — drill into a session, see exactly where it left off, read-first.
+   Later: diff review with inline comments (Conductor-style). → [`apps/web/`](apps/web/)
 
 ## Roadmap
 
-- **V1 — Read & triage.** Cross-section session list via `ai-sessions`. A prioritized
-  "what's ongoing" view. Drill-down read in the web UI. Widget glance. Harness with
-  strict *read* commands + scheduled "monitor the situation" briefs.
-- **V2 — Write & direct.** Drop prompts into sessions from the surface. Issue explicit
-  directions ("merge this PR, the comments are addressed"). Still no telephone game —
-  your prompt, your branch.
-- **V3 — Diff & integrate.** Inline diff review tied to lines. Daily-brief ingestion
-  from your code host (PRs/MRs, QA), Slack (tags), email, and calendar. Proactive nudges.
+- **V1 — Read & triage.** Cross-section session list via `ai-sessions`, a prioritized
+  "what's ongoing" view, drill-down read in the web UI, and the widget glance. Search and
+  keyword breadcrumbs across sessions. Scheduled "monitor the situation" briefs.
+  *V1 is read-only by design — the operator reads and organizes; it never drives a session
+  or ghost-writes into a branch.*
+- **V2 — Write & direct.** Drop prompts into sessions from the surface and issue explicit
+  directions. No telephone game — when you write, it's *your* prompt to *that* branch, not
+  an intermediary re-driving your sub-agents.
+- **V3 — Memory, diff & integrate.** The shared memory layer agents draw on. Inline diff
+  review tied to lines. Daily-brief ingestion from your code host (PRs/MRs), Slack, email,
+  and calendar. Proactive nudges.
 
 ## Non-goals
 
 - Not an autonomous orchestrator that runs your agents for you.
 - Not a replacement for the agents — it's the layer that makes a **fleet** of them
-  legible and prioritized.
+  legible, prioritized, and connected.
+</content>
+</invoke>
