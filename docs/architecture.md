@@ -19,9 +19,9 @@
             └───────────────▲───────────────────────────▲──────────────┘
                             │                           │
               ┌─────────────┴─────────────┐   ┌─────────┴───────────────┐
-              │   ai-sessions MCP         │   │  signal (later: V3)     │
-              │   Claude Code, Codex,     │   │  PRs/MRs, Slack,        │
-              │   Gemini, opencode, …     │   │  email, calendar        │
+              │  scan/grep skills (ours)  │   │  signal (later: V3)     │
+              │  over local session files │   │  PRs/MRs, Slack,        │
+              │  Claude Code, Codex       │   │  email, calendar        │
               └───────────────────────────┘   └─────────────────────────┘
 ```
 

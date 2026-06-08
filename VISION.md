@@ -59,8 +59,9 @@ attention.
 
 1. **Harness "PI"** — the agentic core. Runs locally with a **strict command set**,
    deterministic workflow scripts, and scheduling to *"monitor the situation."* It
-   bootstraps the cross-agent read from the [`ai-sessions` MCP](https://) (Claude Code,
-   Codex, Gemini CLI, opencode, Copilot CLI, …). → [`harness/`](harness/)
+   bootstraps the cross-agent read with our own dependency-free scan/grep skills over the
+   local session files (Claude Code, Codex today; more sources as skills land).
+   → [`harness/`](harness/)
 2. **macOS widget** — always-there, glanceable triage. Threads started today, ongoing
    threads, prioritized. One panel to drop a prompt to the right agent.
    → [`apps/widget/`](apps/widget/)
@@ -70,7 +71,7 @@ attention.
 
 ## Roadmap
 
-- **V1 — Read & triage.** Cross-section session list via `ai-sessions`. A prioritized
+- **V1 — Read & triage.** Cross-section session list via our own scan/grep skills over local session files. A prioritized
   "what's ongoing" view. Drill-down read in the web UI. Widget glance. Harness with
   strict *read* commands + scheduled "monitor the situation" briefs.
 - **V2 — Write & direct.** Drop prompts into sessions from the surface. Issue explicit

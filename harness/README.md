@@ -27,8 +27,9 @@ Also available from the same toolkit when we need them: `@earendil-works/pi-tui`
 
 ## What we build here (the Owner Operator layer)
 
-- Read across all CLI agent sessions via the **`ai-sessions` MCP** (Claude Code, Codex,
-  Gemini CLI, opencode, …).
+- Read across local CLI agent sessions with our own dependency-free scan/grep skills
+  (Claude Code, Codex today; more sources as skills land). The `ai-sessions` MCP is wired
+  up (`harness/.mcp.json`) but optional — for drilling into a single thread, not the read.
 - Compute triage/priority over active threads; produce concise briefs on a schedule
   ("monitor the situation").
 - Expose a **bounded, enumerated command set** — pi extensions/skills constrained to
