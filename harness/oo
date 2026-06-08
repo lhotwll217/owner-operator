@@ -3,9 +3,25 @@
 #   ./harness/oo                      → branded TUI (interactive, pi-tui)
 #   ./harness/oo "what's ongoing?"    → plain one-shot
 #   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
-DIR="$(dirname "$0")"
-if [ "$#" -gt 0 ]; then
-  exec npx tsx "$DIR/src/oo.ts" "$@"
+# Works from the repo and when installed on PATH via `npm link` (resolves the symlink).
+
+# Resolve symlinks so DIR is the real harness dir even when run as a linked global bin.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  D="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [ "${SOURCE#/}" = "$SOURCE" ] && SOURCE="$D/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+ENTRY="$DIR/src/tui.ts"
+[ "$#" -gt 0 ] && ENTRY="$DIR/src/oo.ts"
+
+# Prefer the checkout's tsx (workspace-hoisted to repo root); fall back to npx.
+if [ -x "$DIR/node_modules/.bin/tsx" ]; then
+  exec "$DIR/node_modules/.bin/tsx" "$ENTRY" "$@"
+elif [ -x "$DIR/../node_modules/.bin/tsx" ]; then
+  exec "$DIR/../node_modules/.bin/tsx" "$ENTRY" "$@"
 else
-  exec npx tsx "$DIR/src/tui.ts"
+  exec npx tsx "$ENTRY" "$@"
 fi
