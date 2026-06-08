@@ -5,7 +5,7 @@
 
 import readline from "node:readline/promises";
 import { createOwnerOperatorSession, lastAssistantText, type PresentedThread } from "./agent";
-import { buildCard } from "./cards";
+import { buildCardsBlock } from "./cards";
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
@@ -17,12 +17,8 @@ const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 // (structured output). The TUI draws cards; here we print the same buildCard() lines to
 // stdout (stripping color when piped). Same payload, surface-appropriate rendering.
 function renderCards(threads: PresentedThread[]): void {
-  if (!threads.length) { process.stdout.write("(no active threads)\n"); return; }
-  const width = process.stdout.columns ?? 80;
-  const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // loudest first
-  for (const t of sorted) {
-    const lines = buildCard(t, width).map((l) => (process.stdout.isTTY ? l : stripAnsi(l)));
-    process.stdout.write(lines.join("\n") + "\n\n");
+  for (const line of buildCardsBlock(threads, process.stdout.columns ?? 80)) {
+    process.stdout.write((process.stdout.isTTY ? line : stripAnsi(line)) + "\n");
   }
 }
 

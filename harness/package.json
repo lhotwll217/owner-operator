@@ -8,6 +8,7 @@
   "scripts": {
     "oo": "tsx src/oo.ts",
     "tui": "tsx src/tui.ts",
+    "preview": "tsx src/cards.preview.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

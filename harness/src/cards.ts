@@ -47,3 +47,14 @@ export function buildCard(t: PresentedThread, width: number): string[] {
 
   return out;
 }
+
+// Headless/non-TTY block: priority-sorted cards separated by a blank line (returns ANSI
+// lines; callers strip color when piping). Empty → a single notice. This is the same payload
+// the TUI renders as live cards — one source of truth, surface-appropriate output.
+export function buildCardsBlock(threads: PresentedThread[], width: number): string[] {
+  if (!threads.length) return [dim("(no active threads)")];
+  const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // loudest first
+  const out: string[] = [];
+  for (const t of sorted) out.push(...buildCard(t, width), "");
+  return out;
+}
