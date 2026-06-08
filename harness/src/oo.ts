@@ -4,14 +4,37 @@
 //   tsx src/oo.ts "what's ongoing?"  # one-shot
 
 import readline from "node:readline/promises";
-import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText, type PresentedThread } from "./agent";
+import { buildCard } from "./cards";
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
 
 const DEBUG = !!process.env.OO_DEBUG;
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
+
+// Headless mirror of the TUI: the model presents triage via the `present_threads` tool call
+// (structured output). The TUI draws cards; here we print the same buildCard() lines to
+// stdout (stripping color when piped). Same payload, surface-appropriate rendering.
+function renderCards(threads: PresentedThread[]): void {
+  if (!threads.length) { process.stdout.write("(no active threads)\n"); return; }
+  const width = process.stdout.columns ?? 80;
+  const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // loudest first
+  for (const t of sorted) {
+    const lines = buildCard(t, width).map((l) => (process.stdout.isTTY ? l : stripAnsi(l)));
+    process.stdout.write(lines.join("\n") + "\n\n");
+  }
+}
+
 let streamed = false;
+let presented = false;
 session.subscribe((event: any) => {
+  // Triage came back as structured cards → render them, not prose.
+  if (event.type === "tool_execution_start" && event.toolName === "present_threads") {
+    presented = true;
+    renderCards(event.args?.threads ?? []);
+    return;
+  }
   const ame = event.assistantMessageEvent;
   if (event.type === "message_update" && ame?.type === "text_delta") {
     streamed = true;
@@ -23,13 +46,14 @@ session.subscribe((event: any) => {
 
 async function runTurn(q: string): Promise<void> {
   streamed = false;
+  presented = false;
   try {
     await session.prompt(q);
   } catch (e: any) {
     process.stderr.write(`\n[oo] error: ${e?.stack ?? e?.message ?? e}\n`);
     return;
   }
-  if (!streamed) process.stdout.write(lastAssistantText(session) || "[oo] (no assistant text)");
+  if (!streamed && !presented) process.stdout.write(lastAssistantText(session) || "[oo] (no assistant text)");
 }
 
 const oneShot = process.argv.slice(2).join(" ").trim();
