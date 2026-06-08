@@ -9,9 +9,11 @@
     "oo": "tsx src/oo.ts",
     "tui": "tsx src/tui.ts",
     "preview": "tsx src/cards.preview.ts",
+    "test:agent": "tsx src/agent.behavior.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@owner-operator/core": "*",
     "@earendil-works/pi-coding-agent": "0.78.0",
     "@earendil-works/pi-ai": "0.78.0",
     "@earendil-works/pi-tui": "0.78.0"

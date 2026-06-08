@@ -1,22 +1,28 @@
-// Owner Operator — plain frontend (readline REPL + one-shot). Agent core: agent.ts.
+// Owner Operator — plain frontend (readline REPL + one-shot). A CONSUMER of the headless
+// triage data (Thread[] from @owner-operator/core); renders it as cards, or as raw JSON
+// with --json. Agent core: agent.ts.
 //
-//   tsx src/oo.ts                    # interactive (plain)
-//   tsx src/oo.ts "what's ongoing?"  # one-shot
+//   tsx src/oo.ts                            # interactive (plain)
+//   tsx src/oo.ts "what's ongoing?"          # one-shot, terminal cards
+//   tsx src/oo.ts --json "what's ongoing?"   # one-shot, headless JSON snapshot
 
 import readline from "node:readline/promises";
-import { createOwnerOperatorSession, lastAssistantText, type PresentedThread } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import type { Thread } from "@owner-operator/core";
 import { buildCardsBlock } from "./cards";
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
 
+const argv = process.argv.slice(2);
+const jsonMode = argv.includes("--json");
+const oneShot = argv.filter((a) => a !== "--json").join(" ").trim();
+
 const DEBUG = !!process.env.OO_DEBUG;
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
-// Headless mirror of the TUI: the model presents triage via the `present_threads` tool call
-// (structured output). The TUI draws cards; here we print the same buildCard() lines to
-// stdout (stripping color when piped). Same payload, surface-appropriate rendering.
-function renderCards(threads: PresentedThread[]): void {
+// Cards are one renderer over the triage data. (--json emits the raw Thread[] instead.)
+function renderCards(threads: Thread[]): void {
   for (const line of buildCardsBlock(threads, process.stdout.columns ?? 80)) {
     process.stdout.write((process.stdout.isTTY ? line : stripAnsi(line)) + "\n");
   }
@@ -24,35 +30,45 @@ function renderCards(threads: PresentedThread[]): void {
 
 let streamed = false;
 let presented = false;
+let lastThreads: Thread[] = [];
 session.subscribe((event: any) => {
-  // Triage came back as structured cards → render them, not prose.
+  // Capture the triage DATA; don't render here — the surface decides how at turn's end.
   if (event.type === "tool_execution_start" && event.toolName === "present_threads") {
     presented = true;
-    renderCards(event.args?.threads ?? []);
+    lastThreads = (event.args?.threads ?? []) as Thread[];
     return;
   }
   const ame = event.assistantMessageEvent;
   if (event.type === "message_update" && ame?.type === "text_delta") {
     streamed = true;
-    process.stdout.write(ame.delta);
+    if (!jsonMode) process.stdout.write(ame.delta); // prose streams to the human only
   } else if (DEBUG) {
     process.stderr.write(`\n[ev] ${event.type}${ame?.type ? ":" + ame.type : ""}`);
   }
 });
 
+function emitTurn(): void {
+  if (jsonMode) {
+    // Headless data contract: the triage as JSON (empty array if the turn wasn't a triage).
+    process.stdout.write(JSON.stringify(lastThreads, null, 2) + "\n");
+    return;
+  }
+  if (presented) return renderCards(lastThreads);       // cards: one renderer over the data
+  if (!streamed) process.stdout.write(lastAssistantText(session) || "[oo] (no assistant text)");
+}
+
 async function runTurn(q: string): Promise<void> {
   streamed = false;
   presented = false;
+  lastThreads = [];
   try {
     await session.prompt(q);
   } catch (e: any) {
     process.stderr.write(`\n[oo] error: ${e?.stack ?? e?.message ?? e}\n`);
     return;
   }
-  if (!streamed && !presented) process.stdout.write(lastAssistantText(session) || "[oo] (no assistant text)");
+  emitTurn();
 }
-
-const oneShot = process.argv.slice(2).join(" ").trim();
 try {
   if (oneShot) {
     await runTurn(oneShot);

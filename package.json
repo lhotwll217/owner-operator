@@ -5,6 +5,7 @@
   "description": "Local-first chief of staff over your CLI agent sessions, built on the pi coding agent toolkit.",
   "license": "MIT",
   "workspaces": [
-    "harness"
+    "harness",
+    "packages/*"
   ]
 }

@@ -16,6 +16,7 @@ import {
   ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
+import type { Thread } from "@owner-operator/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..", "..");
@@ -36,7 +37,12 @@ const ThreadCard = Type.Object({
   link: Type.Optional(Type.String({ description: "Deep link to open the session, if the digest gives one" })),
 });
 const PresentThreadsParams = Type.Object({ threads: Type.Array(ThreadCard) });
-export type PresentedThread = Static<typeof ThreadCard>;
+
+// The TypeBox schema above is the LLM's structured-output contract; the UI-independent data
+// model lives in @owner-operator/core. They must agree — this fails to compile if they drift.
+const _schemaMatchesContract: Thread = undefined as unknown as Static<typeof ThreadCard>;
+void _schemaMatchesContract;
+export type { Thread };
 
 export const presentThreadsTool = defineTool({
   name: "present_threads",

@@ -2,7 +2,7 @@
 // previewed without a live terminal. Produces the lines for one compact, glanceable card.
 
 import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { PresentedThread } from "./agent";
+import { sortByPriority, type Thread } from "@owner-operator/core";
 
 type Styler = (s: string) => string;
 const sgr = (...c: number[]): Styler => (s) => `\x1b[${c.join(";")}m${s}\x1b[0m`;
@@ -18,7 +18,7 @@ const INDENT = 4;   // body sits under the topic (after "P5  ")
 // Compact card: a priority-colored left rail, then info grouped top→down the way you read
 // it — what & how-fresh, where, state, next action. ANSI-aware widths so color never
 // breaks alignment.
-export function buildCard(t: PresentedThread, width: number): string[] {
+export function buildCard(t: Thread, width: number): string[] {
   const W = Math.max(40, Math.min(width, MAX_W));
   const color = prioColor(t.priority);
   const rail = color("▌") + " ";
@@ -51,10 +51,9 @@ export function buildCard(t: PresentedThread, width: number): string[] {
 // Headless/non-TTY block: priority-sorted cards separated by a blank line (returns ANSI
 // lines; callers strip color when piping). Empty → a single notice. This is the same payload
 // the TUI renders as live cards — one source of truth, surface-appropriate output.
-export function buildCardsBlock(threads: PresentedThread[], width: number): string[] {
+export function buildCardsBlock(threads: Thread[], width: number): string[] {
   if (!threads.length) return [dim("(no active threads)")];
-  const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // loudest first
   const out: string[] = [];
-  for (const t of sorted) out.push(...buildCard(t, width), "");
+  for (const t of sortByPriority(threads)) out.push(...buildCard(t, width), "");
   return out;
 }

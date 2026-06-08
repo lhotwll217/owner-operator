@@ -17,7 +17,8 @@ import {
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
-import { createOwnerOperatorSession, lastAssistantText, type PresentedThread } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import { sortByPriority, type Thread } from "@owner-operator/core";
 import { buildCard } from "./cards";
 
 if (!process.stdout.isTTY) {
@@ -72,15 +73,14 @@ tui.addInputListener((data: string) => {
 // ---- structured thread cards (rendered from the present_threads tool call) ----
 // Card layout lives in cards.ts (so it's previewable without a TTY).
 class Card implements Component {
-  constructor(private readonly t: PresentedThread) {}
+  constructor(private readonly t: Thread) {}
   invalidate(): void { /* stateless */ }
   render(width: number): string[] { return buildCard(this.t, width); }
 }
 
-function renderThreadCards(threads: PresentedThread[]): void {
+function renderThreadCards(threads: Thread[]): void {
   if (!threads.length) { log.addChild(new Text(dim("(no active threads)"))); tui.requestRender(); return; }
-  const sorted = [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); // highest priority first
-  for (const t of sorted) {
+  for (const t of sortByPriority(threads)) {
     log.addChild(new Card(t));
     log.addChild(new Spacer(1));
   }
