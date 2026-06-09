@@ -137,8 +137,8 @@ function realRepo(cwd) {
 function parseSession({ file, source, mtime }) {
   let raw;
   try { raw = readFileSync(file, "utf8"); } catch { return null; }
-  const msgs = [];                 // substantive text turns: {role, text, ts}
-  let project = null, sessionId = null, entrypoint = null, firstTs = 0, lastTs = 0;
+  const msgs = [];                 // substantive text turns: {role, text, ts, stop?}
+  let project = null, sessionId = null, entrypoint = null, firstTs = 0, lastTs = 0, lastLifecycle = null;
 
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -154,10 +154,17 @@ function parseSession({ file, source, mtime }) {
       if (o.type === "user" || o.type === "assistant") {
         if (o.isMeta) continue; // canonical flag for injected/meta turns (divmgl/clancey, constellos/claude-code)
         const text = claudeText(o.message?.content);
-        if (text && text.trim()) msgs.push({ role: o.type, text, ts });
+        // stop_reason marks turn boundaries: "tool_use" = mid loop (working); "end_turn" = done.
+        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason });
       }
     } else { // codex
       if (o.type === "session_meta") { project = o.payload?.cwd || project; sessionId = o.payload?.id || sessionId; }
+      // Turn lifecycle: task_started (running) vs task_complete / turn_aborted (done) — the
+      // terminal signal that the agent yielded control back to the user.
+      if (o.type === "event_msg") {
+        const pt = o.payload?.type;
+        if (pt === "task_started" || pt === "task_complete" || pt === "turn_aborted") lastLifecycle = pt;
+      }
       if (o.type === "response_item" && o.payload?.type === "message") {
         const role = o.payload.role;
         const text = (o.payload.content || []).map((c) => c?.text || "").join(" ");
@@ -198,6 +205,18 @@ function parseSession({ file, source, mtime }) {
   const createdTs = firstTs || mtime;
   const lastMsgTs = lastMsg.ts || lastTs || mtime;
 
+  // Is a turn IN PROGRESS (still reasoning / running tools / streaming)? The last *message*
+  // role alone can't tell — an intermediate assistant message looks "done". Use the terminal
+  // signal: Codex → last lifecycle is task_started (no completion yet); Claude → the last
+  // assistant message is a tool_use step, not end_turn.
+  const lastAsst = [...convo].reverse().find((m) => m.role === "assistant");
+  const working = source === "codex"
+    ? lastLifecycle === "task_started"
+    : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
+  // Liveness from the file's last write — catches reasoning/tool events even when they carry no
+  // timestamp, so a thinking agent never looks idle.
+  const lastActivityTs = Math.max(lastTs || 0, mtime);
+
   // Keep the opening N + most-recent N real messages (no overlap); count what's skipped.
   const shape = (m) => ({ role: m.role, text: clip(m.text), at: m.ts ? iso(m.ts) : null });
   let firstMessages, recentMessages, omittedMessageCount;
@@ -219,6 +238,8 @@ function parseSession({ file, source, mtime }) {
     lastMessageAt: iso(lastMsgTs),
     secondsSinceCreated: Math.max(0, Math.round((Date.now() - createdTs) / 1000)),
     secondsSinceLastMessage: Math.max(0, Math.round((Date.now() - lastMsgTs) / 1000)),
+    secondsSinceActivity: Math.max(0, Math.round((Date.now() - lastActivityTs) / 1000)),
+    working,                                           // a turn is in progress (reasoning/tools)
     automated,
     link: guiLink(source, sessionId, project),
     file,

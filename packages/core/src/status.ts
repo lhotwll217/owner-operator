@@ -25,6 +25,10 @@ export interface ScanRow {
   createdAt: string;          // ISO
   lastMessageAt: string;      // ISO
   secondsSinceLastMessage: number;
+  /** Seconds since the LAST event of any kind (file write) — true liveness, even mid-reasoning. */
+  secondsSinceActivity: number;
+  /** A turn is in progress (Codex task running / Claude tool-loop) — the agent hasn't yielded. */
+  working: boolean;
   link?: string | null;
 }
 
@@ -69,12 +73,15 @@ export function cleanTopic(raw: string): string {
 }
 
 /**
- * Derive a thread's state from a raw scan row — no model. Last word was the assistant's →
- * it answered and is waiting on you (`needs-you`); last word was yours → the agent owes a
- * reply (`working`); quiet too long → `idle`.
+ * Derive a thread's state from a raw scan row — no model. Quiet too long → `idle`. A turn still
+ * in progress (reasoning / running tools / streaming) → `working`, even if the last message is
+ * the assistant's. Otherwise: the assistant spoke last and yielded → `needs-you`; the user
+ * spoke last → `working` (the agent owes a reply). The `working` flag is what stops a thinking
+ * Codex/Claude session from looking "stopped".
  */
-export function deriveState(row: Pick<ScanRow, "lastRole" | "secondsSinceLastMessage">): ThreadState {
-  if (row.secondsSinceLastMessage >= IDLE_AFTER_SECONDS) return "idle";
+export function deriveState(row: Pick<ScanRow, "lastRole" | "secondsSinceActivity" | "working">): ThreadState {
+  if (row.secondsSinceActivity >= IDLE_AFTER_SECONDS) return "idle";
+  if (row.working) return "working";
   return row.lastRole === "assistant" ? "needs-you" : "working";
 }
 
@@ -105,7 +112,7 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
       app: row.app,
       topic: cleanTopic(row.topic),
       state,
-      lastActive: formatRelative(row.secondsSinceLastMessage),
+      lastActive: formatRelative(row.secondsSinceActivity),
       createdAt: row.createdAt,
       lastMessageAt: row.lastMessageAt,
       firstSeen: was?.firstSeen ?? nowIso,

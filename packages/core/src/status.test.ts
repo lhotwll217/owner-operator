@@ -19,13 +19,14 @@ import {
 const row = (over: Partial<ScanRow> & Pick<ScanRow, "id">): ScanRow => ({
   source: "claude", repo: "demo", app: "Claude Code", topic: "t",
   lastRole: "assistant", createdAt: "2026-06-09T10:00:00.000Z",
-  lastMessageAt: "2026-06-09T10:05:00.000Z", secondsSinceLastMessage: 60, ...over,
+  lastMessageAt: "2026-06-09T10:05:00.000Z", secondsSinceLastMessage: 60, secondsSinceActivity: 60, working: false, ...over,
 });
 
 // --- deriveState ---
-assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60 }), "needs-you", "assistant spoke last → needs-you");
-assert.equal(deriveState({ lastRole: "user", secondsSinceLastMessage: 60 }), "working", "user spoke last → working");
-assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS }), "idle", "stale → idle regardless of role");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceActivity: 60, working: false }), "needs-you", "assistant yielded → needs-you");
+assert.equal(deriveState({ lastRole: "user", secondsSinceActivity: 60, working: false }), "working", "user spoke last → working");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceActivity: 60, working: true }), "working", "turn in progress → working even though the assistant spoke last (the bug fix)");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceActivity: IDLE_AFTER_SECONDS, working: false }), "idle", "stale → idle");
 
 // --- reconcile: first poll stamps firstSeen + stateSince to now ---
 const T0 = "2026-06-09T10:06:00.000Z";
@@ -62,7 +63,7 @@ assert.deepEqual(diffSnapshots(withB, gone).resolved.map((t) => t.id), ["a"], "a
 
 // --- sortByAttention: needs-you before working before idle ---
 const mixed = reconcile(null, [
-  row({ id: "i", lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS }),
+  row({ id: "i", lastRole: "assistant", secondsSinceActivity: IDLE_AFTER_SECONDS }),
   row({ id: "w", lastRole: "user" }),
   row({ id: "n", lastRole: "assistant" }),
 ], "2026-06-09T10:11:00.000Z");
