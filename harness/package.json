@@ -9,6 +9,9 @@
     "oo": "tsx src/oo.ts",
     "tui": "tsx src/tui.ts",
     "preview": "tsx src/cards.preview.ts",
+    "preview:sidebar": "tsx src/sidebar.preview.ts",
+    "preview:screen": "tsx src/screen.preview.ts",
+    "poll:smoke": "tsx src/poller.smoke.ts",
     "test:agent": "tsx src/agent.behavior.ts",
     "typecheck": "tsc --noEmit"
   },
