@@ -1,60 +1,46 @@
-# Inspiration — TUI & multi-agent tools
+# Inspiration Dock
 
-Reference list of prior art for Owner Operator's surfaces and the multi-agent
-problem space. Sister doc to [VISION.md](../VISION.md) and
-[architecture.md](./architecture.md).
+Tools we can learn from. Sister doc to [VISION.md](../VISION.md) and [architecture.md](./architecture.md).
+
+**Telegraph style:** list it · link it · what it is · what to borrow.
 
 ## Building on pi (our stack)
 
-The ecosystem we build on. For how we develop & run on top of it — dev mode vs.
-local install — see [development.md](./development.md).
-
 - **[pi](https://github.com/earendil-works/pi)** (`@earendil-works/pi-*`) — the toolkit we build on.
-- **[OpenClaw](https://github.com/openclaw/openclaw)** — the largest pi-based product (own repo, pi via npm).
-- **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** — local-first CLI agent in the same ecosystem.
+- **[OpenClaw](https://github.com/openclaw/openclaw)** — largest pi-based product (own repo, pi via npm).
+- **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** — local-first CLI agent, same ecosystem.
 
-## The list
+## Catalogs
 
-- **[rothgar/awesome-tuis](https://github.com/rothgar/awesome-tuis)** — community
-  catalog of TUI applications. Good for crowd sourcing approaches and examples of UX / UI withing the terminal
-  
-  We should update projects and list out specific features we can use from each project i.e. agent-deck and session status polling
+- **[rothgar/awesome-tuis](https://github.com/rothgar/awesome-tuis)** — community catalog of TUI apps. *Borrow:* source for UX/UI ideas and more entries in this dock.
 
-## Multi-agent tools (from awesome-tuis)
+## Multi-agent tools
 
-Tools that manage, observe, or coordinate **more than one** AI coding agent — the
-closest neighbors to what Owner Operator does.
+- **[amux](https://github.com/andyrewlee/amux)** — run parallel coding agents. *Borrow:* parallel-agent UX.
+- **[agent-deck](https://github.com/asheshgoplani/agent-deck)** — TUI session manager for AI coding agents. *Borrow:* status state machine (`● working · ◐ needs-you · ○ idle · ✕ error`); persistent session deck = our sidebar; status in tmux bar; reads transcripts per turn.
+- **[Superset](https://github.com/superset-sh/superset)** — desktop IDE running an army of parallel agents in isolated worktrees. *Borrow:* monitor-and-notify "needs attention" state; persisted session state in a DB (the persisted-poll store).
+- **[Claude Code Bridge](https://github.com/bfly123/claude_code_bridge)** — real-time Claude/Codex/Gemini collaboration in terminal. *Borrow:* cross-agent bridging.
+- **[Quorum](https://github.com/Detrol/quorum-cli)** — multi-agent debate between LLMs. *Borrow:* structured multi-agent turns.
+- **[kagan](https://github.com/kagan-sh/kagan)** — AI Kanban TUI for autonomous dev. *Borrow:* board/column triage layout.
+- **[Backlog.md](https://github.com/MrLesk/Backlog.md)** — human/AI collaboration in a git repo. *Borrow:* git-native task tracking.
+- **[fast-resume](https://github.com/angristan/fast-resume)** — index + fuzzy-search coding agent sessions. *Borrow:* fast cross-session search/index — the lookup layer for drilling into a thread.
+- **[Cloud Code Usage Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor)** — monitor Claude token usage. *Borrow:* token/cost surfacing.
+- **[models](https://github.com/arimxyer/models)** — TUI for browsing AI models/agents. *Borrow:* model/agent picker UX.
 
-- **[amux](https://github.com/andyrewlee/amux)** — easily run parallel coding agents.
-- **[agent-deck](https://github.com/asheshgoplani/agent-deck)** — terminal dashboard
-  for managing multiple AI coding agent sessions.
-    - Polling for agent status
-- **[Claude Code Bridge](https://github.com/bfly123/claude_code_bridge)** — real-time
-  multi-AI collaboration between Claude, Codex and Gemini in terminal.
-- **[Quorum](https://github.com/Detrol/quorum-cli)** — multi-agent AI discussion
-  system for structured debates between LLMs.
-- **[kagan](https://github.com/kagan-sh/kagan)** — AI-powered Kanban TUI for
-  autonomous development workflows.
-- **[Backlog.md](https://github.com/MrLesk/Backlog.md)** — managing project
-  collaboration between humans and AI agents in a git ecosystem.
-- **[fast-resume](https://github.com/angristan/fast-resume)** — index and fuzzy
-  search coding agent sessions.
-- **[Cloud Code Usage Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor)**
-  — monitor Claude token usage.
-- **[models](https://github.com/arimxyer/models)** — TUI for browsing AI models and
-  coding agents.
+## Session discovery & parsing (prior art)
 
-## Single-agent coding TUIs (the branches we sit above)
+How others find/parse local agent session files — borrowed for `get-active-threads` instead of hand-rolling.
 
-Useful as context — these are the kind of session Owner Operator reads from, not
-competes with.
+- **ai-sessions** (connected MCP) — reads sessions across claude/gemini/codex/opencode/mistral/copilot. *Borrow:* cross-agent discovery oracle; metadata-only `list_sessions` (no transcripts) is cheap enough to back the digest.
+- **[divmgl/clancey](https://github.com/divmgl/clancey)** — Claude Code JSONL parser (MIT). *Borrow:* skip `isMeta` turns; content-block extraction (text / tool_use).
+- **[constellos/claude-code](https://github.com/constellos/claude-code)** — CC transcript utils (MIT). *Borrow:* same `isMeta` filtering.
+- **[AgentWrapper/agent-orchestrator](https://github.com/AgentWrapper/agent-orchestrator)** — agent session classifier (MIT). *Borrow:* worker-vs-interactive by **launch mode** (`codex exec` / `claude -p --headless` / sdk), not message count.
 
-- **[codex](https://github.com/openai/codex)** — OpenAI's lightweight coding agent
-  in the terminal.
+## Single-agent coding TUIs
+
+- **[codex](https://github.com/openai/codex)** — OpenAI's terminal coding agent.
 - **[crush](https://github.com/charmbracelet/crush)** — Charm's AI coding agent.
-- **[opencode](https://github.com/sst/opencode)** — AI coding agent, built for the
-  terminal.
+- **[opencode](https://github.com/sst/opencode)** — terminal-built AI coding agent.
 - **[VT Code](https://github.com/vinhnx/vtcode)** — semantic coding agent.
-- **[Toad](https://github.com/batrachianai/toad)** — a unified interface for AI.
-- **[tweakcc](https://github.com/Piebald-AI/tweakcc)** — TUI to customize Claude
-  Code themes, thinking verbs, and more.
+- **[Toad](https://github.com/batrachianai/toad)** — unified interface for AI.
+- **[tweakcc](https://github.com/Piebald-AI/tweakcc)** — TUI to customize Claude Code themes/verbs.
