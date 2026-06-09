@@ -7,6 +7,8 @@
 
 /** One active agent thread, triaged. The headless unit of data every surface renders. */
 export interface Thread {
+  /** Stable session id (from the scan digest). Joins triage ↔ the live status poll. */
+  id?: string;
   /** Short title of what the thread is about. */
   topic: string;
   /** 5 (highest — needs the operator now) down to 1 (lowest). */
@@ -34,3 +36,11 @@ export type Triage = Thread[];
 export function sortByPriority(threads: readonly Thread[]): Thread[] {
   return [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
+
+// Thread status & the lo-fi state machine — model-free, polled, persisted. The cheap
+// counterpart to the triaged `Thread` above (which needs the model). See status.ts.
+export * from "./status";
+
+// The sidebar data model: digest metadata + live status (+ cached triage), with the
+// default-visible filter and grouping the rail renders. See sidebar.ts.
+export * from "./sidebar";
