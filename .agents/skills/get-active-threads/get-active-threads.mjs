@@ -152,6 +152,7 @@ function parseSession({ file, source, mtime }) {
       if (!sessionId && o.sessionId) sessionId = o.sessionId;
       if (!entrypoint && o.entrypoint) entrypoint = o.entrypoint;
       if (o.type === "user" || o.type === "assistant") {
+        if (o.isMeta) continue; // canonical flag for injected/meta turns (divmgl/clancey, constellos/claude-code)
         const text = claudeText(o.message?.content);
         if (text && text.trim()) msgs.push({ role: o.type, text, ts });
       }
@@ -177,7 +178,21 @@ function parseSession({ file, source, mtime }) {
 
   const userTurns = convo.filter((m) => m.role === "user");
   const topicMsg = userTurns[0] || convo[0];
-  const automated = userTurns.length < 2;
+  // Worker vs interactive by LAUNCH MODE, not message count (battle-tested: AgentWrapper/
+  // agent-orchestrator keys off `codex exec` / `claude --headless|-p` / sdk). A session is a
+  // worker one-shot — hidden unless --all — when:
+  //   • no real (non-boilerplate) user turn survived — e.g. a Codex direct/worker preamble; or
+  //   • it ran via the SDK (sdk-ts / sdk-cli); or
+  //   • it's a single-turn `cli` session — `claude -p` and Task subagents are
+  //     indistinguishable from a brand-new terminal session at one turn, so treat <2 turns as
+  //     a one-shot (a real terminal session surfaces on its 2nd turn).
+  // Interactive entrypoints (codex, claude-desktop, …) show as soon as they have one real turn.
+  const SDK_ENTRYPOINTS = new Set(["sdk-ts", "sdk-cli"]);
+  const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
+  const automated =
+    userTurns.length === 0 ||
+    SDK_ENTRYPOINTS.has(entrypoint) ||
+    (cliLike && userTurns.length < 2);
 
   const lastMsg = convo[convo.length - 1];
   const createdTs = firstTs || mtime;
@@ -215,6 +230,19 @@ function parseSession({ file, source, mtime }) {
 }
 
 let threads = candidates.map(parseSession).filter(Boolean);
+// One thread per session id: collapse subagent/sidechain transcripts (Task tool, resumed
+// sessions) into their parent, keeping the richest (most user turns → most messages → most
+// recent). A real session and its subagents share an id, so this de-noises without dropping
+// real threads.
+const byId = new Map();
+for (const t of threads) {
+  const p = byId.get(t.id);
+  const richer = !p || t.userMessages > p.userMessages
+    || (t.userMessages === p.userMessages && (t.messageCount > p.messageCount
+      || (t.messageCount === p.messageCount && t._sort > p._sort)));
+  if (richer) byId.set(t.id, t);
+}
+threads = [...byId.values()];
 if (threadArg) {
   // Single-thread drill-in: match by full or prefix id (or file basename); keep it even
   // if it's an automated one-shot, and don't apply the limit.

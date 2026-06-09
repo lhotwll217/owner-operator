@@ -47,10 +47,11 @@ call.** The UI renders the tool payload as cards.
 For each thread, reason over its `firstMessages` (what it was about) and `recentMessages`
 (where it stands now) and fill one entry:
 
+- `id` — copy the thread's `id` from the digest **verbatim** (this is how the sidebar matches the card to the live thread — don't omit or alter it).
 - `topic` — what the thread is about.
 - `priority` — integer **5 (highest, needs the operator now) → 1 (lowest)**.
-- `summary` — one sentence on what has generally gone on / current state.
-- `nextSteps` — one short clause: the concrete next action (what's it waiting on).
+- `summary` — one SHORT, scannable sentence on current state (≤ ~15 words; the gist, not the whole story).
+- `nextSteps` — one short clause: the concrete next action (what's it waiting on). Rendered greyed, as the card's footer.
 - `repo`, `app` — copy from the digest.
 - `created`, `lastActive` — copy the **relative** times from the digest ("2 hours ago").
 - `link` — only if the digest gives one.
