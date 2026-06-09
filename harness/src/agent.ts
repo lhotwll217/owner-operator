@@ -26,9 +26,10 @@ export const repoRoot = join(here, "..", "..");
 // the TUI renders the payload as cards. This is the "structured output, rendered
 // differently" path — the model fills the fields, the surface decides how to show them.
 const ThreadCard = Type.Object({
+  id: Type.String({ description: "Stable session id — copy the `id` from the digest verbatim (lets the sidebar match this thread)" }),
   topic: Type.String({ description: "Short title of what the thread is about" }),
   priority: Type.Integer({ minimum: 1, maximum: 5, description: "Priority 5 (highest — needs the operator now) down to 1 (lowest)" }),
-  summary: Type.String({ description: "One sentence on what has generally happened / current state" }),
+  summary: Type.String({ description: "One SHORT, scannable sentence on current state (≤ ~15 words) — the gist, not the full story" }),
   nextSteps: Type.String({ description: "One short clause: the concrete next action" }),
   repo: Type.String({ description: "Repo name" }),
   app: Type.String({ description: "App / GUI the session was made from" }),

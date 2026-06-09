@@ -41,9 +41,9 @@ export function buildCard(t: Thread, width: number): string[] {
   // Line 3+ — state (summary), wrapped.
   for (const seg of wrapTextWithAnsi(t.summary, bodyW)) out.push(sub + seg);
 
-  // Next action — arrow-led, continuation aligned under the text.
+  // Next action — a greyed, arrow-led footer, set apart from the summary above it.
   const segs = wrapTextWithAnsi(t.nextSteps, bodyW - 2);
-  segs.forEach((seg, i) => out.push(sub + (i === 0 ? cyan("→ ") + bold(seg) : "  " + seg)));
+  segs.forEach((seg, i) => out.push(sub + dim(i === 0 ? `→ ${seg}` : `  ${seg}`)));
 
   return out;
 }
