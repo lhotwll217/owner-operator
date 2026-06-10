@@ -47,8 +47,8 @@ const editorTheme: EditorTheme = {
   selectList: { selectedPrefix: blue, selectedText: bold, description: dim, scrollInfo: dim, noMatch: dim },
 };
 
-const SIDEBAR_W = 42;   // rail column width
-const SPLIT_MIN = 90;   // only split the screen on terminals at least this wide
+const SIDEBAR_W = 63;   // rail column width
+const SPLIT_MIN = 104;  // only split the screen on terminals at least this wide (chat keeps ≥40)
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 

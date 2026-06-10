@@ -13,7 +13,7 @@ import { toSidebarThreads, type StatusSnapshot, type TriageInfo } from "@owner-o
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const stub = (lines: string[]): Component => ({ render: () => lines, invalidate() {} });
 
-const ROWS = 30, COLS = 110, RAIL_W = 42;
+const ROWS = 30, COLS = 120, RAIL_W = 63;
 const NOW = "2026-06-09T12:00:00.000Z";
 
 // rail data: the live poll snapshot enriched by the triage cache
@@ -31,7 +31,7 @@ rail.setThreads(toSidebarThreads(snap, triage));
 
 const chat = new ChatPane(stub(Array.from({ length: 50 }, (_, i) => `chat line ${i}`)));
 const editor = stub(["", "› type here <CURSOR_SENTINEL>", ""]);
-const columns = new Columns(rail, chat, editor, RAIL_W, 90);
+const columns = new Columns(rail, chat, editor, RAIL_W, 104);
 const header = stub(["\x1b[1;35m● Owner Operator\x1b[0m", "local chief of staff · /done 1,3 · esc stop · ctrl+c exit"]);
 const screen = new Screen({ rows: ROWS, columns: COLS }, header, columns);
 
