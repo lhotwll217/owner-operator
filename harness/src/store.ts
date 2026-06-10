@@ -11,6 +11,7 @@ import type { StatusSnapshot, TriageInfo } from "@owner-operator/core";
 export const STORE_DIR = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 export const STATUS_FILE = join(STORE_DIR, "status.json");
 export const TRIAGE_FILE = join(STORE_DIR, "triage.json");
+export const DONE_FILE = join(STORE_DIR, "done.json");
 
 function writeAtomic(file: string, data: unknown): void {
   mkdirSync(STORE_DIR, { recursive: true });
@@ -46,4 +47,18 @@ export function loadTriage(): Map<string, TriageInfo> {
 /** Persist the triage cache atomically (written on each full/targeted triage). */
 export function saveTriage(triage: ReadonlyMap<string, TriageInfo>): void {
   writeAtomic(TRIAGE_FILE, Object.fromEntries(triage));
+}
+
+/** The done overlay (thread id → ISO marked-at) — what `/done` wrote; the poll can't observe it. */
+export function loadDone(): Map<string, string> {
+  try {
+    return new Map(Object.entries(JSON.parse(readFileSync(DONE_FILE, "utf8")) as Record<string, string>));
+  } catch {
+    return new Map();
+  }
+}
+
+/** Persist the done overlay atomically (written on each /done). */
+export function saveDone(done: ReadonlyMap<string, string>): void {
+  writeAtomic(DONE_FILE, Object.fromEntries(done));
 }

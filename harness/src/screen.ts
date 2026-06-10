@@ -1,8 +1,10 @@
 // Owner Operator — fixed-viewport layout. pi-tui is inline/scrollback: it only redraws in
 // place (no native-scrollback growth) when the whole frame is <= terminal rows. So the rail
 // can only stay pinned if we render a bounded frame every tick. `Screen` enforces that
-// (header + body + editor, always <= rows); `Columns` is the manual [ rail │ chat ] split
-// (pi-tui has no columns primitive); `ChatPane` bounds the growing chat to its tail.
+// (header + body, always <= rows); `Columns` is the manual [ rail │ chat-over-editor ] split
+// (pi-tui has no columns primitive) — a TRUE sidebar: the rail spans the full body height and
+// the editor lives INSIDE the right column, so the input never runs under the rail;
+// `ChatPane` bounds the growing chat to its tail.
 
 import { visibleWidth, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
@@ -41,25 +43,44 @@ export interface RailComponent extends Component {
   setBodyHeight(h: number): void;
 }
 
-/** Manual horizontal split [ left │ right ]. Below `splitMin` the rail hides, chat goes full-width. */
+/**
+ * Manual horizontal split [ rail │ chat + editor ]. The rail spans the FULL body height; the
+ * right column stacks the bounded chat above the editor (measured, never clipped — its cursor
+ * marker must survive). RESPONSIVE: the rail takes 40% of the terminal capped at `leftWidth`,
+ * so it shrinks on smaller windows before it hides; below `splitMin` it hides entirely.
+ */
 export class Columns implements Component {
   private bodyH = 20;
   constructor(
     private readonly left: RailComponent,
     private readonly right: ChatPane,
+    private readonly editor: Component,
     private readonly leftWidth: number,
     private readonly splitMin: number,
   ) {}
-  setBodyHeight(h: number): void { this.bodyH = h; this.left.setBodyHeight(h); this.right.setHeight(h); }
+  setBodyHeight(h: number): void { this.bodyH = h; }
   splits(width: number): boolean { return width >= this.splitMin; }
-  invalidate(): void { this.left.invalidate(); this.right.invalidate(); }
+  /** Actual rail width at this terminal width: min(cap, 40%). */
+  railWidth(width: number): number { return Math.min(this.leftWidth, Math.floor(width * 0.4)); }
+  invalidate(): void { this.left.invalidate(); this.right.invalidate(); this.editor.invalidate(); }
   render(width: number): string[] {
-    if (!this.splits(width)) return toLines(this.right.render(width), this.bodyH);
-    const lw = this.leftWidth, rw = width - lw - 1;
-    const L = toLines(this.left.render(lw), this.bodyH);
-    const R = toLines(this.right.render(rw), this.bodyH);
+    if (!this.splits(width)) {
+      const ed = this.editor.render(width); // measured, not assumed — the editor self-sizes / grows
+      const chatH = Math.max(1, this.bodyH - ed.length);
+      this.right.setHeight(chatH);
+      return [...toLines(this.right.render(width), chatH), ...ed];
+    }
+    const lw = this.railWidth(width), rw = width - lw - 1;
+    const ed = this.editor.render(rw);
+    const chatH = Math.max(1, this.bodyH - ed.length);
+    const h = chatH + ed.length;
+    this.right.setHeight(chatH);
+    this.left.setBodyHeight(h);
+    const L = toLines(this.left.render(lw), h);
+    const R = [...toLines(this.right.render(rw), chatH), ...ed];
     const out: string[] = [];
-    for (let i = 0; i < this.bodyH; i++) {
+    for (let i = 0; i < h; i++) {
+      // Editor lines render at rw so padExact only pads them — never truncates the cursor marker.
       const line = padExact(L[i], lw) + dim("│") + padExact(R[i], rw);
       out.push(visibleWidth(line) > width ? truncateToWidth(line, width) : line);
     }
@@ -67,30 +88,22 @@ export class Columns implements Component {
   }
 }
 
-/** Fixed-viewport root: header + body + editor, always <= terminal rows so it never scrolls. */
+/** Fixed-viewport root: header + body ([ rail │ chat+editor ]), always <= terminal rows. */
 export class Screen implements Component {
   constructor(
     private readonly term: { rows: number; columns: number },
     private readonly header: Component,
     private readonly columns: Columns,
-    private readonly editor: Component,
-    private readonly minBody = 3,
+    private readonly minBody = 4,
   ) {}
-  invalidate(): void { this.header.invalidate(); this.columns.invalidate(); this.editor.invalidate(); }
+  invalidate(): void { this.header.invalidate(); this.columns.invalidate(); }
   render(width: number): string[] {
     const rows = this.term.rows || 30;
     const head = this.header.render(width);
-    const ed = this.editor.render(width); // measured, not assumed — the editor self-sizes / grows
-    let bodyH = Math.max(this.minBody, rows - head.length - ed.length);
-    this.columns.setBodyHeight(bodyH);
-    let body = this.columns.render(width);
-    let out = [...head, ...body, ...ed];
-    // Never exceed the viewport — trim the BODY only (never the editor or its cursor marker).
-    if (out.length > rows) {
-      bodyH = Math.max(0, bodyH - (out.length - rows));
-      this.columns.setBodyHeight(bodyH);
-      out = [...head, ...this.columns.render(width), ...ed];
-    }
-    return out;
+    this.columns.setBodyHeight(Math.max(this.minBody, rows - head.length));
+    const out = [...head, ...this.columns.render(width)];
+    // Never exceed the viewport. The body only overflows when the editor outgrows it (chat
+    // floor = 1 line); clip the TOP so the editor and its cursor marker always survive.
+    return out.length > rows ? out.slice(out.length - rows) : out;
   }
 }

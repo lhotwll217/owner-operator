@@ -19,12 +19,12 @@ import {
   type EditorTheme,
 } from "@earendil-works/pi-tui";
 import { createOwnerOperatorSession, lastAssistantText } from "./agent";
-import { sortByPriority, toSidebarThreads, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo } from "@owner-operator/core";
+import { sortByPriority, toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo, type SidebarThread } from "@owner-operator/core";
 import { buildCard } from "./cards";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { StatusPoller } from "./poller";
-import { loadSnapshot, loadTriage, saveTriage } from "./store";
+import { loadSnapshot, loadTriage, saveTriage, loadDone, saveDone } from "./store";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
@@ -47,8 +47,8 @@ const editorTheme: EditorTheme = {
   selectList: { selectedPrefix: blue, selectedText: bold, description: dim, scrollInfo: dim, noMatch: dim },
 };
 
-const SIDEBAR_W = 34;   // rail column width
-const SPLIT_MIN = 90;   // only split the screen on terminals at least this wide
+const SIDEBAR_W = 51;   // rail column CAP — the split is responsive: min(51, 40% of terminal)
+const SPLIT_MIN = 80;   // below this the rail hides entirely; above, it shrinks before the chat does
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 
@@ -57,7 +57,7 @@ const tui = new TUI(new ProcessTerminal());
 // ---- chat surface (unchanged components, just bounded by ChatPane in the layout) ----------
 const header = new Box(0, 0);
 header.addChild(new Text(brand("● Owner Operator")));
-header.addChild(new Text(dim(`local chief of staff · ${modelLabel} · ${skills.length} skills · ctrl+c exit`)));
+header.addChild(new Text(dim(`local chief of staff · ${modelLabel} · ${skills.length} skills · /done 1,3 · esc stop · ctrl+c exit`)));
 header.addChild(new Spacer(1));
 
 const log = new Box(0, 0);
@@ -67,18 +67,25 @@ log.addChild(hint);
 const editor = new Editor(tui, editorTheme);
 
 // ---- live thread rail + fixed-viewport layout --------------------------------------------
+// A TRUE sidebar: the rail spans the full body height; the editor lives in the right column
+// (it never runs under the rail). See screen.ts.
 const sidebar = new SidebarList();
-const columns = new Columns(sidebar, new ChatPane(log), SIDEBAR_W, SPLIT_MIN);
-const screen = new Screen(tui.terminal, header, columns, editor);
+const columns = new Columns(sidebar, new ChatPane(log), editor, SIDEBAR_W, SPLIT_MIN);
+const screen = new Screen(tui.terminal, header, columns);
 tui.addChild(screen);
 tui.setFocus(editor);
 
 // The rail is LIVE: membership = the poll snapshot (every active thread, no filter); the cached
-// triage enriches it (title/priority/nextStep) by id. Both persisted for an instant warm-start.
+// triage enriches it (title/priority/nextStep) by id; the done overlay (/done) hides marked
+// rows until new activity wakes them. All persisted for an instant warm-start.
 let statusSnapshot: StatusSnapshot = loadSnapshot() ?? { polledAt: "", threads: [] };
 const triageCache: Map<string, TriageInfo> = loadTriage();
+const doneMarks: Map<string, string> = loadDone();
+let railByNum: Map<number, SidebarThread> = new Map(); // displayed number → thread, for /done
 function refreshRail(): void {
-  sidebar.setThreads(toSidebarThreads(statusSnapshot, triageCache));
+  const rows = toSidebarThreads(statusSnapshot, triageCache, doneMarks);
+  railByNum = numberThreads(rows).byNum; // same core numbering the rail renders — no drift
+  sidebar.setThreads(rows);
   tui.requestRender();
 }
 // Triage (full or targeted) only ENRICHES by id — never decides membership (the poll does).
@@ -109,6 +116,12 @@ function focusEditor(): void { tui.setFocus(editor); tui.requestRender(); }
 
 tui.addInputListener((data: string) => {
   if (matchesKey(data, "ctrl+c")) quit();
+  // esc while a turn is running → stop it (abort the in-flight prompt; runTurn settles it).
+  if (busy && matchesKey(data, "escape")) {
+    stopRequested = true;
+    void session.abort();
+    return { consume: true };
+  }
   return undefined; // the editor handles everything else
 });
 
@@ -133,6 +146,7 @@ function renderThreadCards(threads: Thread[]): void {
 interface Turn { md: Markdown; acc: string; loader: Loader; loaderRemoved: boolean; mdAdded: boolean; cardsShown: boolean }
 let current: Turn | null = null;
 let busy = false;
+let stopRequested = false; // esc pressed mid-turn → session.abort(), settle with "■ stopped"
 
 function removeLoader(): void {
   if (current && !current.loaderRemoved) { log.removeChild(current.loader); current.loaderRemoved = true; }
@@ -170,17 +184,18 @@ async function runTurn(promptText: string, emptyMsg = "(no response)"): Promise<
   tui.requestRender();
   try {
     await session.prompt(promptText);
-    if (current && !current.mdAdded && !current.cardsShown) {
-      removeLoader();
+    removeLoader();
+    if (stopRequested) {
+      log.addChild(new Text(dim("■ stopped")));
+    } else if (current && !current.mdAdded && !current.cardsShown) {
       current.md.setText(lastAssistantText(session) || dim(emptyMsg));
       log.addChild(current.md);
-    } else {
-      removeLoader();
     }
   } catch (e: any) {
     removeLoader();
-    log.addChild(new Text(yellow(`⚠ ${e?.message ?? e}`)));
+    log.addChild(stopRequested ? new Text(dim("■ stopped")) : new Text(yellow(`⚠ ${e?.message ?? e}`)));
   } finally {
+    stopRequested = false;
     current = null;
     busy = false;
     focusEditor();
@@ -188,11 +203,28 @@ async function runTurn(promptText: string, emptyMsg = "(no response)"): Promise<
   }
 }
 
+// /done 1,3 — mark rail rows done by their DISPLAYED number. Persists by thread id (the
+// number is just the handle), the rows leave the rail on this render. Local-only, no model —
+// so it works even mid-turn.
+function markDone(arg: string): void {
+  const hits = parseNumbers(arg).map((n) => railByNum.get(n)).filter((t): t is SidebarThread => !!t);
+  if (!hits.length) {
+    log.addChild(new Text(dim("usage: /done 1,3,5 — the rail row numbers")));
+  } else {
+    const now = new Date().toISOString();
+    for (const t of hits) doneMarks.set(t.id, now);
+    try { saveDone(doneMarks); } catch { /* ignore */ }
+    log.addChild(new Text(green("✓ done") + dim(" › ") + hits.map((t) => `${t.num} ${displayTopic(t)}`).join(dim(" · "))));
+  }
+  refreshRail();
+}
+
 async function handleSubmit(text: string): Promise<void> {
   const q = text.trim();
   editor.setText("");
   if (!q) return;
   if (q === "/exit" || q === "/quit") return quit();
+  if (q === "/done" || q.startsWith("/done ")) return markDone(q.slice(5));
   if (busy) return;
   busy = true;
   log.addChild(new Text(`${bold(blue("you"))} › ${q}`));
