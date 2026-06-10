@@ -13,7 +13,7 @@ import { toSidebarThreads, type StatusSnapshot, type TriageInfo } from "@owner-o
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const stub = (lines: string[]): Component => ({ render: () => lines, invalidate() {} });
 
-const ROWS = 30, COLS = 120, RAIL_W = 63;
+const ROWS = 30, COLS = 130, RAIL_CAP = 51, RAIL_W = 51; // at 130 cols, 40% = 52 → capped at 51
 const NOW = "2026-06-09T12:00:00.000Z";
 
 // rail data: the live poll snapshot enriched by the triage cache
@@ -31,7 +31,7 @@ rail.setThreads(toSidebarThreads(snap, triage));
 
 const chat = new ChatPane(stub(Array.from({ length: 50 }, (_, i) => `chat line ${i}`)));
 const editor = stub(["", "› type here <CURSOR_SENTINEL>", ""]);
-const columns = new Columns(rail, chat, editor, RAIL_W, 104);
+const columns = new Columns(rail, chat, editor, RAIL_CAP, 80);
 const header = stub(["\x1b[1;35m● Owner Operator\x1b[0m", "local chief of staff · /done 1,3 · esc stop · ctrl+c exit"]);
 const screen = new Screen({ rows: ROWS, columns: COLS }, header, columns);
 
@@ -58,10 +58,17 @@ assert.match(stripAnsi(body[0]).slice(0, RAIL_W), /Threads\s+2/, "rail header on
 assert.ok(body.some((l) => /chat line/.test(stripAnsi(l).slice(RAIL_W + 1))), "chat content on the right");
 assert.ok(body.some((l) => /↑ \d+ earlier/.test(stripAnsi(l))), "chat tail shows the earlier-lines affordance");
 
-// --- narrow terminal: rail hides, chat + editor go full width ---
-assert.equal(columns.splits(80), false, "below splitMin the screen doesn't split");
+// --- responsive: on smaller windows the rail shrinks (40% of width) before it hides ---
+assert.equal(columns.railWidth(100), 40, "mid-size terminal → rail at 40% (under the cap)");
 columns.setBodyHeight(20);
-const narrow = columns.render(80);
+const mid = columns.render(100);
+assert.equal(mid.length, 20, "mid-size body fills its height");
+for (const l of mid) assert.equal(stripAnsi(l)[40], "│", "separator follows the responsive rail width");
+assert.ok(mid[mid.length - 2].includes("<CURSOR_SENTINEL>"), "mid-size: editor still in the right column");
+
+// --- narrow terminal: rail hides, chat + editor go full width ---
+assert.equal(columns.splits(79), false, "below splitMin the screen doesn't split");
+const narrow = columns.render(79);
 assert.equal(narrow.length, 20, "narrow body still fills its height");
 assert.ok(narrow[narrow.length - 2].includes("<CURSOR_SENTINEL>"), "narrow: editor at the bottom, full width");
 

@@ -46,7 +46,8 @@ export interface RailComponent extends Component {
 /**
  * Manual horizontal split [ rail │ chat + editor ]. The rail spans the FULL body height; the
  * right column stacks the bounded chat above the editor (measured, never clipped — its cursor
- * marker must survive). Below `splitMin` the rail hides, chat + editor go full-width.
+ * marker must survive). RESPONSIVE: the rail takes 40% of the terminal capped at `leftWidth`,
+ * so it shrinks on smaller windows before it hides; below `splitMin` it hides entirely.
  */
 export class Columns implements Component {
   private bodyH = 20;
@@ -59,6 +60,8 @@ export class Columns implements Component {
   ) {}
   setBodyHeight(h: number): void { this.bodyH = h; }
   splits(width: number): boolean { return width >= this.splitMin; }
+  /** Actual rail width at this terminal width: min(cap, 40%). */
+  railWidth(width: number): number { return Math.min(this.leftWidth, Math.floor(width * 0.4)); }
   invalidate(): void { this.left.invalidate(); this.right.invalidate(); this.editor.invalidate(); }
   render(width: number): string[] {
     if (!this.splits(width)) {
@@ -67,7 +70,7 @@ export class Columns implements Component {
       this.right.setHeight(chatH);
       return [...toLines(this.right.render(width), chatH), ...ed];
     }
-    const lw = this.leftWidth, rw = width - lw - 1;
+    const lw = this.railWidth(width), rw = width - lw - 1;
     const ed = this.editor.render(rw);
     const chatH = Math.max(1, this.bodyH - ed.length);
     const h = chatH + ed.length;

@@ -34,7 +34,7 @@ const done = new Map([["d", "2026-06-09T13:00:00.000Z"]]); // marked AFTER its l
 const rows = toSidebarThreads(snap, triage, done);
 const panel = new SidebarList(20);
 panel.setThreads(rows);
-const lines = panel.render(63).map(stripAnsi);
+const lines = panel.render(51).map(stripAnsi);
 process.stdout.write(lines.map((l) => "  " + l).join("\n") + "\n\n");
 
 assert.match(lines[0], /^Threads\s+4/, "active threads shown — done row left the body");
@@ -54,7 +54,7 @@ assert.deepEqual(numbered.map((l) => Number(l.trim()[0])), [1, 2, 3, 4], "rows r
 assert.equal(byNum.get(1)!.id, "n", "number 1 = the loudest displayed row");
 
 // --- empty ---
-const empty = new SidebarList().render(63).map(stripAnsi);
+const empty = new SidebarList().render(51).map(stripAnsi);
 assert.match(empty[0], /^Threads\s+0/, "empty header");
 assert.ok(empty.some((l) => /no active threads/.test(l)), "empty notice");
 
