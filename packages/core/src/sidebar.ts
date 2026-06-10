@@ -20,6 +20,11 @@ export interface SidebarThread extends ThreadStatus {
   triagedTopic?: string;
   nextSteps?: string;
   priority?: number;
+  /** Operator overlay: false once marked done (/done). Inactive rows leave the rail; new
+   *  activity after the mark reactivates the thread (the mark is older than the message). */
+  active: boolean;
+  /** Rail row number (1…n in display order) — the handle `/done 1,3` resolves. */
+  num?: number;
 }
 
 /** Title to show — the triaged title when we have one, else the raw digest topic. */
@@ -30,15 +35,49 @@ export function displayTopic(t: SidebarThread): string {
 /**
  * The rail = ALL threads in the poll snapshot (live, NO filter), each enriched by the cached
  * triage (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
+ * The `done` overlay (id → ISO marked-at) is the one operator-driven exception: a thread
+ * marked done goes inactive — until a message lands AFTER the mark, which reactivates it.
  */
 export function toSidebarThreads(
   snapshot: StatusSnapshot,
   triage: ReadonlyMap<string, TriageInfo>,
+  done: ReadonlyMap<string, string> = new Map(),
 ): SidebarThread[] {
   return snapshot.threads.map((t): SidebarThread => {
     const tri = triage.get(t.id);
-    return { ...t, triagedTopic: tri?.topic, nextSteps: tri?.nextSteps, priority: tri?.priority };
+    const marked = done.get(t.id);
+    const active = !marked || t.lastMessageAt > marked;
+    return {
+      ...t,
+      state: active ? t.state : "done",
+      triagedTopic: tri?.topic,
+      nextSteps: tri?.nextSteps,
+      priority: tri?.priority,
+      active,
+    };
   });
+}
+
+export interface NumberedRail { groups: RepoGroup[]; byNum: Map<number, SidebarThread>; }
+
+/**
+ * Group + number the rail: ACTIVE threads only (done rows drop off), numbered 1…n in display
+ * order — so the number you see is the number `/done` addresses. Pure: numbers go on copies.
+ */
+export function numberThreads(threads: readonly SidebarThread[]): NumberedRail {
+  const groups = groupByRepo(threads.filter((t) => t.active))
+    .map((g): RepoGroup => ({ ...g, threads: g.threads.map((t) => ({ ...t })) }));
+  const byNum = new Map<number, SidebarThread>();
+  let n = 0;
+  for (const g of groups) for (const t of g.threads) { t.num = ++n; byNum.set(n, t); }
+  return { groups, byNum };
+}
+
+/** Parse a `/done` argument — comma/space-separated row numbers → unique, in given order. */
+export function parseNumbers(arg: string): number[] {
+  const out: number[] = [];
+  for (const m of arg.matchAll(/\d+/g)) { const n = Number(m[0]); if (!out.includes(n)) out.push(n); }
+  return out;
 }
 
 export interface RepoGroup { repo: string; threads: SidebarThread[]; }

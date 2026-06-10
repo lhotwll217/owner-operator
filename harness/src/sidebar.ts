@@ -1,12 +1,13 @@
-// Owner Operator — the live thread rail (glance-only). Grouped by project; every thread is
-// rendered identically with all its data points: status glyph · priority · title · recency ·
-// greyed next-step (no summary). No selection/cursor/navigation — it's a consistent display the
-// chat sits beside. Content is the digest + cached triage merged by id (see core/sidebar.ts).
+// Owner Operator — the live thread rail (glance-only). Grouped by project; every ACTIVE thread
+// is rendered identically with all its data points: row number · status glyph · priority ·
+// title · recency · greyed next-step (no summary). The number is the operator's handle —
+// `/done 1,3` in the chat resolves through the same core numbering (see core/sidebar.ts).
+// No selection/cursor/navigation — it's a consistent display the chat sits beside.
 // Renders RAW lines; the Columns layout in screen.ts pads each line and draws the separator.
 
 import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
 import {
-  groupByRepo,
+  numberThreads,
   stateCounts,
   displayTopic,
   type RepoGroup,
@@ -38,6 +39,7 @@ function shortAge(lastActive: string): string {
  */
 export class SidebarList {
   private groups: RepoGroup[] = [];
+  private counts: Record<ThreadState, number> = { "needs-you": 0, working: 0, idle: 0, done: 0 };
   private frame = 0; // spinner frame for `working` rows
 
   constructor(private bodyHeight = 18) {}
@@ -45,8 +47,10 @@ export class SidebarList {
   /** Body rows the rail may use; the fixed-viewport layout sets this from terminal height. */
   setBodyHeight(h: number): void { this.bodyHeight = Math.max(3, h - 3); } // minus the 3-line header
 
+  /** Takes ALL rail rows; done (inactive) rows leave the body but stay in the ✓ count. */
   setThreads(threads: readonly SidebarThread[]): void {
-    this.groups = groupByRepo(threads);
+    this.counts = stateCounts(threads);
+    this.groups = numberThreads(threads).groups;
   }
 
   /** True if any thread is `working` — the tui only animates the spinner when this holds. */
@@ -59,13 +63,15 @@ export class SidebarList {
   render(width: number): string[] {
     const W = Math.max(18, width);
     const all = this.groups.flatMap((g) => g.threads);
-    const c = stateCounts(all);
-    const stats = [c["needs-you"] && yellow(`◐ ${c["needs-you"]}`), c.working && green(`● ${c.working}`), c.idle && gray(`○ ${c.idle}`)]
+    const c = this.counts;
+    const stats = [c["needs-you"] && yellow(`◐ ${c["needs-you"]}`), c.working && green(`● ${c.working}`), c.idle && gray(`○ ${c.idle}`), c.done && gray(`✓ ${c.done}`)]
       .filter(Boolean).join(dim("  ")) || dim("—");
     const head = [bold("Threads") + dim(`  ${all.length}`), stats, ""];
     if (!all.length) return [head[0], "", dim("(no active threads)")];
 
-    // Every thread: line 1 = glyph · priority · title (right-aligned recency); line 2 = grey next-step.
+    // Every thread: line 1 = number · glyph · priority · title (right-aligned recency);
+    // line 2 = grey next-step. The number is what `/done` takes.
+    const numW = String(all.length).length;
     const body: string[] = [];
     for (const g of this.groups) {
       body.push(cyan(bold(`▾ ${g.repo}`)) + dim(`  ${g.threads.length}`));
@@ -73,7 +79,7 @@ export class SidebarList {
         const badge = t.priority ? prio(t.priority)(`P${t.priority} `) : "";
         const age = dim(shortAge(t.lastActive));
         const glyph = t.state === "working" ? green(SPINNER[this.frame % SPINNER.length]) : COLOR[t.state](GLYPH[t.state]);
-        const left = "  " + glyph + " " + badge;
+        const left = " " + dim(String(t.num ?? 0).padStart(numW)) + " " + glyph + " " + badge;
         const room = Math.max(4, W - visibleWidth(left) - visibleWidth(age) - 1);
         const title = truncateToWidth(displayTopic(t).replace(/\s+/g, " ").trim(), room);
         const l1 = left + title;
