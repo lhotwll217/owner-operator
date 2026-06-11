@@ -39,11 +39,14 @@ export interface PollerOptions {
 const SESSION_ROOTS = [join(homedir(), ".claude", "projects"), join(homedir(), ".codex", "sessions")];
 
 // Run the scan with no message bodies (--sample 0) — we only need metadata for status, so
-// keep the payload tiny and fast.
+// keep the payload tiny and fast. --include-done because the state machine needs EVERY
+// candidate: done-suppression happens in reconcile (via the canonical resolver); if the
+// scan dropped done rows here, they'd leave the snapshot, orphan the persisted `done`,
+// and resurface as active on the next pass.
 async function runScan(since: string, limit: number): Promise<ScanRow[]> {
   const { stdout } = await execFileP(
     "node",
-    [SCAN, "--since", since, "--limit", String(limit), "--sample", "0", "--json"],
+    [SCAN, "--since", since, "--limit", String(limit), "--sample", "0", "--json", "--include-done"],
     { maxBuffer: 32 * 1024 * 1024 },
   );
   const parsed = JSON.parse(stdout) as { threads?: Array<Record<string, any>> };
@@ -87,15 +90,17 @@ export class StatusPoller {
     this.polling = true;
     try {
       const rows = await (this.opts.scan ?? runScan)(this.opts.since ?? "today", this.opts.limit ?? 50);
-      // Disk is the source of truth because operator actions can update status.json
-      // outside this poller's in-memory `current` snapshot.
+      // The store is the source of truth because operator actions can land outside this
+      // poller's in-memory `current` snapshot — other processes included.
       const prev = loadSnapshot() ?? this.current;
       const next = reconcile(prev, rows, new Date().toISOString());
-      const diff = diffSnapshots(prev, next);
-      this.current = next;
-      saveSnapshot(next);
-      for (const fn of this.listeners) fn(next, diff);
-      return next;
+      // The store re-applies the done-hold at the write boundary and returns the STORED
+      // truth — under a concurrent writer it can differ from `next`; render what it kept.
+      const stored = saveSnapshot(next);
+      const diff = diffSnapshots(prev, stored);
+      this.current = stored;
+      for (const fn of this.listeners) fn(stored, diff);
+      return stored;
     } catch {
       return this.current; // keep the last good snapshot rather than blanking the sidebar
     } finally {

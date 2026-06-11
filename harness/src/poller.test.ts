@@ -39,6 +39,13 @@ try {
   const unchanged = await poller.poll();
   assert.equal(unchanged?.threads[0].state, "done", "poll preserves disk-sourced done state");
 
+  // App refresh/reload: a brand-new poller (fresh process, no in-memory continuity) joins
+  // the persisted store through the resolver — done must survive a cold rebuild too.
+  const reloaded = new StatusPoller({ scan: async () => rows });
+  const afterReload = await reloaded.poll();
+  assert.equal(afterReload?.threads[0].state, "done", "fresh poller preserves persisted done");
+  reloaded.stop();
+
   rows = [{ ...rows[0], lastMessageAt: "2026-06-09T10:07:00.000Z" }];
   const awakened = await poller.poll();
   assert.equal(awakened?.threads[0].state, "needs-you", "newer message wakes a done thread");

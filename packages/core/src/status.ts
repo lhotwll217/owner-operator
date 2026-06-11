@@ -5,10 +5,25 @@
 // fast and for free — the expensive triage (priority/summary, see `Thread`) refreshes
 // slowly and separately. Pure functions only, same contract every surface renders.
 
+import { resolveState } from "./resolve.mjs";
+
+// The canonical resolver — raw scan candidates joined with persisted operator state. Every
+// surface (poller, sidebar, tools, the scan skill itself) resolves through these, never its
+// own rule. Plain ESM in resolve.mjs so the zero-install scan skill runs the same code.
+export {
+  IDLE_AFTER_SECONDS,
+  deriveState,
+  holdsDone,
+  resolveState,
+  isActiveState,
+  resolveCandidates,
+} from "./resolve.mjs";
+
 /**
  * Lifecycle state of a thread — lo-fi and distinct from `priority` (priority = how loud;
  * state = what's happening). Mirrors the bounded vocabulary agent-deck polls for.
- * `done` is reserved for the triage/diff layer (we can't observe "resolved" off disk yet).
+ * `done` is OPERATOR-set (`/done` / mark_thread_done) — transcripts can't observe
+ * "resolved" — and holds until a newer message wakes the thread (see resolve.mjs).
  */
 export type ThreadState = "needs-you" | "working" | "idle" | "done";
 
@@ -64,25 +79,9 @@ export interface StatusDiff {
   resolved: ThreadStatus[];   // present last poll, gone now
 }
 
-/** Quiet at least this long → `idle`, regardless of who spoke last. Lo-fi; tune later. */
-export const IDLE_AFTER_SECONDS = 30 * 60;
-
 /** Normalize a raw scan topic for display: strip slash-command/caveat markup, collapse space. */
 export function cleanTopic(raw: string): string {
   return raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || "(untitled)";
-}
-
-/**
- * Derive a thread's state from a raw scan row — no model. Quiet too long → `idle`. A turn still
- * in progress (reasoning / running tools / streaming) → `working`, even if the last message is
- * the assistant's. Otherwise: the assistant spoke last and yielded → `needs-you`; the user
- * spoke last → `working` (the agent owes a reply). The `working` flag is what stops a thinking
- * Codex/Claude session from looking "stopped".
- */
-export function deriveState(row: Pick<ScanRow, "lastRole" | "secondsSinceActivity" | "working">): ThreadState {
-  if (row.secondsSinceActivity >= IDLE_AFTER_SECONDS) return "idle";
-  if (row.working) return "working";
-  return row.lastRole === "assistant" ? "needs-you" : "working";
 }
 
 /** Loudest-first ordering for the sidebar: needs-you → working → idle → done, then most recent. */
@@ -103,12 +102,9 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
   const byId = new Map((prev?.threads ?? []).map((t) => [t.id, t]));
   const threads = rows.map((row): ThreadStatus => {
     const was = byId.get(row.id);
-    const derivedState = deriveState(row);
-    // `done` is operator-set, not observable from transcripts. Keep it until a newer
-    // message lands, then let the scan-derived state wake the thread again.
-    const state = was?.state === "done" && row.lastMessageAt <= was.lastMessageAt
-      ? "done"
-      : derivedState;
+    // The canonical resolver decides: operator-set `done` holds until a newer message
+    // lands, then the scan-derived state wakes the thread again.
+    const state = resolveState(was, row);
     const changed = !was || was.state !== state;
     return {
       id: row.id,

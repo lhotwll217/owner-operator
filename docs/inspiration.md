@@ -7,7 +7,7 @@ Tools we can learn from. Sister doc to [VISION.md](../VISION.md) and [architectu
 ## Building on pi (our stack)
 
 - **[pi](https://github.com/earendil-works/pi)** (`@earendil-works/pi-*`) — the toolkit we build on.
-- **[OpenClaw](https://github.com/openclaw/openclaw)** — largest pi-based product (own repo, pi via npm).
+- **[OpenClaw](https://github.com/openclaw/openclaw)** — largest pi-based product (own repo, pi via npm). *Borrow:* one Gateway process **owns** session state — surfaces query it, never derive their own; two persistence layers (mutable store `sessions.json` + append-only transcripts) = our `status.json` + session scans; store writes serialized through a single writer. Our daemon (`harness/src/daemon.ts`) is this pattern local-first: one state-owning process (poll loop + canonical resolver + schedules/triggers), HTTP+SSE on localhost, surfaces as thin clients.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** — local-first CLI agent, same ecosystem.
 
 ## Catalogs

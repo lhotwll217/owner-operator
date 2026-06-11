@@ -34,9 +34,15 @@ Flags:
 - `--sample N` — keep the first N + most-recent N messages per thread (default 4; `--bookends`/`--last` are aliases)
 - `--thread <id>` — drill into ONE thread (id prefix ok); pair with a bigger `--sample` to expand just that thread
 - `--limit N` — max threads (default 40)
-- `--all` — include automated/worker one-shots (hidden by default)
+- `--all` — include automated/worker one-shots AND done threads (both hidden by default)
+- `--include-done` — include threads the operator marked done (for auditing)
 - `--json` — machine-readable output (use when you want to post-process)
 - `--truncate N` — per-message char cap (default 280)
+
+Each thread carries a resolved `State` (needs-you / working / idle / done) — the scan's
+candidates joined against the operator's status store by the canonical resolver. Threads
+the operator marked done are **excluded by default** and only reappear when a newer
+message wakes them; `--thread` drill-ins always answer.
 
 ## Then: present via the `present_threads` tool (required)
 
@@ -56,10 +62,11 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 - `created`, `lastActive` — copy the **relative** times from the digest ("2 hours ago").
 - `link` — only if the digest gives one.
 
-Set `priority` by how much it needs the operator now — 5 for mid-conversation threads
-waiting on a decision/approval/MR review, low for things ticking along on their own. Drop
-resolved / "done" threads entirely. Order the array highest-priority first. Never paste the
-raw tail back verbatim.
+Set `priority` by how much it needs the operator now — the digest's `State` line is the
+live signal: 5 for mid-conversation threads waiting on a decision/approval/MR review, low
+for things ticking along on their own. Threads the operator marked done are already
+excluded from the digest — don't resurrect them. Order the array highest-priority first.
+Never paste the raw tail back verbatim.
 
 ### If a thread's ends are too vague to summarize
 

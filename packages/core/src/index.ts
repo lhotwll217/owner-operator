@@ -44,3 +44,7 @@ export * from "./status";
 // The sidebar data model: digest metadata + live status (+ cached triage), with the
 // default-visible filter and grouping the rail renders. See sidebar.ts.
 export * from "./sidebar";
+
+// The daemon wire protocol: endpoints, schedules/triggers, and push events — the contract
+// every surface speaks to the one state-owning process. See protocol.ts.
+export * from "./protocol";

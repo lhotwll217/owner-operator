@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { displayTopic, numberThreads, toSidebarThreads, type SidebarThread, type Thread } from "@owner-operator/core";
-import { loadSnapshot, loadTriage, markThreadsDone } from "./store";
+import { resolveBackend } from "./client";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..", "..");
@@ -65,9 +65,12 @@ interface SidebarToolThread {
   lastActive: string;
 }
 
-function getCurrentSidebarThreads(): SidebarToolThread[] {
-  const snapshot = loadSnapshot() ?? { polledAt: "", threads: [] };
-  const rows = toSidebarThreads(snapshot, loadTriage());
+// Tools go through the Backend seam — the daemon when one runs (single writer), the
+// store directly otherwise. Same data either way; the tool can't tell and shouldn't.
+async function getCurrentSidebarThreads(): Promise<SidebarToolThread[]> {
+  const backend = await resolveBackend();
+  const snapshot = (await backend.loadSnapshot()) ?? { polledAt: "", threads: [] };
+  const rows = toSidebarThreads(snapshot, await backend.loadTriage());
   const numbered = numberThreads(rows);
   return [...numbered.byNum.entries()].map(([index, t]) => ({
     index,
@@ -104,7 +107,7 @@ export const getSidebarThreadsTool = defineTool({
   ],
   parameters: Type.Object({}),
   async execute() {
-    const threads = getCurrentSidebarThreads();
+    const threads = await getCurrentSidebarThreads();
     return {
       content: [{ type: "text" as const, text: JSON.stringify({ threads }, null, 2) }],
       details: { threads },
@@ -124,7 +127,7 @@ export const markThreadDoneTool = defineTool({
   ],
   parameters: MarkThreadDoneParams,
   async execute(_id, params) {
-    const sidebar = getCurrentSidebarThreads();
+    const sidebar = await getCurrentSidebarThreads();
     const byIndex = new Map(sidebar.map((t) => [t.index, t]));
     const indexTargets = cleanIndexes(params.indexes).map((n) => byIndex.get(n)).filter((t): t is SidebarToolThread => !!t);
     const queryResults = cleanQueries(params.queries).map((query) => {
@@ -144,7 +147,7 @@ export const markThreadDoneTool = defineTool({
         matches: r.matches.map((t) => ({ index: t.index, id: t.id, repo: t.repo, topic: t.topic })),
       }));
 
-    const result = markThreadsDone(ids);
+    const result = await (await resolveBackend()).markThreadsDone(ids);
 
     const marked = result.marked.map((t) => sidebar.find((row) => row.id === t.id) ?? {
       index: null,
