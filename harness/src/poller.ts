@@ -32,6 +32,8 @@ export interface PollerOptions {
   intervalMs?: number;
   /** Debounce for watcher-triggered reconciles in ms (default 600). */
   debounceMs?: number;
+  /** Test seam: deterministic replacement for the session-file scan. */
+  scan?: (since: string, limit: number) => Promise<ScanRow[]>;
 }
 
 const SESSION_ROOTS = [join(homedir(), ".claude", "projects"), join(homedir(), ".codex", "sessions")];
@@ -84,9 +86,12 @@ export class StatusPoller {
     if (this.polling) return this.current; // never overlap a slow scan
     this.polling = true;
     try {
-      const rows = await runScan(this.opts.since ?? "today", this.opts.limit ?? 50);
-      const next = reconcile(this.current, rows, new Date().toISOString());
-      const diff = diffSnapshots(this.current, next);
+      const rows = await (this.opts.scan ?? runScan)(this.opts.since ?? "today", this.opts.limit ?? 50);
+      // Disk is the source of truth because operator actions can update status.json
+      // outside this poller's in-memory `current` snapshot.
+      const prev = loadSnapshot() ?? this.current;
+      const next = reconcile(prev, rows, new Date().toISOString());
+      const diff = diffSnapshots(prev, next);
       this.current = next;
       saveSnapshot(next);
       for (const fn of this.listeners) fn(next, diff);
