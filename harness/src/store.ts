@@ -12,9 +12,9 @@
 //     transaction, and saveSnapshot re-applies the canonical done-hold at the write
 //     boundary (threads-db.ts), so a writer holding a stale snapshot can't resurrect a
 //     done thread. New writers inherit both for free by going through the seam.
-//   • Next step on this path: a gateway daemon (openclaw pattern, docs/inspiration.md)
-//     becomes the ONLY writer and this seam its internal API — surfaces move to gateway
-//     RPC; the status.json export stays for cold readers.
+//   • The daemon (daemon.ts) IS that single writer when it runs — surfaces resolve it via
+//     client.ts and this seam becomes its internal API; the status.json export stays for
+//     cold readers either way.
 
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,8 @@ export const STORE_DIR = process.env.OO_HOME ?? join(homedir(), ".owner-operator
 export const STATUS_FILE = join(STORE_DIR, "status.json");
 /** Legacy triage cache — seed input only; no longer written (triage lives in the db). */
 export const TRIAGE_FILE = join(STORE_DIR, "triage.json");
+/** Daemon discovery file ({ port, pid, startedAt }) — written by the daemon, read by clients. */
+export const DAEMON_FILE = join(STORE_DIR, "daemon.json");
 
 let db: ThreadDb | null = null;
 function getDb(): ThreadDb {
@@ -50,6 +52,11 @@ function seedLegacyJson(target: ThreadDb): void {
     const obj = JSON.parse(readFileSync(TRIAGE_FILE, "utf8")) as Record<string, TriageInfo>;
     for (const [id, info] of Object.entries(obj)) target.upsertTriage(id, info, "model");
   } catch { /* no legacy triage */ }
+}
+
+/** The daemon's privileged handle (schedules, direct queries). Surfaces stay on the seam. */
+export function storeDb(): ThreadDb {
+  return getDb();
 }
 
 // Atomic write (temp + rename) so a status.json reader never sees a partial file.

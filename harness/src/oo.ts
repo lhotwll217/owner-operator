@@ -11,6 +11,13 @@ import { createOwnerOperatorSession, lastAssistantText } from "./agent";
 import type { Thread } from "@owner-operator/core";
 import { buildCardsBlock } from "./cards";
 
+// `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
+if (process.argv[2] === "daemon") {
+  const { daemonMain } = await import("./daemon");
+  await daemonMain();
+  process.exit(0);
+}
+
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
 

@@ -24,7 +24,7 @@ import { buildCard } from "./cards";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { StatusPoller } from "./poller";
-import { loadSnapshot, loadTriage, markThreadsDone, saveTriage } from "./store";
+import { resolveBackend } from "./client";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
@@ -52,6 +52,11 @@ const SPLIT_MIN = 80;   // below this the rail hides entirely; above, it shrinks
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 
+// State backend: the daemon when it runs (spawned here if needed — it owns the poll loop
+// and pushes snapshots), the store + an embedded poller otherwise. One writer when daemon-
+// backed; the store's write-boundary hold keeps embedded mode safe too.
+const backend = await resolveBackend({ spawnDaemon: true });
+
 const tui = new TUI(new ProcessTerminal());
 
 // ---- chat surface (unchanged components, just bounded by ChatPane in the layout) ----------
@@ -78,8 +83,8 @@ tui.setFocus(editor);
 // The rail is LIVE: membership = the poll snapshot; the cached triage enriches it
 // (title/priority/nextStep) by id. `/done` sets thread status to done, so rows leave the
 // active rail until new activity wakes them.
-let statusSnapshot: StatusSnapshot = loadSnapshot() ?? { polledAt: "", threads: [] };
-const triageCache: Map<string, TriageInfo> = loadTriage();
+let statusSnapshot: StatusSnapshot = (await backend.loadSnapshot()) ?? { polledAt: "", threads: [] };
+const triageCache: Map<string, TriageInfo> = await backend.loadTriage();
 let railByNum: Map<number, SidebarThread> = new Map(); // displayed number → thread, for /done
 function refreshRail(): void {
   const rows = toSidebarThreads(statusSnapshot, triageCache);
@@ -95,12 +100,15 @@ function cacheTriage(threads: Thread[]): void {
     triageCache.set(t.id, { topic: t.topic, summary: t.summary, nextSteps: t.nextSteps, priority: t.priority });
     changed = true;
   }
-  if (changed) { try { saveTriage(triageCache); } catch { /* ignore */ } refreshRail(); }
+  if (changed) { backend.saveTriage(triageCache).catch(() => { /* best-effort */ }); refreshRail(); }
 }
 
 let poller: StatusPoller | undefined;
+let unsubscribePush: (() => void) | undefined;
 let spin: NodeJS.Timeout | undefined;
 function quit(): never {
+  try { unsubscribePush?.(); } catch { /* ignore */ }
+  try { backend.close(); } catch { /* ignore */ }
   try { poller?.stop(); } catch { /* ignore */ }
   try { if (spin) clearInterval(spin); } catch { /* ignore */ }
   try { session.dispose(); } catch { /* ignore */ }
@@ -165,9 +173,9 @@ session.subscribe((event: any) => {
   }
 
   if (event.type === "tool_execution_start" && event.toolName === "mark_thread_done") {
-    // The tool writes status.json during this turn. Poll on the next tick so the rail
-    // reflects the write without waiting for the interval.
-    setTimeout(() => void poller?.poll(), 0).unref?.();
+    // The tool writes through the backend during this turn. Reconcile on the next tick so
+    // the rail reflects the write without waiting for the interval/push.
+    setTimeout(() => { if (poller) void poller.poll(); else void backend.forcePoll(); }, 0).unref?.();
     return;
   }
 
@@ -211,12 +219,12 @@ async function runTurn(promptText: string, emptyMsg = "(no response)"): Promise<
 
 // /done 1,3 — mark rail rows `done` by their DISPLAYED number. Persists by thread id (the
 // number is just the handle), the rows leave the rail on this render.
-function markDone(arg: string): void {
+async function markDone(arg: string): Promise<void> {
   const hits = parseNumbers(arg).map((n) => railByNum.get(n)).filter((t): t is SidebarThread => !!t);
   if (!hits.length) {
     log.addChild(new Text(dim("usage: /done 1,3,5 — the rail row numbers")));
   } else {
-    const result = markThreadsDone(hits.map((t) => t.id));
+    const result = await backend.markThreadsDone(hits.map((t) => t.id));
     if (result.snapshot) statusSnapshot = result.snapshot;
     log.addChild(new Text(green("✓ done") + dim(" › ") + hits.map((t) => `${t.num} ${displayTopic(t)}`).join(dim(" · "))));
   }
@@ -306,11 +314,24 @@ function onPoll(snap: StatusSnapshot, diff: StatusDiff): void {
 }
 
 // ---- start ----
-refreshRail();                              // instant: last poll snapshot + triage cache, so it isn't blank
-poller = new StatusPoller({ since: "today", intervalMs: 15_000 });
-poller.subscribe(onPoll);
-poller.start();   // 15s interval — fallback/reconciliation
-poller.watch();   // fs.watch on the session dirs — the responsive path (debounced ~600ms)
+refreshRail();                              // instant: last snapshot + triage cache, so it isn't blank
+if (backend.subscribe) {
+  // Daemon mode: the daemon owns the poll loop (interval + fs.watch); the rail rides its
+  // push stream. Triage saved by ANY surface arrives here too — multi-surface consistency.
+  unsubscribePush = backend.subscribe((e) => {
+    if (e.type === "snapshot") onPoll(e.snapshot, e.diff);
+    else if (e.type === "triage") {
+      for (const [id, info] of Object.entries(e.entries)) triageCache.set(id, info);
+      refreshRail();
+    }
+  });
+} else {
+  // Embedded mode (no daemon / OO_DAEMON=0): this process polls, exactly as before.
+  poller = new StatusPoller({ since: "today", intervalMs: 15_000 });
+  poller.subscribe(onPoll);
+  poller.start();   // 15s interval — fallback/reconciliation
+  poller.watch();   // fs.watch on the session dirs — the responsive path (debounced ~600ms)
+}
 
 // Animate the `working` spinner (~8 fps) only while something is actually working.
 spin = setInterval(() => { if (sidebar.hasWorking()) { sidebar.tick(); tui.requestRender(); } }, 120);

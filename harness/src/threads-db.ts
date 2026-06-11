@@ -13,10 +13,11 @@
 //     transcription of holdsDone(), packages/core/src/resolve.mjs), so a writer holding a
 //     stale snapshot cannot resurrect an operator-set `done`. A new "rebuild the world"
 //     writer must go through saveSnapshot, never raw UPDATEs on `state`.
-//   • Change events are in-process only. A cross-process consumer reads the derived
+//   • Change events here are in-process only. Cross-process push is the daemon's job
+//     (daemon.ts — openclaw's gateway pattern): it owns the poll loop and broadcasts
+//     snapshots/edges over SSE. A consumer without the daemon reads the derived
 //     status.json (see store.ts) or queries the db read-only and watches the -wal file +
-//     PRAGMA data_version. When the gateway daemon lands (openclaw pattern,
-//     docs/inspiration.md), it becomes the only writer and pushes these edges itself.
+//     PRAGMA data_version.
 //
 // Tables:
 //   threads       — identity + resolved state (current value) + poll-window membership
@@ -28,6 +29,9 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   STATE_RANK,
+  type Schedule,
+  type ScheduleAction,
+  type ScheduleWhen,
   type StatusSnapshot,
   type ThreadState,
   type ThreadStatus,
@@ -142,6 +146,16 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE INDEX IF NOT EXISTS idx_threads_in_snapshot ON threads(in_snapshot);
+
+CREATE TABLE IF NOT EXISTS schedules (
+  name             TEXT PRIMARY KEY,
+  when_json        TEXT NOT NULL,
+  action_json      TEXT NOT NULL,
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  created_at       TEXT NOT NULL,
+  last_run_at      TEXT,
+  last_result_json TEXT
+);
 
 CREATE TABLE IF NOT EXISTS thread_triage (
   thread_id      TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
@@ -545,6 +559,44 @@ export class ThreadDb {
       });
     }
     return map;
+  }
+
+  // ---- schedules & triggers (the daemon's domain; see daemon.ts) -------------------------
+
+  /** All schedules, by name. JSON columns keep the shapes free to evolve with protocol.ts. */
+  listSchedules(): Schedule[] {
+    const rows = this.db.prepare(
+      "SELECT name, when_json, action_json, enabled, last_run_at, last_result_json FROM schedules ORDER BY name",
+    ).all() as Array<{ name: string; when_json: string; action_json: string; enabled: number; last_run_at: string | null; last_result_json: string | null }>;
+    return rows.map((r): Schedule => ({
+      name: r.name,
+      when: JSON.parse(r.when_json) as ScheduleWhen,
+      action: JSON.parse(r.action_json) as ScheduleAction,
+      enabled: !!r.enabled,
+      ...(r.last_run_at ? { lastRunAt: r.last_run_at } : {}),
+      ...(r.last_result_json ? { lastResult: JSON.parse(r.last_result_json) as Schedule["lastResult"] } : {}),
+    }));
+  }
+
+  /** Upsert by name. Run bookkeeping (last_run/last_result) survives a definition update. */
+  upsertSchedule(s: Pick<Schedule, "name" | "when" | "action" | "enabled">): Schedule {
+    this.db.prepare(
+      `INSERT INTO schedules (name, when_json, action_json, enabled, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET
+         when_json = excluded.when_json, action_json = excluded.action_json, enabled = excluded.enabled`,
+    ).run(s.name, JSON.stringify(s.when), JSON.stringify(s.action), s.enabled ? 1 : 0, this.now());
+    return this.listSchedules().find((x) => x.name === s.name)!;
+  }
+
+  deleteSchedule(name: string): boolean {
+    const r = this.db.prepare("DELETE FROM schedules WHERE name = ?").run(name);
+    return Number(r.changes) > 0;
+  }
+
+  recordScheduleRun(name: string, result: { ok: boolean; detail?: string; at: string }): void {
+    this.db.prepare("UPDATE schedules SET last_run_at = ?, last_result_json = ? WHERE name = ?")
+      .run(result.at, JSON.stringify(result), name);
   }
 
   close(): void {

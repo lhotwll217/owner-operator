@@ -31,6 +31,11 @@
   runs on a schedule to "monitor the situation," and exposes a **strict, enumerated
   command set** (no open-ended driving of sub-agents). Deterministic workflow scripts
   live alongside it for the repeatable stuff.
+- **daemon** (`harness/src/daemon.ts`) — the state owner, openclaw's gateway pattern
+  local-first: ONE process runs the poll loop (scan → canonical resolver → store), the
+  schedule/trigger runner, and an HTTP + SSE server on 127.0.0.1. Surfaces are thin
+  clients over the protocol in `packages/core` (`oo daemon` to run; the TUI auto-spawns
+  it and falls back to an embedded poller when disabled via `OO_DAEMON=0`).
 - **core** (`packages/core/`) — the shared types the surfaces and harness agree on
   (sessions, threads, priority). Deliberately thin until we build — not a committed
   schema. Keeps everything speaking one language.
@@ -58,8 +63,25 @@ urgency and by how much attention each needs (a one-tap "merge it" vs. a plan th
 real review). The exact ranking model is TBD; we'll learn it by using it, not design it
 up front.
 
+## Schedules & triggers
+
+The daemon hosts them (see `packages/core/src/protocol.ts` for shapes): a schedule is
+WHEN × ACTION, upserted by name over HTTP. `interval`/`daily` run from the tick loop;
+`event: needs-you` fires when a thread newly needs the operator (with
+`OO_NEEDS_YOU=<ids>` in the env). Actions today: `poll` and `shell` — a desktop
+notification or a piped `oo --json` brief is one shell command away; a model-driven
+brief becomes a new action type when it's ready.
+
+```sh
+curl -X PUT localhost:47711/schedules/morning-brief \
+  -d '{"when":{"type":"daily","at":"08:00"},"action":{"type":"shell","command":"oo --json \"what needs me\" > ~/brief.json"}}'
+curl -X PUT localhost:47711/schedules/notify \
+  -d '{"when":{"type":"event","event":"needs-you"},"action":{"type":"shell","command":"osascript -e \"display notification \\\"$OO_NEEDS_YOU\\\" with title \\\"oo\\\"\""}}'
+```
+
 ## Open questions
 
 - Monorepo tooling (workspaces / task runner) — deferred until there's code to build.
-- How the widget authenticates/talks to the local harness (IPC? localhost HTTP?).
+- ~~How the widget authenticates/talks to the local harness~~ — answered: the daemon's
+  localhost HTTP + SSE (no auth while loopback-only; revisit before any non-local bind).
 - Phone/diff-review UX (V3): draft PRs vs. native inline-comment-tied-to-line.
