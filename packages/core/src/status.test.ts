@@ -61,6 +61,16 @@ assert.equal(d.transitioned.length, 0, "a held steady");
 const gone = reconcile(withB, [row({ id: "b", lastRole: "user" })], "2026-06-09T10:10:00.000Z");
 assert.deepEqual(diffSnapshots(withB, gone).resolved.map((t) => t.id), ["a"], "a resolved (dropped off the scan)");
 
+// --- manual done persists until a newer message arrives ---
+const markedDone: StatusSnapshot = {
+  polledAt: snap2.polledAt,
+  threads: [{ ...snap2.threads[0], state: "done", stateSince: "2026-06-09T10:09:00.000Z", previousState: "needs-you" }],
+};
+const stillDone = reconcile(markedDone, [row({ id: "a", lastRole: "assistant", lastMessageAt: snap2.threads[0].lastMessageAt })], "2026-06-09T10:10:00.000Z");
+assert.equal(stillDone.threads[0].state, "done", "done survives polls with no newer message");
+const reawakened = reconcile(stillDone, [row({ id: "a", lastRole: "assistant", lastMessageAt: "2026-06-09T10:11:00.000Z" })], "2026-06-09T10:12:00.000Z");
+assert.equal(reawakened.threads[0].state, "needs-you", "newer message reactivates from done");
+
 // --- sortByAttention: needs-you before working before idle ---
 const mixed = reconcile(null, [
   row({ id: "i", lastRole: "assistant", secondsSinceActivity: IDLE_AFTER_SECONDS }),
