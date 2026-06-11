@@ -90,15 +90,17 @@ export class StatusPoller {
     this.polling = true;
     try {
       const rows = await (this.opts.scan ?? runScan)(this.opts.since ?? "today", this.opts.limit ?? 50);
-      // Disk is the source of truth because operator actions can update status.json
-      // outside this poller's in-memory `current` snapshot.
+      // The store is the source of truth because operator actions can land outside this
+      // poller's in-memory `current` snapshot — other processes included.
       const prev = loadSnapshot() ?? this.current;
       const next = reconcile(prev, rows, new Date().toISOString());
-      const diff = diffSnapshots(prev, next);
-      this.current = next;
-      saveSnapshot(next);
-      for (const fn of this.listeners) fn(next, diff);
-      return next;
+      // The store re-applies the done-hold at the write boundary and returns the STORED
+      // truth — under a concurrent writer it can differ from `next`; render what it kept.
+      const stored = saveSnapshot(next);
+      const diff = diffSnapshots(prev, stored);
+      this.current = stored;
+      for (const fn of this.listeners) fn(stored, diff);
+      return stored;
     } catch {
       return this.current; // keep the last good snapshot rather than blanking the sidebar
     } finally {

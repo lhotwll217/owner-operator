@@ -14,6 +14,7 @@
     "poll:smoke": "tsx src/poller.smoke.ts",
     "test:poller": "tsx src/poller.test.ts",
     "test:scan": "tsx src/scan.test.ts",
+    "test:store": "tsx src/store.test.ts",
     "test:agent": "tsx src/agent.behavior.ts",
     "test:db": "tsx src/threads-db.test.ts",
     "typecheck": "tsc --noEmit"

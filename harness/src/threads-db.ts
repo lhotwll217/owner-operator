@@ -1,21 +1,38 @@
-// Owner Operator — durable thread db. The SQLite layer store.ts's seam anticipates
-// ("swapping in sqlite later is a one-file change"): where the JSON store keeps only the
-// LATEST snapshot, this keeps history — thread identity across polls (first_seen), the
-// state edge log, and versioned triage. node:sqlite, dependency-free. Not yet wired into
-// the poller/TUI; the JSON seam stays the hot path until this replaces it.
+// Owner Operator — durable thread db. The SQLite engine behind store.ts's seam: where the
+// JSON export keeps only the LATEST snapshot, this keeps history — thread identity across
+// polls (first_seen), the state edge log, versioned triage, and the current poll window
+// (in_snapshot). node:sqlite, dependency-free.
 //
-// Single-writer by design: the writer doubles as the event bus — writes detect state
-// edges and emit to in-process subscribers. Cold readers just query the file; a reader
-// without the harness watches the -wal file + PRAGMA data_version.
+// MULTI-CONSUMER WRITING — why concurrent writer processes (TUI + one-shot oo + future
+// widget/web) are safe here, and the rules any NEW writer must follow:
+//   • WAL + busy_timeout(5s): readers never block the writer; a second writer queues
+//     briefly instead of throwing SQLITE_BUSY on first collision.
+//   • Every logical mutation is ONE `BEGIN IMMEDIATE` transaction. Never read-then-write
+//     across two transactions — that reintroduces the last-writer-wins clobber.
+//   • saveSnapshot() re-applies the canonical done-hold INSIDE the write (a SQL
+//     transcription of holdsDone(), packages/core/src/resolve.mjs), so a writer holding a
+//     stale snapshot cannot resurrect an operator-set `done`. A new "rebuild the world"
+//     writer must go through saveSnapshot, never raw UPDATEs on `state`.
+//   • Change events are in-process only. A cross-process consumer reads the derived
+//     status.json (see store.ts) or queries the db read-only and watches the -wal file +
+//     PRAGMA data_version. When the gateway daemon lands (openclaw pattern,
+//     docs/inspiration.md), it becomes the only writer and pushes these edges itself.
 //
-// Two tables:
-//   threads       — identity + observed state (scan-derived, current value only)
+// Tables:
+//   threads       — identity + resolved state (current value) + poll-window membership
 //   thread_triage — versioned model output (append-only; latest version wins)
+//   meta          — store-level keys (polled_at = the current snapshot's timestamp)
 
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { STATE_RANK, type ThreadState } from "@owner-operator/core";
+import {
+  STATE_RANK,
+  type StatusSnapshot,
+  type ThreadState,
+  type ThreadStatus,
+  type TriageInfo,
+} from "@owner-operator/core";
 import { STORE_DIR } from "./store";
 
 /** Machine-global like the JSON store — threads span every repo on the box. */
@@ -42,7 +59,7 @@ export interface ThreadObservation {
   lastUserAt?: string;
 }
 
-export type TriageSource = "startup" | "targeted_refresh" | "manual";
+export type TriageSource = "startup" | "targeted_refresh" | "manual" | "model";
 
 export interface TriageInput {
   priority?: number;
@@ -110,8 +127,21 @@ CREATE TABLE IF NOT EXISTS threads (
   state_reason      TEXT,
   last_assistant_at TEXT,
   last_user_at      TEXT,
-  last_checked_at   TEXT
+  last_checked_at   TEXT,
+  -- snapshot-window columns (the StatusSnapshot contract; see saveSnapshot/loadSnapshot)
+  last_message_at   TEXT,
+  last_active_rel   TEXT,
+  state_since       TEXT,
+  previous_state    TEXT,
+  in_snapshot       INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_in_snapshot ON threads(in_snapshot);
 
 CREATE TABLE IF NOT EXISTS thread_triage (
   thread_id      TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
@@ -146,7 +176,22 @@ export class ThreadDb {
     // throwing SQLITE_BUSY on the first collision.
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec(SCHEMA);
+    this.migrate();
     this.now = opts.now ?? (() => new Date().toISOString());
+  }
+
+  // Dbs created before the snapshot columns existed get them ALTERed in (additive only;
+  // a fresh CREATE above already carries them).
+  private migrate(): void {
+    const cols = new Set(
+      (this.db.prepare("PRAGMA table_info(threads)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    const add = (ddl: string): void => { this.db.exec(`ALTER TABLE threads ADD COLUMN ${ddl}`); };
+    if (!cols.has("last_message_at")) add("last_message_at TEXT");
+    if (!cols.has("last_active_rel")) add("last_active_rel TEXT");
+    if (!cols.has("state_since")) add("state_since TEXT");
+    if (!cols.has("previous_state")) add("previous_state TEXT");
+    if (!cols.has("in_snapshot")) add("in_snapshot INTEGER NOT NULL DEFAULT 0");
   }
 
   /** Listen for change events (edges, not snapshots). Returns an unsubscribe fn. */
@@ -310,6 +355,196 @@ export class ThreadDb {
     );
     const rows = opts.activeSince ? stmt.all(opts.activeSince) : stmt.all();
     return rows as unknown as SidebarRow[];
+  }
+
+  // ---- the StatusSnapshot contract (what store.ts's seam serves) -------------------------
+
+  /** True before any snapshot or thread has landed — gates the one-time legacy-JSON seed. */
+  isEmpty(): boolean {
+    if (this.db.prepare("SELECT value FROM meta WHERE key = 'polled_at'").get()) return false;
+    const { n } = this.db.prepare("SELECT COUNT(*) AS n FROM threads").get() as { n: number };
+    return n === 0;
+  }
+
+  /**
+   * Persist a full poll snapshot — the whole-window replace the JSON store used to do, as
+   * ONE IMMEDIATE transaction: rows in this snapshot get `in_snapshot = 1`, everything
+   * else drops to 0 (rows are kept — history is keep-forever). `first_seen_at` is
+   * insert-only, so identity continuity survives even a caller that rebuilt from scratch.
+   *
+   * THE WRITE-BOUNDARY BACKSTOP: `state` goes through a SQL transcription of `holdsDone()`
+   * (packages/core/src/resolve.mjs — keep the two in lockstep). Without it, a writer that
+   * loaded its snapshot BEFORE another consumer marked a thread done would clobber that
+   * done back to active — the issue #3 bug class, cross-process edition. With it,
+   * saveSnapshot is safe to call with a stale snapshot: done holds unless the incoming
+   * row carries a NEWER message.
+   */
+  saveSnapshot(snapshot: StatusSnapshot): void {
+    const upsert = this.db.prepare(
+      `INSERT INTO threads (id, repo, app, source, raw_topic, created_at, last_active_at,
+         first_seen_at, last_seen_at, state, last_message_at, last_active_rel,
+         state_since, previous_state, in_snapshot, last_checked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         repo = excluded.repo, app = excluded.app, source = excluded.source,
+         raw_topic = excluded.raw_topic, created_at = excluded.created_at,
+         last_active_at = excluded.last_active_at, last_seen_at = excluded.last_seen_at,
+         state = CASE WHEN threads.state = 'done' AND excluded.last_message_at <= threads.last_message_at
+                      THEN 'done' ELSE excluded.state END,
+         state_since = CASE WHEN threads.state = 'done' AND excluded.last_message_at <= threads.last_message_at
+                      THEN threads.state_since ELSE excluded.state_since END,
+         previous_state = CASE WHEN threads.state = 'done' AND excluded.last_message_at <= threads.last_message_at
+                      THEN threads.previous_state ELSE excluded.previous_state END,
+         last_message_at = excluded.last_message_at,
+         last_active_rel = excluded.last_active_rel,
+         in_snapshot = 1,
+         last_checked_at = excluded.last_checked_at`,
+    );
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec("UPDATE threads SET in_snapshot = 0 WHERE in_snapshot = 1");
+      for (const t of snapshot.threads) {
+        upsert.run(
+          t.id, t.repo, t.app, t.source, t.topic, t.createdAt,
+          t.lastMessageAt, // closest ISO activity signal the snapshot carries
+          t.firstSeen, snapshot.polledAt, t.state, t.lastMessageAt, t.lastActive,
+          t.stateSince, t.previousState ?? null, snapshot.polledAt,
+        );
+      }
+      this.db.prepare(
+        "INSERT INTO meta (key, value) VALUES ('polled_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      ).run(snapshot.polledAt);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** The current snapshot (poll-window rows + meta polled_at), or null before first poll. */
+  loadSnapshot(): StatusSnapshot | null {
+    const polled = this.db.prepare("SELECT value FROM meta WHERE key = 'polled_at'").get() as
+      | { value: string } | undefined;
+    if (!polled) return null;
+    const rows = this.db.prepare(
+      `SELECT id, source, repo, app, raw_topic AS topic, state,
+              last_active_rel AS lastActive, created_at AS createdAt,
+              last_message_at AS lastMessageAt, first_seen_at AS firstSeen,
+              state_since AS stateSince, previous_state AS previousState
+       FROM threads WHERE in_snapshot = 1
+       ORDER BY last_message_at DESC`,
+    ).all() as Array<Record<string, string | null>>;
+    return {
+      polledAt: polled.value,
+      threads: rows.map((r): ThreadStatus => ({
+        id: String(r.id),
+        source: r.source ?? "",
+        repo: r.repo ?? "",
+        app: r.app ?? "",
+        topic: r.topic ?? "",
+        state: r.state as ThreadState,
+        lastActive: r.lastActive ?? "",
+        createdAt: r.createdAt ?? "",
+        lastMessageAt: r.lastMessageAt ?? "",
+        firstSeen: r.firstSeen ?? "",
+        stateSince: r.stateSince ?? "",
+        ...(r.previousState ? { previousState: r.previousState as ThreadState } : {}),
+      })),
+    };
+  }
+
+  /**
+   * Operator override: mark current-window threads done — one transaction, so it can never
+   * interleave with a concurrent saveSnapshot. Idempotent on already-done rows
+   * (stateSince/previousState keep their first-mark values).
+   */
+  markThreadsDone(ids: readonly string[], now: string): {
+    snapshot: StatusSnapshot | null; marked: ThreadStatus[]; missingIds: string[];
+  } {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const polled = this.db.prepare("SELECT value FROM meta WHERE key = 'polled_at'").get();
+      if (!polled) {
+        this.db.exec("COMMIT");
+        return { snapshot: null, marked: [], missingIds: [...ids] };
+      }
+      if (ids.length) {
+        this.db.prepare(
+          `UPDATE threads SET
+             previous_state = CASE WHEN state = 'done' THEN previous_state ELSE state END,
+             state_since    = CASE WHEN state = 'done' THEN state_since ELSE ? END,
+             state = 'done'
+           WHERE in_snapshot = 1 AND id IN (${ids.map(() => "?").join(", ")})`,
+        ).run(now, ...ids);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    const snapshot = this.loadSnapshot();
+    const wanted = new Set(ids);
+    const marked = (snapshot?.threads ?? []).filter((t) => wanted.has(t.id));
+    const markedIds = new Set(marked.map((t) => t.id));
+    return { snapshot, marked, missingIds: ids.filter((id) => !markedIds.has(id)) };
+  }
+
+  /**
+   * Idempotent triage upsert for the cache seam (the tui re-saves its WHOLE map): appends
+   * a new version ONLY when the latest differs, so unchanged entries stay version-stable.
+   * Unknown thread ids get a stub row (in_snapshot = 0 → invisible to snapshots until a
+   * poll sees them) so the FK holds and a pre-poll triage isn't lost.
+   */
+  upsertTriage(threadId: string, t: TriageInfo, source: TriageSource): number | null {
+    const now = this.now();
+    let version: number | null = null;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT OR IGNORE INTO threads (id, first_seen_at, last_seen_at, state, in_snapshot) VALUES (?, ?, ?, 'idle', 0)",
+      ).run(threadId, now, now);
+      const latest = this.db.prepare(
+        `SELECT version, priority, topic, summary, next_steps AS nextSteps
+         FROM thread_triage WHERE thread_id = ? ORDER BY version DESC LIMIT 1`,
+      ).get(threadId) as
+        | { version: number; priority: number | null; topic: string | null; summary: string | null; nextSteps: string | null }
+        | undefined;
+      const same = latest
+        && latest.priority === (t.priority ?? null) && latest.topic === (t.topic ?? null)
+        && latest.summary === (t.summary ?? null) && latest.nextSteps === (t.nextSteps ?? null);
+      if (!same) {
+        version = (latest?.version ?? 0) + 1;
+        this.db.prepare(
+          `INSERT INTO thread_triage (thread_id, version, priority, topic, summary, next_steps, source, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(threadId, version, t.priority ?? null, t.topic ?? null, t.summary ?? null, t.nextSteps ?? null, source, now);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    if (version != null) this.emit({ type: "triage_updated", threadId, version });
+    return version;
+  }
+
+  /** Latest triage per thread, as the cache map the rail joins by id. */
+  getTriageMap(): Map<string, TriageInfo> {
+    const rows = this.db.prepare(
+      `SELECT thread_id AS threadId, priority, topic, summary, next_steps AS nextSteps
+       FROM thread_triage x
+       WHERE version = (SELECT MAX(version) FROM thread_triage WHERE thread_id = x.thread_id)`,
+    ).all() as Array<{ threadId: string; priority: number | null; topic: string | null; summary: string | null; nextSteps: string | null }>;
+    const map = new Map<string, TriageInfo>();
+    for (const r of rows) {
+      map.set(r.threadId, {
+        ...(r.topic != null ? { topic: r.topic } : {}),
+        ...(r.summary != null ? { summary: r.summary } : {}),
+        ...(r.nextSteps != null ? { nextSteps: r.nextSteps } : {}),
+        ...(r.priority != null ? { priority: r.priority } : {}),
+      });
+    }
+    return map;
   }
 
   close(): void {
