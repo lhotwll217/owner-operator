@@ -1,7 +1,7 @@
 // Deterministic test of the SIDEBAR rail — no poll, no model, no TTY.
 //   npm run preview:sidebar   (from harness/)
-// The rail = the LIVE poll snapshot (every thread, NO filter) enriched by the triage cache,
-// minus the done overlay (/done): marked rows leave the body but stay in the ✓ count.
+// The rail = the LIVE poll snapshot enriched by the triage cache. Threads with status
+// `done` leave the body but stay in the ✓ count.
 // Asserts: numbered rows 1…n in display order (the /done handles), uniform rows (num · glyph ·
 // priority · title · recency · grey next-step), triaged + untriaged both render, no cursor.
 
@@ -22,16 +22,15 @@ const snap: StatusSnapshot = {
     st("w", "amplify", "working", "Weekly update automation", "3 hours ago"),
     st("o", "owner-operator", "working", "status sidebar wiring", "just now"),
     st("old", "amplify", "idle", "ancient idle thread", "2 days ago"), // NOT filtered — must show
-    st("d", "amplify", "needs-you", "already shipped thing", "1 hour ago"), // /done'd — leaves the body
+    st("d", "amplify", "done", "already shipped thing", "1 hour ago"),
   ],
 };
 const triage = new Map<string, TriageInfo>([
   ["n", { topic: "422 contract mismatch", nextSteps: "Paste the drafted reply", priority: 5 }],
   ["o", { nextSteps: "Push the fix", priority: 3 }],
 ]);
-const done = new Map([["d", "2026-06-09T13:00:00.000Z"]]); // marked AFTER its last message → inactive
 
-const rows = toSidebarThreads(snap, triage, done);
+const rows = toSidebarThreads(snap, triage);
 const panel = new SidebarList(20);
 panel.setThreads(rows);
 const lines = panel.render(51).map(stripAnsi);
