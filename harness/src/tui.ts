@@ -24,7 +24,7 @@ import { buildCard } from "./cards";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { StatusPoller } from "./poller";
-import { loadSnapshot, loadTriage, saveTriage, loadDone, saveDone } from "./store";
+import { loadSnapshot, loadTriage, markThreadsDone, saveTriage } from "./store";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
@@ -75,15 +75,14 @@ const screen = new Screen(tui.terminal, header, columns);
 tui.addChild(screen);
 tui.setFocus(editor);
 
-// The rail is LIVE: membership = the poll snapshot (every active thread, no filter); the cached
-// triage enriches it (title/priority/nextStep) by id; the done overlay (/done) hides marked
-// rows until new activity wakes them. All persisted for an instant warm-start.
+// The rail is LIVE: membership = the poll snapshot; the cached triage enriches it
+// (title/priority/nextStep) by id. `/done` sets thread status to done, so rows leave the
+// active rail until new activity wakes them.
 let statusSnapshot: StatusSnapshot = loadSnapshot() ?? { polledAt: "", threads: [] };
 const triageCache: Map<string, TriageInfo> = loadTriage();
-const doneMarks: Map<string, string> = loadDone();
 let railByNum: Map<number, SidebarThread> = new Map(); // displayed number → thread, for /done
 function refreshRail(): void {
-  const rows = toSidebarThreads(statusSnapshot, triageCache, doneMarks);
+  const rows = toSidebarThreads(statusSnapshot, triageCache);
   railByNum = numberThreads(rows).byNum; // same core numbering the rail renders — no drift
   sidebar.setThreads(rows);
   tui.requestRender();
@@ -93,7 +92,7 @@ function cacheTriage(threads: Thread[]): void {
   let changed = false;
   for (const t of threads) {
     if (!t.id) continue;
-    triageCache.set(t.id, { topic: t.topic, nextSteps: t.nextSteps, priority: t.priority });
+    triageCache.set(t.id, { topic: t.topic, summary: t.summary, nextSteps: t.nextSteps, priority: t.priority });
     changed = true;
   }
   if (changed) { try { saveTriage(triageCache); } catch { /* ignore */ } refreshRail(); }
@@ -165,6 +164,13 @@ session.subscribe((event: any) => {
     return;
   }
 
+  if (event.type === "tool_execution_start" && event.toolName === "mark_thread_done") {
+    // The tool writes status.json during this turn. Poll on the next tick so the rail
+    // reflects the write without waiting for the interval.
+    setTimeout(() => void poller?.poll(), 0).unref?.();
+    return;
+  }
+
   const ame = event.assistantMessageEvent;
   if (event.type === "message_update" && ame?.type === "text_delta") {
     current.acc += ame.delta;
@@ -203,17 +209,15 @@ async function runTurn(promptText: string, emptyMsg = "(no response)"): Promise<
   }
 }
 
-// /done 1,3 — mark rail rows done by their DISPLAYED number. Persists by thread id (the
-// number is just the handle), the rows leave the rail on this render. Local-only, no model —
-// so it works even mid-turn.
+// /done 1,3 — mark rail rows `done` by their DISPLAYED number. Persists by thread id (the
+// number is just the handle), the rows leave the rail on this render.
 function markDone(arg: string): void {
   const hits = parseNumbers(arg).map((n) => railByNum.get(n)).filter((t): t is SidebarThread => !!t);
   if (!hits.length) {
     log.addChild(new Text(dim("usage: /done 1,3,5 — the rail row numbers")));
   } else {
-    const now = new Date().toISOString();
-    for (const t of hits) doneMarks.set(t.id, now);
-    try { saveDone(doneMarks); } catch { /* ignore */ }
+    const result = markThreadsDone(hits.map((t) => t.id), { snapshot: statusSnapshot });
+    if (result.snapshot) statusSnapshot = result.snapshot;
     log.addChild(new Text(green("✓ done") + dim(" › ") + hits.map((t) => `${t.num} ${displayTopic(t)}`).join(dim(" · "))));
   }
   refreshRail();
