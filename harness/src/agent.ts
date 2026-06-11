@@ -28,7 +28,7 @@ export const repoRoot = join(here, "..", "..");
 // differently" path — the model fills the fields, the surface decides how to show them.
 const ThreadCard = Type.Object({
   id: Type.String({ description: "Stable session id — copy the `id` from the digest verbatim (lets the sidebar match this thread)" }),
-  topic: Type.String({ description: "Short title of what the thread is about" }),
+  topic: Type.String({ description: "Short title of the SPECIFIC work — never repeat the repo or app name (the card shows both separately); spend the title on what's actually happening" }),
   priority: Type.Integer({ minimum: 1, maximum: 5, description: "Priority 5 (highest — needs the operator now) down to 1 (lowest)" }),
   summary: Type.String({ description: "One SHORT, scannable sentence on current state (≤ ~15 words) — the gist, not the full story" }),
   nextSteps: Type.String({ description: "One short clause: the concrete next action" }),
@@ -36,6 +36,8 @@ const ThreadCard = Type.Object({
   app: Type.String({ description: "App / GUI the session was made from" }),
   created: Type.String({ description: "Relative time created, e.g. '2 hours ago' (copy from the digest)" }),
   lastActive: Type.String({ description: "Relative time of the last message, e.g. 'just now' (copy from the digest)" }),
+  diffAdded: Type.Optional(Type.Integer({ description: "Lines added — copy the +N from the digest's Diff line, only when present" })),
+  diffDeleted: Type.Optional(Type.Integer({ description: "Lines deleted — copy the -N from the digest's Diff line, only when present" })),
   link: Type.Optional(Type.String({ description: "Deep link to open the session, if the digest gives one" })),
 });
 const PresentThreadsParams = Type.Object({ threads: Type.Array(ThreadCard) });

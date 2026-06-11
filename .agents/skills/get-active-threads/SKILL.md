@@ -56,12 +56,15 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 (where it stands now) and fill one entry:
 
 - `id` — copy the thread's `id` from the digest **verbatim** (this is how the sidebar matches the card to the live thread — don't omit or alter it).
-- `topic` — what the thread is about.
+- `topic` — the SPECIFIC work, not the location: never repeat the repo or app name (the
+  card and rail show both separately). "Fix 422 contract mismatch", not "Amplify 422 fix".
 - `priority` — integer **5 (highest, needs the operator now) → 1 (lowest)**.
 - `summary` — one SHORT, scannable sentence on current state (≤ ~15 words; the gist, not the whole story).
 - `nextSteps` — one short clause: the concrete next action (what's it waiting on). Rendered greyed, as the card's footer.
 - `repo`, `app` — copy from the digest.
 - `created`, `lastActive` — copy the **relative** times from the digest ("2 hours ago").
+- `diffAdded`, `diffDeleted` — copy the numbers from the digest's `Diff: +N -N` line; omit
+  when the digest has no Diff line.
 - `link` — only if the digest gives one.
 
 Set `priority` by how much it needs the operator now — the digest's `State` line is the

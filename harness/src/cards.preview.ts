@@ -11,7 +11,7 @@ const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 const sample: Thread[] = [
   { topic: "Amplify 422 contract mismatch", priority: 3, summary: "POST/PATCH need a JSON body with source_updated_at; DELETE does not.", nextSteps: "Paste the drafted reply", repo: "amplify", app: "Claude Code", created: "1 hour ago", lastActive: "7 minutes ago" },
-  { topic: "Headless triage card rendering", priority: 5, summary: "Headless oo now prints present_threads cards instead of no assistant text.", nextSteps: "Review the diff and push", repo: "owner-operator", app: "Claude Code", created: "just now", lastActive: "just now" },
+  { topic: "Headless triage card rendering", priority: 5, summary: "Headless oo now prints present_threads cards instead of no assistant text.", nextSteps: "Review the diff and push", repo: "owner-operator", app: "Superset", created: "just now", lastActive: "just now", diffAdded: 208, diffDeleted: 47 },
   { topic: "Insights repo data refresh", priority: 1, summary: "Extracted the original CSV, verified against v2, updated the data README.", nextSteps: "Review changed files", repo: "amplify", app: "Codex", created: "30 minutes ago", lastActive: "27 minutes ago" },
 ];
 
@@ -24,6 +24,8 @@ const heads = block.filter((l) => /^▌ P\d/.test(l));
 assert.equal(heads.length, sample.length, "one head line per thread");
 assert.match(heads[0], /P5/, "highest priority renders first");
 assert.match(heads[heads.length - 1], /P1/, "lowest priority renders last");
+assert.ok(block.some((l) => /owner-operator · Superset · \+208 -47/.test(l)), "meta line carries the git ±delta next to the app");
+assert.ok(block.some((l) => /amplify · Claude Code$/.test(l.trimEnd())), "no delta → plain repo · app");
 assert.deepEqual(buildCardsBlock([], width).map(stripAnsi), ["(no active threads)"], "empty → notice");
 
 process.stdout.write("\nok — card rendering preview passed\n");

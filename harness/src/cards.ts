@@ -35,8 +35,12 @@ export function buildCard(t: Thread, width: number): string[] {
   const gap = Math.max(1, W - RAIL - visibleWidth(head) - visibleWidth(right));
   out.push(rail + head + " ".repeat(gap) + right);
 
-  // Line 2 — where: repo · app.
-  out.push(sub + `${green(t.repo)}${dim(" · ")}${cyan(t.app)}`);
+  // Line 2 — where: repo · app (· ±delta when the workspace has one). Colors MATCH the
+  // rail (sidebar.ts): repo cyan, app dim, delta +green −red — one mapping everywhere.
+  const delta = t.diffAdded != null || t.diffDeleted != null
+    ? dim(" · ") + green(`+${t.diffAdded ?? 0}`) + " " + red(`-${t.diffDeleted ?? 0}`)
+    : "";
+  out.push(sub + `${cyan(t.repo)}${dim(" · ")}${dim(t.app)}${delta}`);
 
   // Line 3+ — state (summary), wrapped.
   for (const seg of wrapTextWithAnsi(t.summary, bodyW)) out.push(sub + seg);

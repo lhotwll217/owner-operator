@@ -25,6 +25,9 @@ export interface Thread {
   created: string;
   /** Relative time of the last message, e.g. "just now". */
   lastActive: string;
+  /** Workspace git line delta (copied from the digest's Diff line when present). */
+  diffAdded?: number;
+  diffDeleted?: number;
   /** Deep link to open the session, if known. */
   link?: string;
 }
