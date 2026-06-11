@@ -31,7 +31,7 @@ writeFileSync(
   msg("user", "looks good, add tests too", at(20)) +
   msg("assistant", "Tests added; resolver join is wired.", at(10)),
 );
-interface ScanThread { id: string; state: string; lastMessageAt: string }
+interface ScanThread { id: string; state: string; lastMessageAt: string; firstMessages: unknown[]; recentMessages: unknown[]; omittedMessageCount: number }
 const run = (...extra: string[]): { count: number; threads: ScanThread[] } =>
   JSON.parse(execFileSync("node", [SCAN, "--since", "7d", "--json", ...extra], {
     env: { ...process.env, HOME: home, OO_HOME: ooHome },
@@ -44,6 +44,15 @@ try {
   assert.equal(fresh.count, 1, "scan finds the session");
   assert.equal(fresh.threads[0].id, sid);
   assert.equal(fresh.threads[0].state, "needs-you", "assistant yielded → needs-you");
+
+  // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
+  // (slice(-0) used to dump the entire tail).
+  const meta = run("--sample", "0").threads[0];
+  assert.deepEqual(
+    [meta.firstMessages, meta.recentMessages, meta.omittedMessageCount],
+    [[], [], 4],
+    "--sample 0 carries metadata only",
+  );
 
   // Operator marks it done (status.json is the durable store the resolver joins against).
   writeFileSync(join(ooHome, "status.json"), JSON.stringify({

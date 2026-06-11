@@ -226,9 +226,12 @@ function parseSession({ file, source, mtime }) {
   const lastActivityTs = Math.max(lastTs || 0, mtime);
 
   // Keep the opening N + most-recent N real messages (no overlap); count what's skipped.
+  // --sample 0 (the poller's metadata-only mode) keeps NONE — slice(-0) would dump the
+  // whole tail, so it gets its own branch.
   const shape = (m) => ({ role: m.role, text: clip(m.text), at: m.ts ? iso(m.ts) : null });
   let firstMessages, recentMessages, omittedMessageCount;
-  if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
+  if (sampleSize <= 0) { firstMessages = []; recentMessages = []; omittedMessageCount = convo.length; }
+  else if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
   else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
 
   return {
