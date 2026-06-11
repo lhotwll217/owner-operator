@@ -137,7 +137,9 @@ CREATE TABLE IF NOT EXISTS threads (
   last_active_rel   TEXT,
   state_since       TEXT,
   previous_state    TEXT,
-  in_snapshot       INTEGER NOT NULL DEFAULT 0
+  in_snapshot       INTEGER NOT NULL DEFAULT 0,
+  diff_added        INTEGER,
+  diff_deleted      INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -206,6 +208,8 @@ export class ThreadDb {
     if (!cols.has("state_since")) add("state_since TEXT");
     if (!cols.has("previous_state")) add("previous_state TEXT");
     if (!cols.has("in_snapshot")) add("in_snapshot INTEGER NOT NULL DEFAULT 0");
+    if (!cols.has("diff_added")) add("diff_added INTEGER");
+    if (!cols.has("diff_deleted")) add("diff_deleted INTEGER");
   }
 
   /** Listen for change events (edges, not snapshots). Returns an unsubscribe fn. */
@@ -397,12 +401,13 @@ export class ThreadDb {
     const upsert = this.db.prepare(
       `INSERT INTO threads (id, repo, app, source, raw_topic, created_at, last_active_at,
          first_seen_at, last_seen_at, state, last_message_at, last_active_rel,
-         state_since, previous_state, in_snapshot, last_checked_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+         state_since, previous_state, in_snapshot, last_checked_at, diff_added, diff_deleted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          repo = excluded.repo, app = excluded.app, source = excluded.source,
          raw_topic = excluded.raw_topic, created_at = excluded.created_at,
          last_active_at = excluded.last_active_at, last_seen_at = excluded.last_seen_at,
+         diff_added = excluded.diff_added, diff_deleted = excluded.diff_deleted,
          state = CASE WHEN threads.state = 'done' AND excluded.last_message_at <= threads.last_message_at
                       THEN 'done' ELSE excluded.state END,
          state_since = CASE WHEN threads.state = 'done' AND excluded.last_message_at <= threads.last_message_at
@@ -423,6 +428,7 @@ export class ThreadDb {
           t.lastMessageAt, // closest ISO activity signal the snapshot carries
           t.firstSeen, snapshot.polledAt, t.state, t.lastMessageAt, t.lastActive,
           t.stateSince, t.previousState ?? null, snapshot.polledAt,
+          t.diffAdded ?? null, t.diffDeleted ?? null,
         );
       }
       this.db.prepare(
@@ -444,10 +450,11 @@ export class ThreadDb {
       `SELECT id, source, repo, app, raw_topic AS topic, state,
               last_active_rel AS lastActive, created_at AS createdAt,
               last_message_at AS lastMessageAt, first_seen_at AS firstSeen,
-              state_since AS stateSince, previous_state AS previousState
+              state_since AS stateSince, previous_state AS previousState,
+              diff_added AS diffAdded, diff_deleted AS diffDeleted
        FROM threads WHERE in_snapshot = 1
        ORDER BY last_message_at DESC`,
-    ).all() as Array<Record<string, string | null>>;
+    ).all() as Array<Record<string, string | null> & { diffAdded: number | null; diffDeleted: number | null }>;
     return {
       polledAt: polled.value,
       threads: rows.map((r): ThreadStatus => ({
@@ -463,6 +470,8 @@ export class ThreadDb {
         firstSeen: r.firstSeen ?? "",
         stateSince: r.stateSince ?? "",
         ...(r.previousState ? { previousState: r.previousState as ThreadState } : {}),
+        ...(r.diffAdded != null ? { diffAdded: r.diffAdded } : {}),
+        ...(r.diffDeleted != null ? { diffDeleted: r.diffDeleted } : {}),
       })),
     };
   }

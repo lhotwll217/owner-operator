@@ -18,6 +18,7 @@ const thread = (over: Partial<ThreadStatus> = {}): ThreadStatus => ({
   state: "needs-you", lastActive: "just now",
   createdAt: "2026-06-09T10:00:00.000Z", lastMessageAt: "2026-06-09T10:05:00.000Z",
   firstSeen: "2026-06-09T10:01:00.000Z", stateSince: "2026-06-09T10:05:00.000Z",
+  diffAdded: 19, diffDeleted: 5,
   ...over,
 });
 
@@ -33,6 +34,7 @@ try {
   const seeded = store.loadSnapshot();
   assert.equal(seeded?.polledAt, legacy.polledAt, "legacy snapshot seeded");
   assert.equal(seeded?.threads[0].state, "needs-you");
+  assert.deepEqual([seeded?.threads[0].diffAdded, seeded?.threads[0].diffDeleted], [19, 5], "git delta survives the db round-trip");
   assert.equal(store.loadTriage().get("a")?.topic, "Ship the fix", "legacy triage seeded");
 
   // Operator marks done through the seam → db truth + refreshed export for cold readers.
