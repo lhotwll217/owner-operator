@@ -102,8 +102,13 @@ export function sortByAttention<T extends ThreadStatus>(threads: readonly T[]): 
 export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[], nowIso: string): StatusSnapshot {
   const byId = new Map((prev?.threads ?? []).map((t) => [t.id, t]));
   const threads = rows.map((row): ThreadStatus => {
-    const state = deriveState(row);
     const was = byId.get(row.id);
+    const derivedState = deriveState(row);
+    // `done` is operator-set, not observable from transcripts. Keep it until a newer
+    // message lands, then let the scan-derived state wake the thread again.
+    const state = was?.state === "done" && row.lastMessageAt <= was.lastMessageAt
+      ? "done"
+      : derivedState;
     const changed = !was || was.state !== state;
     return {
       id: row.id,

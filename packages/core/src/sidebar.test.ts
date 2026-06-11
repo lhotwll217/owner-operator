@@ -1,6 +1,6 @@
 // Deterministic test of the sidebar data model — pure, no model, no I/O.
-// The rail = the LIVE poll snapshot (no filtering) enriched by the triage cache, joined by id,
-// minus the done overlay (/done) — with display-order numbering as the /done handle.
+// The rail = the LIVE poll snapshot enriched by the triage cache, joined by id, minus
+// threads whose status is `done` — with display-order numbering as the /done handle.
 
 import assert from "node:assert";
 import { toSidebarThreads, groupByRepo, numberThreads, parseNumbers, stateCounts, displayTopic, type TriageInfo } from "./sidebar";
@@ -20,6 +20,7 @@ const snap: StatusSnapshot = {
     st("n", "amplify", "needs-you", "raw 422 topic"),
     st("o", "owner-operator", "working", "raw sidebar topic"),
     st("old", "amplify", "idle", "raw roadmap topic", "2026-06-01T00:00:00.000Z"),
+    st("d", "amplify", "done", "raw done topic"),
   ],
 };
 // Triage enriches only some (by id); untriaged threads still appear with their raw topic.
@@ -29,10 +30,10 @@ const triage = new Map<string, TriageInfo>([
 
 const rail = toSidebarThreads(snap, triage);
 
-// --- the rail = ALL polled threads, no filtering (the idle/old one stays) ---
-assert.equal(rail.length, 3, "every polled thread appears — nothing filtered");
-assert.deepEqual(rail.map((t) => t.id).sort(), ["n", "o", "old"]);
-assert.ok(rail.every((t) => t.active), "no done overlay → everything active");
+// --- the rail projection includes the snapshot; done rows are inactive and unnumbered later ---
+assert.equal(rail.length, 4, "every polled thread appears in the projection");
+assert.deepEqual(rail.map((t) => t.id).sort(), ["d", "n", "o", "old"]);
+assert.equal(rail.find((t) => t.id === "d")!.active, false, "done status → inactive");
 
 // --- triaged thread is enriched; untriaged keeps its raw topic + no badge ---
 const n = rail.find((t) => t.id === "n")!;
@@ -46,27 +47,16 @@ assert.equal(o.priority, undefined, "untriaged → no priority badge");
 
 // --- grouping + stats over the live set ---
 assert.deepEqual(groupByRepo(rail).map((g) => g.repo), ["amplify", "owner-operator"], "needs-you group first");
-assert.deepEqual(stateCounts(rail), { "needs-you": 1, working: 1, idle: 1, done: 0 });
-
-// --- the done overlay: marked rows go inactive (state done); new activity reactivates ---
-const done = new Map([
-  ["n", "2026-06-09T13:00:00.000Z"],   // marked AFTER its last message → inactive
-  ["o", "2026-06-09T11:00:00.000Z"],   // a message landed AFTER the mark → active again
-]);
-const overlaid = toSidebarThreads(snap, triage, done);
-const dn = overlaid.find((t) => t.id === "n")!;
-assert.equal(dn.active, false, "marked done after last activity → inactive");
-assert.equal(dn.state, "done", "inactive rows read as done");
-assert.equal(overlaid.find((t) => t.id === "o")!.active, true, "new activity after the mark wakes the thread");
-assert.deepEqual(stateCounts(overlaid), { "needs-you": 0, working: 1, idle: 1, done: 1 });
+assert.deepEqual(stateCounts(rail), { "needs-you": 1, working: 1, idle: 1, done: 1 });
 
 // --- numbering: ACTIVE rows only, 1…n in display order — the /done handle ---
-const { groups, byNum } = numberThreads(overlaid);
-assert.equal(byNum.size, 2, "done rows are not numbered (they left the rail)");
-assert.deepEqual([...byNum.keys()], [1, 2], "numbers are 1…n");
-assert.deepEqual(groups.flatMap((g) => g.threads).map((t) => t.num), [1, 2], "rendered order carries the same numbers");
-assert.equal(byNum.get(1)!.id, "o", "display order: loudest group first (working beats idle)");
-assert.equal(byNum.get(2)!.id, "old");
+const { groups, byNum } = numberThreads(rail);
+assert.equal(byNum.size, 3, "done rows are not numbered (they left the rail)");
+assert.deepEqual([...byNum.keys()], [1, 2, 3], "numbers are 1…n");
+assert.deepEqual(groups.flatMap((g) => g.threads).map((t) => t.num), [1, 2, 3], "rendered order carries the same numbers");
+assert.equal(byNum.get(1)!.id, "n", "display order: needs-you first");
+assert.equal(byNum.get(2)!.id, "old", "same repo stays grouped");
+assert.equal(byNum.get(3)!.id, "o", "next repo follows");
 assert.ok(!rail.some((t) => t.num !== undefined), "numbering is pure — inputs untouched");
 
 // --- /done argument parsing ---

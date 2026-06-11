@@ -12,6 +12,7 @@
     "preview:sidebar": "tsx src/sidebar.preview.ts",
     "preview:screen": "tsx src/screen.preview.ts",
     "poll:smoke": "tsx src/poller.smoke.ts",
+    "test:poller": "tsx src/poller.test.ts",
     "test:agent": "tsx src/agent.behavior.ts",
     "test:db": "tsx src/threads-db.test.ts",
     "typecheck": "tsc --noEmit"

@@ -1,7 +1,7 @@
 // Owner Operator — the sidebar data model.
 //
-// The rail is LIVE: its membership is the cheap poll's snapshot — EVERY active thread it sees,
-// with NO filtering — so new threads you start show up on the next tick. The model's triage is
+// The rail is LIVE: its membership is the cheap poll's snapshot, minus threads whose status
+// has been marked `done` — so new threads you start show up on the next tick. The model's triage is
 // an ENRICHMENT overlay (title · priority · nextStep) joined by id; the chat cards are a
 // separate, frozen render and the rail is NOT coupled to them. Untriaged/new threads still
 // appear (raw digest topic + live status) until a triage enriches them. Pure + UI-independent.
@@ -11,6 +11,7 @@ import { sortByAttention, STATE_RANK, type StatusSnapshot, type ThreadState, typ
 /** The subset of a model triage we cache and join onto a thread by id (the enrichment). */
 export interface TriageInfo {
   topic?: string;      // a nicer title than the raw scan topic
+  summary?: string;    // short card summary, when a model triage has produced one
   nextSteps?: string;  // the concrete next action (greyed on the rail)
   priority?: number;   // 5 (loudest) … 1
 }
@@ -18,10 +19,10 @@ export interface TriageInfo {
 /** A rail row: the live polled thread + its (optional) cached triage enrichment. */
 export interface SidebarThread extends ThreadStatus {
   triagedTopic?: string;
+  summary?: string;
   nextSteps?: string;
   priority?: number;
-  /** Operator overlay: false once marked done (/done). Inactive rows leave the rail; new
-   *  activity after the mark reactivates the thread (the mark is older than the message). */
+  /** False once status is `done`; done rows leave the active rail. */
   active: boolean;
   /** Rail row number (1…n in display order) — the handle `/done 1,3` resolves. */
   num?: number;
@@ -33,24 +34,20 @@ export function displayTopic(t: SidebarThread): string {
 }
 
 /**
- * The rail = ALL threads in the poll snapshot (live, NO filter), each enriched by the cached
+ * The rail = threads in the poll snapshot, each enriched by the cached
  * triage (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
- * The `done` overlay (id → ISO marked-at) is the one operator-driven exception: a thread
- * marked done goes inactive — until a message lands AFTER the mark, which reactivates it.
  */
 export function toSidebarThreads(
   snapshot: StatusSnapshot,
   triage: ReadonlyMap<string, TriageInfo>,
-  done: ReadonlyMap<string, string> = new Map(),
 ): SidebarThread[] {
   return snapshot.threads.map((t): SidebarThread => {
     const tri = triage.get(t.id);
-    const marked = done.get(t.id);
-    const active = !marked || t.lastMessageAt > marked;
+    const active = t.state !== "done";
     return {
       ...t,
-      state: active ? t.state : "done",
       triagedTopic: tri?.topic,
+      summary: tri?.summary,
       nextSteps: tri?.nextSteps,
       priority: tri?.priority,
       active,
