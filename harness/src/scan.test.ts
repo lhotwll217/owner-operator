@@ -1,7 +1,8 @@
-// Integration test of the scan skill's resolver join — the REAL get-active-threads script
-// against fake session files and a fake status store. Proves the canonical-resolver contract
-// at the skill surface: operator-marked done threads are excluded by default, audit-visible
-// with --include-done, drill-in always answers, and a newer message wakes the thread.
+// Integration test of the scan skill — the REAL get-active-threads script against fake
+// session files (Claude + Cursor), a real throwaway git repo, and a fake status store.
+// Proves: the canonical-resolver contract at the skill surface (done excluded by default,
+// --include-done audits, drill-in answers, newer message wakes), the Cursor finder (slug →
+// cwd reconstruction), origin-app detection (Superset/Cursor), and the git ± delta.
 //   npm run test:scan      (from harness/)
 
 import assert from "node:assert";
@@ -19,9 +20,11 @@ const ooHome = mkdtempSync(join(tmpdir(), "oo-scan-store-"));
 
 const sid = "11111111-2222-3333-4444-555555555555";
 const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
+// Claude session, spawned in a (fake) Superset worktree → App resolves to "Superset".
+const claudeCwd = join(home, ".superset", "worktrees", "sb", "demo-repo");
 const sessionFile = join(home, ".claude", "projects", "demo", `${sid}.jsonl`);
 const msg = (type: "user" | "assistant", content: string, ts: string) =>
-  JSON.stringify({ type, sessionId: sid, cwd: "/Users/x/dev/demo-repo", timestamp: ts, message: { content, ...(type === "assistant" ? { stop_reason: "end_turn" } : {}) } }) + "\n";
+  JSON.stringify({ type, sessionId: sid, cwd: claudeCwd, timestamp: ts, message: { content, ...(type === "assistant" ? { stop_reason: "end_turn" } : {}) } }) + "\n";
 
 mkdirSync(dirname(sessionFile), { recursive: true });
 writeFileSync(
@@ -31,47 +34,89 @@ writeFileSync(
   msg("user", "looks good, add tests too", at(20)) +
   msg("assistant", "Tests added; resolver join is wired.", at(10)),
 );
-interface ScanThread { id: string; state: string; lastMessageAt: string; firstMessages: unknown[]; recentMessages: unknown[]; omittedMessageCount: number }
+
+// Cursor session in a REAL git repo whose path contains dashes (the slug-reconstruction
+// edge) and a +3 −1 working-tree delta vs HEAD.
+const repoDir = join(home, "dev", "demo-app-x");
+mkdirSync(repoDir, { recursive: true });
+const git = (...a: string[]) => execFileSync("git", ["-C", repoDir, ...a], {
+  env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+git("init", "-q");
+writeFileSync(join(repoDir, "f.txt"), "a\nb\nc\n");
+git("add", ".");
+git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base");
+writeFileSync(join(repoDir, "f.txt"), "a\nB\nc\nd\ne\n"); // change 1 line, add 2 → +3 −1
+
+const cid = "99999999-8888-7777-6666-555555555555";
+const slug = repoDir.slice(1).split("/").join("-"); // Cursor's cwd → dir-name slugging
+const cursorFile = join(home, ".cursor", "projects", slug, "agent-transcripts", cid, `${cid}.jsonl`);
+mkdirSync(dirname(cursorFile), { recursive: true });
+writeFileSync(
+  cursorFile,
+  JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "<user_query>tighten the retry loop</user_query>" }] } }) + "\n" +
+  JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Retry loop tightened; tests pass." }] } }) + "\n",
+);
+
+interface ScanThread {
+  id: string; state: string; lastMessageAt: string; repo: string; ui: string;
+  topic: string; diffAdded?: number; diffDeleted?: number;
+  firstMessages: unknown[]; recentMessages: unknown[]; omittedMessageCount: number;
+}
 const run = (...extra: string[]): { count: number; threads: ScanThread[] } =>
   JSON.parse(execFileSync("node", [SCAN, "--since", "7d", "--json", ...extra], {
     env: { ...process.env, HOME: home, OO_HOME: ooHome },
     encoding: "utf8",
   }));
+const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefined =>
+  res.threads.find((t) => t.id === id);
 
 try {
-  // No operator state yet → the candidate passes, resolved from scan facts alone.
+  // No operator state yet → both candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 1, "scan finds the session");
-  assert.equal(fresh.threads[0].id, sid);
-  assert.equal(fresh.threads[0].state, "needs-you", "assistant yielded → needs-you");
+  assert.equal(fresh.count, 2, "scan finds the Claude and Cursor sessions");
+  const claude = byId(fresh, sid)!;
+  assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
+  assert.equal(claude.ui, "Superset", "worktree host wins app detection");
+  assert.equal(claude.diffAdded, undefined, "no repo at the claude cwd → no delta");
+
+  // The Cursor finder: slug → real cwd (dashes inside the leaf), origin app, git delta.
+  const cursor = byId(fresh, cid)!;
+  assert.equal(cursor.ui, "Cursor");
+  assert.equal(cursor.repo, "demo-app-x", "dash-slug reconstructed against the real filesystem");
+  assert.equal(cursor.state, "needs-you", "assistant yielded (no trailing tool_use) → needs-you");
+  assert.ok(cursor.topic.includes("tighten the retry loop") && !cursor.topic.includes("<user_query>"), "topic clean of wrapper tags");
+  assert.deepEqual([cursor.diffAdded, cursor.diffDeleted], [3, 1], "working-tree delta vs HEAD");
 
   // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
-  const meta = run("--sample", "0").threads[0];
+  const meta = byId(run("--sample", "0"), sid)!;
   assert.deepEqual(
     [meta.firstMessages, meta.recentMessages, meta.omittedMessageCount],
     [[], [], 4],
     "--sample 0 carries metadata only",
   );
 
-  // Operator marks it done (status.json is the durable store the resolver joins against).
+  // Operator marks the claude thread done (status.json is the store the resolver joins).
   writeFileSync(join(ooHome, "status.json"), JSON.stringify({
     polledAt: at(5),
-    threads: [{ id: sid, state: "done", lastMessageAt: fresh.threads[0].lastMessageAt }],
+    threads: [{ id: sid, state: "done", lastMessageAt: claude.lastMessageAt }],
   }));
 
-  assert.equal(run().count, 0, "done thread is excluded from a fresh scan by default");
+  const afterDone = run();
+  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [1, undefined], "done thread excluded by default; cursor unaffected");
   const audit = run("--include-done");
-  assert.deepEqual([audit.count, audit.threads[0].state], [1, "done"], "--include-done audits it, resolved done");
+  assert.deepEqual([audit.count, byId(audit, sid)?.state], [2, "done"], "--include-done audits it, resolved done");
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
   // A newer message lands → the same scan wakes the thread (no operator action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
-  assert.deepEqual([woken.count, woken.threads[0].state], [1, "needs-you"], "newer message wakes a done thread");
+  assert.deepEqual([woken.count, byId(woken, sid)?.state], [2, "needs-you"], "newer message wakes a done thread");
 
-  process.stdout.write("ok — scan skill resolves candidates against operator state\n");
+  process.stdout.write("ok — scan skill: resolver join, cursor finder, origin app, git delta\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });

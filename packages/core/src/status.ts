@@ -45,6 +45,9 @@ export interface ScanRow {
   /** A turn is in progress (Codex task running / Claude tool-loop) — the agent hasn't yielded. */
   working: boolean;
   link?: string | null;
+  /** Workspace line delta vs the repo's base branch (scan-gathered), when there is one. */
+  diffAdded?: number;
+  diffDeleted?: number;
 }
 
 /** One polled thread with continuity across polls — the unit the sidebar renders. */
@@ -64,6 +67,9 @@ export interface ThreadStatus {
   /** ISO of when it entered its current `state` (drives "has been waiting 20m"). */
   stateSince: string;
   previousState?: ThreadState;
+  /** Workspace line delta vs the repo's base branch — the rail's +N −N badge. */
+  diffAdded?: number;
+  diffDeleted?: number;
 }
 
 /** A full poll result. Persisted to the store; surfaces read this. */
@@ -119,6 +125,8 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
       firstSeen: was?.firstSeen ?? nowIso,
       stateSince: changed ? nowIso : was!.stateSince,
       previousState: changed ? was?.state : was!.previousState,
+      diffAdded: row.diffAdded,
+      diffDeleted: row.diffDeleted,
     };
   });
   return { polledAt: nowIso, threads };

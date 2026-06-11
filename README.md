@@ -34,8 +34,10 @@ sub-agents.
 
 V1 reads CLI agent sessions **directly off disk** with our own dependency-free scan/grep
 skills ([`.agents/skills`](.agents/skills/)) — `get-active-threads`, `sessions-grep`,
-`session-keywords`. Today that covers **Claude Code** (`~/.claude/projects`) and **Codex**
-(`~/.codex/sessions`); more sources slot in as skills. Scanning the files directly — never
+`session-keywords`. Today that covers **Claude Code** (`~/.claude/projects`), **Codex**
+(`~/.codex/sessions`), and **Cursor** (`~/.cursor/projects/*/agent-transcripts`), with
+worktree hosts (**Superset**, **Conductor**) resolved as the origin app; more sources
+slot in as skills. Scanning the files directly — never
 loading full transcripts into a model — is the "look across everything" layer the operator
 triages on top of.
 

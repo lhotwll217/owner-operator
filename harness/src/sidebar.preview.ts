@@ -12,15 +12,15 @@ import { toSidebarThreads, numberThreads, type StatusSnapshot, type ThreadStatus
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const NOW = "2026-06-09T12:00:00.000Z";
 
-const st = (id: string, repo: string, state: ThreadStatus["state"], topic: string, age: string): ThreadStatus =>
-  ({ id, source: "claude", repo, app: "Claude Code", topic, state, lastActive: age, createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW });
+const st = (id: string, repo: string, state: ThreadStatus["state"], topic: string, age: string, over: Partial<ThreadStatus> = {}): ThreadStatus =>
+  ({ id, source: "claude", repo, app: "Claude Code", topic, state, lastActive: age, createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW, ...over });
 
 const snap: StatusSnapshot = {
   polledAt: NOW,
   threads: [
-    st("n", "amplify", "needs-you", "raw 422 topic", "7 minutes ago"),
+    st("n", "amplify", "needs-you", "raw 422 topic", "7 minutes ago", { app: "Superset", diffAdded: 12, diffDeleted: 4 }),
     st("w", "amplify", "working", "Weekly update automation", "3 hours ago"),
-    st("o", "owner-operator", "working", "status sidebar wiring", "just now"),
+    st("o", "owner-operator", "working", "status sidebar wiring", "just now", { app: "Cursor" }),
     st("old", "amplify", "idle", "ancient idle thread", "2 days ago"), // NOT filtered — must show
     st("d", "amplify", "done", "already shipped thing", "1 hour ago"),
   ],
@@ -44,6 +44,11 @@ assert.ok(lines.some((l) => /1 ◐ P5 422 contract mismatch.*7m$/.test(l)), "num
 assert.ok(lines.some((l) => /\d [●○] ancient idle thread/.test(l)), "untriaged idle thread still shows (raw topic, no badge)");
 assert.ok(!lines.some((l) => /^→ /.test(l)), "no selection cursor (glance-only)");
 assert.ok(lines.some((l) => /→ Paste the drafted reply/.test(l)) && lines.some((l) => /→ Push the fix/.test(l)), "next-step on every triaged row");
+
+// --- the origin row: git ±delta (when the workspace has one) + the app, right-aligned ---
+assert.ok(lines.some((l) => /\+12 -4  Superset$/.test(l)), "delta sits just left of the app, right-aligned");
+assert.ok(lines.some((l) => /^\s+Cursor$/.test(l)), "app-only origin row when there is no delta");
+assert.equal(lines.filter((l) => /(Superset|Cursor|Claude Code)\s*$/.test(l)).length, 4, "every active row carries its origin");
 
 // --- the numbering IS the /done handle: display order 1…n, resolved by the same core fn ---
 const { byNum } = numberThreads(rows);

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // get-active-threads — deterministic, zero-install scan of local CLI agent sessions.
 //
-// Reads Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session files,
-// finds recently-active threads, and prints a COMPACT digest: topic, light metadata, and
-// a sample of each thread's messages (its opening few + most-recent few) so an agent can
-// triage "what's ongoing" WITHOUT loading full transcripts into an expensive model.
+// Reads Claude Code (~/.claude/projects), Codex (~/.codex/sessions), and Cursor
+// (~/.cursor/projects/*/agent-transcripts) session files, finds recently-active threads,
+// and prints a COMPACT digest: topic, light metadata (resolved state, origin app, git
+// delta), and a sample of each thread's messages (its opening few + most-recent few) so
+// an agent can triage "what's ongoing" WITHOUT loading full transcripts into a model.
 //
 // Raw scan rows are CANDIDATES, not truth: each row is resolved against the operator's
 // persisted status store (~/.owner-operator/status.json) via the canonical resolver
@@ -20,6 +21,7 @@
 //   --include-done   include threads the operator marked done (--all implies it)
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { resolveCandidates } from "../../../packages/core/src/resolve.mjs";
@@ -70,6 +72,7 @@ function walk(dir, out) {
 const roots = [
   { root: join(homedir(), ".claude", "projects"), source: "claude" },
   { root: join(homedir(), ".codex", "sessions"), source: "codex" },
+  { root: join(homedir(), ".cursor", "projects"), source: "cursor" },
 ];
 const candidates = [];
 for (const { root, source } of roots) {
@@ -77,8 +80,10 @@ for (const { root, source } of roots) {
   const files = [];
   walk(root, files);
   for (const f of files) {
+    // Cursor's projects dir also holds mcps/terminals — only agent transcripts are sessions.
+    if (source === "cursor" && !f.includes("/agent-transcripts/")) continue;
     let st; try { st = statSync(f); } catch { continue; }
-    if (st.mtimeMs >= cutoff) candidates.push({ file: f, source, mtime: st.mtimeMs });
+    if (st.mtimeMs >= cutoff) candidates.push({ file: f, source, mtime: st.mtimeMs, btime: st.birthtimeMs });
   }
 }
 
@@ -102,12 +107,20 @@ function claudeText(content) {
   return "";
 }
 
-// Which GUI the thread lives in. A session spawned in a Conductor worktree belongs to
-// Conductor — that's where the branch/worktree lives — even if Codex/Claude is the agent.
-// So Conductor is checked FIRST, before the underlying source.
-function detectUi(source, cwd, entrypoint) {
+// Which GUI the thread lives in. A session spawned in a Superset/Conductor worktree
+// belongs to that GUI — that's where the branch/worktree lives — even if Codex/Claude/
+// Cursor is the agent. So the worktree hosts are checked FIRST, before the source.
+// Codex refines by its session_meta provenance (originator + source fields).
+function detectUi(source, cwd, entrypoint, meta = {}) {
+  if (cwd && cwd.includes("/.superset/worktrees/")) return "Superset";
   if (cwd && cwd.includes("/conductor/workspaces/")) return "Conductor";
-  if (source === "codex") return "Codex";
+  if (source === "cursor") return "Cursor";
+  if (source === "codex") {
+    if (meta.srcHint === "vscode") return "Codex (VS Code)";
+    if (meta.originator === "codex_cli_rs") return "Codex CLI";
+    if (meta.originator === "codex_sdk_ts") return "Codex SDK";
+    return "Codex";
+  }
   if (entrypoint === "claude-desktop") return "Claude Code (desktop)";
   if (entrypoint === "sdk-ts") return "SDK";
   return source === "claude" ? "Claude Code" : source;
@@ -126,6 +139,56 @@ function guiLink(source, id, cwd) {
 
 const iso = (ms) => new Date(ms).toISOString();
 
+// Cursor encodes the session cwd as a dash-slug directory (/Users/x/dev/app → Users-x-dev-app),
+// ambiguous for path segments that themselves contain dashes (ai-backend-api). Reconstruct by
+// walking the REAL filesystem: extend each component with more tokens until a path exists.
+// Naive join fallback when the directory is gone (deleted worktree). Cached per slug.
+const unslugCache = new Map();
+function cursorProject(file) {
+  const slug = basename(file.split("/agent-transcripts/")[0]);
+  if (unslugCache.has(slug)) return unslugCache.get(slug);
+  const tokens = slug.split("-");
+  const go = (base, i) => {
+    if (i === tokens.length) return base;
+    let comp = "";
+    for (let j = i; j < tokens.length; j++) {
+      comp = comp ? `${comp}-${tokens[j]}` : tokens[j];
+      const p = `${base}/${comp}`;
+      if (existsSync(p)) { const hit = go(p, j + 1); if (hit) return hit; }
+    }
+    return null;
+  };
+  const path = go("", 0) ?? `/${tokens.join("/")}`;
+  unslugCache.set(slug, path);
+  return path;
+}
+
+// ---------- git workspace delta (per unique cwd, cached) ----------
+// +/- line totals from the repo's base (merge-base with origin's default branch) to the
+// WORKING TREE — committed + staged + unstaged in one number. No remote → HEAD (uncommitted
+// only). Best-effort fact about the workspace: not a repo / dir gone → no badge.
+const diffCache = new Map();
+function gitDiffStat(cwd) {
+  if (!cwd || cwd === "(unknown)") return null;
+  if (diffCache.has(cwd)) return diffCache.get(cwd);
+  let stat = null;
+  try {
+    const git = (...a) => execFileSync("git", a, { cwd, stdio: ["ignore", "pipe", "ignore"], timeout: 4000 }).toString();
+    let base = "HEAD";
+    for (const ref of ["origin/HEAD", "origin/main", "origin/master", "main", "master"]) {
+      try { base = git("merge-base", "HEAD", ref).trim(); break; } catch { /* try next ref */ }
+    }
+    let added = 0, deleted = 0;
+    for (const line of git("diff", "--numstat", base).split("\n")) {
+      const m = /^(\d+)\t(\d+)\t/.exec(line); // binary files show "-\t-" and are skipped
+      if (m) { added += +m[1]; deleted += +m[2]; }
+    }
+    stat = added || deleted ? { added, deleted } : null;
+  } catch { /* not a git repo / no commits / cwd gone */ }
+  diffCache.set(cwd, stat);
+  return stat;
+}
+
 // Resolve the real repo name for a cwd. Normal checkout → its own folder. Git worktree
 // (Conductor workspace) → <cwd>/.git is a FILE "gitdir: <repo>/.git/worktrees/<name>", so
 // take the repo from that path instead of the worktree codename. Best-effort; falls back
@@ -142,11 +205,15 @@ function realRepo(cwd) {
 }
 
 // ---------- parse one session ----------
-function parseSession({ file, source, mtime }) {
+function parseSession({ file, source, mtime, btime }) {
   let raw;
   try { raw = readFileSync(file, "utf8"); } catch { return null; }
   const msgs = [];                 // substantive text turns: {role, text, ts, stop?}
   let project = null, sessionId = null, entrypoint = null, firstTs = 0, lastTs = 0, lastLifecycle = null;
+  let originator = null, srcHint = null;   // codex session_meta provenance (→ detectUi)
+  let cursorTail = null;                   // cursor: {role, lastBlock} of the LAST record
+
+  if (source === "cursor") project = cursorProject(file); // cwd lives in the dir slug, not the records
 
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -165,8 +232,22 @@ function parseSession({ file, source, mtime }) {
         // stop_reason marks turn boundaries: "tool_use" = mid loop (working); "end_turn" = done.
         if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason });
       }
+    } else if (source === "cursor") {
+      // Cursor CLI transcript: { role, message: { content: [text|tool_use blocks] } } —
+      // no timestamps, no ids in the records; identity/time come from the path + file stat.
+      if (o.role === "user" || o.role === "assistant") {
+        const blocks = Array.isArray(o.message?.content) ? o.message.content : [];
+        cursorTail = { role: o.role, lastBlock: blocks[blocks.length - 1]?.type ?? null };
+        const text = claudeText(o.message?.content).replace(/<\/?user_query>/g, " ");
+        if (text && text.trim()) msgs.push({ role: o.role, text, ts: 0 });
+      }
     } else { // codex
-      if (o.type === "session_meta") { project = o.payload?.cwd || project; sessionId = o.payload?.id || sessionId; }
+      if (o.type === "session_meta") {
+        project = o.payload?.cwd || project;
+        sessionId = o.payload?.id || sessionId;
+        originator = o.payload?.originator || originator;
+        srcHint = o.payload?.source || srcHint;
+      }
       // Turn lifecycle: task_started (running) vs task_complete / turn_aborted (done) — the
       // terminal signal that the agent yielded control back to the user.
       if (o.type === "event_msg") {
@@ -210,17 +291,20 @@ function parseSession({ file, source, mtime }) {
     (cliLike && userTurns.length < 2);
 
   const lastMsg = convo[convo.length - 1];
-  const createdTs = firstTs || mtime;
+  const createdTs = firstTs || btime || mtime;
   const lastMsgTs = lastMsg.ts || lastTs || mtime;
 
   // Is a turn IN PROGRESS (still reasoning / running tools / streaming)? The last *message*
   // role alone can't tell — an intermediate assistant message looks "done". Use the terminal
-  // signal: Codex → last lifecycle is task_started (no completion yet); Claude → the last
-  // assistant message is a tool_use step, not end_turn.
+  // signal: Codex → last lifecycle is task_started (no completion yet); Cursor → the last
+  // record ends on a tool_use block (no yield); Claude → the last assistant message is a
+  // tool_use step, not end_turn.
   const lastAsst = [...convo].reverse().find((m) => m.role === "assistant");
   const working = source === "codex"
     ? lastLifecycle === "task_started"
-    : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
+    : source === "cursor"
+      ? cursorTail?.role === "assistant" && cursorTail.lastBlock === "tool_use"
+      : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
   // Liveness from the file's last write — catches reasoning/tool events even when they carry no
   // timestamp, so a thinking agent never looks idle.
   const lastActivityTs = Math.max(lastTs || 0, mtime);
@@ -234,13 +318,16 @@ function parseSession({ file, source, mtime }) {
   else if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
   else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
 
+  const diff = gitDiffStat(project === "(unknown)" ? null : project);
+
   return {
     id: sessionId,
     source,
     repo,                                              // Repo Name (leaf folder of cwd)
-    ui: detectUi(source, project, entrypoint),         // App the session was made from
+    ui: detectUi(source, project, entrypoint, { originator, srcHint }), // App the session came from
     entrypoint: entrypoint || (source === "codex" ? "codex" : null),
     project,
+    ...(diff ? { diffAdded: diff.added, diffDeleted: diff.deleted } : {}),
     topic: clip(topicMsg.text, 140),
     messageCount: convo.length,
     userMessages: userTurns.length,
@@ -320,6 +407,7 @@ if (asJson) {
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);
       console.log(`  State         : ${t.state}`);
+      if (t.diffAdded != null) console.log(`  Diff          : +${t.diffAdded} -${t.diffDeleted}`);
       console.log(`  Created       : ${rel(t.secondsSinceCreated)}`);
       console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)}`);
       console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);

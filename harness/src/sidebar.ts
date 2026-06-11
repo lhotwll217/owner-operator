@@ -70,7 +70,8 @@ export class SidebarList {
     if (!all.length) return [head[0], "", dim("(no active threads)")];
 
     // Every thread: line 1 = number · glyph · priority · title (right-aligned recency);
-    // line 2 = grey next-step. The number is what `/done` takes.
+    // line 2 = grey next-step; line 3 = origin (git ±delta · the app it came from),
+    // right-aligned. The number is what `/done` takes.
     const numW = String(all.length).length;
     const body: string[] = [];
     for (const g of this.groups) {
@@ -86,6 +87,10 @@ export class SidebarList {
         const gap = Math.max(1, W - visibleWidth(l1) - visibleWidth(age));
         body.push(l1 + " ".repeat(gap) + age);
         if (t.nextSteps) body.push(dim("    → " + truncateToWidth(t.nextSteps.replace(/\s+/g, " ").trim(), W - 6)));
+        const delta = t.diffAdded != null || t.diffDeleted != null
+          ? green(`+${t.diffAdded ?? 0}`) + " " + red(`-${t.diffDeleted ?? 0}`) + "  " : "";
+        const origin = delta + dim(truncateToWidth(t.app, Math.max(6, W - visibleWidth(delta) - 4)));
+        body.push(" ".repeat(Math.max(1, W - visibleWidth(origin))) + origin);
       }
     }
 

@@ -63,6 +63,8 @@ async function runScan(since: string, limit: number): Promise<ScanRow[]> {
     secondsSinceActivity: t.secondsSinceActivity ?? t.secondsSinceLastMessage,
     working: !!t.working,
     link: t.link ?? null,
+    diffAdded: t.diffAdded,
+    diffDeleted: t.diffDeleted,
   }));
 }
 
