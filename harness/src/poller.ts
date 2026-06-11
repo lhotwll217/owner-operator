@@ -39,11 +39,14 @@ export interface PollerOptions {
 const SESSION_ROOTS = [join(homedir(), ".claude", "projects"), join(homedir(), ".codex", "sessions")];
 
 // Run the scan with no message bodies (--sample 0) — we only need metadata for status, so
-// keep the payload tiny and fast.
+// keep the payload tiny and fast. --include-done because the state machine needs EVERY
+// candidate: done-suppression happens in reconcile (via the canonical resolver); if the
+// scan dropped done rows here, they'd leave the snapshot, orphan the persisted `done`,
+// and resurface as active on the next pass.
 async function runScan(since: string, limit: number): Promise<ScanRow[]> {
   const { stdout } = await execFileP(
     "node",
-    [SCAN, "--since", since, "--limit", String(limit), "--sample", "0", "--json"],
+    [SCAN, "--since", since, "--limit", String(limit), "--sample", "0", "--json", "--include-done"],
     { maxBuffer: 32 * 1024 * 1024 },
   );
   const parsed = JSON.parse(stdout) as { threads?: Array<Record<string, any>> };

@@ -216,7 +216,7 @@ function markDone(arg: string): void {
   if (!hits.length) {
     log.addChild(new Text(dim("usage: /done 1,3,5 — the rail row numbers")));
   } else {
-    const result = markThreadsDone(hits.map((t) => t.id), { snapshot: statusSnapshot });
+    const result = markThreadsDone(hits.map((t) => t.id));
     if (result.snapshot) statusSnapshot = result.snapshot;
     log.addChild(new Text(green("✓ done") + dim(" › ") + hits.map((t) => `${t.num} ${displayTopic(t)}`).join(dim(" · "))));
   }

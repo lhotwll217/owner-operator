@@ -6,7 +6,7 @@
 // separate, frozen render and the rail is NOT coupled to them. Untriaged/new threads still
 // appear (raw digest topic + live status) until a triage enriches them. Pure + UI-independent.
 
-import { sortByAttention, STATE_RANK, type StatusSnapshot, type ThreadState, type ThreadStatus } from "./status";
+import { isActiveState, sortByAttention, STATE_RANK, type StatusSnapshot, type ThreadState, type ThreadStatus } from "./status";
 
 /** The subset of a model triage we cache and join onto a thread by id (the enrichment). */
 export interface TriageInfo {
@@ -43,7 +43,7 @@ export function toSidebarThreads(
 ): SidebarThread[] {
   return snapshot.threads.map((t): SidebarThread => {
     const tri = triage.get(t.id);
-    const active = t.state !== "done";
+    const active = isActiveState(t.state);
     return {
       ...t,
       triagedTopic: tri?.topic,

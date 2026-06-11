@@ -1,21 +1,28 @@
 #!/usr/bin/env node
-// get-active-threads — deterministic, dependency-free scan of local CLI agent sessions.
+// get-active-threads — deterministic, zero-install scan of local CLI agent sessions.
 //
 // Reads Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session files,
 // finds recently-active threads, and prints a COMPACT digest: topic, light metadata, and
 // a sample of each thread's messages (its opening few + most-recent few) so an agent can
 // triage "what's ongoing" WITHOUT loading full transcripts into an expensive model.
 //
+// Raw scan rows are CANDIDATES, not truth: each row is resolved against the operator's
+// persisted status store (~/.owner-operator/status.json) via the canonical resolver
+// (packages/core/src/resolve.mjs — no npm deps, an in-repo import). Threads the operator
+// marked done stay hidden until a newer message wakes them; `--include-done` audits them.
+//
 // Usage:
-//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--sample 4]
-//                               [--thread <id>] [--limit 40] [--all] [--json] [--truncate 280]
-//   --sample N    keeps the first N + most-recent N messages of each thread
-//   --thread <id> drills into ONE thread (id prefix ok); pair with a bigger --sample to
-//                 expand just that thread's ends. (--bookends / --last alias --sample.)
+//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--sample 4] [--thread <id>]
+//                               [--limit 40] [--all] [--include-done] [--json] [--truncate 280]
+//   --sample N       keeps the first N + most-recent N messages of each thread
+//   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
+//                    expand just that thread's ends. (--bookends / --last alias --sample.)
+//   --include-done   include threads the operator marked done (--all implies it)
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
+import { resolveCandidates } from "../../../packages/core/src/resolve.mjs";
 
 const args = process.argv.slice(2);
 const val = (name, def) => {
@@ -35,6 +42,7 @@ const threadArg = val("thread", val("id", null));
 const limit = parseInt(val("limit", "40"), 10);
 const truncate = parseInt(val("truncate", "280"), 10);
 const includeAll = has("all");
+const includeDone = has("include-done") || includeAll;
 const asJson = has("json");
 
 // ---------- time window ----------
@@ -264,6 +272,16 @@ for (const t of threads) {
   if (richer) byId.set(t.id, t);
 }
 threads = [...byId.values()];
+
+// Join candidates with the operator's persisted status store: the canonical resolver
+// annotates each row's resolved `state` and drops rows the operator marked done (until a
+// newer message wakes them). `--thread` drill-ins bypass the drop — an explicit look at
+// one thread should always answer — but still carry the resolved state.
+const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
+let persisted = [];
+try { persisted = JSON.parse(readFileSync(join(ooHome, "status.json"), "utf8")).threads ?? []; } catch { /* no operator state yet → all candidates pass */ }
+threads = resolveCandidates(threads, persisted, { includeDone: includeDone || !!threadArg });
+
 if (threadArg) {
   // Single-thread drill-in: match by full or prefix id (or file basename); keep it even
   // if it's an automated one-shot, and don't apply the limit.
@@ -298,6 +316,7 @@ if (asJson) {
       console.log(`  id            : ${t.id}   (drill in: --thread ${t.id} --sample 15)`);
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);
+      console.log(`  State         : ${t.state}`);
       console.log(`  Created       : ${rel(t.secondsSinceCreated)}`);
       console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)}`);
       console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);

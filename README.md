@@ -25,7 +25,7 @@ sub-agents.
 | [`harness/`](harness/) | **"PI"** — agentic core built on the [pi coding agent](https://github.com/earendil-works/pi) (consumed via npm: `@earendil-works/pi-*`). `oo` CLI + branded TUI, structured triage over local session files via our own scan/grep skills, plus a polled status sidebar. | 🧩 read/triage + status poll live |
 | [`apps/widget/`](apps/widget/) | macOS native widget — always-there glanceable triage. | 📐 planned |
 | [`apps/web/`](apps/web/) | localhost web UI — drill into sessions, read-first. | 📐 planned |
-| [`packages/core/`](packages/core/) | Shared, UI-independent types the surfaces + harness agree on — `Thread`/`Triage` + `sortByPriority`, plus the model-free `ThreadStatus` state machine (`deriveState`/`reconcile`/`diffSnapshots`). | 🧩 threads + status contract |
+| [`packages/core/`](packages/core/) | Shared, UI-independent types the surfaces + harness agree on — `Thread`/`Triage` + `sortByPriority`, plus the model-free `ThreadStatus` state machine and the **canonical thread-state resolver** every surface joins through (`resolveState`/`resolveCandidates`/`reconcile`/`diffSnapshots`). | 🧩 threads + status contract |
 | [`packages/workflows/`](packages/workflows/) | Deterministic workflow scripts. | 📐 planned |
 | [`scripts/`](scripts/) | Repo tooling / dev scripts. | 📐 planned |
 | [`docs/`](docs/) | Architecture & design notes. | ✍️ in progress |

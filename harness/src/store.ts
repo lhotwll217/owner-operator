@@ -54,10 +54,14 @@ export interface MarkThreadsDoneResult {
   missingIds: string[];
 }
 
-/** Mark threads done by updating the persisted status snapshot itself. */
-export function markThreadsDone(ids: readonly string[], opts: { snapshot?: StatusSnapshot; now?: string } = {}): MarkThreadsDoneResult {
+/**
+ * Mark threads done by updating the persisted status snapshot — the single-writer path:
+ * always read disk, mutate, write. Never takes a caller's in-memory snapshot, so a stale
+ * copy (e.g. a rail that hasn't seen a background mark yet) can't clobber newer state.
+ */
+export function markThreadsDone(ids: readonly string[], opts: { now?: string } = {}): MarkThreadsDoneResult {
   const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
-  const snapshot = opts.snapshot ?? loadSnapshot();
+  const snapshot = loadSnapshot();
   if (!snapshot) return { snapshot: null, marked: [], missingIds: uniqueIds };
   if (!uniqueIds.length) return { snapshot, marked: [], missingIds: [] };
 
