@@ -13,6 +13,7 @@
     "preview:screen": "tsx src/screen.preview.ts",
     "poll:smoke": "tsx src/poller.smoke.ts",
     "test:agent": "tsx src/agent.behavior.ts",
+    "test:db": "tsx src/threads-db.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
