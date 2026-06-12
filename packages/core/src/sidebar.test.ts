@@ -9,7 +9,7 @@ import type { StatusSnapshot, ThreadStatus } from "./status";
 const NOW = "2026-06-09T12:00:00.000Z";
 
 const st = (id: string, repo: string, state: ThreadStatus["state"], topic: string, createdAt = NOW): ThreadStatus => ({
-  id, source: "claude", repo, app: "Claude Code", topic, state, lastActive: "1m",
+  id, source: "claude", repo, app: "Claude CLI", topic, state, lastActive: "1m",
   createdAt, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW,
 });
 

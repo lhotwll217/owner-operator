@@ -18,7 +18,7 @@ try {
     id: "abc-123",
     source: "claude",
     repo: "owner-operator",
-    app: "Claude Code",
+    app: "Claude CLI",
     topic: "mark done status",
     lastRole: "assistant",
     createdAt: "2026-06-09T10:00:00.000Z",

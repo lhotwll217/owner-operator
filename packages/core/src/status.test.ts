@@ -17,7 +17,7 @@ import {
 } from "./status";
 
 const row = (over: Partial<ScanRow> & Pick<ScanRow, "id">): ScanRow => ({
-  source: "claude", repo: "demo", app: "Claude Code", topic: "t",
+  source: "claude", repo: "demo", app: "Claude CLI", topic: "t",
   lastRole: "assistant", createdAt: "2026-06-09T10:00:00.000Z",
   lastMessageAt: "2026-06-09T10:05:00.000Z", secondsSinceLastMessage: 60, secondsSinceActivity: 60, working: false, ...over,
 });

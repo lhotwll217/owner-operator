@@ -107,23 +107,25 @@ function claudeText(content) {
   return "";
 }
 
-// Which GUI the thread lives in. A session spawned in a Superset/Conductor worktree
-// belongs to that GUI — that's where the branch/worktree lives — even if Codex/Claude/
-// Cursor is the agent. So the worktree hosts are checked FIRST, before the source.
-// Codex refines by its session_meta provenance (originator + source fields).
+// Which GUI the thread lives in — the CANONICAL APP NAMES, a fixed display vocabulary:
+// Superset App, Conductor, Claude CLI, Claude App, Codex CLI, Codex App, Cursor. (SDK
+// worker sessions — hidden by default — carry an SDK label outside that set.) A session
+// spawned in a
+// Superset/Conductor worktree belongs to that GUI — that's where the branch/worktree
+// lives — even if Codex/Claude/Cursor is the agent, so the worktree hosts are checked
+// FIRST, before the source. Codex refines by its session_meta provenance.
 function detectUi(source, cwd, entrypoint, meta = {}) {
-  if (cwd && cwd.includes("/.superset/worktrees/")) return "Superset";
+  if (cwd && cwd.includes("/.superset/worktrees/")) return "Superset App";
   if (cwd && cwd.includes("/conductor/workspaces/")) return "Conductor";
   if (source === "cursor") return "Cursor";
   if (source === "codex") {
-    if (meta.srcHint === "vscode") return "Codex (VS Code)";
-    if (meta.originator === "codex_cli_rs") return "Codex CLI";
+    if (meta.srcHint === "vscode") return "Codex App";
     if (meta.originator === "codex_sdk_ts") return "Codex SDK";
-    return "Codex";
+    return "Codex CLI"; // codex_cli_rs and unknown provenance both read as the CLI
   }
-  if (entrypoint === "claude-desktop") return "Claude Code (desktop)";
-  if (entrypoint === "sdk-ts") return "SDK";
-  return source === "claude" ? "Claude Code" : source;
+  if (entrypoint === "claude-desktop") return "Claude App";
+  if (entrypoint === "sdk-ts" || entrypoint === "sdk-cli") return "Claude SDK";
+  return source === "claude" ? "Claude CLI" : source;
 }
 
 // GUI deep-link — ONLY when it opens the GUI the session actually lives in:

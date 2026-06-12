@@ -14,7 +14,7 @@ const dir = mkdtempSync(join(tmpdir(), "oo-store-"));
 process.env.OO_HOME = dir;
 
 const thread = (over: Partial<ThreadStatus> = {}): ThreadStatus => ({
-  id: "a", source: "claude", repo: "demo", app: "Claude Code", topic: "ship it",
+  id: "a", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
   state: "needs-you", lastActive: "just now",
   createdAt: "2026-06-09T10:00:00.000Z", lastMessageAt: "2026-06-09T10:05:00.000Z",
   firstSeen: "2026-06-09T10:01:00.000Z", stateSince: "2026-06-09T10:05:00.000Z",

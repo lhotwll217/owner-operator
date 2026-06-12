@@ -20,7 +20,7 @@ const ooHome = mkdtempSync(join(tmpdir(), "oo-scan-store-"));
 
 const sid = "11111111-2222-3333-4444-555555555555";
 const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
-// Claude session, spawned in a (fake) Superset worktree → App resolves to "Superset".
+// Claude session, spawned in a (fake) Superset worktree → App resolves to "Superset App".
 const claudeCwd = join(home, ".superset", "worktrees", "sb", "demo-repo");
 const sessionFile = join(home, ".claude", "projects", "demo", `${sid}.jsonl`);
 const msg = (type: "user" | "assistant", content: string, ts: string) =>
@@ -78,7 +78,7 @@ try {
   assert.equal(fresh.count, 2, "scan finds the Claude and Cursor sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
-  assert.equal(claude.ui, "Superset", "worktree host wins app detection");
+  assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
   assert.equal(claude.diffAdded, undefined, "no repo at the claude cwd → no delta");
 
   // The Cursor finder: slug → real cwd (dashes inside the leaf), origin app, git delta.
