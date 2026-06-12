@@ -20,8 +20,8 @@ const NOW = "2026-06-09T12:00:00.000Z";
 const snap: StatusSnapshot = {
   polledAt: NOW,
   threads: [
-    { id: "n", source: "claude", repo: "amplify", app: "Claude Code", topic: "raw 422", state: "needs-you", lastActive: "7 minutes ago", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
-    { id: "w", source: "claude", repo: "owner-operator", app: "Claude Code", topic: "status sidebar wiring", state: "working", lastActive: "just now", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
+    { id: "n", source: "claude", repo: "amplify", app: "Claude CLI", topic: "raw 422", state: "needs-you", lastActive: "7 minutes ago", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
+    { id: "w", source: "claude", repo: "owner-operator", app: "Claude CLI", topic: "status sidebar wiring", state: "working", lastActive: "just now", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
   ],
 };
 const triage = new Map<string, TriageInfo>([["n", { topic: "422 contract mismatch", nextSteps: "Paste the drafted reply", priority: 5 }]]);
@@ -32,7 +32,14 @@ rail.setThreads(toSidebarThreads(snap, triage));
 const chat = new ChatPane(stub(Array.from({ length: 50 }, (_, i) => `chat line ${i}`)));
 const editor = stub(["", "› type here <CURSOR_SENTINEL>", ""]);
 const columns = new Columns(rail, chat, editor, RAIL_CAP, 80);
-const header = stub(["\x1b[1;35m● Owner Operator\x1b[0m", "local chief of staff · /done 1,3 · esc stop · ctrl+c exit"]);
+const header = stub([
+  "\x1b[1;37m ██████  ██     ██ ███    ██ ███████ ██████          ██      ██████  ██████  ███████ ██████   █████  ████████  ██████  ██████\x1b[0m",
+  "\x1b[1;37m██    ██ ██     ██ ████   ██ ██      ██   ██        ██      ██    ██ ██   ██ ██      ██   ██ ██   ██    ██    ██    ██ ██   ██\x1b[0m",
+  "\x1b[1;37m██    ██ ██  █  ██ ██ ██  ██ █████   ██████        ██       ██    ██ ██████  █████   ██████  ███████    ██    ██    ██ ██████\x1b[0m",
+  "\x1b[1;37m██    ██ ██ ███ ██ ██  ██ ██ ██      ██   ██      ██        ██    ██ ██      ██      ██   ██ ██   ██    ██    ██    ██ ██   ██\x1b[0m",
+  "\x1b[1;37m ██████   ███ ███  ██   ████ ███████ ██   ██     ██          ██████  ██      ███████ ██   ██ ██   ██    ██     ██████  ██   ██\x1b[0m",
+  "local chief of staff · /done 1,3 · esc stop · ctrl+c exit",
+]);
 const screen = new Screen({ rows: ROWS, columns: COLS }, header, columns);
 
 const lines = screen.render(COLS);
@@ -43,12 +50,12 @@ assert.equal(lines.length, ROWS, "frame is exactly terminal rows tall (so pi-tui
 for (const l of lines) assert.ok(stripAnsi(l).length <= COLS, "no line exceeds terminal columns (no width crash)");
 
 // --- header on top, editor (with cursor marker) at the bottom of the RIGHT column ---
-assert.match(stripAnsi(lines[0]), /● Owner Operator/, "header first");
+assert.match(stripAnsi(lines[0]), /██████ {2}██/, "wordmark header first");
 assert.ok(stripAnsi(lines[ROWS - 2]).includes("<CURSOR_SENTINEL>"), "editor + cursor marker preserved at the bottom");
 
 // --- a TRUE sidebar: the separator runs the FULL body height — including the editor rows ---
-const body = lines.slice(2); // everything under the 2-line header
-assert.equal(body.length, ROWS - 2, "body fills the rest of the viewport");
+const body = lines.slice(6); // everything under the 6-line header
+assert.equal(body.length, ROWS - 6, "body fills the rest of the viewport");
 for (const l of body) {
   assert.equal(stripAnsi(l).length, COLS, "body lines are full width");
   assert.equal(stripAnsi(l)[RAIL_W], "│", "separator sits at the rail boundary on EVERY body row");

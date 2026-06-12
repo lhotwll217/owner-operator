@@ -35,7 +35,7 @@ if (!process.stdout.isTTY) {
 type Styler = (s: string) => string;
 const sgr = (...c: number[]): Styler => (s) => `\x1b[${c.join(";")}m${s}\x1b[0m`;
 const dim = sgr(2), bold = sgr(1), italic = sgr(3), underline = sgr(4), strike = sgr(9);
-const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), red = sgr(1, 31), brand = sgr(1, 35);
+const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), red = sgr(1, 31), white = sgr(1, 37);
 
 const mdTheme: MarkdownTheme = {
   heading: (t) => bold(cyan(t)), link: blue, linkUrl: dim, code: yellow, codeBlock: green,
@@ -60,8 +60,33 @@ const backend = await resolveBackend({ spawnDaemon: true });
 const tui = new TUI(new ProcessTerminal());
 
 // ---- chat surface (unchanged components, just bounded by ChatPane in the layout) ----------
+// Big white wordmark — solid blocks, generated with figlet (not hand-drawn): "ANSI Compact"
+// as the standard size, "ANSI Regular" on wide terminals. Width-aware: the largest rendering
+// that fits wins (Screen never truncates header lines); narrower still → the one-liner.
+const WORDMARK_LG = [
+  " ██████  ██     ██ ███    ██ ███████ ██████          ██      ██████  ██████  ███████ ██████   █████  ████████  ██████  ██████",
+  "██    ██ ██     ██ ████   ██ ██      ██   ██        ██      ██    ██ ██   ██ ██      ██   ██ ██   ██    ██    ██    ██ ██   ██",
+  "██    ██ ██  █  ██ ██ ██  ██ █████   ██████        ██       ██    ██ ██████  █████   ██████  ███████    ██    ██    ██ ██████",
+  "██    ██ ██ ███ ██ ██  ██ ██ ██      ██   ██      ██        ██    ██ ██      ██      ██   ██ ██   ██    ██    ██    ██ ██   ██",
+  " ██████   ███ ███  ██   ████ ███████ ██   ██     ██          ██████  ██      ███████ ██   ██ ██   ██    ██     ██████  ██   ██",
+];
+const WORDMARK_MD = [
+  "▄████▄ ██     ██ ███  ██ ██████ █████▄      █   ▄████▄ █████▄ ██████ █████▄  ▄████▄ ██████ ▄████▄ █████▄",
+  "██  ██ ██ ▄█▄ ██ ██ ▀▄██ ██▄▄   ██▄▄██▄    █    ██  ██ ██▄▄█▀ ██▄▄   ██▄▄██▄ ██▄▄██   ██   ██  ██ ██▄▄██▄",
+  "▀████▀  ▀██▀██▀  ██   ██ ██▄▄▄▄ ██   ██   █     ▀████▀ ██     ██▄▄▄▄ ██   ██ ██  ██   ██   ▀████▀ ██   ██",
+];
+const widest = (art: string[]): number => Math.max(...art.map((l) => l.length));
+const LG_W = widest(WORDMARK_LG), MD_W = widest(WORDMARK_MD);
+class Wordmark implements Component {
+  invalidate(): void { /* stateless */ }
+  render(width: number): string[] {
+    const art = width >= LG_W ? WORDMARK_LG : width >= MD_W ? WORDMARK_MD : null;
+    return art ? art.map(white) : [white("● OWNER / OPERATOR")];
+  }
+}
+
 const header = new Box(0, 0);
-header.addChild(new Text(brand("● Owner Operator")));
+header.addChild(new Wordmark());
 header.addChild(new Text(dim(`local chief of staff · ${modelLabel} · ${skills.length} skills · /done 1,3 · esc stop · ctrl+c exit`)));
 header.addChild(new Spacer(1));
 
