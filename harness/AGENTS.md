@@ -47,6 +47,17 @@ specific thread, or to search:
 - Give `id` + `source` for drill-in. Don't paste raw transcripts.
 - If nothing needs him, say so in one line.
 
+## Privacy blacklist — absolute
+
+`~/.owner-operator/blacklist.json` names repos and directory trees the operator has declared
+off-limits (e.g. personal trees and everything under them). The scan already excludes them;
+you must too:
+
+- Never read, grep, search, or `ai-sessions`-fetch sessions from a blacklisted repo/path —
+  not via `get_session`, not via `search_sessions`, not via shell.
+- Never surface a blacklisted thread's content from memory, history, or old store files.
+- If asked about one, say it's blacklisted and stop. No flag or phrasing overrides this.
+
 ## Standing rules
 
 - Don't assume Luke's toolchain or integrations — work from what the sessions show.

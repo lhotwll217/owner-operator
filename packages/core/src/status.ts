@@ -32,6 +32,8 @@ export interface ScanRow {
   id: string;
   source: string;
   repo: string;
+  /** Session cwd (absolute) — the identity the privacy blacklist matches on. */
+  project?: string;
   /** App / GUI the session was made from (the scan's `ui`). */
   app: string;
   topic: string;
@@ -57,6 +59,8 @@ export interface ThreadStatus {
   id: string;
   source: string;
   repo: string;
+  /** Session cwd (absolute) — kept so the blacklist can purge stored rows by path. */
+  project?: string;
   app: string;
   topic: string;
   state: ThreadState;
@@ -118,6 +122,7 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
       id: row.id,
       source: row.source,
       repo: row.repo,
+      ...(row.project ? { project: row.project } : {}),
       app: row.app,
       topic: cleanTopic(row.topic),
       state,

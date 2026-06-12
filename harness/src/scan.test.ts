@@ -116,7 +116,37 @@ try {
   const woken = run();
   assert.deepEqual([woken.count, byId(woken, sid)?.state], [2, "needs-you"], "newer message wakes a done thread");
 
-  process.stdout.write("ok — scan skill: resolver join, cursor finder, origin app, git delta\n");
+  // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
+  const privateRoot = join(home, "Documents", "Personal");
+  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [privateRoot], repos: ["Personal"] }));
+  const privMsg = (id: string, cwd: string, type: "user" | "assistant", content: string, ts: string) =>
+    JSON.stringify({ type, sessionId: id, cwd, timestamp: ts, message: { content, ...(type === "assistant" ? { stop_reason: "end_turn" } : {}) } }) + "\n";
+  // Layer 1: project dir named with the cwd slug → the file is skipped UNREAD.
+  const slugId = "aaaaaaaa-1111-2222-3333-444444444444";
+  const slugCwd = join(privateRoot, "Career");
+  const slugDir = join(home, ".claude", "projects", slugCwd.replace(/[^A-Za-z0-9-]/g, "-"));
+  mkdirSync(slugDir, { recursive: true });
+  writeFileSync(join(slugDir, `${slugId}.jsonl`),
+    privMsg(slugId, slugCwd, "user", "private thing", at(8)) +
+    privMsg(slugId, slugCwd, "assistant", "noted", at(7)) +
+    privMsg(slugId, slugCwd, "user", "more private follow-up", at(6)));
+  // Layer 2: unslugged dir (worktree-style) — caught post-parse by the records' cwd.
+  const deepId = "bbbbbbbb-1111-2222-3333-444444444444";
+  const deepCwd = join(privateRoot, "Career", "Jobs", "acme");
+  mkdirSync(join(home, ".claude", "projects", "misc"), { recursive: true });
+  writeFileSync(join(home, ".claude", "projects", "misc", `${deepId}.jsonl`),
+    privMsg(deepId, deepCwd, "user", "private lower-level thing", at(8)) +
+    privMsg(deepId, deepCwd, "assistant", "noted", at(7)) +
+    privMsg(deepId, deepCwd, "user", "more of it", at(6)));
+
+  const blocked = run("--all");
+  assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
+  assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
+  assert.equal(run().count, 2, "visible set unchanged");
+  assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
+  assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
+
+  process.stdout.write("ok — scan skill: resolver join, cursor finder, origin app, git delta, blacklist\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });

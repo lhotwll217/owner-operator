@@ -19,7 +19,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import type { StatusSnapshot, ThreadStatus, TriageInfo } from "@owner-operator/core";
+import { loadBlacklist, isBlacklisted, type Blacklist, type StatusSnapshot, type ThreadStatus, type TriageInfo } from "@owner-operator/core";
 import { ThreadDb } from "./threads-db";
 
 export const STORE_DIR = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
@@ -35,8 +35,26 @@ function getDb(): ThreadDb {
   if (!db) {
     db = new ThreadDb();
     seedLegacyJson(db);
+    applyBlacklist(db);
   }
   return db;
+}
+
+/** The privacy blacklist (<STORE_DIR>/blacklist.json), read fresh at each enforcement point. */
+function blacklist(): Blacklist {
+  return loadBlacklist(STORE_DIR);
+}
+
+// The blacklist self-heals on open: rows that landed before a repo/path was blacklisted
+// (or were written by an older binary) are purged, and the derived export is regenerated
+// so status.json never re-serves them.
+function applyBlacklist(target: ThreadDb): void {
+  const bl = blacklist();
+  if (!bl.paths.length && !bl.repos.length) return;
+  if (target.purgeBlacklisted(bl) > 0) {
+    const snap = target.loadSnapshot();
+    if (snap) writeAtomic(STATUS_FILE, snap);
+  }
 }
 
 // One-time migration: a box that ran the JSON-only store has state worth keeping (operator
@@ -82,6 +100,12 @@ export function loadSnapshot(): StatusSnapshot | null {
  * done-hold may adjust rows, so callers must render what comes back, not what they sent.
  */
 export function saveSnapshot(snapshot: StatusSnapshot): StatusSnapshot {
+  // Write-boundary backstop: a caller holding a stale snapshot (or an unpatched scan)
+  // cannot persist a blacklisted thread — the scan is the gate, this seam is the lock.
+  const bl = blacklist();
+  if (bl.paths.length || bl.repos.length) {
+    snapshot = { ...snapshot, threads: snapshot.threads.filter((t) => !isBlacklisted(bl, { cwd: t.project, repo: t.repo })) };
+  }
   const d = getDb();
   d.saveSnapshot(snapshot);
   const stored = d.loadSnapshot() ?? snapshot;

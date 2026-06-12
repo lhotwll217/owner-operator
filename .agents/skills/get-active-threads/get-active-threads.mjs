@@ -22,9 +22,10 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { resolveCandidates } from "../../../packages/core/src/resolve.mjs";
+import { loadBlacklist, isBlacklisted, pathSlugs } from "../../../packages/core/src/blacklist.mjs";
 
 const args = process.argv.slice(2);
 const val = (name, def) => {
@@ -59,6 +60,15 @@ function cutoffFrom(s) {
 }
 const cutoff = cutoffFrom(sinceArg);
 
+// ---------- privacy blacklist (ABSOLUTE — no flag bypasses it) ----------
+// Repos/paths the operator declared off-limits (<ooHome>/blacklist.json). Claude transcript
+// files under a blacklisted tree are skipped by their project-dir slug BEFORE a byte is
+// read; everything else (Codex/Cursor/worktrees) is dropped post-parse by cwd + repo name.
+const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
+const blacklist = loadBlacklist(ooHome);
+const blockedSlugs = pathSlugs(blacklist);
+const slugBlocked = (dirName) => blockedSlugs.some((s) => dirName === s || dirName.startsWith(s + "-"));
+
 // ---------- collect candidate files (mtime within window) ----------
 function walk(dir, out) {
   let ents;
@@ -82,6 +92,8 @@ for (const { root, source } of roots) {
   for (const f of files) {
     // Cursor's projects dir also holds mcps/terminals — only agent transcripts are sessions.
     if (source === "cursor" && !f.includes("/agent-transcripts/")) continue;
+    // Blacklisted tree → skip the file unread (Claude project dirs are cwd slugs).
+    if (source === "claude" && slugBlocked(basename(dirname(f)))) continue;
     let st; try { st = statSync(f); } catch { continue; }
     if (st.mtimeMs >= cutoff) candidates.push({ file: f, source, mtime: st.mtimeMs, btime: st.birthtimeMs });
   }
@@ -110,10 +122,9 @@ function claudeText(content) {
 // Which GUI the thread lives in — the CANONICAL APP NAMES, a fixed display vocabulary:
 // Superset App, Conductor, Claude CLI, Claude App, Codex CLI, Codex App, Cursor. (SDK
 // worker sessions — hidden by default — carry an SDK label outside that set.) A session
-// spawned in a
-// Superset/Conductor worktree belongs to that GUI — that's where the branch/worktree
-// lives — even if Codex/Claude/Cursor is the agent, so the worktree hosts are checked
-// FIRST, before the source. Codex refines by its session_meta provenance.
+// spawned in a Superset/Conductor worktree belongs to that GUI — that's where the branch/
+// worktree lives — even if Codex/Claude/Cursor is the agent, so the worktree hosts are
+// checked FIRST, before the source. Codex refines by its session_meta provenance.
 function detectUi(source, cwd, entrypoint, meta = {}) {
   if (cwd && cwd.includes("/.superset/worktrees/")) return "Superset App";
   if (cwd && cwd.includes("/conductor/workspaces/")) return "Conductor";
@@ -351,6 +362,10 @@ function parseSession({ file, source, mtime, btime }) {
 }
 
 let threads = candidates.map(parseSession).filter(Boolean);
+// Blacklist, second layer: cwd + resolved repo name — catches Codex/Cursor sessions and
+// worktrees of a blacklisted repo living elsewhere. Applies before --thread/--all/limit:
+// no flag reaches a blacklisted thread.
+threads = threads.filter((t) => !isBlacklisted(blacklist, { cwd: t.project, repo: t.repo }));
 // One thread per session id: collapse subagent/sidechain transcripts (Task tool, resumed
 // sessions) into their parent, keeping the richest (most user turns → most messages → most
 // recent). A real session and its subagents share an id, so this de-noises without dropping
@@ -369,7 +384,6 @@ threads = [...byId.values()];
 // annotates each row's resolved `state` and drops rows the operator marked done (until a
 // newer message wakes them). `--thread` drill-ins bypass the drop — an explicit look at
 // one thread should always answer — but still carry the resolved state.
-const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 let persisted = [];
 try { persisted = JSON.parse(readFileSync(join(ooHome, "status.json"), "utf8")).threads ?? []; } catch { /* no operator state yet → all candidates pass */ }
 threads = resolveCandidates(threads, persisted, { includeDone: includeDone || !!threadArg });

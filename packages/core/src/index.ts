@@ -40,6 +40,11 @@ export function sortByPriority(threads: readonly Thread[]): Thread[] {
   return [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
 
+// The privacy blacklist: repos/paths the operator declared off-limits — enforced at the
+// scan (discovery), the store seam (writes), and the open-time purge. See blacklist.mjs.
+export { loadBlacklist, isBlacklisted, pathSlugs } from "./blacklist.mjs";
+export type { Blacklist } from "./blacklist.mjs";
+
 // Thread status & the lo-fi state machine — model-free, polled, persisted. The cheap
 // counterpart to the triaged `Thread` above (which needs the model). See status.ts.
 export * from "./status";

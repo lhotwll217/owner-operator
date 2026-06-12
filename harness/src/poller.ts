@@ -54,6 +54,7 @@ async function runScan(since: string, limit: number): Promise<ScanRow[]> {
     id: t.id,
     source: t.source,
     repo: t.repo,
+    project: t.project,
     app: t.ui, // scan calls it `ui`; our model calls it `app`
     topic: t.topic,
     lastRole: t.lastRole,

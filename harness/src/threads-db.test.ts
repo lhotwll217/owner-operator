@@ -24,7 +24,7 @@ try {
 
   // --- first poll: new thread → thread_added ---
   const r1 = db.recordScan({
-    id: "abc-123", repo: "amplify", app: "Claude Code", source: "claude",
+    id: "abc-123", repo: "amplify", app: "Claude CLI", source: "claude",
     transcriptPath: "/tmp/abc.jsonl", createdAt: "2026-06-09T10:00:00Z",
     lastActiveAt: "2026-06-09T11:00:00Z", rawTopic: "fix 422s",
     state: "working",
@@ -107,6 +107,35 @@ try {
   assert.equal(persisted.priority, 5);
   assert.equal(reopened.getLatestTriage("abc-123")!.version, 2);
   reopened.close();
+
+  // --- privacy purge: path tree (lower-level repos too), repo name, slug, CASCADE ---
+  const pdb = new ThreadDb(join(dir, "purge.db"), { now });
+  const status = (id: string, repo: string, project?: string) => ({
+    id, source: "claude", repo, ...(project ? { project } : {}), app: "Claude CLI",
+    topic: "t", state: "idle" as const, lastActive: "just now",
+    createdAt: "2026-06-09T10:00:00Z", lastMessageAt: "2026-06-09T11:00:00Z",
+    firstSeen: "2026-06-09T10:00:00Z", stateSince: "2026-06-09T10:00:00Z",
+  });
+  pdb.saveSnapshot({
+    polledAt: "2026-06-09T13:00:00Z",
+    threads: [
+      status("keep-1", "amplify", "/u/dev/amplify"),
+      status("keep-2", "PersonalSite", "/u/Documents/PersonalSite"), // sibling prefix must NOT bleed
+      status("priv-root", "Personal", "/u/Documents/Personal"),
+      status("priv-deep", "acme", "/u/Documents/Personal/Career/Jobs/acme"), // lower-level repo
+      status("priv-wt", "personal", "/u/.superset/worktrees/x/branch"),      // worktree → repo name
+    ],
+  });
+  pdb.upsertTriage("priv-deep", { topic: "private" }, "model");
+  // A historical row with NO project value — only its transcript path identifies it.
+  pdb.recordScan({ id: "priv-legacy", state: "idle", transcriptPath: "/u/.claude/projects/-u-Documents-Personal-Career/x.jsonl" });
+
+  const bl = { paths: ["/u/Documents/Personal"], repos: ["Personal"] };
+  assert.equal(pdb.purgeBlacklisted(bl), 4, "root + lower-level + worktree-by-name + legacy-by-slug purged");
+  assert.deepEqual(pdb.loadSnapshot()!.threads.map((t) => t.id).sort(), ["keep-1", "keep-2"], "survivors intact");
+  assert.equal(pdb.getLatestTriage("priv-deep"), undefined, "purged thread's triage cascaded");
+  assert.equal(pdb.purgeBlacklisted({ paths: [], repos: [] }), 0, "empty blacklist deletes nothing");
+  pdb.close();
 
   process.stdout.write("ok — thread db passed\n");
 } finally {

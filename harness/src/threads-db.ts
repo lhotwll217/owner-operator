@@ -118,6 +118,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS threads (
   id              TEXT PRIMARY KEY,
   repo            TEXT,
+  project         TEXT,
   app             TEXT,
   source          TEXT,
   transcript_path TEXT,
@@ -210,6 +211,7 @@ export class ThreadDb {
     if (!cols.has("in_snapshot")) add("in_snapshot INTEGER NOT NULL DEFAULT 0");
     if (!cols.has("diff_added")) add("diff_added INTEGER");
     if (!cols.has("diff_deleted")) add("diff_deleted INTEGER");
+    if (!cols.has("project")) add("project TEXT");
   }
 
   /** Listen for change events (edges, not snapshots). Returns an unsubscribe fn. */
@@ -399,12 +401,13 @@ export class ThreadDb {
    */
   saveSnapshot(snapshot: StatusSnapshot): void {
     const upsert = this.db.prepare(
-      `INSERT INTO threads (id, repo, app, source, raw_topic, created_at, last_active_at,
+      `INSERT INTO threads (id, repo, project, app, source, raw_topic, created_at, last_active_at,
          first_seen_at, last_seen_at, state, last_message_at, last_active_rel,
          state_since, previous_state, in_snapshot, last_checked_at, diff_added, diff_deleted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          repo = excluded.repo, app = excluded.app, source = excluded.source,
+         project = COALESCE(excluded.project, threads.project),
          raw_topic = excluded.raw_topic, created_at = excluded.created_at,
          last_active_at = excluded.last_active_at, last_seen_at = excluded.last_seen_at,
          diff_added = excluded.diff_added, diff_deleted = excluded.diff_deleted,
@@ -424,7 +427,7 @@ export class ThreadDb {
       this.db.exec("UPDATE threads SET in_snapshot = 0 WHERE in_snapshot = 1");
       for (const t of snapshot.threads) {
         upsert.run(
-          t.id, t.repo, t.app, t.source, t.topic, t.createdAt,
+          t.id, t.repo, t.project ?? null, t.app, t.source, t.topic, t.createdAt,
           t.lastMessageAt, // closest ISO activity signal the snapshot carries
           t.firstSeen, snapshot.polledAt, t.state, t.lastMessageAt, t.lastActive,
           t.stateSince, t.previousState ?? null, snapshot.polledAt,
@@ -447,7 +450,7 @@ export class ThreadDb {
       | { value: string } | undefined;
     if (!polled) return null;
     const rows = this.db.prepare(
-      `SELECT id, source, repo, app, raw_topic AS topic, state,
+      `SELECT id, source, repo, project, app, raw_topic AS topic, state,
               last_active_rel AS lastActive, created_at AS createdAt,
               last_message_at AS lastMessageAt, first_seen_at AS firstSeen,
               state_since AS stateSince, previous_state AS previousState,
@@ -461,6 +464,7 @@ export class ThreadDb {
         id: String(r.id),
         source: r.source ?? "",
         repo: r.repo ?? "",
+        ...(r.project ? { project: r.project } : {}),
         app: r.app ?? "",
         topic: r.topic ?? "",
         state: r.state as ThreadState,
@@ -510,6 +514,31 @@ export class ThreadDb {
     const marked = (snapshot?.threads ?? []).filter((t) => wanted.has(t.id));
     const markedIds = new Set(marked.map((t) => t.id));
     return { snapshot, marked, missingIds: ids.filter((id) => !markedIds.has(id)) };
+  }
+
+  /**
+   * Privacy purge: delete every thread (triage rows follow via CASCADE) that belongs to a
+   * blacklisted tree or repo. Matches the stored cwd (`project`), the repo name
+   * (case-insensitive), and the transcript path's Claude project-dir slug — historical
+   * rows that predate the `project` column only carry the latter two. Returns rows deleted.
+   */
+  purgeBlacklisted(bl: { paths: string[]; repos: string[] }): number {
+    const conds: string[] = [];
+    const params: string[] = [];
+    for (const r of bl.repos) {
+      conds.push("lower(repo) = lower(?)");
+      params.push(r);
+    }
+    for (const p of bl.paths) {
+      conds.push("(project = ? COLLATE NOCASE OR project LIKE ? || '/%' COLLATE NOCASE)");
+      params.push(p, p);
+      const slug = p.replace(/[^A-Za-z0-9-]/g, "-"); // keep in lockstep with core pathSlugs()
+      conds.push("(transcript_path LIKE ? OR transcript_path LIKE ?)");
+      params.push(`%/projects/${slug}/%`, `%/projects/${slug}-%`);
+    }
+    if (!conds.length) return 0;
+    const r = this.db.prepare(`DELETE FROM threads WHERE ${conds.join(" OR ")}`).run(...params);
+    return Number(r.changes);
   }
 
   /**
