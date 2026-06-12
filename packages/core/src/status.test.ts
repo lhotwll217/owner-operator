@@ -23,10 +23,11 @@ const row = (over: Partial<ScanRow> & Pick<ScanRow, "id">): ScanRow => ({
 });
 
 // --- deriveState ---
-assert.equal(deriveState({ lastRole: "assistant", secondsSinceActivity: 60, working: false }), "needs-you", "assistant yielded → needs-you");
-assert.equal(deriveState({ lastRole: "user", secondsSinceActivity: 60, working: false }), "working", "user spoke last → working");
-assert.equal(deriveState({ lastRole: "assistant", secondsSinceActivity: 60, working: true }), "working", "turn in progress → working even though the assistant spoke last (the bug fix)");
-assert.equal(deriveState({ lastRole: "assistant", secondsSinceActivity: IDLE_AFTER_SECONDS, working: false }), "idle", "stale → idle");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60, working: false }), "needs-you", "assistant yielded → needs-you");
+assert.equal(deriveState({ lastRole: "user", secondsSinceLastMessage: 60, working: false }), "working", "user spoke last → working");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60, working: true }), "working", "turn in progress → working even though the assistant spoke last (the bug fix)");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS, working: false }), "idle", "message-quiet → idle (file mtime noise must not keep threads alive)");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS, working: true }), "working", "a long-running turn outranks message-quiet idle");
 
 // --- reconcile: first poll stamps firstSeen + stateSince to now ---
 const T0 = "2026-06-09T10:06:00.000Z";
@@ -77,7 +78,7 @@ assert.deepEqual([withDiff.threads[0].diffAdded, withDiff.threads[0].diffDeleted
 
 // --- sortByAttention: needs-you before working before idle ---
 const mixed = reconcile(null, [
-  row({ id: "i", lastRole: "assistant", secondsSinceActivity: IDLE_AFTER_SECONDS }),
+  row({ id: "i", lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS }),
   row({ id: "w", lastRole: "user" }),
   row({ id: "n", lastRole: "assistant" }),
 ], "2026-06-09T10:11:00.000Z");

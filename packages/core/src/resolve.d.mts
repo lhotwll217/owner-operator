@@ -7,7 +7,7 @@ import type { ThreadState } from "./status";
 export interface CandidateRow {
   id: string;
   lastRole: string;
-  secondsSinceActivity: number;
+  secondsSinceLastMessage: number;
   working: boolean;
   lastMessageAt: string; // ISO
 }
@@ -22,7 +22,7 @@ export interface PersistedThread {
 export declare const IDLE_AFTER_SECONDS: number;
 
 export declare function deriveState(
-  row: Pick<CandidateRow, "lastRole" | "secondsSinceActivity" | "working">,
+  row: Pick<CandidateRow, "lastRole" | "secondsSinceLastMessage" | "working">,
 ): ThreadState;
 
 export declare function holdsDone(

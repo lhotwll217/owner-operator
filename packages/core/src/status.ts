@@ -40,7 +40,9 @@ export interface ScanRow {
   createdAt: string;          // ISO
   lastMessageAt: string;      // ISO
   secondsSinceLastMessage: number;
-  /** Seconds since the LAST event of any kind (file write) — true liveness, even mid-reasoning. */
+  /** Seconds since the LAST event of any kind (file write). Informational only — GUI apps
+   *  append housekeeping events that keep this forever fresh, so state/recency use
+   *  `secondsSinceLastMessage` + the `working` flag instead. */
   secondsSinceActivity: number;
   /** A turn is in progress (Codex task running / Claude tool-loop) — the agent hasn't yielded. */
   working: boolean;
@@ -119,7 +121,9 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
       app: row.app,
       topic: cleanTopic(row.topic),
       state,
-      lastActive: formatRelative(row.secondsSinceActivity),
+      // Display recency = MESSAGE time (matches the cards and the digest's "Last message");
+      // file-activity time lies when a GUI app keeps appending housekeeping events.
+      lastActive: formatRelative(row.secondsSinceLastMessage),
       createdAt: row.createdAt,
       lastMessageAt: row.lastMessageAt,
       firstSeen: was?.firstSeen ?? nowIso,
