@@ -1,7 +1,7 @@
 // Hand-written declarations for blacklist.mjs (plain ESM so the scan skill can import it
 // without a build step). Keep in lockstep with blacklist.mjs — it's 3 small functions.
 
-/** The parsed blacklist: directory trees and repo names the operator declared off-limits. */
+/** The parsed blacklist: directory trees and repo names the owner declared off-limits. */
 export interface Blacklist {
   paths: string[];
   repos: string[];

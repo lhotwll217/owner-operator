@@ -7,7 +7,7 @@
 
 import { resolveState } from "./resolve.mjs";
 
-// The canonical resolver — raw scan candidates joined with persisted operator state. Every
+// The canonical resolver — raw scan candidates joined with persisted owner state. Every
 // surface (poller, sidebar, tools, the scan skill itself) resolves through these, never its
 // own rule. Plain ESM in resolve.mjs so the zero-install scan skill runs the same code.
 export {
@@ -114,7 +114,7 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
   const byId = new Map((prev?.threads ?? []).map((t) => [t.id, t]));
   const threads = rows.map((row): ThreadStatus => {
     const was = byId.get(row.id);
-    // The canonical resolver decides: operator-set `done` holds until a newer message
+    // The canonical resolver decides: owner-set `done` holds until a newer message
     // lands, then the scan-derived state wakes the thread again.
     const state = resolveState(was, row);
     const changed = !was || was.state !== state;
@@ -143,7 +143,7 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
 
 /**
  * Threads that just ENTERED `needs-you` (a new assistant response landed → now waiting on the
- * operator). These are the only threads worth a targeted LLM nextStep refresh — everything else
+ * owner). These are the only threads worth a targeted LLM nextStep refresh — everything else
  * the cheap poll handles with status/recency alone. Event-driven, not every-poll.
  */
 export function becameNeedsYou(diff: StatusDiff): ThreadStatus[] {

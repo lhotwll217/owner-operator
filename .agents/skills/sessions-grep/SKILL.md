@@ -28,7 +28,7 @@ missing or insufficient.
 ## How to use
 
 ```bash
-node /Users/otwell/Development/owner-operator/.agents/skills/sessions-grep/sessions-grep.mjs --query "why did you" --since 7d --limit 12 --before 2 --after 2
+node .agents/skills/sessions-grep/sessions-grep.mjs --query "why did you" --since 7d --limit 12 --before 2 --after 2
 ```
 
 Common flags:

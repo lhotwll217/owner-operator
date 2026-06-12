@@ -57,7 +57,7 @@ function applyBlacklist(target: ThreadDb): void {
   }
 }
 
-// One-time migration: a box that ran the JSON-only store has state worth keeping (operator
+// One-time migration: a box that ran the JSON-only store has state worth keeping (owner
 // dones, triage titles). Seed the empty db from the legacy files; from then on the db is
 // truth and status.json is output-only.
 function seedLegacyJson(target: ThreadDb): void {

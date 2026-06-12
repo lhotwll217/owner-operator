@@ -114,7 +114,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   };
 
   // The push stream + event triggers hang off the poll: every pass broadcasts, and a
-  // thread NEWLY needing the operator (transition or fresh appearance) fires event
+  // thread NEWLY needing the owner (transition or fresh appearance) fires event
   // schedules with OO_NEEDS_YOU=<ids> — a desktop notification is one shell command away.
   poller.subscribe((snapshot: StatusSnapshot, diff: StatusDiff) => {
     broadcast({ type: "snapshot", snapshot, diff });

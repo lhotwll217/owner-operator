@@ -29,7 +29,7 @@ export const repoRoot = join(here, "..", "..");
 const ThreadCard = Type.Object({
   id: Type.String({ description: "Stable session id — copy the `id` from the digest verbatim (lets the sidebar match this thread)" }),
   topic: Type.String({ description: "Short title of the SPECIFIC work — never repeat the repo or app name (the card shows both separately); spend the title on what's actually happening" }),
-  priority: Type.Integer({ minimum: 1, maximum: 5, description: "Priority 5 (highest — needs the operator now) down to 1 (lowest)" }),
+  priority: Type.Integer({ minimum: 1, maximum: 5, description: "Priority 5 (highest — needs the owner now) down to 1 (lowest)" }),
   summary: Type.String({ description: "One SHORT, scannable sentence on current state (≤ ~15 words) — the gist, not the full story" }),
   nextSteps: Type.String({ description: "One short clause: the concrete next action" }),
   repo: Type.String({ description: "Repo name" }),
@@ -105,7 +105,7 @@ export const getSidebarThreadsTool = defineTool({
     "Read the current visible Owner Operator sidebar rows, including row number, id, repo, topic, status, priority, and next step.",
   promptSnippet: "get_sidebar_threads — read current visible sidebar rows with index, id, topic, status, priority, and next step",
   promptGuidelines: [
-    "Use get_sidebar_threads when the operator asks what is in the sidebar or wants current visible sidebar context.",
+    "Use get_sidebar_threads when the owner asks what is in the sidebar or wants current visible sidebar context.",
   ],
   parameters: Type.Object({}),
   async execute() {
@@ -124,7 +124,7 @@ export const markThreadDoneTool = defineTool({
     "Mark one or more current sidebar threads done by stable id, visible sidebar index, or name/topic query.",
   promptSnippet: "mark_thread_done — set sidebar thread status to done by id, visible index, or name/topic query",
   promptGuidelines: [
-    "Use mark_thread_done only when the operator asks to mark threads done/resolved/inactive.",
+    "Use mark_thread_done only when the owner asks to mark threads done/resolved/inactive.",
     "Use ids when known, indexes for visible row numbers, or queries for user-provided names/topics.",
   ],
   parameters: MarkThreadDoneParams,
@@ -177,7 +177,7 @@ export const presentThreadsTool = defineTool({
   name: "present_threads",
   label: "Present threads",
   description:
-    "Render the triaged active threads to the operator as structured cards. Call this " +
+    "Render the triaged active threads to the owner as structured cards. Call this " +
     "INSTEAD of writing the triage as prose. One entry per thread, ordered most-urgent first.",
   promptSnippet: "present_threads — render triaged active threads as cards (use instead of prose)",
   promptGuidelines: [
@@ -186,7 +186,7 @@ export const presentThreadsTool = defineTool({
   parameters: PresentThreadsParams,
   async execute(_id, params) {
     const n = params.threads.length;
-    return { content: [{ type: "text" as const, text: `Rendered ${n} thread card(s) for the operator.` }], details: undefined };
+    return { content: [{ type: "text" as const, text: `Rendered ${n} thread card(s) for the owner.` }], details: undefined };
   },
 });
 
@@ -220,7 +220,7 @@ export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession
     authStorage,
     modelRegistry,
     customTools: [presentThreadsTool, getSidebarThreadsTool, markThreadDoneTool],
-    // read-only + bash to run the skills, plus our structured-output/operator tools.
+    // read-only + bash to run the skills, plus our structured-output/owner tools.
     // (This is an allowlist, so custom tools must be listed or they would be disabled.)
     tools: ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done"],
   });

@@ -26,7 +26,7 @@ Run the bundled script. **Do this instead of reading session files or calling se
 tools yourself** — those overflow context and cost tokens.
 
 ```bash
-node /Users/otwell/Development/owner-operator/.agents/skills/get-active-threads/get-active-threads.mjs --since today --sample 4
+node .agents/skills/get-active-threads/get-active-threads.mjs --since today --sample 4
 ```
 
 Flags:
@@ -35,13 +35,13 @@ Flags:
 - `--thread <id>` — drill into ONE thread (id prefix ok); pair with a bigger `--sample` to expand just that thread
 - `--limit N` — max threads (default 40)
 - `--all` — include automated/worker one-shots AND done threads (both hidden by default)
-- `--include-done` — include threads the operator marked done (for auditing)
+- `--include-done` — include threads the owner marked done (for auditing)
 - `--json` — machine-readable output (use when you want to post-process)
 - `--truncate N` — per-message char cap (default 280)
 
 Each thread carries a resolved `State` (needs-you / working / idle / done) — the scan's
-candidates joined against the operator's status store by the canonical resolver. Threads
-the operator marked done are **excluded by default** and only reappear when a newer
+candidates joined against the owner's status store by the canonical resolver. Threads
+the owner marked done are **excluded by default** and only reappear when a newer
 message wakes them; `--thread` drill-ins always answer. Threads also carry their origin
 `App` (Superset App / Conductor / Claude CLI / Claude App / Codex CLI / Codex App / Cursor) and, when the workspace
 has changes vs its base branch, a `Diff: +N -N` line delta.
@@ -49,7 +49,7 @@ has changes vs its base branch, a `Diff: +N -N` line delta.
 ## Then: present via the `present_threads` tool (required)
 
 **You MUST present the result by calling the `present_threads` tool. Do NOT write the
-triage as prose, a list, or a table — the only way threads reach the operator is the tool
+triage as prose, a list, or a table — the only way threads reach the owner is the tool
 call.** The UI renders the tool payload as cards.
 
 For each thread, reason over its `firstMessages` (what it was about) and `recentMessages`
@@ -58,7 +58,7 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 - `id` — copy the thread's `id` from the digest **verbatim** (this is how the sidebar matches the card to the live thread — don't omit or alter it).
 - `topic` — the SPECIFIC work, not the location: never repeat the repo or app name (the
   card and rail show both separately). "Fix 422 contract mismatch", not "Amplify 422 fix".
-- `priority` — integer **5 (highest, needs the operator now) → 1 (lowest)**.
+- `priority` — integer **5 (highest, needs the owner now) → 1 (lowest)**.
 - `summary` — one SHORT, scannable sentence on current state (≤ ~15 words; the gist, not the whole story).
 - `nextSteps` — one short clause: the concrete next action (what's it waiting on). Rendered greyed, as the card's footer.
 - `repo`, `app` — copy from the digest.
@@ -67,9 +67,9 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
   when the digest has no Diff line.
 - `link` — only if the digest gives one.
 
-Set `priority` by how much it needs the operator now — the digest's `State` line is the
+Set `priority` by how much it needs the owner now — the digest's `State` line is the
 live signal: 5 for mid-conversation threads waiting on a decision/approval/MR review, low
-for things ticking along on their own. Threads the operator marked done are already
+for things ticking along on their own. Threads the owner marked done are already
 excluded from the digest — don't resurrect them. Order the array highest-priority first.
 Never paste the raw tail back verbatim.
 

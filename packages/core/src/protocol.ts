@@ -38,7 +38,7 @@ export interface DaemonInfo {
 export type ScheduleWhen =
   | { type: "interval"; ms: number }       // every N ms (min 5s)
   | { type: "daily"; at: string }          // local "HH:MM" — e.g. the 08:00 morning brief
-  | { type: "event"; event: "needs-you" }; // a thread newly needs the operator
+  | { type: "event"; event: "needs-you" }; // a thread newly needs the owner
 
 export type ScheduleAction =
   | { type: "poll" }                       // force a reconcile pass

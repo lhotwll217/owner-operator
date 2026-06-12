@@ -7,9 +7,9 @@
 // delta), and a sample of each thread's messages (its opening few + most-recent few) so
 // an agent can triage "what's ongoing" WITHOUT loading full transcripts into a model.
 //
-// Raw scan rows are CANDIDATES, not truth: each row is resolved against the operator's
+// Raw scan rows are CANDIDATES, not truth: each row is resolved against the owner's
 // persisted status store (~/.owner-operator/status.json) via the canonical resolver
-// (packages/core/src/resolve.mjs — no npm deps, an in-repo import). Threads the operator
+// (packages/core/src/resolve.mjs — no npm deps, an in-repo import). Threads the owner
 // marked done stay hidden until a newer message wakes them; `--include-done` audits them.
 //
 // Usage:
@@ -18,7 +18,7 @@
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
-//   --include-done   include threads the operator marked done (--all implies it)
+//   --include-done   include threads the owner marked done (--all implies it)
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -61,7 +61,7 @@ function cutoffFrom(s) {
 const cutoff = cutoffFrom(sinceArg);
 
 // ---------- privacy blacklist (ABSOLUTE — no flag bypasses it) ----------
-// Repos/paths the operator declared off-limits (<ooHome>/blacklist.json). Claude transcript
+// Repos/paths the owner declared off-limits (<ooHome>/blacklist.json). Claude transcript
 // files under a blacklisted tree are skipped by their project-dir slug BEFORE a byte is
 // read; everything else (Codex/Cursor/worktrees) is dropped post-parse by cwd + repo name.
 const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
@@ -380,12 +380,12 @@ for (const t of threads) {
 }
 threads = [...byId.values()];
 
-// Join candidates with the operator's persisted status store: the canonical resolver
-// annotates each row's resolved `state` and drops rows the operator marked done (until a
+// Join candidates with the owner's persisted status store: the canonical resolver
+// annotates each row's resolved `state` and drops rows the owner marked done (until a
 // newer message wakes them). `--thread` drill-ins bypass the drop — an explicit look at
 // one thread should always answer — but still carry the resolved state.
 let persisted = [];
-try { persisted = JSON.parse(readFileSync(join(ooHome, "status.json"), "utf8")).threads ?? []; } catch { /* no operator state yet → all candidates pass */ }
+try { persisted = JSON.parse(readFileSync(join(ooHome, "status.json"), "utf8")).threads ?? []; } catch { /* no owner state yet → all candidates pass */ }
 threads = resolveCandidates(threads, persisted, { includeDone: includeDone || !!threadArg });
 
 if (threadArg) {
@@ -418,7 +418,7 @@ if (asJson) {
     console.log(`## ${repo}`);
     for (const t of ts) {
       console.log(`\n● ${t.topic}`);
-      // Structured fields the operator triages on. Times are relative ("2 days ago").
+      // Structured fields the owner triages on. Times are relative ("2 days ago").
       console.log(`  id            : ${t.id}   (drill in: --thread ${t.id} --sample 15)`);
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);

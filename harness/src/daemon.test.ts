@@ -88,7 +88,7 @@ try {
   assert.ok(sched.lastRunAt, "run recorded");
   assert.equal(sched.lastResult.ok, true);
 
-  // --- event trigger: a thread newly needing the operator fires the schedule with ids ---
+  // --- event trigger: a thread newly needing the owner fires the schedule with ids ---
   const needsFile = join(dir, "needs.txt");
   await send("PUT", "/schedules/notify", {
     when: { type: "event", event: "needs-you" },

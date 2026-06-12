@@ -93,7 +93,7 @@ export class StatusPoller {
     this.polling = true;
     try {
       const rows = await (this.opts.scan ?? runScan)(this.opts.since ?? "today", this.opts.limit ?? 50);
-      // The store is the source of truth because operator actions can land outside this
+      // The store is the source of truth because owner actions can land outside this
       // poller's in-memory `current` snapshot — other processes included.
       const prev = loadSnapshot() ?? this.current;
       const next = reconcile(prev, rows, new Date().toISOString());

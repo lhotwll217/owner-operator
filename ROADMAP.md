@@ -1,6 +1,6 @@
 # Roadmap / Backlog
 
-> **Owner-controlled — Luke drives this file.** Agents/assistants: do **not** add items, check
+> **Owner-controlled — the owner drives this file.** Agents/assistants: do **not** add items, check
 > boxes, or rewrite this roadmap. Surface suggestions in chat; the owner decides what lands here.
 
 Concrete things to build, beyond the phase-level vision in [VISION.md](VISION.md).

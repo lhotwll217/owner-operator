@@ -11,7 +11,7 @@ export interface Thread {
   id?: string;
   /** Short title of what the thread is about. */
   topic: string;
-  /** 5 (highest — needs the operator now) down to 1 (lowest). */
+  /** 5 (highest — needs the owner now) down to 1 (lowest). */
   priority: number;
   /** One sentence on what has generally happened / current state. */
   summary: string;
@@ -40,7 +40,7 @@ export function sortByPriority(threads: readonly Thread[]): Thread[] {
   return [...threads].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
 
-// The privacy blacklist: repos/paths the operator declared off-limits — enforced at the
+// The privacy blacklist: repos/paths the owner declared off-limits — enforced at the
 // scan (discovery), the store seam (writes), and the open-time purge. See blacklist.mjs.
 export { loadBlacklist, isBlacklisted, pathSlugs } from "./blacklist.mjs";
 export type { Blacklist } from "./blacklist.mjs";

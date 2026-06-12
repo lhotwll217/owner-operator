@@ -1,7 +1,7 @@
 // Deterministic test of the SQLite-backed store seam: the one-time legacy-JSON seed, the
 // status.json export, triage versioning through the cache seam, and the write-boundary
 // done-hold — a SECOND connection (≈ another process) saving a STALE snapshot must not
-// clobber an operator-set done. This is the multi-consumer-writing guarantee.
+// clobber an owner-set done. This is the multi-consumer-writing guarantee.
 //   npm run test:store     (from harness/)
 
 import assert from "node:assert";
@@ -51,7 +51,7 @@ try {
   other.saveSnapshot({ polledAt: "2026-06-09T10:08:00.000Z", threads: [thread()] }); // still says needs-you
   assert.equal(store.loadSnapshot()?.threads[0].state, "done", "stale writer cannot resurrect a done thread");
 
-  // A NEWER message wakes it — through any writer, no operator action needed.
+  // A NEWER message wakes it — through any writer, no owner action needed.
   other.saveSnapshot({
     polledAt: "2026-06-09T10:09:00.000Z",
     threads: [thread({ lastMessageAt: "2026-06-09T10:09:00.000Z" })],

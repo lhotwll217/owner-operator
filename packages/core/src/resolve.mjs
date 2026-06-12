@@ -1,6 +1,6 @@
 // Owner Operator — THE canonical thread-state resolver. One rule, in one place, that every
 // surface goes through: raw transcript scans produce CANDIDATE facts; the persisted status
-// store holds OPERATOR state (`done`); this module joins the two.
+// store holds OWNER state (`done`); this module joins the two.
 //
 // Modeled on OpenClaw's state ownership (docs/inspiration.md): a single owner of session
 // state, surfaces query it rather than derive their own. Until a gateway process owns this
@@ -27,7 +27,7 @@ export function deriveState(row) {
 }
 
 /**
- * Does an operator-set `done` still hold for this candidate? `done` is durable operator
+ * Does an owner-set `done` still hold for this candidate? `done` is durable owner
  * state — transcripts can't observe "resolved" — so it survives every rescan until a NEWER
  * message lands, which wakes the thread. ISO-Z timestamps compare lexicographically.
  */

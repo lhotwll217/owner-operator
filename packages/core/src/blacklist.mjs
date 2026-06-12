@@ -1,4 +1,4 @@
-// Owner Operator — the privacy blacklist. Repos/paths the operator declared OFF-LIMITS:
+// Owner Operator — the privacy blacklist. Repos/paths the owner declared OFF-LIMITS:
 // never scanned, never stored, never shown — no flag bypasses it. Lives at
 // <ooHome>/blacklist.json:
 //

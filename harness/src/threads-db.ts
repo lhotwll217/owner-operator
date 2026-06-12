@@ -11,7 +11,7 @@
 //     across two transactions — that reintroduces the last-writer-wins clobber.
 //   • saveSnapshot() re-applies the canonical done-hold INSIDE the write (a SQL
 //     transcription of holdsDone(), packages/core/src/resolve.mjs), so a writer holding a
-//     stale snapshot cannot resurrect an operator-set `done`. A new "rebuild the world"
+//     stale snapshot cannot resurrect an owner-set `done`. A new "rebuild the world"
 //     writer must go through saveSnapshot, never raw UPDATEs on `state`.
 //   • Change events here are in-process only. Cross-process push is the daemon's job
 //     (daemon.ts — openclaw's gateway pattern): it owns the poll loop and broadcasts

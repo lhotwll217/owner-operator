@@ -1,6 +1,6 @@
 // Owner Operator — the live thread rail (glance-only). Grouped by project; every ACTIVE thread
 // is rendered identically with all its data points: row number · status glyph · priority ·
-// title · recency · greyed next-step (no summary). The number is the operator's handle —
+// title · recency · greyed next-step (no summary). The number is the owner's handle —
 // `/done 1,3` in the chat resolves through the same core numbering (see core/sidebar.ts).
 // No selection/cursor/navigation — it's a consistent display the chat sits beside.
 // Renders RAW lines; the Columns layout in screen.ts pads each line and draws the separator.

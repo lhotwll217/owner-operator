@@ -73,7 +73,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
   res.threads.find((t) => t.id === id);
 
 try {
-  // No operator state yet → both candidates pass, resolved from scan facts alone.
+  // No owner state yet → both candidates pass, resolved from scan facts alone.
   const fresh = run();
   assert.equal(fresh.count, 2, "scan finds the Claude and Cursor sessions");
   const claude = byId(fresh, sid)!;
@@ -111,7 +111,7 @@ try {
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
-  // A newer message lands → the same scan wakes the thread (no operator action needed).
+  // A newer message lands → the same scan wakes the thread (no owner action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
   assert.deepEqual([woken.count, byId(woken, sid)?.state], [2, "needs-you"], "newer message wakes a done thread");

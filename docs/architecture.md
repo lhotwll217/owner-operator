@@ -67,7 +67,7 @@ up front.
 
 The daemon hosts them (see `packages/core/src/protocol.ts` for shapes): a schedule is
 WHEN × ACTION, upserted by name over HTTP. `interval`/`daily` run from the tick loop;
-`event: needs-you` fires when a thread newly needs the operator (with
+`event: needs-you` fires when a thread newly needs the owner (with
 `OO_NEEDS_YOU=<ids>` in the env). Actions today: `poll` and `shell` — a desktop
 notification or a piped `oo --json` brief is one shell command away; a model-driven
 brief becomes a new action type when it's ready.

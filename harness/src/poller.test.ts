@@ -1,4 +1,4 @@
-// Regression test for operator-set status: mark done, then poll unchanged scan data.
+// Regression test for owner-set status: mark done, then poll unchanged scan data.
 // The poller must treat status.json as the source of truth, not stale in-memory current.
 
 import assert from "node:assert";
@@ -51,7 +51,7 @@ try {
   assert.equal(awakened?.threads[0].state, "needs-you", "newer message wakes a done thread");
 
   poller.stop();
-  process.stdout.write("ok — poller preserves operator-set done status\n");
+  process.stdout.write("ok — poller preserves owner-set done status\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

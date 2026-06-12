@@ -13,7 +13,7 @@ const cand = (over: Partial<{ id: string; lastRole: string; secondsSinceLastMess
 });
 const doneAt = (lastMessageAt: string) => ({ id: "a", state: "done" as const, lastMessageAt });
 
-// --- holdsDone: operator-set done survives until a NEWER message lands ---
+// --- holdsDone: owner-set done survives until a NEWER message lands ---
 assert.equal(holdsDone(undefined, cand()), false, "no persisted state → nothing holds");
 assert.equal(holdsDone(doneAt(AT), cand()), true, "same lastMessageAt → done holds");
 assert.equal(holdsDone(doneAt(NEWER), cand()), true, "older candidate → done holds");
