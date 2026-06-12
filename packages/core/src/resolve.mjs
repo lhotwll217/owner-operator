@@ -12,15 +12,17 @@
 export const IDLE_AFTER_SECONDS = 30 * 60;
 
 /**
- * Derive a candidate's state from raw scan facts — no model, no store. Quiet too long →
- * `idle`. A turn still in progress (reasoning / running tools / streaming) → `working`, even
- * if the last message is the assistant's. Otherwise: the assistant spoke last and yielded →
- * `needs-you`; the user spoke last → `working` (the agent owes a reply). The `working` flag
- * is what stops a thinking Codex/Claude session from looking "stopped".
+ * Derive a candidate's state from raw scan facts — no model, no store. A turn still in
+ * progress (reasoning / running tools / streaming) → `working`, even if the last message
+ * is the assistant's — the `working` flag is what stops a thinking agent from looking
+ * "stopped", so it wins. Then quiet too long → `idle` — by MESSAGE time, never file
+ * activity: GUI apps append housekeeping events (mode/meta lines) that keep the file's
+ * mtime forever fresh, which made 8-hour-old threads read "2m ago" and never idle.
+ * Otherwise: assistant spoke last and yielded → `needs-you`; user spoke last → `working`.
  */
 export function deriveState(row) {
-  if (row.secondsSinceActivity >= IDLE_AFTER_SECONDS) return "idle";
   if (row.working) return "working";
+  if (row.secondsSinceLastMessage >= IDLE_AFTER_SECONDS) return "idle";
   return row.lastRole === "assistant" ? "needs-you" : "working";
 }
 

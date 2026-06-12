@@ -8,8 +8,8 @@ import { holdsDone, resolveState, isActiveState, resolveCandidates } from "./res
 const AT = "2026-06-09T10:05:00.000Z";
 const NEWER = "2026-06-09T10:06:00.000Z";
 
-const cand = (over: Partial<{ id: string; lastRole: string; secondsSinceActivity: number; working: boolean; lastMessageAt: string }> = {}) => ({
-  id: "a", lastRole: "assistant", secondsSinceActivity: 60, working: false, lastMessageAt: AT, ...over,
+const cand = (over: Partial<{ id: string; lastRole: string; secondsSinceLastMessage: number; working: boolean; lastMessageAt: string }> = {}) => ({
+  id: "a", lastRole: "assistant", secondsSinceLastMessage: 60, working: false, lastMessageAt: AT, ...over,
 });
 const doneAt = (lastMessageAt: string) => ({ id: "a", state: "done" as const, lastMessageAt });
 
