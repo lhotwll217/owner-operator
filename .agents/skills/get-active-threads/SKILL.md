@@ -44,7 +44,10 @@ candidates joined against the owner's status store by the canonical resolver. Th
 the owner marked done are **excluded by default** and only reappear when a newer
 message wakes them; `--thread` drill-ins always answer. Threads also carry their origin
 `App` (Superset App / Conductor / Claude CLI / Claude App / Codex CLI / Codex App / Cursor / PostHog Code) and, when the workspace
-has changes vs its base branch, a `Diff: +N -N` line delta.
+has changes vs its base branch, a `Diff: +N -N` line delta. PostHog Code threads also carry an
+`environment` (`local` / `cloud`); a `cloud` run is provisioning/working in a PostHog sandbox
+(it may have no local cwd and only a "Setting up sandbox" status until it streams) — call that
+out in the summary, since it's making progress while the owner is away.
 
 ## Then: present via the `present_threads` tool (required)
 

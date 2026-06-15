@@ -146,8 +146,20 @@ writeFileSync(
   phNote({ jsonrpc: "2.0", id: 2, result: { stopReason: "end_turn", usage: { totalTokens: 1234 } } }, at(13)),
 );
 
+// PostHog Code CLOUD task still provisioning a sandbox: no session/new, no cwd, no
+// conversation — identity/repo/status live only in _posthog/* telemetry. Must still surface
+// (as a working "cloud" thread) instead of being dropped for having no messages.
+const phCloudId = "44444444-5555-6666-7777-888888888888";
+const phCloudFile = join(home, ".posthog-code", "sessions", phCloudId, "logs.ndjson");
+mkdirSync(dirname(phCloudFile), { recursive: true });
+writeFileSync(
+  phCloudFile,
+  phNote({ jsonrpc: "2.0", method: "_posthog/console", params: { sessionId: phCloudId, level: "debug", message: "Creating environment from published sandbox base image for acme/widget-site" } }, at(3)) +
+  phNote({ jsonrpc: "2.0", method: "_posthog/progress", params: { sessionId: phCloudId, step: "sandbox", status: "in_progress", label: "Setting up sandbox" } }, at(2)),
+);
+
 interface ScanThread {
-  id: string; state: string; lastMessageAt: string; repo: string; ui: string;
+  id: string; state: string; lastMessageAt: string; repo: string; ui: string; environment?: string;
   topic: string; working?: boolean; diffAdded?: number; diffDeleted?: number;
   firstMessages: { role: string; text: string }[]; recentMessages: unknown[]; omittedMessageCount: number;
 }
@@ -162,7 +174,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 5, "scan finds the Claude, Cursor, and PostHog Code sessions");
+  assert.equal(fresh.count, 6, "scan finds the Claude, Cursor, and PostHog Code (local + cloud) sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -202,6 +214,14 @@ try {
     "agent_message chunks coalesce; agent_thought_chunk excluded",
   );
 
+  // The cloud task surfaces despite zero conversation — repo + status from _posthog/* telemetry.
+  const phCloud = byId(fresh, phCloudId)!;
+  assert.equal(phCloud.ui, "PostHog Code", "cloud task is still a PostHog Code thread");
+  assert.equal(phCloud.repo, "widget-site", "cloud repo from the sandbox-image line (no local cwd)");
+  assert.equal(phCloud.environment, "cloud", "sandbox provisioning → cloud env");
+  assert.equal(phCloud.working, true, "still provisioning → working");
+  assert.ok(phCloud.topic.includes("Setting up sandbox"), "topic falls back to the progress label");
+
   // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
   const meta = byId(run("--sample", "0"), sid)!;
@@ -218,16 +238,16 @@ try {
   }));
 
   const afterDone = run();
-  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [4, undefined], "done thread excluded by default; others unaffected");
+  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [5, undefined], "done thread excluded by default; others unaffected");
   const audit = run("--include-done");
-  assert.deepEqual([audit.count, byId(audit, sid)?.state], [5, "done"], "--include-done audits it, resolved done");
+  assert.deepEqual([audit.count, byId(audit, sid)?.state], [6, "done"], "--include-done audits it, resolved done");
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
   // A newer message lands → the same scan wakes the thread (no owner action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
-  assert.deepEqual([woken.count, byId(woken, sid)?.state], [5, "needs-you"], "newer message wakes a done thread");
+  assert.deepEqual([woken.count, byId(woken, sid)?.state], [6, "needs-you"], "newer message wakes a done thread");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");
@@ -255,7 +275,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 5, "visible set unchanged");
+  assert.equal(run().count, 6, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 

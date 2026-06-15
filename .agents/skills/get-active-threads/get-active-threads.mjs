@@ -298,6 +298,10 @@ function parseSession({ file, source, mtime, btime }) {
   // a session/prompt RESULT (stopReason); pending requests (no result yet) = a live turn.
   let pcAsst = [], pcAsstTs = 0, pcPromptReq = 0, pcPromptDone = 0;
   const pcFlush = () => { if (pcAsst.length) { msgs.push({ role: "assistant", text: pcAsst.join(" "), ts: pcAsstTs }); pcAsst = []; } };
+  // posthog-code cloud/just-launched tasks emit no session/new + conversation until the sandbox
+  // is up — only _posthog/* telemetry. Capture repo (from the sandbox-image line), the latest
+  // progress label, whether setup is still running, and local-vs-cloud, so the task still surfaces.
+  let pcRepo = null, pcEnv = null, pcProgress = null, pcSetupActive = false;
 
   if (source === "cursor") project = cursorProject(file); // cwd lives in the dir slug, not the records
 
@@ -337,6 +341,7 @@ function parseSession({ file, source, mtime, btime }) {
       if (n.method === "session/new") {
         if (n.params?.cwd) project = n.params.cwd;
         if (n.params?._meta?.taskRunId) sessionId = n.params._meta.taskRunId;
+        if (n.params?._meta?.environment) pcEnv = n.params._meta.environment;
       } else if (n.method === "session/prompt") {
         pcPromptReq++;
         const text = (n.params?.prompt || []).filter((b) => b && b.type === "text").map((b) => b.text).join(" ");
@@ -344,6 +349,14 @@ function parseSession({ file, source, mtime, btime }) {
       } else if (n.method === "session/update") {
         const u = n.params?.update || {};
         if (u.sessionUpdate === "agent_message" && u.content?.type === "text") { pcAsst.push(u.content.text); pcAsstTs = ts; }
+      } else if (n.method === "_posthog/console") {
+        // Cloud runs clone into a sandbox: "…sandbox base image for <org>/<repo>" is the only
+        // place the repo appears before session/new — and it means this is a cloud task.
+        const m = /sandbox base image for\s+[\w.-]+\/([\w.-]+)/.exec(n.params?.message || "");
+        if (m) { pcRepo = m[1]; pcEnv = pcEnv || "cloud"; }
+      } else if (n.method === "_posthog/progress") {
+        if (n.params?.label) pcProgress = n.params.label;       // e.g. "Setting up sandbox"
+        pcSetupActive = n.params?.status === "in_progress";     // still provisioning → working
       } else if (!n.method && n.result && typeof n.result.stopReason === "string") {
         pcPromptDone++; // a session/prompt completed (end_turn) — only prompt results carry stopReason
       }
@@ -373,12 +386,22 @@ function parseSession({ file, source, mtime, btime }) {
   if (!sessionId) sessionId = source === "posthog-code" ? basename(dirname(file)) : basename(file).replace(/\.(jsonl|ndjson)$/, "");
   if (!project) project = "(unknown)";
   // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
-  // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer.
-  const repo = project === "(unknown)" ? "(unknown)" : realRepo(project);
+  // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer. A
+  // posthog-code cloud run has no local cwd — its repo comes from the sandbox-image line.
+  const repo = source === "posthog-code" && pcRepo && project === "(unknown)"
+    ? pcRepo
+    : project === "(unknown)" ? "(unknown)" : realRepo(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
   const convo = msgs.filter((m) => !isBoiler(m.text));
-  if (convo.length === 0) return null;
+  if (convo.length === 0) {
+    // A launched PostHog Code task that hasn't streamed a turn yet — typically a cloud run
+    // still provisioning its sandbox (only _posthog/* telemetry so far). Surface it as a
+    // starting thread from that telemetry instead of dropping it until the agent speaks.
+    if (source === "posthog-code" && (pcRepo || pcProgress)) {
+      convo.push({ role: "assistant", text: pcProgress || "Starting task…", ts: lastTs || mtime });
+    } else return null;
+  }
 
   const userTurns = convo.filter((m) => m.role === "user");
   const topicMsg = userTurns[0] || convo[0];
@@ -393,10 +416,11 @@ function parseSession({ file, source, mtime, btime }) {
   // Interactive entrypoints (codex, claude-desktop, …) show as soon as they have one real turn.
   const SDK_ENTRYPOINTS = new Set(["sdk-ts", "sdk-cli"]);
   const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
-  const automated =
-    userTurns.length === 0 ||
-    SDK_ENTRYPOINTS.has(entrypoint) ||
-    (cliLike && userTurns.length < 2);
+  const automated = source === "posthog-code"
+    ? false // PostHog Code tasks are deliberately launched (incl. cloud / inbox autopilot) — always surface
+    : userTurns.length === 0 ||
+      SDK_ENTRYPOINTS.has(entrypoint) ||
+      (cliLike && userTurns.length < 2);
 
   const lastMsg = convo[convo.length - 1];
   const createdTs = firstTs || btime || mtime;
@@ -413,7 +437,7 @@ function parseSession({ file, source, mtime, btime }) {
     : source === "cursor"
       ? cursorTail?.role === "assistant" && cursorTail.lastBlock === "tool_use"
       : source === "posthog-code"
-        ? pcPromptReq > pcPromptDone // a prompt is still running (no stopReason result yet)
+        ? pcPromptReq > pcPromptDone || pcSetupActive // a prompt is running (no stopReason yet) or the sandbox is still provisioning
         : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
   // Liveness from the file's last write — catches reasoning/tool events even when they carry no
   // timestamp, so a thinking agent never looks idle.
@@ -438,6 +462,9 @@ function parseSession({ file, source, mtime, btime }) {
     entrypoint: entrypoint || (source === "codex" ? "codex" : null),
     project,
     ...(diff ? { diffAdded: diff.added, diffDeleted: diff.deleted } : {}),
+    // PostHog Code runs local or in a PostHog-owned cloud sandbox; a cloud run works while the
+    // owner is away, so it's worth flagging in triage.
+    ...(source === "posthog-code" ? { environment: pcEnv || (pcRepo ? "cloud" : "local") } : {}),
     topic: clip(topicMsg.text, 140),
     messageCount: convo.length,
     userMessages: userTurns.length,
