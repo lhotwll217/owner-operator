@@ -39,6 +39,27 @@ Flags:
 - `--json` — machine-readable output (use when you want to post-process)
 - `--truncate N` — per-message char cap (default 280)
 
+### Where it scans
+
+Defaults cover Claude Code (`~/.claude/projects`), Codex (`~/.codex/sessions`), Cursor
+(`~/.cursor/projects`), and PostHog Code (`~/.posthog-code/sessions`). An owner whose sessions
+live elsewhere overrides via `~/.owner-operator/session_sources.json` (the same dir as
+`blacklist.json`):
+
+```json
+{
+  "disable": ["cursor"],
+  "add": [
+    { "source": "posthog-code", "root": "/work/ph/sessions" },
+    { "source": "claude",       "root": "~/alt/claude" }
+  ]
+}
+```
+
+`source` must be one of `claude` / `codex` / `cursor` / `posthog-code` — config points at a new
+**location**, not a new **format** (each format is parsed in code). To relocate a source,
+`disable` its default and `add` the new root.
+
 Each thread carries a resolved `State` (needs-you / working / idle / done) — the scan's
 candidates joined against the owner's status store by the canonical resolver. Threads
 the owner marked done are **excluded by default** and only reappear when a newer

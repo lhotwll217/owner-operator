@@ -7,10 +7,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { watch as fsWatch, type FSWatcher } from "node:fs";
-import { homedir } from "node:os";
 import {
   reconcile,
   diffSnapshots,
+  loadSessionSources,
   type ScanRow,
   type StatusSnapshot,
   type StatusDiff,
@@ -36,11 +36,9 @@ export interface PollerOptions {
   scan?: (since: string, limit: number) => Promise<ScanRow[]>;
 }
 
-const SESSION_ROOTS = [
-  join(homedir(), ".claude", "projects"),
-  join(homedir(), ".codex", "sessions"),
-  join(homedir(), ".posthog-code", "sessions"),
-];
+// The dirs to watch for the responsive path — the same roots the scan reads (built-in
+// defaults + owner overrides), so a configured source is watched, not just interval-polled.
+const SESSION_ROOTS = loadSessionSources().map((s) => s.root);
 
 // Run the scan with no message bodies (--sample 0) — we only need metadata for status, so
 // keep the payload tiny and fast. --include-done because the state machine needs EVERY

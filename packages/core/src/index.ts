@@ -45,6 +45,11 @@ export function sortByPriority(threads: readonly Thread[]): Thread[] {
 export { loadBlacklist, isBlacklisted, pathSlugs } from "./blacklist.mjs";
 export type { Blacklist } from "./blacklist.mjs";
 
+// Where local agent sessions live — the (source, root) dirs the scan and poller share, with
+// owner overrides from session_sources.json. One source of truth so they can't drift.
+export { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
+export type { SessionSource, SessionRoot } from "./session-sources.mjs";
+
 // Thread status & the lo-fi state machine — model-free, polled, persisted. The cheap
 // counterpart to the triaged `Thread` above (which needs the model). See status.ts.
 export * from "./status";

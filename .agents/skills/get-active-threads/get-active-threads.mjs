@@ -26,6 +26,7 @@ import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { resolveCandidates } from "../../../packages/core/src/resolve.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../../packages/core/src/blacklist.mjs";
+import { loadSessionSources } from "../../../packages/core/src/session-sources.mjs";
 
 const args = process.argv.slice(2);
 const val = (name, def) => {
@@ -80,12 +81,9 @@ function walk(dir, out) {
     else if (e.isFile() && (e.name.endsWith(".jsonl") || e.name.endsWith(".ndjson"))) out.push(p);
   }
 }
-const roots = [
-  { root: join(homedir(), ".claude", "projects"), source: "claude" },
-  { root: join(homedir(), ".codex", "sessions"), source: "codex" },
-  { root: join(homedir(), ".cursor", "projects"), source: "cursor" },
-  { root: join(homedir(), ".posthog-code", "sessions"), source: "posthog-code" },
-];
+// Built-in defaults + owner overrides (<ooHome>/session_sources.json). Same list the poller
+// watches — one source of truth in @owner-operator/core.
+const roots = loadSessionSources(ooHome);
 const candidates = [];
 for (const { root, source } of roots) {
   if (!existsSync(root)) continue;
