@@ -59,6 +59,74 @@ writeFileSync(
   JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Retry loop tightened; tests pass." }] } }) + "\n",
 );
 
+// Plain workspace stacked on a non-main base branch. The old scanner always tried
+// origin/main first, which made the diff include the release branch's own line.
+const stackedRepoDir = join(home, "dev", "feature-from-release");
+mkdirSync(stackedRepoDir, { recursive: true });
+const stackedGit = (...a: string[]) => execFileSync("git", ["-C", stackedRepoDir, ...a], {
+  env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+stackedGit("init", "-q");
+writeFileSync(join(stackedRepoDir, "f.txt"), "root\n");
+stackedGit("add", ".");
+stackedGit("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "main");
+stackedGit("branch", "-M", "main");
+stackedGit("update-ref", "refs/remotes/origin/main", stackedGit("rev-parse", "HEAD").toString().trim());
+stackedGit("checkout", "-qb", "release");
+writeFileSync(join(stackedRepoDir, "f.txt"), "root\nrelease\n");
+stackedGit("add", ".");
+stackedGit("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "release");
+stackedGit("update-ref", "refs/remotes/origin/release", stackedGit("rev-parse", "HEAD").toString().trim());
+stackedGit("checkout", "-qb", "feature-from-release");
+stackedGit("config", "branch.feature-from-release.base", "release");
+writeFileSync(join(stackedRepoDir, "f.txt"), "root\nrelease\nfeature\n");
+stackedGit("add", ".");
+stackedGit("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "feature");
+writeFileSync(join(stackedRepoDir, "f.txt"), "root\nrelease\nfeature\nworking\n");
+
+const stackedId = "77777777-6666-5555-4444-333333333333";
+const stackedSlug = stackedRepoDir.slice(1).split("/").join("-");
+const stackedFile = join(home, ".cursor", "projects", stackedSlug, "agent-transcripts", stackedId, `${stackedId}.jsonl`);
+mkdirSync(dirname(stackedFile), { recursive: true });
+writeFileSync(
+  stackedFile,
+  JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "<user_query>stack this on release</user_query>" }] } }) + "\n" +
+  JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Feature change is ready on the release stack." }] } }) + "\n",
+);
+
+// Same branch shape, but no branch.<name>.base metadata. The scanner should omit the badge
+// instead of guessing origin/main and showing a misleading delta.
+const unknownBaseRepoDir = join(home, "dev", "unknown-base-feature");
+mkdirSync(unknownBaseRepoDir, { recursive: true });
+const unknownGit = (...a: string[]) => execFileSync("git", ["-C", unknownBaseRepoDir, ...a], {
+  env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+unknownGit("init", "-q");
+writeFileSync(join(unknownBaseRepoDir, "f.txt"), "root\n");
+unknownGit("add", ".");
+unknownGit("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "main");
+unknownGit("branch", "-M", "main");
+unknownGit("update-ref", "refs/remotes/origin/main", unknownGit("rev-parse", "HEAD").toString().trim());
+unknownGit("checkout", "-qb", "release");
+writeFileSync(join(unknownBaseRepoDir, "f.txt"), "root\nrelease\n");
+unknownGit("add", ".");
+unknownGit("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "release");
+unknownGit("update-ref", "refs/remotes/origin/release", unknownGit("rev-parse", "HEAD").toString().trim());
+unknownGit("checkout", "-qb", "feature-without-base");
+writeFileSync(join(unknownBaseRepoDir, "f.txt"), "root\nrelease\nfeature\n");
+
+const unknownBaseId = "22222222-3333-4444-5555-666666666666";
+const unknownBaseSlug = unknownBaseRepoDir.slice(1).split("/").join("-");
+const unknownBaseFile = join(home, ".cursor", "projects", unknownBaseSlug, "agent-transcripts", unknownBaseId, `${unknownBaseId}.jsonl`);
+mkdirSync(dirname(unknownBaseFile), { recursive: true });
+writeFileSync(
+  unknownBaseFile,
+  JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "<user_query>unknown base branch</user_query>" }] } }) + "\n" +
+  JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Ready, but the branch has no base metadata." }] } }) + "\n",
+);
+
 interface ScanThread {
   id: string; state: string; lastMessageAt: string; repo: string; ui: string;
   topic: string; diffAdded?: number; diffDeleted?: number;
@@ -73,9 +141,9 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
   res.threads.find((t) => t.id === id);
 
 try {
-  // No owner state yet → both candidates pass, resolved from scan facts alone.
+  // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 2, "scan finds the Claude and Cursor sessions");
+  assert.equal(fresh.count, 4, "scan finds the Claude and Cursor sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -88,6 +156,16 @@ try {
   assert.equal(cursor.state, "needs-you", "assistant yielded (no trailing tool_use) → needs-you");
   assert.ok(cursor.topic.includes("tighten the retry loop") && !cursor.topic.includes("<user_query>"), "topic clean of wrapper tags");
   assert.deepEqual([cursor.diffAdded, cursor.diffDeleted], [3, 1], "working-tree delta vs HEAD");
+  assert.deepEqual(
+    [byId(fresh, stackedId)?.diffAdded, byId(fresh, stackedId)?.diffDeleted],
+    [2, 0],
+    "stacked workspace delta uses branch.<name>.base",
+  );
+  assert.deepEqual(
+    [byId(fresh, unknownBaseId)?.diffAdded, byId(fresh, unknownBaseId)?.diffDeleted],
+    [undefined, undefined],
+    "unknown-base workspace omits the badge instead of guessing origin/main",
+  );
 
   // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
@@ -105,16 +183,16 @@ try {
   }));
 
   const afterDone = run();
-  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [1, undefined], "done thread excluded by default; cursor unaffected");
+  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [3, undefined], "done thread excluded by default; cursor unaffected");
   const audit = run("--include-done");
-  assert.deepEqual([audit.count, byId(audit, sid)?.state], [2, "done"], "--include-done audits it, resolved done");
+  assert.deepEqual([audit.count, byId(audit, sid)?.state], [4, "done"], "--include-done audits it, resolved done");
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
   // A newer message lands → the same scan wakes the thread (no owner action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
-  assert.deepEqual([woken.count, byId(woken, sid)?.state], [2, "needs-you"], "newer message wakes a done thread");
+  assert.deepEqual([woken.count, byId(woken, sid)?.state], [4, "needs-you"], "newer message wakes a done thread");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");
@@ -142,7 +220,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 2, "visible set unchanged");
+  assert.equal(run().count, 4, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 
