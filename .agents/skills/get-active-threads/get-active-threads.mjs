@@ -176,10 +176,74 @@ function cursorProject(file) {
   return path;
 }
 
+function currentBranch(git) {
+  try { return git("branch", "--show-current").trim() || null; } catch { return null; }
+}
+
+function mergeBase(git, ref) {
+  try { return git("merge-base", "HEAD", ref).trim() || null; } catch { return null; }
+}
+
+function gitConfig(git, key) {
+  try { return git("config", "--get", key).trim() || null; } catch { return null; }
+}
+
+function shortHeadRef(ref) {
+  return ref?.replace(/^refs\/heads\//, "").replace(/^refs\/remotes\//, "") || null;
+}
+
+function baseRefCandidates(base, remote = "origin") {
+  const ref = shortHeadRef(base);
+  if (!ref) return [];
+  if (ref.startsWith(`${remote}/`) || ref.startsWith("origin/")) return [ref, ref.replace(/^[^/]+\//, "")];
+  return [...new Set([remote ? `${remote}/${ref}` : null, `origin/${ref}`, ref].filter(Boolean))];
+}
+
+function configuredBaseRefs(git) {
+  const current = currentBranch(git);
+  if (!current) return [];
+  const remote = gitConfig(git, `branch.${current}.remote`) || "origin";
+  const branchBase = gitConfig(git, `branch.${current}.base`);
+  const ghMergeBase = gitConfig(git, `branch.${current}.gh-merge-base`);
+  const mergeRef = shortHeadRef(gitConfig(git, `branch.${current}.merge`));
+  const refs = [
+    ...baseRefCandidates(branchBase, remote),
+    ...baseRefCandidates(ghMergeBase, remote),
+  ];
+  if (mergeRef && mergeRef !== current) refs.push(...baseRefCandidates(mergeRef, remote));
+  return [...new Set(refs)];
+}
+
+function remoteHead(git) {
+  try {
+    return shortHeadRef(git("symbolic-ref", "refs/remotes/origin/HEAD").trim());
+  } catch {
+    return null;
+  }
+}
+
+function pickDiffBase(git) {
+  const configuredRefs = configuredBaseRefs(git);
+  for (const ref of configuredRefs) {
+    const base = mergeBase(git, ref);
+    if (base) return base;
+  }
+  // If a configured base exists but is unavailable, or a default branch exists but this
+  // branch has no explicit base, do not guess. A hidden badge is better than a misleading
+  // "vs main" badge for stacked branches.
+  if (configuredRefs.length) return null;
+  for (const ref of [...baseRefCandidates(remoteHead(git)), "origin/main", "origin/master"]) {
+    if (mergeBase(git, ref)) return null;
+  }
+  return "HEAD";
+}
+
 // ---------- git workspace delta (per unique cwd, cached) ----------
-// +/- line totals from the repo's base (merge-base with origin's default branch) to the
-// WORKING TREE — committed + staged + unstaged in one number. No remote → HEAD (uncommitted
-// only). Best-effort fact about the workspace: not a repo / dir gone → no badge.
+// +/- line totals from the repo's base branch to the WORKING TREE — committed + staged +
+// unstaged in one number. Prefer branch-local Git config (`branch.<name>.base`,
+// `gh-merge-base`, or a non-self tracking ref). If the branch's base is unknown but a
+// default branch exists, omit the badge instead of guessing "main". No branch refs → HEAD
+// (uncommitted only). Best-effort fact about the workspace: not a repo / dir gone → no badge.
 const diffCache = new Map();
 function gitDiffStat(cwd) {
   if (!cwd || cwd === "(unknown)") return null;
@@ -187,9 +251,10 @@ function gitDiffStat(cwd) {
   let stat = null;
   try {
     const git = (...a) => execFileSync("git", a, { cwd, stdio: ["ignore", "pipe", "ignore"], timeout: 4000 }).toString();
-    let base = "HEAD";
-    for (const ref of ["origin/HEAD", "origin/main", "origin/master", "main", "master"]) {
-      try { base = git("merge-base", "HEAD", ref).trim(); break; } catch { /* try next ref */ }
+    const base = pickDiffBase(git);
+    if (!base) {
+      diffCache.set(cwd, null);
+      return null;
     }
     let added = 0, deleted = 0;
     for (const line of git("diff", "--numstat", base).split("\n")) {
