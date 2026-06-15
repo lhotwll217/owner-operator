@@ -1,8 +1,9 @@
 // Integration test of the scan skill — the REAL get-active-threads script against fake
-// session files (Claude + Cursor), a real throwaway git repo, and a fake status store.
-// Proves: the canonical-resolver contract at the skill surface (done excluded by default,
-// --include-done audits, drill-in answers, newer message wakes), the Cursor finder (slug →
-// cwd reconstruction), origin-app detection (Superset/Cursor), and the git ± delta.
+// session files (Claude + Cursor + PostHog Code), a real throwaway git repo, and a fake
+// status store. Proves: the canonical-resolver contract at the skill surface (done excluded
+// by default, --include-done audits, drill-in answers, newer message wakes), the Cursor
+// finder (slug → cwd reconstruction), the PostHog Code finder (ACP log → thread), origin-app
+// detection (Superset/Cursor/PostHog Code), and the git ± delta.
 //   npm run test:scan      (from harness/)
 
 import assert from "node:assert";
@@ -127,10 +128,28 @@ writeFileSync(
   JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Ready, but the branch has no base metadata." }] } }) + "\n",
 );
 
+// PostHog Code session: the ACP (Agent Client Protocol) JSON-RPC stream in `logs.ndjson` —
+// session/new (cwd + taskRunId), session/prompt (user turn), agent_message chunks (assistant
+// narration, coalesced to one turn), and the session/prompt result (stopReason = turn done).
+const phId = "33333333-4444-5555-6666-777777777777";
+const phCwd = join(home, "dev", "ph-demo"); // no git here → no diff badge
+const phNote = (notification: unknown, ts: string) => JSON.stringify({ type: "notification", timestamp: ts, notification }) + "\n";
+const phFile = join(home, ".posthog-code", "sessions", phId, "logs.ndjson");
+mkdirSync(dirname(phFile), { recursive: true });
+writeFileSync(
+  phFile,
+  phNote({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: phCwd, _meta: { taskRunId: phId } } }, at(15)) +
+  phNote({ jsonrpc: "2.0", id: 2, method: "session/prompt", params: { prompt: [{ type: "text", text: "wire up google ads in posthog" }] } }, at(15)) +
+  phNote({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message", content: { type: "text", text: "Looking into the integration." } } } }, at(14)) +
+  phNote({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking out loud — should not surface" } } } }, at(14)) +
+  phNote({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message", content: { type: "text", text: "Google Ads is a native source." } } } }, at(13)) +
+  phNote({ jsonrpc: "2.0", id: 2, result: { stopReason: "end_turn", usage: { totalTokens: 1234 } } }, at(13)),
+);
+
 interface ScanThread {
   id: string; state: string; lastMessageAt: string; repo: string; ui: string;
-  topic: string; diffAdded?: number; diffDeleted?: number;
-  firstMessages: unknown[]; recentMessages: unknown[]; omittedMessageCount: number;
+  topic: string; working?: boolean; diffAdded?: number; diffDeleted?: number;
+  firstMessages: { role: string; text: string }[]; recentMessages: unknown[]; omittedMessageCount: number;
 }
 const run = (...extra: string[]): { count: number; threads: ScanThread[] } =>
   JSON.parse(execFileSync("node", [SCAN, "--since", "7d", "--json", ...extra], {
@@ -143,7 +162,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 4, "scan finds the Claude and Cursor sessions");
+  assert.equal(fresh.count, 5, "scan finds the Claude, Cursor, and PostHog Code sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -167,6 +186,22 @@ try {
     "unknown-base workspace omits the badge instead of guessing origin/main",
   );
 
+  // The PostHog Code finder: ACP log → thread. taskRunId is the id, cwd → repo, first prompt
+  // is the topic, agent_message chunks coalesce to one assistant turn, agent_thought_chunk is
+  // dropped, and the completed prompt (stopReason result) → not working → needs-you.
+  const ph = byId(fresh, phId)!;
+  assert.equal(ph.ui, "PostHog Code", "posthog-code source → PostHog Code app");
+  assert.equal(ph.repo, "ph-demo", "repo is the cwd leaf");
+  assert.ok(ph.topic.includes("wire up google ads"), "topic from the first session/prompt");
+  assert.equal(ph.state, "needs-you", "completed turn, assistant last → needs-you");
+  assert.equal(ph.working, false, "stopReason result present → turn not in progress");
+  assert.deepEqual(ph.firstMessages.map((m) => m.role), ["user", "assistant"], "one user turn + coalesced assistant turn");
+  assert.equal(
+    ph.firstMessages[1].text,
+    "Looking into the integration. Google Ads is a native source.",
+    "agent_message chunks coalesce; agent_thought_chunk excluded",
+  );
+
   // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
   const meta = byId(run("--sample", "0"), sid)!;
@@ -183,16 +218,16 @@ try {
   }));
 
   const afterDone = run();
-  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [3, undefined], "done thread excluded by default; cursor unaffected");
+  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [4, undefined], "done thread excluded by default; others unaffected");
   const audit = run("--include-done");
-  assert.deepEqual([audit.count, byId(audit, sid)?.state], [4, "done"], "--include-done audits it, resolved done");
+  assert.deepEqual([audit.count, byId(audit, sid)?.state], [5, "done"], "--include-done audits it, resolved done");
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
   // A newer message lands → the same scan wakes the thread (no owner action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
-  assert.deepEqual([woken.count, byId(woken, sid)?.state], [4, "needs-you"], "newer message wakes a done thread");
+  assert.deepEqual([woken.count, byId(woken, sid)?.state], [5, "needs-you"], "newer message wakes a done thread");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");
@@ -220,7 +255,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 4, "visible set unchanged");
+  assert.equal(run().count, 5, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 

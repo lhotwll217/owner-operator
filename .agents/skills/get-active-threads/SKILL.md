@@ -1,7 +1,7 @@
 ---
 name: get-active-threads
 description: >-
-  Triage the user's ongoing local CLI agent sessions (Claude Code, Codex, Cursor) — what's
+  Triage the user's ongoing local CLI agent sessions (Claude Code, Codex, Cursor, PostHog Code) — what's
   active, what needs a reply, what they left open. Use when asked "what's ongoing", "what
   threads do I have today", "what needs me", "what did I leave open", or to summarize/
   prioritize active work across sessions. Runs a cheap deterministic scan; never loads full
@@ -43,7 +43,7 @@ Each thread carries a resolved `State` (needs-you / working / idle / done) — t
 candidates joined against the owner's status store by the canonical resolver. Threads
 the owner marked done are **excluded by default** and only reappear when a newer
 message wakes them; `--thread` drill-ins always answer. Threads also carry their origin
-`App` (Superset App / Conductor / Claude CLI / Claude App / Codex CLI / Codex App / Cursor) and, when the workspace
+`App` (Superset App / Conductor / Claude CLI / Claude App / Codex CLI / Codex App / Cursor / PostHog Code) and, when the workspace
 has changes vs its base branch, a `Diff: +N -N` line delta.
 
 ## Then: present via the `present_threads` tool (required)

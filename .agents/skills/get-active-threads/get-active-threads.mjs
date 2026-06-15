@@ -76,13 +76,15 @@ function walk(dir, out) {
   for (const e of ents) {
     const p = join(dir, e.name);
     if (e.isDirectory()) walk(p, out);
-    else if (e.isFile() && e.name.endsWith(".jsonl")) out.push(p);
+    // PostHog Code writes one ACP log per task as `logs.ndjson`; everyone else uses `.jsonl`.
+    else if (e.isFile() && (e.name.endsWith(".jsonl") || e.name.endsWith(".ndjson"))) out.push(p);
   }
 }
 const roots = [
   { root: join(homedir(), ".claude", "projects"), source: "claude" },
   { root: join(homedir(), ".codex", "sessions"), source: "codex" },
   { root: join(homedir(), ".cursor", "projects"), source: "cursor" },
+  { root: join(homedir(), ".posthog-code", "sessions"), source: "posthog-code" },
 ];
 const candidates = [];
 for (const { root, source } of roots) {
@@ -129,6 +131,7 @@ function detectUi(source, cwd, entrypoint, meta = {}) {
   if (cwd && cwd.includes("/.superset/worktrees/")) return "Superset App";
   if (cwd && cwd.includes("/conductor/workspaces/")) return "Conductor";
   if (source === "cursor") return "Cursor";
+  if (source === "posthog-code") return "PostHog Code";
   if (source === "codex") {
     if (meta.srcHint === "vscode") return "Codex App";
     if (meta.originator === "codex_sdk_ts") return "Codex SDK";
@@ -290,6 +293,11 @@ function parseSession({ file, source, mtime, btime }) {
   let project = null, sessionId = null, entrypoint = null, firstTs = 0, lastTs = 0, lastLifecycle = null;
   let originator = null, srcHint = null;   // codex session_meta provenance (→ detectUi)
   let cursorTail = null;                   // cursor: {role, lastBlock} of the LAST record
+  // posthog-code (ACP): assistant narration arrives as many small agent_message chunks per
+  // turn — buffer and flush as ONE assistant turn on the next user prompt. Turn completion is
+  // a session/prompt RESULT (stopReason); pending requests (no result yet) = a live turn.
+  let pcAsst = [], pcAsstTs = 0, pcPromptReq = 0, pcPromptDone = 0;
+  const pcFlush = () => { if (pcAsst.length) { msgs.push({ role: "assistant", text: pcAsst.join(" "), ts: pcAsstTs }); pcAsst = []; } };
 
   if (source === "cursor") project = cursorProject(file); // cwd lives in the dir slug, not the records
 
@@ -319,6 +327,26 @@ function parseSession({ file, source, mtime, btime }) {
         const text = claudeText(o.message?.content).replace(/<\/?user_query>/g, " ");
         if (text && text.trim()) msgs.push({ role: o.role, text, ts: 0 });
       }
+    } else if (source === "posthog-code") {
+      // PostHog Code logs the ACP (Agent Client Protocol) JSON-RPC stream — one notification
+      // per line: { type, timestamp, notification: { method?, id?, params?, result? } }. Ids
+      // are reused across method types, so turn completion is keyed off the result SHAPE
+      // (stopReason), not id matching.
+      const n = o.notification;
+      if (!n) continue;
+      if (n.method === "session/new") {
+        if (n.params?.cwd) project = n.params.cwd;
+        if (n.params?._meta?.taskRunId) sessionId = n.params._meta.taskRunId;
+      } else if (n.method === "session/prompt") {
+        pcPromptReq++;
+        const text = (n.params?.prompt || []).filter((b) => b && b.type === "text").map((b) => b.text).join(" ");
+        if (text && text.trim()) { pcFlush(); msgs.push({ role: "user", text, ts }); } // user_message_chunk duplicates this — prefer the prompt
+      } else if (n.method === "session/update") {
+        const u = n.params?.update || {};
+        if (u.sessionUpdate === "agent_message" && u.content?.type === "text") { pcAsst.push(u.content.text); pcAsstTs = ts; }
+      } else if (!n.method && n.result && typeof n.result.stopReason === "string") {
+        pcPromptDone++; // a session/prompt completed (end_turn) — only prompt results carry stopReason
+      }
     } else { // codex
       if (o.type === "session_meta") {
         project = o.payload?.cwd || project;
@@ -339,8 +367,10 @@ function parseSession({ file, source, mtime, btime }) {
       }
     }
   }
+  if (source === "posthog-code") pcFlush(); // trailing assistant turn (no later user prompt to flush it)
 
-  if (!sessionId) sessionId = basename(file).replace(/\.jsonl$/, "");
+  // posthog-code's session id is the task-run dir, not the `logs.ndjson` leaf; others use the file stem.
+  if (!sessionId) sessionId = source === "posthog-code" ? basename(dirname(file)) : basename(file).replace(/\.(jsonl|ndjson)$/, "");
   if (!project) project = "(unknown)";
   // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
   // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer.
@@ -382,7 +412,9 @@ function parseSession({ file, source, mtime, btime }) {
     ? lastLifecycle === "task_started"
     : source === "cursor"
       ? cursorTail?.role === "assistant" && cursorTail.lastBlock === "tool_use"
-      : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
+      : source === "posthog-code"
+        ? pcPromptReq > pcPromptDone // a prompt is still running (no stopReason result yet)
+        : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
   // Liveness from the file's last write — catches reasoning/tool events even when they carry no
   // timestamp, so a thinking agent never looks idle.
   const lastActivityTs = Math.max(lastTs || 0, mtime);

@@ -36,7 +36,11 @@ export interface PollerOptions {
   scan?: (since: string, limit: number) => Promise<ScanRow[]>;
 }
 
-const SESSION_ROOTS = [join(homedir(), ".claude", "projects"), join(homedir(), ".codex", "sessions")];
+const SESSION_ROOTS = [
+  join(homedir(), ".claude", "projects"),
+  join(homedir(), ".codex", "sessions"),
+  join(homedir(), ".posthog-code", "sessions"),
+];
 
 // Run the scan with no message bodies (--sample 0) — we only need metadata for status, so
 // keep the payload tiny and fast. --include-done because the state machine needs EVERY
@@ -129,7 +133,8 @@ export class StatusPoller {
     for (const root of roots) {
       try {
         const w = fsWatch(root, { recursive: true }, (_event, file) => {
-          if (typeof file === "string" && file.endsWith(".jsonl")) this.scheduleReconcile();
+          // PostHog Code appends to `logs.ndjson`; Claude/Codex use `.jsonl`.
+          if (typeof file === "string" && (file.endsWith(".jsonl") || file.endsWith(".ndjson"))) this.scheduleReconcile();
         });
         w.on("error", () => { /* transient watch error → interval poll covers it */ });
         w.unref?.();
