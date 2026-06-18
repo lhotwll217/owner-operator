@@ -137,6 +137,24 @@ try {
   assert.equal(pdb.purgeBlacklisted({ paths: [], repos: [] }), 0, "empty blacklist deletes nothing");
   pdb.close();
 
+  // --- loadSnapshot: a needs-you thread is NEVER dropped, even when it ages out of the window ---
+  // The live sidebar renders loadSnapshot() (not listSidebar). saveSnapshot only marks the current
+  // scan window in_snapshot=1, so a thread blocked on the owner must be exempt there too — else it
+  // silently vanishes once its activity falls outside the window. (Mirrors the listSidebar exemption.)
+  const sdb = new ThreadDb(join(dir, "snapshot.db"), { now });
+  const mk = (id: string, state: "needs-you" | "idle" | "working") => ({
+    id, source: "claude", repo: "amplify", app: "Claude CLI", topic: id, state, lastActive: "1 hour ago",
+    createdAt: "2026-06-09T10:00:00Z", lastMessageAt: "2026-06-09T11:00:00Z",
+    firstSeen: "2026-06-09T10:00:00Z", stateSince: "2026-06-09T10:30:00Z",
+  });
+  sdb.saveSnapshot({ polledAt: "2026-06-09T12:00:00Z", threads: [mk("waiting", "needs-you"), mk("quiet", "idle")] });
+  assert.deepEqual(sdb.loadSnapshot()!.threads.map((t) => t.id).sort(), ["quiet", "waiting"], "both present in the window");
+  // Next poll: neither is in the scan window any more (a different thread is active now).
+  sdb.saveSnapshot({ polledAt: "2026-06-09T13:00:00Z", threads: [mk("other", "working")] });
+  const survived = sdb.loadSnapshot()!.threads.map((t) => t.id).sort();
+  assert.deepEqual(survived, ["other", "waiting"], "needs-you survives aging out; the idle thread drops");
+  sdb.close();
+
   process.stdout.write("ok — thread db passed\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
