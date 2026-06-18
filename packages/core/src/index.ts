@@ -50,6 +50,17 @@ export type { Blacklist } from "./blacklist.mjs";
 export { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
 export type { SessionSource, SessionRoot } from "./session-sources.mjs";
 
+// Interactive GUI hosts (Conductor/Superset drive the SDK, PostHog Code ACP) — the single
+// source of truth that keeps a deliberately-launched session from being hidden as an SDK
+// worker. Read by the scan's launch-mode classifier and app detection. See gui-hosts.mjs.
+export { loadGuiHosts, guiHostForCwd, interactiveHost } from "./gui-hosts.mjs";
+export type { GuiHost } from "./gui-hosts.mjs";
+
+// Owner settings — scalar knobs (today the active-thread window) from settings.json, later set
+// in onboarding. The window grammar (parseWindowMs) is shared so the scan's cutoff and the
+// settings validator can't drift. See settings.mjs.
+export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
+
 // Thread status & the lo-fi state machine — model-free, polled, persisted. The cheap
 // counterpart to the triaged `Thread` above (which needs the model). See status.ts.
 export * from "./status";
