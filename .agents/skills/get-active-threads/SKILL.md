@@ -30,7 +30,7 @@ node .agents/skills/get-active-threads/get-active-threads.mjs --since today --sa
 ```
 
 Flags:
-- `--since today | 7d | 2026-06-04` — window (default `today`)
+- `--since 24h | 7d | today | 2026-06-04` — window; rolling `Nh`/`Nd`, calendar `today`, or an ISO date. Default = the owner's `activeWindow` setting (rolling `1d` if unset)
 - `--sample N` — keep the first N + most-recent N messages per thread (default 4; `--bookends`/`--last` are aliases)
 - `--thread <id>` — drill into ONE thread (id prefix ok); pair with a bigger `--sample` to expand just that thread
 - `--limit N` — max threads (default 40)
