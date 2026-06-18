@@ -352,7 +352,7 @@ if (backend.subscribe) {
   });
 } else {
   // Embedded mode (no daemon / OO_DAEMON=0): this process polls, exactly as before.
-  poller = new StatusPoller({ since: "today", intervalMs: 15_000 });
+  poller = new StatusPoller({ intervalMs: 15_000 }); // window from owner settings (rolling "1d" default)
   poller.subscribe(onPoll);
   poller.start();   // 15s interval — fallback/reconciliation
   poller.watch();   // fs.watch on the session dirs — the responsive path (debounced ~600ms)
