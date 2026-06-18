@@ -3,7 +3,8 @@
 // status store. Proves: the canonical-resolver contract at the skill surface (done excluded
 // by default, --include-done audits, drill-in answers, newer message wakes), the Cursor
 // finder (slug → cwd reconstruction), the PostHog Code finder (ACP log → thread), origin-app
-// detection (Superset/Cursor/PostHog Code), and the git ± delta.
+// detection (Superset/Cursor/PostHog Code/Conductor), launch-mode classification (a Conductor
+// SDK session surfaces; a non-GUI SDK worker stays hidden), and the git ± delta.
 //   npm run test:scan      (from harness/)
 
 import assert from "node:assert";
@@ -158,6 +159,41 @@ writeFileSync(
   phNote({ jsonrpc: "2.0", method: "_posthog/progress", params: { sessionId: phCloudId, step: "sandbox", status: "in_progress", label: "Setting up sandbox" } }, at(2)),
 );
 
+// Conductor session: Claude driven over the SDK (entrypoint sdk-ts) inside a Conductor
+// workspace. The launch-mode classifier must NOT hide it — sdk-ts is Conductor's transport,
+// not a headless-worker signal. This is the regression that silently dropped EVERY Conductor
+// thread (sdk-ts ⇒ automated) until the gui-hosts override; it must surface in the DEFAULT scan.
+const condId = "abababab-cdcd-efef-0101-232323232323";
+const condCwd = join(home, "conductor", "workspaces", "stitchr", "codename-x");
+mkdirSync(condCwd, { recursive: true });
+const condFile = join(home, ".claude", "projects", "cond", `${condId}.jsonl`);
+mkdirSync(dirname(condFile), { recursive: true });
+const sdkMsg = (id: string, cwd: string, type: "user" | "assistant", content: string, ts: string) =>
+  JSON.stringify({ type, sessionId: id, cwd, entrypoint: "sdk-ts", timestamp: ts, message: { content, ...(type === "assistant" ? { stop_reason: "end_turn" } : {}) } }) + "\n";
+writeFileSync(
+  condFile,
+  sdkMsg(condId, condCwd, "user", "fix the active-thread filter", at(40)) +
+  sdkMsg(condId, condCwd, "assistant", "Looking at the scan now.", at(35)) +
+  sdkMsg(condId, condCwd, "user", "yeah it hides Conductor threads", at(30)) +
+  sdkMsg(condId, condCwd, "assistant", "Found it — sdk-ts was force-hidden. Patching.", at(12)),
+);
+
+// The inverse: a headless Claude SDK worker in a PLAIN cwd (no GUI host). Same sdk-ts transport,
+// but nobody opened a GUI — it MUST stay hidden by default (the launch-mode rule still applies).
+// Guards against the gui-hosts exemption over-surfacing real workers.
+const workerId = "dcdcdcdc-baba-fafa-1010-454545454545";
+const workerCwd = join(home, "dev", "headless-worker");
+mkdirSync(workerCwd, { recursive: true });
+const workerFile = join(home, ".claude", "projects", "worker", `${workerId}.jsonl`);
+mkdirSync(dirname(workerFile), { recursive: true });
+writeFileSync(
+  workerFile,
+  sdkMsg(workerId, workerCwd, "user", "run the nightly summary", at(40)) +
+  sdkMsg(workerId, workerCwd, "assistant", "Summary complete.", at(38)) +
+  sdkMsg(workerId, workerCwd, "user", "thanks", at(37)) +
+  sdkMsg(workerId, workerCwd, "assistant", "Anytime.", at(36)),
+);
+
 interface ScanThread {
   id: string; state: string; lastMessageAt: string; repo: string; ui: string; environment?: string;
   topic: string; working?: boolean; diffAdded?: number; diffDeleted?: number;
@@ -174,7 +210,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 6, "scan finds the Claude, Cursor, and PostHog Code (local + cloud) sessions");
+  assert.equal(fresh.count, 7, "scan finds the Claude, Cursor, PostHog Code (local + cloud), and Conductor sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -222,6 +258,19 @@ try {
   assert.equal(phCloud.working, true, "still provisioning → working");
   assert.ok(phCloud.topic.includes("Setting up sandbox"), "topic falls back to the progress label");
 
+  // Conductor (Claude over the SDK in a Conductor workspace) MUST surface in the DEFAULT scan —
+  // `fresh` is run() with no --all. sdk-ts is its transport, not a headless-worker signal.
+  // (Regression guard: before gui-hosts, sdk-ts ⇒ automated silently dropped every Conductor thread.)
+  const conductor = byId(fresh, condId)!;
+  assert.equal(conductor.ui, "Conductor", "Conductor workspace → Conductor app");
+  assert.equal(conductor.state, "needs-you", "assistant yielded → needs-you");
+  assert.ok(conductor.topic.includes("fix the active-thread filter"), "topic from the first user turn");
+
+  // The inverse: a headless SDK worker in a plain cwd (no GUI host) stays hidden by default,
+  // and only --all audits it. Exempting GUI hosts must not resurface real workers.
+  assert.equal(byId(fresh, workerId), undefined, "non-GUI sdk-ts worker hidden by default");
+  assert.ok(byId(run("--all"), workerId), "…but --all still audits the worker");
+
   // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
   const meta = byId(run("--sample", "0"), sid)!;
@@ -238,16 +287,16 @@ try {
   }));
 
   const afterDone = run();
-  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [5, undefined], "done thread excluded by default; others unaffected");
+  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [6, undefined], "done thread excluded by default; others unaffected");
   const audit = run("--include-done");
-  assert.deepEqual([audit.count, byId(audit, sid)?.state], [6, "done"], "--include-done audits it, resolved done");
+  assert.deepEqual([audit.count, byId(audit, sid)?.state], [7, "done"], "--include-done audits it, resolved done");
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
   // A newer message lands → the same scan wakes the thread (no owner action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
-  assert.deepEqual([woken.count, byId(woken, sid)?.state], [6, "needs-you"], "newer message wakes a done thread");
+  assert.deepEqual([woken.count, byId(woken, sid)?.state], [7, "needs-you"], "newer message wakes a done thread");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");
@@ -275,11 +324,11 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 6, "visible set unchanged");
+  assert.equal(run().count, 7, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 
-  process.stdout.write("ok — scan skill: resolver join, cursor finder, origin app, git delta, blacklist\n");
+  process.stdout.write("ok — scan skill: resolver join, cursor finder, origin app, launch-mode (Conductor vs worker), git delta, blacklist\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });
