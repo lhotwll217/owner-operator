@@ -11,6 +11,7 @@ import {
   reconcile,
   diffSnapshots,
   loadSessionSources,
+  loadActiveWindow,
   type ScanRow,
   type StatusSnapshot,
   type StatusDiff,
@@ -24,7 +25,7 @@ const SCAN = join(repoRoot, ".agents/skills/get-active-threads/get-active-thread
 export type StatusListener = (snapshot: StatusSnapshot, diff: StatusDiff) => void;
 
 export interface PollerOptions {
-  /** Scan window (default "today"). */
+  /** Scan window (default = owner's configured `activeWindow`, rolling "1d" if unset). */
   since?: string;
   /** Max threads (default 50). */
   limit?: number;
@@ -94,7 +95,9 @@ export class StatusPoller {
     if (this.polling) return this.current; // never overlap a slow scan
     this.polling = true;
     try {
-      const rows = await (this.opts.scan ?? runScan)(this.opts.since ?? "today", this.opts.limit ?? 50);
+      // Read the window each poll so an owner changing it (settings.json / onboarding) takes
+      // effect without a restart. An explicit opts.since still pins it (tests, smoke).
+      const rows = await (this.opts.scan ?? runScan)(this.opts.since ?? loadActiveWindow(), this.opts.limit ?? 50);
       // The store is the source of truth because owner actions can land outside this
       // poller's in-memory `current` snapshot — other processes included.
       const prev = loadSnapshot() ?? this.current;
