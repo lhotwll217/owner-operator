@@ -13,7 +13,8 @@
 // marked done stay hidden until a newer message wakes them; `--include-done` audits them.
 //
 // Usage:
-//   node get-active-threads.mjs [--since today|7d|2026-06-04] [--sample 4] [--thread <id>]
+//   node get-active-threads.mjs [--since 24h|7d|today|2026-06-04] [--sample 4] [--thread <id>]
+//      --since default = owner's settings.json `activeWindow` (rolling "1d" if unset)
 //                               [--limit 40] [--all] [--include-done] [--json] [--truncate 280]
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
@@ -27,6 +28,8 @@ import { homedir } from "node:os";
 import { resolveCandidates } from "../../../packages/core/src/resolve.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../../packages/core/src/blacklist.mjs";
 import { loadSessionSources } from "../../../packages/core/src/session-sources.mjs";
+import { loadGuiHosts, guiHostForCwd, interactiveHost } from "../../../packages/core/src/gui-hosts.mjs";
+import { loadActiveWindow, parseWindowMs } from "../../../packages/core/src/settings.mjs";
 
 const args = process.argv.slice(2);
 const val = (name, def) => {
@@ -37,7 +40,12 @@ const val = (name, def) => {
 };
 const has = (name) => args.includes(`--${name}`);
 
-const sinceArg = String(val("since", "today"));
+// ooHome holds the owner's config (settings, blacklist, session sources, GUI hosts).
+const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
+// Default window comes from owner settings (a rolling "1d" unless configured) — NOT calendar
+// "today", so a thread used late last night is still active this morning. Configurable in
+// <ooHome>/settings.json (later: onboarding). An explicit --since still overrides per-run.
+const sinceArg = String(val("since", null) ?? loadActiveWindow(ooHome));
 // How many messages to keep from each end of a thread (opening N + most-recent N).
 const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10);
 // Drill into ONE thread by id (prefix ok). Expands just that thread — pair with a bigger
@@ -50,23 +58,20 @@ const includeDone = has("include-done") || includeAll;
 const asJson = has("json");
 
 // ---------- time window ----------
-function cutoffFrom(s) {
-  const now = Date.now();
-  if (s === "today") { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
-  const m = /^(\d+)d$/.exec(s);
-  if (m) return now - parseInt(m[1], 10) * 86400000;
-  const d = new Date(s + "T00:00:00");
-  if (!isNaN(d.getTime())) return d.getTime();
-  const t = new Date(); t.setHours(0, 0, 0, 0); return t.getTime();
-}
-const cutoff = cutoffFrom(sinceArg);
+// The window grammar (Nh/Nd rolling, calendar "today", ISO date) lives in core (parseWindowMs)
+// so the settings validator and this cutoff can't drift. An unparseable --since falls back to
+// calendar-today as a last resort.
+const cutoff = parseWindowMs(sinceArg, Date.now())
+  ?? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
 
 // ---------- privacy blacklist (ABSOLUTE — no flag bypasses it) ----------
 // Repos/paths the owner declared off-limits (<ooHome>/blacklist.json). Claude transcript
 // files under a blacklisted tree are skipped by their project-dir slug BEFORE a byte is
 // read; everything else (Codex/Cursor/worktrees) is dropped post-parse by cwd + repo name.
-const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 const blacklist = loadBlacklist(ooHome);
+// Interactive GUI hosts (Conductor/Superset/PostHog Code, + owner overrides) — one source of
+// truth shared by app detection and the launch-mode classifier (see below). Loaded once.
+const guiHosts = loadGuiHosts(ooHome);
 const blockedSlugs = pathSlugs(blacklist);
 const slugBlocked = (dirName) => blockedSlugs.some((s) => dirName === s || dirName.startsWith(s + "-"));
 
@@ -126,10 +131,11 @@ function claudeText(content) {
 // worktree lives — even if Codex/Claude/Cursor is the agent, so the worktree hosts are
 // checked FIRST, before the source. Codex refines by its session_meta provenance.
 function detectUi(source, cwd, entrypoint, meta = {}) {
-  if (cwd && cwd.includes("/.superset/worktrees/")) return "Superset App";
-  if (cwd && cwd.includes("/conductor/workspaces/")) return "Conductor";
+  // Worktree GUIs (Superset/Conductor) and source-owned GUIs (PostHog Code) come from the
+  // shared host table — cwd marker wins over source, so a worktree's GUI beats its agent.
+  const host = interactiveHost(cwd, source, guiHosts);
+  if (host) return host.ui;
   if (source === "cursor") return "Cursor";
-  if (source === "posthog-code") return "PostHog Code";
   if (source === "codex") {
     if (meta.srcHint === "vscode") return "Codex App";
     if (meta.originator === "codex_sdk_ts") return "Codex SDK";
@@ -146,7 +152,7 @@ function detectUi(source, cwd, entrypoint, meta = {}) {
 //    deep-link), so a codex:// link would point at the wrong GUI → no link.
 //  - Claude (desktop/Conductor)           → no confirmed deep-link → no link.
 function guiLink(source, id, cwd) {
-  if (cwd && cwd.includes("/conductor/workspaces/")) return null; // Conductor-spawned → ties to Conductor, not Codex
+  if (guiHostForCwd(cwd, guiHosts)) return null; // worktree-hosted (Conductor/Superset) → ties to that GUI, not Codex
   if (source === "codex") return `codex://threads/${id}`;
   return null;
 }
@@ -412,10 +418,18 @@ function parseSession({ file, source, mtime, btime }) {
   //     indistinguishable from a brand-new terminal session at one turn, so treat <2 turns as
   //     a one-shot (a real terminal session surfaces on its 2nd turn).
   // Interactive entrypoints (codex, claude-desktop, …) show as soon as they have one real turn.
+  //
+  // EXCEPT when an interactive GUI HOST owns the session: Conductor and Superset drive the agent
+  // over the SDK, PostHog Code over ACP — the transport is headless but the owner opened the
+  // session deliberately, so the rules above would WRONGLY hide it (every Conductor thread was
+  // hidden this way until now). A host short-circuits to interactive; `surfaceEmpty` hosts
+  // (PostHog Code cloud tasks, no turns yet) surface even empty. The host list lives in
+  // @owner-operator/core (gui-hosts) — a new GUI is one entry there, never a per-source patch here.
   const SDK_ENTRYPOINTS = new Set(["sdk-ts", "sdk-cli"]);
   const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
-  const automated = source === "posthog-code"
-    ? false // PostHog Code tasks are deliberately launched (incl. cloud / inbox autopilot) — always surface
+  const host = interactiveHost(project, source, guiHosts);
+  const automated = host
+    ? (host.surfaceEmpty ? false : userTurns.length === 0)
     : userTurns.length === 0 ||
       SDK_ENTRYPOINTS.has(entrypoint) ||
       (cliLike && userTurns.length < 2);
