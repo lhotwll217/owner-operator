@@ -444,7 +444,17 @@ export class ThreadDb {
     }
   }
 
-  /** The current snapshot (poll-window rows + meta polled_at), or null before first poll. */
+  /**
+   * The current snapshot (poll-window rows + meta polled_at), or null before first poll.
+   *
+   * `in_snapshot = 1` is the latest poll window. We ALSO surface every `needs-you` thread,
+   * window or not: a thread blocked on the owner must never drop off the sidebar just because
+   * its last activity aged past the scan window — that silent disappearance is the exact
+   * forgotten-commitment failure this product exists to prevent. (An out-of-window needs-you
+   * carries its frozen last-known row; it leaves only when a newer message or `/done` moves it
+   * off needs-you. Mirrors the `listSidebar` exemption — this is the live-path equivalent.)
+   * Render sorts by attention (sidebar.ts), so these float to the top despite older timestamps.
+   */
   loadSnapshot(): StatusSnapshot | null {
     const polled = this.db.prepare("SELECT value FROM meta WHERE key = 'polled_at'").get() as
       | { value: string } | undefined;
@@ -455,7 +465,7 @@ export class ThreadDb {
               last_message_at AS lastMessageAt, first_seen_at AS firstSeen,
               state_since AS stateSince, previous_state AS previousState,
               diff_added AS diffAdded, diff_deleted AS diffDeleted
-       FROM threads WHERE in_snapshot = 1
+       FROM threads WHERE in_snapshot = 1 OR state = 'needs-you'
        ORDER BY last_message_at DESC`,
     ).all() as Array<Record<string, string | null> & { diffAdded: number | null; diffDeleted: number | null }>;
     return {
