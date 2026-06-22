@@ -1,11 +1,12 @@
 // Owner Operator — the live thread rail (glance-only). Grouped by project; every ACTIVE thread
 // is rendered identically with all its data points: row number · status glyph · priority ·
-// title · recency · greyed next-step (no summary). The number is the owner's handle —
-// `/done 1,3` in the chat resolves through the same core numbering (see core/sidebar.ts).
-// No selection/cursor/navigation — it's a consistent display the chat sits beside.
-// Renders RAW lines; the Columns layout in screen.ts pads each line and draws the separator.
+// title · recency · greyed next-step (no summary). Title and next-step WRAP rather than
+// truncate — the rail is the core primitive and must never drop information. The number is the
+// owner's handle — `/done 1,3` in the chat resolves through the same core numbering (see
+// core/sidebar.ts). No selection/cursor/navigation — it's a consistent display the chat sits
+// beside. Renders RAW lines; the Columns layout in screen.ts pads each line and draws the separator.
 
-import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
+import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
   numberThreads,
   stateCounts,
@@ -34,8 +35,8 @@ function shortAge(lastActive: string): string {
 
 /**
  * Glance-only thread rail: grouped by project, every row showing the same data points. Fed the
- * rail rows (the triaged cards joined with live status). MIRRORS the cards — no filtering.
- * No interaction — pure render.
+ * rail rows (live status joined with the cached triage). Shows every active thread — no
+ * filtering — and wraps long titles/next-steps so nothing is lost. No interaction — pure render.
  */
 export class SidebarList {
   private groups: RepoGroup[] = [];
@@ -69,24 +70,34 @@ export class SidebarList {
     const head = [bold("Threads") + dim(`  ${all.length}`), stats, ""];
     if (!all.length) return [head[0], "", dim("(no active threads)")];
 
-    // Every thread: line 1 = number · glyph · priority · title (right-aligned recency);
-    // line 2 = grey next-step; line 3 = origin (git ±delta · the app it came from),
-    // right-aligned. The number is what `/done` takes.
+    // Every thread: line 1 = number · glyph · priority · title (right-aligned recency); the
+    // title WRAPS onto continuation lines aligned under it. Then the grey next-step (wrapped),
+    // then the origin (git ±delta · the app it came from), right-aligned. The number is what
+    // `/done` takes. Title/next-step never truncate — the rail keeps every word.
     const numW = String(all.length).length;
     const body: string[] = [];
     for (const g of this.groups) {
-      body.push(cyan(bold(`▾ ${g.repo}`)) + dim(`  ${g.threads.length}`));
+      const header = cyan(bold(`▾ ${g.repo}`)) + dim(`  ${g.threads.length}`);
+      body.push(visibleWidth(header) > W ? truncateToWidth(header, W) : header);
       for (const t of g.threads) {
         const badge = t.priority ? prio(t.priority)(`P${t.priority} `) : "";
         const age = dim(shortAge(t.lastActive));
+        const ageW = visibleWidth(age);
         const glyph = t.state === "working" ? green(SPINNER[this.frame % SPINNER.length]) : COLOR[t.state](GLYPH[t.state]);
         const left = " " + dim(String(t.num ?? 0).padStart(numW)) + " " + glyph + " " + badge;
-        const room = Math.max(4, W - visibleWidth(left) - visibleWidth(age) - 1);
-        const title = truncateToWidth(displayTopic(t).replace(/\s+/g, " ").trim(), room);
-        const l1 = left + title;
-        const gap = Math.max(1, W - visibleWidth(l1) - visibleWidth(age));
+        const indent = visibleWidth(left);
+        // Wrap the title; reserve the recency gutter across the block so continuation lines stay
+        // in column and the age never collides. Continuation segments align under the title.
+        const segs = wrapTextWithAnsi(displayTopic(t).replace(/\s+/g, " ").trim(), Math.max(8, W - indent - ageW - 1));
+        const l1 = left + (segs[0] ?? "");
+        const gap = Math.max(1, W - visibleWidth(l1) - ageW);
         body.push(l1 + " ".repeat(gap) + age);
-        if (t.nextSteps) body.push(dim("    → " + truncateToWidth(t.nextSteps.replace(/\s+/g, " ").trim(), W - 6)));
+        for (const seg of segs.slice(1)) body.push(" ".repeat(indent) + seg);
+        // Next-step wraps too, under an arrow gutter (continuation indented to match).
+        if (t.nextSteps) {
+          const step = wrapTextWithAnsi(t.nextSteps.replace(/\s+/g, " ").trim(), Math.max(8, W - 6));
+          step.forEach((seg, i) => body.push(dim((i === 0 ? "    → " : "      ") + seg)));
+        }
         const delta = t.diffAdded != null || t.diffDeleted != null
           ? green(`+${t.diffAdded ?? 0}`) + " " + red(`-${t.diffDeleted ?? 0}`) + "  " : "";
         const origin = delta + dim(truncateToWidth(t.app, Math.max(6, W - visibleWidth(delta) - 4)));
