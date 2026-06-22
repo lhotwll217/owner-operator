@@ -22,7 +22,10 @@ Concrete things to build, beyond the phase-level vision in [VISION.md](VISION.md
 
 ## Surfaces
 
-- [ ] **Rethink the chat cards.** Today's chat cards are redundant with the sidebar. They
+- [x] **Rethink the chat cards.** Today's chat cards are redundant with the sidebar. They
   should probably surface only the few top things to focus on right now, not mirror every
   thread. The sidebar stays the live, must-be-100%-accurate representation of global state;
   the chat becomes a focused "what to do next" rather than a second list.
+- [ ] **Agent-to-agent startup.** `--json` emits the triage `Thread[]` without lifecycle
+  `state`. Think about agent-to-agent optimization: what startup looks like, whether to
+  preload context or expose start flags.
