@@ -6,6 +6,7 @@
 // priority · title · recency · grey next-step), triaged + untriaged both render, no cursor.
 
 import assert from "node:assert";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { SidebarList } from "./sidebar";
 import { toSidebarThreads, numberThreads, type StatusSnapshot, type ThreadStatus, type TriageInfo } from "@owner-operator/core";
 
@@ -56,6 +57,25 @@ assert.equal(byNum.size, 4, "every active row numbered");
 const numbered = lines.filter((l) => /^\s*\d [◐●○⠋]/.test(l));
 assert.deepEqual(numbered.map((l) => Number(l.trim()[0])), [1, 2, 3, 4], "rows render 1…n in display order");
 assert.equal(byNum.get(1)!.id, "n", "number 1 = the loudest displayed row");
+
+// --- wrapping: long title + next-step keep every word (the rail must not lose information) ---
+const longTopic = "Reconsider the JSON output shape for agent-to-agent consumption and lifecycle state";
+const longStep = "Decide whether JSON should emit a focused brief or the full lossless thread list";
+const wrapSnap: StatusSnapshot = { polledAt: NOW, threads: [st("L", "owner-operator", "needs-you", longTopic, "2 minutes ago")] };
+const wrapTriage = new Map<string, TriageInfo>([["L", { nextSteps: longStep, priority: 4 }]]);
+const wpanel = new SidebarList(20);
+wpanel.setThreads(toSidebarThreads(wrapSnap, wrapTriage));
+const wlines = wpanel.render(51).map(stripAnsi);
+process.stdout.write(wlines.map((l) => "  " + l).join("\n") + "\n\n");
+// Words can't be reassembled by a naive join (the right-aligned age sits between title
+// segments), so assert losslessly at the word level: every word must appear somewhere.
+const haystack = wlines.join(" ").replace(/\s+/g, " ");
+assert.ok(!wlines.some((l) => /…|\.\.\.$/.test(l)), "no ellipsis — text wraps, never truncates");
+for (const w of longTopic.split(" ")) assert.ok(haystack.includes(w), `title word "${w}" survives the wrap`);
+for (const w of longStep.split(" ")) assert.ok(haystack.includes(w), `next-step word "${w}" survives the wrap`);
+assert.ok(wlines.every((l) => visibleWidth(l) <= 51), "every wrapped line fits the column width");
+// A continuation line: indented, carries a tail word of the title, and has no row glyph.
+assert.ok(wlines.some((l) => /^\s+\S/.test(l) && /lifecycle|consumption/.test(l) && !/[◐●○⠋]/.test(l)), "title wrapped onto an indented continuation line");
 
 // --- empty ---
 const empty = new SidebarList().render(51).map(stripAnsi);
