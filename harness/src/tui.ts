@@ -19,8 +19,8 @@ import {
   type EditorTheme,
 } from "@earendil-works/pi-tui";
 import { createOwnerOperatorSession, lastAssistantText } from "./agent";
-import { sortByPriority, toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo, type SidebarThread } from "@owner-operator/core";
-import { buildCard } from "./cards";
+import { toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo, type SidebarThread } from "@owner-operator/core";
+import { buildBrief } from "./brief";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { StatusPoller } from "./poller";
@@ -157,21 +157,22 @@ tui.addInputListener((data: string) => {
   return undefined; // the editor handles everything else
 });
 
-// ---- structured thread cards (from the present_threads tool call) -------------------------
-// Card layout lives in cards.ts (previewable without a TTY). The same triage also enriches
-// the rail: cache topic/summary/priority by id — NOT per poll, only when the model triages.
-class Card implements Component {
-  constructor(private readonly t: Thread) {}
+// ---- focused chat brief (from the present_threads tool call) ------------------------------
+// The chat is the "what to do next" surface, not a second copy of the rail: the model triages
+// EVERY active thread (which enriches the rail by id, below), but the chat shows only a short
+// landscape summary + the few threads waiting on the owner. Brief layout lives in brief.ts
+// (previewable without a TTY); it reads the SAME snapshot+triage the rail joins, so the two
+// can't disagree. The rendered brief is frozen (a point-in-time chat message); the rail stays
+// live.
+class Brief implements Component {
+  constructor(private readonly rows: readonly SidebarThread[]) {}
   invalidate(): void { /* stateless */ }
-  render(width: number): string[] { return buildCard(this.t, width); }
+  render(width: number): string[] { return buildBrief(this.rows, width); }
 }
 
-function renderThreadCards(threads: Thread[]): void {
-  if (!threads.length) { log.addChild(new Text(dim("(no active threads)"))); tui.requestRender(); return; }
-  for (const t of sortByPriority(threads)) {
-    log.addChild(new Card(t));
-    log.addChild(new Spacer(1));
-  }
+function renderBrief(): void {
+  log.addChild(new Brief(toSidebarThreads(statusSnapshot, triageCache)));
+  log.addChild(new Spacer(1));
   tui.requestRender();
 }
 
@@ -187,12 +188,13 @@ function removeLoader(): void {
 session.subscribe((event: any) => {
   if (!current) return;
 
-  // Model presented its triage → render the (frozen) chat cards AND enrich the live rail by id.
+  // Model presented its triage → enrich the live rail by id (all threads), then render the
+  // focused chat brief (summary + who needs you). cacheTriage first so the brief reads fresh.
   if (event.type === "tool_execution_start" && event.toolName === "present_threads") {
     removeLoader();
     const threads = (event.args?.threads ?? []) as Thread[];
-    renderThreadCards(threads);
     cacheTriage(threads);
+    renderBrief();
     current.cardsShown = true;
     return;
   }
@@ -268,14 +270,15 @@ async function handleSubmit(text: string): Promise<void> {
   await runTurn(q);
 }
 
-// First response on open: a fresh, full triage (cards) so the rail piggybacks off live data,
-// never stale cache. Runs every launch by design — you wanted fresh, not cached.
+// First response on open: a fresh, full triage so the rail piggybacks off live data, never
+// stale cache. The model triages EVERY active thread (that enriches the rail by id); the chat
+// renders only the focused brief. Runs every launch by design — you wanted fresh, not cached.
 async function startupBrief(): Promise<void> {
   if (busy) return;
   busy = true;
   log.removeChild(hint);
   log.addChild(new Text(dim("▸ bringing your threads up to date…")));
-  await runTurn("What's ongoing today? Run get-active-threads and present every active thread as cards.", "(nothing active today)");
+  await runTurn("What's ongoing today? Run get-active-threads, then triage every active thread with present_threads, most-urgent first.", "(nothing active today)");
 }
 
 editor.onSubmit = (text: string) => {
