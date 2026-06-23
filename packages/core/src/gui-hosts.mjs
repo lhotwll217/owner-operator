@@ -5,7 +5,7 @@
 // WRONG for these GUIs, whose sessions the owner opened deliberately. This is the single source
 // of truth for "which hosts are interactive", read by both the classifier and detectUi, so a
 // new GUI is ONE entry here — not a per-source patch scattered across the scan (the omission
-// that silently hid every Conductor thread; see scan.test.ts and gui-hosts.test.ts).
+// that silently hid every Conductor thread; see scan.integration.test.ts and gui-hosts.test.ts).
 //
 // A host matches a session by a cwd path marker (the GUI's worktree dir) and/or its source.
 // `surfaceEmpty` hosts surface even with zero conversation (PostHog Code cloud tasks stream no

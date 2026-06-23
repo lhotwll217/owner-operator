@@ -1,6 +1,6 @@
 // Unit test for the interactive GUI-host table: built-in matchers (cwd marker wins over
 // source), surfaceEmpty, owner `add` extension, the bad-entry guard, and invalid-config
-// fallback. The classifier's behavior over these hosts is covered end-to-end in scan.test.ts;
+// fallback. The classifier's behavior over these hosts is covered end-to-end in scan.integration.test.ts;
 // this pins the data layer (and the flexibility — a new GUI is one config/array entry).
 //   tsx src/gui-hosts.test.ts
 
