@@ -47,8 +47,21 @@ make build        # release build
 ```
 
 Controls: **drag** the bar to reposition · **click `⌄`** to expand/collapse · **right-click** for
-Refresh / Quit. `--once` renders the same rail to stdout, so you can verify the daemon round-trip
-headlessly.
+Expand/Collapse / Quit. `--once` renders the same rail to stdout, so you can verify the daemon
+round-trip headlessly.
+
+### Tests
+
+Pure-logic unit tests — the rail join + loudest-first ordering, the `hidden`/mark-done filter,
+lenient decode, and the 5-min fresh-completion rule:
+
+```sh
+swift test
+```
+
+> XCTest ships inside Xcode, not the Command Line Tools. If `swift test` reports `no such module
+> 'XCTest'`, point it at Xcode for that run:
+> `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`
 
 ### Keep it across reboots (optional)
 
