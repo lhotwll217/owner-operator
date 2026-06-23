@@ -9,5 +9,6 @@ let package = Package(
     platforms: [.macOS(.v13)], // MenuBarExtra(.window) lands in macOS 13
     targets: [
         .executableTarget(name: "oo-widget", path: "Sources/oo-widget"),
+        .testTarget(name: "oo-widgetTests", dependencies: ["oo-widget"], path: "Tests/oo-widgetTests"),
     ]
 )
