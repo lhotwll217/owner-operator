@@ -2,31 +2,16 @@
 // The poller must treat status.json as the source of truth, not stale in-memory current.
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ScanRow } from "@owner-operator/core";
+import { fakeScanRow, tempOoHome } from "../test/helpers";
 
-const dir = mkdtempSync(join(tmpdir(), "oo-poller-"));
-process.env.OO_HOME = dir;
+const { cleanup } = tempOoHome("oo-poller");
 
 try {
   const { StatusPoller } = await import("./poller");
   const { loadSnapshot, markThreadsDone } = await import("./store");
 
-  let rows: ScanRow[] = [{
-    id: "abc-123",
-    source: "claude",
-    repo: "owner-operator",
-    app: "Claude CLI",
-    topic: "mark done status",
-    lastRole: "assistant",
-    createdAt: "2026-06-09T10:00:00.000Z",
-    lastMessageAt: "2026-06-09T10:05:00.000Z",
-    secondsSinceLastMessage: 60,
-    secondsSinceActivity: 60,
-    working: false,
-  }];
+  let rows: ScanRow[] = [fakeScanRow({ topic: "mark done status" })];
 
   const poller = new StatusPoller({ scan: async () => rows });
   const first = await poller.poll();
@@ -53,5 +38,5 @@ try {
   poller.stop();
   process.stdout.write("ok — poller preserves owner-set done status\n");
 } finally {
-  rmSync(dir, { recursive: true, force: true });
+  cleanup();
 }
