@@ -4,21 +4,12 @@
 //   npm run test:daemon    (from harness/)
 
 import assert from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DaemonEvent, DaemonInfo, ScanRow } from "@owner-operator/core";
+import { fakeScanRow, tempOoHome, waitFor } from "../test/helpers";
 
-const dir = mkdtempSync(join(tmpdir(), "oo-daemon-"));
-process.env.OO_HOME = dir;
-
-async function waitFor(cond: () => boolean, ms: number, what: string): Promise<void> {
-  const until = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > until) throw new Error(`timeout waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
+const { dir, cleanup } = tempOoHome("oo-daemon");
 
 try {
   const { startDaemon, isDue } = await import("./daemon");
@@ -37,12 +28,7 @@ try {
   // --- no daemon yet → discovery says so ---
   assert.equal(await connectDaemon(), null, "no daemon.json → no daemon");
 
-  let rows: ScanRow[] = [{
-    id: "abc-123", source: "claude", repo: "owner-operator", app: "Claude CLI",
-    topic: "daemon wiring", lastRole: "assistant",
-    createdAt: "2026-06-09T10:00:00.000Z", lastMessageAt: "2026-06-09T10:05:00.000Z",
-    secondsSinceLastMessage: 60, secondsSinceActivity: 60, working: false,
-  }];
+  let rows: ScanRow[] = [fakeScanRow()];
   const d = await startDaemon({ port: 0, poller: { scan: async () => rows }, watch: false, tickMs: 60_000 });
   const base = `http://127.0.0.1:${d.port}`;
   const get = async (path: string) => { const r = await fetch(base + path); return { status: r.status, body: await r.json() }; };
@@ -115,5 +101,5 @@ try {
 
   process.stdout.write("ok — daemon owns state end to end\n");
 } finally {
-  rmSync(dir, { recursive: true, force: true });
+  cleanup();
 }
