@@ -8,12 +8,14 @@
 //
 // Built by mirroring pi's own main.ts runtime wiring — createAgentSessionServices →
 // createAgentSessionFromServices → createAgentSessionRuntime → new InteractiveMode(runtime).run()
-// — but feeding it OUR services (prompt override + custom tools) instead of the CLI's defaults.
+// — but feeding it OUR services (prompt override + custom tools + our extension).
 //
-// Known gap (worth seeing): present_threads is a structured-output tool whose CARD rendering
-// lives in our surfaces (cards.ts / the sidebar). pi's stock InteractiveMode has no renderer for
-// it, so triage shows here as the tool call + its text result — exactly the kind of trade-off
-// this surface lets us evaluate against the branded TUI.
+// ownerOperatorExtension (oo-extension.ts) makes the stock shell behave like ours WITHOUT a
+// hand-rolled UI: it renders present_threads triage as our cards inline (closing the gap where
+// stock mode showed triage as a bare tool-result), and registers /done, /threads, and /help as
+// real slash commands with autocomplete — proof that the extension seams cover what tui.ts does
+// by hand. The one thing they can't reproduce is the pinned left-column sidebar (widgets only
+// sit above/below the editor); that remains the branded TUI's reason to exist.
 
 import {
   AuthStorage,
@@ -27,6 +29,7 @@ import {
   initTheme,
 } from "@earendil-works/pi-coding-agent";
 import { ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "./agent";
+import { ownerOperatorExtension } from "./oo-extension";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./harness/oo --interactive` in a real terminal, or `./harness/oo \"question\"` for a one-shot.");
@@ -47,6 +50,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     resourceLoaderOptions: {
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
+      extensionFactories: [ownerOperatorExtension], // cards renderer + /done, /threads, /help
     },
   });
   const created = await createAgentSessionFromServices({
