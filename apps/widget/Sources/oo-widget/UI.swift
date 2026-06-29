@@ -1,5 +1,5 @@
 // The widget's SwiftUI content, hosted inside the floating panel. Collapsed = a small always-on
-// bar (status dot · counts · the loudest needs-you leaf). Expanded in place = the full rail,
+// bar (status dot · counts · the loudest needs-you leaf). Expanded in place = the full sidebar,
 // grouped by repo, loudest-first. Nothing here computes state — it renders the daemon's snapshot.
 
 import SwiftUI
@@ -67,16 +67,15 @@ struct WidgetRoot: View {
     }
 }
 
-/// The always-visible small component: a status dot, the state counts, and (collapsed) the
-/// loudest needs-you title — the one "what to do next" leaf. The chevron toggles the expansion;
-/// the rest of the bar stays draggable so the panel can be repositioned.
+/// The always-visible small component: the state counts and (collapsed) the loudest needs-you
+/// title — the one "what to do next" leaf. The chevron toggles the expansion; the rest of the bar
+/// stays draggable so the panel can be repositioned.
 struct CompactBar: View {
     @EnvironmentObject var client: DaemonClient
     @Binding var expanded: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(statusColor).frame(width: 7, height: 7)
             if client.online {
                 CountsRow(counts: client.counts)
                 if !expanded && !fresh.isEmpty {
@@ -102,28 +101,21 @@ struct CompactBar: View {
         .contentShape(Rectangle())
     }
 
-    private var statusColor: Color {
-        if !client.online { return .red }
-        if client.needsYou > 0 { return .yellow }
-        if client.working > 0 { return .green }
-        return .secondary
-    }
-
     /// The loudest thread overall is groups[0].rows[0]; surface it only when it needs you.
-    private var topNeedsYou: RailRow? {
+    private var topNeedsYou: SidebarRow? {
         guard let r = client.groups.first?.rows.first, r.state == .needsYou else { return nil }
         return r
     }
 
     /// Threads whose turn finished in the last 5 min — what the soft pulse cycles through.
-    private var fresh: [RailRow] { client.freshNeedsYou() }
+    private var fresh: [SidebarRow] { client.freshNeedsYou() }
 }
 
-/// One thread as `Project → next step`: the project tinted light blue, an arrow (the rail's
+/// One thread as `Project → next step`: the project tinted light blue, an arrow (the sidebar's
 /// `→ next step` pattern), then the next step in full. Shared by the calm line and the ticker.
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
 
-private func lineAttr(_ r: RailRow) -> AttributedString {
+private func lineAttr(_ r: SidebarRow) -> AttributedString {
     var proj = AttributeContainer(); proj.foregroundColor = projectBlue
     var out = AttributedString(r.thread.repo, attributes: proj)
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
@@ -134,7 +126,7 @@ private func lineAttr(_ r: RailRow) -> AttributedString {
 }
 
 /// All fresh items joined into one ticker line, separated by a dim dot.
-private func tickerString(_ rows: [RailRow]) -> AttributedString {
+private func tickerString(_ rows: [SidebarRow]) -> AttributedString {
     var out = AttributedString()
     for (i, r) in rows.enumerated() {
         if i > 0 {
@@ -151,7 +143,7 @@ private func tickerString(_ rows: [RailRow]) -> AttributedString {
 /// sits exactly where the first started, so resetting to 0 is invisible) — then sit again. Only
 /// animates during the scroll; fully idle while sitting. `gen` cancels stale timers if data changes.
 struct FreshTicker: View {
-    let items: [RailRow]
+    let items: [SidebarRow]
 
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
@@ -253,7 +245,7 @@ struct GroupView: View {
 /// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
 /// grey next-step, then origin (±diff · app). Matches sidebar.ts's "keep every word".
 struct RowView: View {
-    let row: RailRow
+    let row: SidebarRow
     let onDone: () -> Void
     @State private var hovering = false
 
