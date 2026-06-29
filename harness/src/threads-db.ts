@@ -590,7 +590,7 @@ export class ThreadDb {
     return version;
   }
 
-  /** Latest triage per thread, as the cache map the rail joins by id. */
+  /** Latest triage per thread, as the cache map the sidebar joins by id. */
   getTriageMap(): Map<string, TriageInfo> {
     const rows = this.db.prepare(
       `SELECT thread_id AS threadId, priority, topic, summary, next_steps AS nextSteps
