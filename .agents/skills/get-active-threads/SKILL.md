@@ -81,7 +81,7 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 
 - `id` — copy the thread's `id` from the digest **verbatim** (this is how the sidebar matches the card to the live thread — don't omit or alter it).
 - `topic` — the SPECIFIC work, not the location: never repeat the repo or app name (the
-  card and rail show both separately). "Fix 422 contract mismatch", not "Amplify 422 fix".
+  card and sidebar show both separately). "Fix 422 contract mismatch", not "Amplify 422 fix".
 - `priority` — integer **5 (highest, needs the owner now) → 1 (lowest)**.
 - `summary` — one SHORT, scannable sentence on current state (≤ ~15 words; the gist, not the whole story).
 - `nextSteps` — one short clause: the concrete next action (what's it waiting on). Rendered greyed, as the card's footer.
