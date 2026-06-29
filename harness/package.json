@@ -12,6 +12,7 @@
     "preview:brief": "tsx src/brief.preview.ts",
     "preview:sidebar": "tsx src/sidebar.preview.ts",
     "preview:screen": "tsx src/screen.preview.ts",
+    "preview:chat": "tsx src/chat.preview.ts",
     "poll:smoke": "tsx src/poller.smoke.ts",
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "test:unit": "node test/run.mjs unit",

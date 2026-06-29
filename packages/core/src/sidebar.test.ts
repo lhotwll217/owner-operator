@@ -1,5 +1,5 @@
 // Deterministic test of the sidebar data model — pure, no model, no I/O.
-// The rail = the LIVE poll snapshot enriched by the triage cache, joined by id, minus
+// The sidebar = the LIVE poll snapshot enriched by the triage cache, joined by id, minus
 // threads whose status is `done` — with display-order numbering as the /done handle.
 
 import assert from "node:assert";
@@ -28,36 +28,36 @@ const triage = new Map<string, TriageInfo>([
   ["n", { topic: "422 contract mismatch", nextSteps: "Paste the drafted reply", priority: 5 }],
 ]);
 
-const rail = toSidebarThreads(snap, triage);
+const sidebar = toSidebarThreads(snap, triage);
 
-// --- the rail projection includes the snapshot; done rows are inactive and unnumbered later ---
-assert.equal(rail.length, 4, "every polled thread appears in the projection");
-assert.deepEqual(rail.map((t) => t.id).sort(), ["d", "n", "o", "old"]);
-assert.equal(rail.find((t) => t.id === "d")!.active, false, "done status → inactive");
+// --- the sidebar projection includes the snapshot; done rows are inactive and unnumbered later ---
+assert.equal(sidebar.length, 4, "every polled thread appears in the projection");
+assert.deepEqual(sidebar.map((t) => t.id).sort(), ["d", "n", "o", "old"]);
+assert.equal(sidebar.find((t) => t.id === "d")!.active, false, "done status → inactive");
 
 // --- triaged thread is enriched; untriaged keeps its raw topic + no badge ---
-const n = rail.find((t) => t.id === "n")!;
+const n = sidebar.find((t) => t.id === "n")!;
 assert.equal(displayTopic(n), "422 contract mismatch", "triaged title wins");
 assert.equal(n.nextSteps, "Paste the drafted reply");
 assert.equal(n.priority, 5);
 assert.equal(n.state, "needs-you", "live state from the poll");
-const o = rail.find((t) => t.id === "o")!;
+const o = sidebar.find((t) => t.id === "o")!;
 assert.equal(displayTopic(o), "raw sidebar topic", "untriaged → raw digest topic");
 assert.equal(o.priority, undefined, "untriaged → no priority badge");
 
 // --- grouping + stats over the live set ---
-assert.deepEqual(groupByRepo(rail).map((g) => g.repo), ["amplify", "owner-operator"], "needs-you group first");
-assert.deepEqual(stateCounts(rail), { "needs-you": 1, working: 1, idle: 1, done: 1 });
+assert.deepEqual(groupByRepo(sidebar).map((g) => g.repo), ["amplify", "owner-operator"], "needs-you group first");
+assert.deepEqual(stateCounts(sidebar), { "needs-you": 1, working: 1, idle: 1, done: 1 });
 
 // --- numbering: ACTIVE rows only, 1…n in display order — the /done handle ---
-const { groups, byNum } = numberThreads(rail);
-assert.equal(byNum.size, 3, "done rows are not numbered (they left the rail)");
+const { groups, byNum } = numberThreads(sidebar);
+assert.equal(byNum.size, 3, "done rows are not numbered (they left the sidebar)");
 assert.deepEqual([...byNum.keys()], [1, 2, 3], "numbers are 1…n");
 assert.deepEqual(groups.flatMap((g) => g.threads).map((t) => t.num), [1, 2, 3], "rendered order carries the same numbers");
 assert.equal(byNum.get(1)!.id, "n", "display order: needs-you first");
 assert.equal(byNum.get(2)!.id, "old", "same repo stays grouped");
 assert.equal(byNum.get(3)!.id, "o", "next repo follows");
-assert.ok(!rail.some((t) => t.num !== undefined), "numbering is pure — inputs untouched");
+assert.ok(!sidebar.some((t) => t.num !== undefined), "numbering is pure — inputs untouched");
 
 // --- /done argument parsing ---
 assert.deepEqual(parseNumbers("1,3,5"), [1, 3, 5]);

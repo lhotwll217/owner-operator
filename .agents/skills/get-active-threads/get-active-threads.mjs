@@ -289,6 +289,38 @@ function realRepo(cwd) {
   return basename(cwd);
 }
 
+// PostHog Code cloud tasks: when one dies/finishes during provisioning its session log (the only
+// thing the scan reads per thread) freezes — no repo line, stuck `in_progress`. The desktop app's
+// main.log holds the truth, keyed by the task-run id (== the session dir). Parse it ONCE, lazily,
+// into { repo, ended } per run so the posthog-code branch can fill ONLY those gaps — the session
+// stream stays primary. Best-effort: missing/rotated log → empty map (every thread unchanged).
+let _pcMainLog;
+function posthogMainLog() {
+  if (_pcMainLog) return _pcMainLog;
+  _pcMainLog = new Map();
+  let raw;
+  try { raw = readFileSync(join(homedir(), ".posthog-code", "logs", "main.log"), "utf8"); }
+  catch { return _pcMainLog; }
+  const repoByTask = new Map();   // taskId → repo (launch line: "Creating workspace for task X in <path>")
+  const taskByRun = new Map();    // taskRunId → taskId (watcher line: "key: 'taskId:taskRunId'")
+  const endedRuns = new Set();    // taskRunId whose watcher has stopped → task no longer running
+  let prev = "";
+  for (const line of raw.split("\n")) {
+    const w = /Creating workspace for task ([0-9a-f-]+) in (.+?)(?: \(mode:|$)/.exec(line);
+    if (w) { repoByTask.set(w[1], realRepo(w[2].trim())); prev = line; continue; }
+    const k = /key: '([0-9a-f-]+):([0-9a-f-]+)'/.exec(line);
+    if (k) {
+      taskByRun.set(k[2], k[1]);
+      if (/Cloud task watcher stopped/.test(prev)) endedRuns.add(k[2]);  // stopped { key } — key is the next line
+    }
+    prev = line;
+  }
+  for (const [runId, taskId] of taskByRun) {
+    _pcMainLog.set(runId, { repo: repoByTask.get(taskId) ?? null, ended: endedRuns.has(runId) });
+  }
+  return _pcMainLog;
+}
+
 // ---------- parse one session ----------
 function parseSession({ file, source, mtime, btime }) {
   let raw;
@@ -392,7 +424,7 @@ function parseSession({ file, source, mtime, btime }) {
   // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
   // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer. A
   // posthog-code cloud run has no local cwd — its repo comes from the sandbox-image line.
-  const repo = source === "posthog-code" && pcRepo && project === "(unknown)"
+  let repo = source === "posthog-code" && pcRepo && project === "(unknown)"
     ? pcRepo
     : project === "(unknown)" ? "(unknown)" : realRepo(project);
 
@@ -444,13 +476,24 @@ function parseSession({ file, source, mtime, btime }) {
   // record ends on a tool_use block (no yield); Claude → the last assistant message is a
   // tool_use step, not end_turn.
   const lastAsst = [...convo].reverse().find((m) => m.role === "assistant");
-  const working = source === "codex"
+  let working = source === "codex"
     ? lastLifecycle === "task_started"
     : source === "cursor"
       ? cursorTail?.role === "assistant" && cursorTail.lastBlock === "tool_use"
       : source === "posthog-code"
         ? pcPromptReq > pcPromptDone || pcSetupActive // a prompt is running (no stopReason yet) or the sandbox is still provisioning
         : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
+
+  // PostHog Code: a cloud task whose stream died/finished mid-provision leaves a frozen session log
+  // (no repo, stuck "in_progress"). Backfill ONLY those gaps from the app's main.log, by task-run id
+  // (== sessionId) — the session stream stays authoritative for everything it actually recorded.
+  if (source === "posthog-code") {
+    const ml = posthogMainLog().get(sessionId);
+    if (ml) {
+      if (repo === "(unknown)" && ml.repo) repo = ml.repo;   // stream never logged the repo → use the launch line
+      if (working && ml.ended) working = false;              // app stopped watching it → it isn't working
+    }
+  }
   // Liveness from the file's last write — catches reasoning/tool events even when they carry no
   // timestamp, so a thinking agent never looks idle.
   const lastActivityTs = Math.max(lastTs || 0, mtime);

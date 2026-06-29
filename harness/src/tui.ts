@@ -1,7 +1,7 @@
 // Owner Operator — branded terminal UI on pi-tui. A fixed-viewport layout (see screen.ts):
-// a pinned left thread-rail beside the chat, with the editor at the bottom. The rail's CONTENT
+// a pinned left thread-sidebar beside the chat, with the editor at the bottom. The sidebar's CONTENT
 // is the active-thread digest (via the model-free poll); its titles/summary/priority are the
-// cached model triage (from present_threads) merged by id — the rail never calls the LLM.
+// cached model triage (from present_threads) merged by id — the sidebar never calls the LLM.
 // Agent core: agent.ts.
 
 import {
@@ -12,8 +12,9 @@ import {
   Spacer,
   Markdown,
   Editor,
-  Loader,
   matchesKey,
+  isKeyRelease,
+  isKeyRepeat,
   type Component,
   type MarkdownTheme,
   type EditorTheme,
@@ -23,6 +24,8 @@ import { toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeed
 import { buildBrief } from "./brief";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
+import { Block, StatusLine, StatusFooter, PromptEditor, type FooterData } from "./chat";
+import { readClipboardImage } from "./clipboard";
 import { StatusPoller } from "./poller";
 import { resolveBackend } from "./client";
 
@@ -42,13 +45,15 @@ const mdTheme: MarkdownTheme = {
   codeBlockBorder: dim, quote: italic, quoteBorder: dim, hr: dim, listBullet: cyan,
   bold, italic, strikethrough: strike, underline,
 };
+const gray = sgr(90); // a clearly-visible border gray (stronger than dim)
 const editorTheme: EditorTheme = {
-  borderColor: dim,
+  borderColor: gray,
   selectList: { selectedPrefix: blue, selectedText: bold, description: dim, scrollInfo: dim, noMatch: dim },
 };
 
-const SIDEBAR_W = 51;   // rail column CAP — the split is responsive: min(51, 40% of terminal)
-const SPLIT_MIN = 80;   // below this the rail hides entirely; above, it shrinks before the chat does
+const SIDEBAR_W = 51;   // sidebar column CAP — the split is responsive: min(51, 40% of terminal)
+const SPLIT_MIN = 80;   // below this the sidebar hides entirely; above, it shrinks before the chat does
+const SIDEBAR_STEP = 3;    // sidebar lines per Shift+↑/↓ — about one thread block
 
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 
@@ -87,33 +92,58 @@ class Wordmark implements Component {
 
 const header = new Box(0, 0);
 header.addChild(new Wordmark());
-header.addChild(new Text(dim(`local chief of staff · ${modelLabel} · ${skills.length} skills · /done 1,3 · esc stop · ctrl+c exit`)));
+header.addChild(new Text(dim(`local chief of staff · ${skills.length} skills · /done 1,3 · ⇧↑↓ Scroll Chat · ⌥↑↓ Scroll Sidebar · ⌃R Hide Sidebar · /help · ctrl+c exit`)));
 header.addChild(new Spacer(1));
 
 const log = new Box(0, 0);
 const hint = new Text(dim('Ask what\'s ongoing — e.g. "what needs me today?"'));
 log.addChild(hint);
 
-const editor = new Editor(tui, editorTheme);
+// paddingX:2 leaves a 2-col inset on the input line; PromptEditor swaps the left inset for "› ".
+const editor = new Editor(tui, editorTheme, { paddingX: 2 });
+const promptEditor = new PromptEditor(editor, bold(blue(">")) + " ");
 
-// ---- live thread rail + fixed-viewport layout --------------------------------------------
-// A TRUE sidebar: the rail spans the full body height; the editor lives in the right column
-// (it never runs under the rail). See screen.ts.
+// ---- live thread sidebar + fixed-viewport layout --------------------------------------------
+// A TRUE sidebar: the sidebar spans the full body height; the editor lives in the right column
+// (it never runs under the sidebar). See screen.ts.
 const sidebar = new SidebarList();
-const columns = new Columns(sidebar, new ChatPane(log), editor, SIDEBAR_W, SPLIT_MIN);
-const screen = new Screen(tui.terminal, header, columns);
+const chat = new ChatPane(log);
+const columns = new Columns(sidebar, chat, promptEditor, SIDEBAR_W, SPLIT_MIN);
+
+// Pinned status bar: pi's own SessionStats / context-usage drive it (no token math of our own).
+// Refreshed on message/turn end (not every frame); the footer component just renders the snapshot.
+let footerData: FooterData | null = null;
+function computeFooter(): FooterData {
+  const s = session as any;
+  let cu: any, st: any;
+  try { cu = s.getContextUsage?.(); } catch { /* not ready yet */ }
+  try { st = s.getSessionStats?.(); } catch { /* not ready yet */ }
+  return {
+    model: modelLabel,
+    contextTokens: cu?.tokens ?? null,
+    contextWindow: cu?.contextWindow ?? s.model?.contextWindow ?? 0,
+    percent: cu?.percent ?? null,
+    inTok: st?.tokens?.input ?? 0,
+    outTok: st?.tokens?.output ?? 0,
+    cacheTok: st?.tokens?.cacheRead ?? 0,
+  };
+}
+function refreshFooter(): void { footerData = computeFooter(); tui.requestRender(); }
+footerData = computeFooter(); // show the model immediately; context fills in after the first turn
+const footer = new StatusFooter(() => footerData);
+const screen = new Screen(tui.terminal, header, columns, footer);
 tui.addChild(screen);
 tui.setFocus(editor);
 
-// The rail is LIVE: membership = the poll snapshot; the cached triage enriches it
+// The sidebar is LIVE: membership = the poll snapshot; the cached triage enriches it
 // (title/priority/nextStep) by id. `/done` sets thread status to done, so rows leave the
-// active rail until new activity wakes them.
+// active sidebar until new activity wakes them.
 let statusSnapshot: StatusSnapshot = (await backend.loadSnapshot()) ?? { polledAt: "", threads: [] };
 const triageCache: Map<string, TriageInfo> = await backend.loadTriage();
-let railByNum: Map<number, SidebarThread> = new Map(); // displayed number → thread, for /done
-function refreshRail(): void {
+let sidebarByNum: Map<number, SidebarThread> = new Map(); // displayed number → thread, for /done
+function refreshSidebar(): void {
   const rows = toSidebarThreads(statusSnapshot, triageCache);
-  railByNum = numberThreads(rows).byNum; // same core numbering the rail renders — no drift
+  sidebarByNum = numberThreads(rows).byNum; // same core numbering the sidebar renders — no drift
   sidebar.setThreads(rows);
   tui.requestRender();
 }
@@ -125,7 +155,7 @@ function cacheTriage(threads: Thread[]): void {
     triageCache.set(t.id, { topic: t.topic, summary: t.summary, nextSteps: t.nextSteps, priority: t.priority });
     changed = true;
   }
-  if (changed) { backend.saveTriage(triageCache).catch(() => { /* best-effort */ }); refreshRail(); }
+  if (changed) { backend.saveTriage(triageCache).catch(() => { /* best-effort */ }); refreshSidebar(); }
 }
 
 let poller: StatusPoller | undefined;
@@ -142,27 +172,83 @@ function quit(): never {
   process.exit(0);
 }
 
-// ---- focus: rail vs editor ----------------------------------------------------------------
-// The rail is glance-only — never focused. The editor always has focus.
+// ---- focus: sidebar vs editor ----------------------------------------------------------------
+// The sidebar is glance-only — never focused. The editor always has focus.
 function focusEditor(): void { tui.setFocus(editor); tui.requestRender(); }
 
+// ---- pasted-image attachments ------------------------------------------------------------
+// gpt-5.5 + pi take image input. Ctrl+V (pi's app.clipboard.pasteImage binding, read with pi's
+// native clipboard reader) inserts an "[Image #N]" token INTO THE INPUT — the Claude Code / OpenCode
+// pattern, not a line in the transcript. On submit, tokens still present in the text resolve to their
+// images (handleSubmit); the model gets the text with the marker plus the image content.
+type PendingImage = { type: "image"; data: string; mimeType: string };
+const imageStore = new Map<number, PendingImage>(); // token number → image, until the message is sent
+let imageSeq = 0;
+let attaching = false;
+
+async function attachClipboardImage(): Promise<void> {
+  if (attaching) return;
+  attaching = true;
+  try {
+    const img = await readClipboardImage();
+    if (!img) return; // Ctrl+V with no image on the clipboard → no-op (text paste is the terminal's job)
+    const n = ++imageSeq;
+    imageStore.set(n, { type: "image", ...img });
+    editor.insertTextAtCursor?.(`[Image #${n}] `); // shows in the input; resolves to the image on submit
+    tui.requestRender();
+  } finally { attaching = false; }
+}
+
+// ↑/↓ scroll the chat a line at a time; holding accelerates — the step doubles on each rapid
+// same-direction press (auto-repeat), so a long scroll covers ground fast, and resets on a pause
+// or a direction change. Date.now() is fine here (the real TUI runtime, not the workflow sandbox).
+let scrollAccel = 1, scrollDir = 0, scrollAt = 0;
+function chatLineScroll(dir: -1 | 1): void {
+  const now = Date.now();
+  scrollAccel = dir === scrollDir && now - scrollAt < 250 ? Math.min(scrollAccel * 2, 32) : 1;
+  scrollDir = dir; scrollAt = now;
+  chat.scroll(dir * scrollAccel);
+  tui.requestRender();
+}
+
 tui.addInputListener((data: string) => {
+  // Ignore key-RELEASE events: the Kitty keyboard protocol sends a press AND a release for one
+  // keypress, so acting on both fired every action twice — Ctrl+R toggled straight back to where it
+  // started, and the scroll keys double-stepped. Act on press/repeat only. (Paste is never a release.)
+  if (isKeyRelease(data)) return undefined;
   if (matchesKey(data, "ctrl+c")) quit();
+  // Ctrl+V → paste a copied image from the clipboard (pi's app.clipboard.pasteImage binding). The
+  // control byte reaches the app directly, so it works regardless of how the terminal handles paste.
+  if (matchesKey(data, "ctrl+v") && !isKeyRepeat(data)) { void attachClipboardImage(); return { consume: true }; }
   // esc while a turn is running → stop it (abort the in-flight prompt; runTurn settles it).
   if (busy && matchesKey(data, "escape")) {
     stopRequested = true;
     void session.abort();
     return { consume: true };
   }
+  // Scroll the chat on Shift+↑/↓ — a modifier combo, so it never conflicts with typing, needs no
+  // fn/PgUp, and works mid-turn. Holding accelerates. (Plain ↑/↓ stay with the editor; Cmd+arrows
+  // aren't usable — macOS terminals don't forward them.) PgUp/PgDn page it too where those keys exist.
+  if (matchesKey(data, "shift+up")) { chatLineScroll(-1); return { consume: true }; }
+  if (matchesKey(data, "shift+down")) { chatLineScroll(1); return { consume: true }; }
+  if (matchesKey(data, "pageUp")) { chat.scroll(-chat.pageStep()); tui.requestRender(); return { consume: true }; }
+  if (matchesKey(data, "pageDown")) { chat.scroll(chat.pageStep()); tui.requestRender(); return { consume: true }; }
+  // Scroll the Sidebar on Option+↑/↓ (overflow is rare; the ↑/↓ markers always show what's hidden).
+  if (matchesKey(data, "alt+up")) { sidebar.scroll(-SIDEBAR_STEP); tui.requestRender(); return { consume: true }; }
+  if (matchesKey(data, "alt+down")) { sidebar.scroll(SIDEBAR_STEP); tui.requestRender(); return { consume: true }; }
+  // Hide the sidebar → chat fills the full width, so a normal terminal drag-select copies ONLY the
+  // chat (no sidebar text, no separator bleeding in). Toggle back to bring the sidebar home. Press only
+  // (ignore auto-repeat) so holding the key doesn't flicker the sidebar on/off.
+  if (matchesKey(data, "ctrl+r") && !isKeyRepeat(data)) { columns.toggleSidebar(); tui.requestRender(); return { consume: true }; }
   return undefined; // the editor handles everything else
 });
 
 // ---- focused chat brief (from the present_threads tool call) ------------------------------
-// The chat is the "what to do next" surface, not a second copy of the rail: the model triages
-// EVERY active thread (which enriches the rail by id, below), but the chat shows only a short
+// The chat is the "what to do next" surface, not a second copy of the sidebar: the model triages
+// EVERY active thread (which enriches the sidebar by id, below), but the chat shows only a short
 // landscape summary + the few threads waiting on the owner. Brief layout lives in brief.ts
-// (previewable without a TTY); it reads the SAME snapshot+triage the rail joins, so the two
-// can't disagree. The rendered brief is frozen (a point-in-time chat message); the rail stays
+// (previewable without a TTY); it reads the SAME snapshot+triage the sidebar joins, so the two
+// can't disagree. The rendered brief is frozen (a point-in-time chat message); the sidebar stays
 // live.
 class Brief implements Component {
   constructor(private readonly rows: readonly SidebarThread[]) {}
@@ -176,22 +262,42 @@ function renderBrief(): void {
   tui.requestRender();
 }
 
-interface Turn { md: Markdown; acc: string; loader: Loader; loaderRemoved: boolean; mdAdded: boolean; cardsShown: boolean }
+interface Turn { md: Markdown; acc: string; status: StatusLine | null; mdAdded: boolean; cardsShown: boolean }
 let current: Turn | null = null;
 let busy = false;
 let stopRequested = false; // esc pressed mid-turn → session.abort(), settle with "■ stopped"
 
-function removeLoader(): void {
-  if (current && !current.loaderRemoved) { log.removeChild(current.loader); current.loaderRemoved = true; }
+// ONE live-status line per turn, updated IN PLACE (working → thinking → running…) and removed when
+// the answer or brief lands. The transient states never stack — and reasoning traces aren't shown
+// (they're not visible/useful), so "thinking" is just a phase label on the same single line.
+function setPhase(phase: string): void { if (current?.status) { current.status.setPhase(phase); tui.requestRender(); } }
+function removeStatus(): void { if (current?.status) { log.removeChild(current.status); current.status = null; } }
+
+// The assistant's prose gets a ● bullet + hanging indent (the Claude Code / gemini-cli sigil),
+// added once on the first token (or the fallback). The brief path doesn't use it.
+function ensureAssistantMd(): void {
+  if (current && !current.mdAdded) {
+    log.addChild(new Spacer(1));
+    log.addChild(new Block(current.md, cyan("●") + " ", "  ", 2));
+    current.mdAdded = true;
+  }
 }
 
-session.subscribe((event: any) => {
-  if (!current) return;
+// Tool name → the phase label shown on the single status line while that tool runs.
+const TOOL_PHASE: Record<string, string> = {
+  bash: "running", read: "reading", grep: "searching", find: "finding", ls: "listing",
+  get_sidebar_threads: "checking the sidebar",
+};
 
-  // Model presented its triage → enrich the live rail by id (all threads), then render the
-  // focused chat brief (summary + who needs you). cacheTriage first so the brief reads fresh.
+session.subscribe((event: any) => {
+  if (!current) {
+    if (event.type === "message_end" || event.type === "turn_end") refreshFooter();
+    return;
+  }
+
+  // Model presented its triage → drop the status line, enrich the live sidebar by id, render the brief.
   if (event.type === "tool_execution_start" && event.toolName === "present_threads") {
-    removeLoader();
+    removeStatus();
     const threads = (event.args?.threads ?? []) as Thread[];
     cacheTriage(threads);
     renderBrief();
@@ -201,77 +307,122 @@ session.subscribe((event: any) => {
 
   if (event.type === "tool_execution_start" && event.toolName === "mark_thread_done") {
     // The tool writes through the backend during this turn. Reconcile on the next tick so
-    // the rail reflects the write without waiting for the interval/push.
+    // the sidebar reflects the write without waiting for the interval/push.
     setTimeout(() => { if (poller) void poller.poll(); else void backend.forcePoll(); }, 0).unref?.();
     return;
   }
 
+  // Any other tool (the skills' read/bash/grep/…) → just update the one status line's phase.
+  if (event.type === "tool_execution_start") { setPhase(TOOL_PHASE[event.toolName] ?? event.toolName); return; }
+
   const ame = event.assistantMessageEvent;
-  if (event.type === "message_update" && ame?.type === "text_delta") {
-    current.acc += ame.delta;
-    removeLoader();
-    if (!current.mdAdded) { log.addChild(current.md); current.mdAdded = true; }
-    current.md.setText(current.acc);
-    tui.requestRender();
+  if (event.type === "message_update" && ame) {
+    // Thinking is a phase on the single line — we don't render the (invisible) reasoning trace.
+    if (ame.type === "thinking_start") { setPhase("thinking"); return; }
+    if (ame.type === "thinking_end") { setPhase("working"); return; }
+    // The answer: drop the status line, stream markdown under the ● bullet.
+    if (ame.type === "text_delta") {
+      current.acc += ame.delta;
+      removeStatus();
+      ensureAssistantMd();
+      current.md.setText(current.acc);
+      tui.requestRender();
+      return;
+    }
   }
+
+  if (event.type === "message_end" || event.type === "turn_end") refreshFooter();
 });
 
-// One agent turn: loader → streamed prose / present_threads cards → settle. Shared by user
-// input and the startup brief.
-async function runTurn(promptText: string, emptyMsg = "(no response)"): Promise<void> {
-  const loader = new Loader(tui, cyan, dim, "working…");
-  log.addChild(loader);
-  current = { md: new Markdown("", 0, 0, mdTheme), acc: "", loader, loaderRemoved: false, mdAdded: false, cardsShown: false };
+// One agent turn: a single status line → streamed prose / present_threads brief → settle. Shared
+// by user input and the startup brief.
+async function runTurn(promptText: string, emptyMsg = "(no response)", images?: PendingImage[]): Promise<void> {
+  const status = new StatusLine("working");
+  log.addChild(status);
+  chat.toBottom(); // a new turn pulls you back to the latest, even if you'd scrolled into history
+  current = { md: new Markdown("", 0, 0, mdTheme), acc: "", status, mdAdded: false, cardsShown: false };
   tui.requestRender();
   try {
-    await session.prompt(promptText);
-    removeLoader();
+    await session.prompt(promptText, images && images.length ? { images } : undefined);
+    removeStatus();
     if (stopRequested) {
       log.addChild(new Text(dim("■ stopped")));
     } else if (current && !current.mdAdded && !current.cardsShown) {
       current.md.setText(lastAssistantText(session) || dim(emptyMsg));
-      log.addChild(current.md);
+      ensureAssistantMd();
     }
   } catch (e: any) {
-    removeLoader();
+    removeStatus();
     log.addChild(stopRequested ? new Text(dim("■ stopped")) : new Text(yellow(`⚠ ${e?.message ?? e}`)));
   } finally {
     stopRequested = false;
     current = null;
     busy = false;
+    refreshFooter();
     focusEditor();
     tui.requestRender();
   }
 }
 
-// /done 1,3 — mark rail rows `done` by their DISPLAYED number. Persists by thread id (the
-// number is just the handle), the rows leave the rail on this render.
+// /done 1,3 — mark sidebar rows `done` by their DISPLAYED number. Persists by thread id (the
+// number is just the handle), the rows leave the sidebar on this render.
 async function markDone(arg: string): Promise<void> {
-  const hits = parseNumbers(arg).map((n) => railByNum.get(n)).filter((t): t is SidebarThread => !!t);
+  const hits = parseNumbers(arg).map((n) => sidebarByNum.get(n)).filter((t): t is SidebarThread => !!t);
   if (!hits.length) {
-    log.addChild(new Text(dim("usage: /done 1,3,5 — the rail row numbers")));
+    log.addChild(new Text(dim("usage: /done 1,3,5 — the sidebar row numbers")));
   } else {
     const result = await backend.markThreadsDone(hits.map((t) => t.id));
     if (result.snapshot) statusSnapshot = result.snapshot;
     log.addChild(new Text(green("✓ done") + dim(" › ") + hits.map((t) => `${t.num} ${displayTopic(t)}`).join(dim(" · "))));
   }
-  refreshRail();
+  refreshSidebar();
+}
+
+// /help (or /keys) — a dim cheat-sheet of the keymap, into the transcript (no overlay).
+function showHelp(): void {
+  const rows = [
+    bold("Keys & commands"),
+    dim("  Shift+↑ / ↓     scroll the chat  (hold to speed up · PgUp/PgDn pages it too)"),
+    dim("  Alt+↑ / ↓       scroll the Sidebar"),
+    dim("  Ctrl+R          hide the Sidebar — full-width chat for clean copy/paste"),
+    dim("  Ctrl+V          paste a copied image from the clipboard"),
+    dim("  /done 1,3       mark Sidebar rows done by number"),
+    dim("  /help           this list"),
+    dim("  esc  stop the running turn   ·   ctrl+c  exit"),
+  ];
+  const box = new Box(0, 0);
+  for (const r of rows) box.addChild(new Text(r, 0, 0));
+  log.addChild(new Spacer(1));
+  log.addChild(box);
+  chat.toBottom();
+  tui.requestRender();
 }
 
 async function handleSubmit(text: string): Promise<void> {
   const q = text.trim();
   editor.setText("");
-  if (!q) return;
   if (q === "/exit" || q === "/quit") return quit();
+  if (q === "/help" || q === "/keys") return showHelp();
   if (q === "/done" || q.startsWith("/done ")) return markDone(q.slice(5));
-  if (busy) return;
+  // Resolve any [Image #N] tokens still in the text to their pasted images (deleted tokens drop out).
+  const images: PendingImage[] = [];
+  for (const m of q.matchAll(/\[Image #(\d+)\]/g)) {
+    const img = imageStore.get(Number(m[1]));
+    if (img) images.push(img);
+  }
+  if (!q && !images.length) return;   // nothing typed and no image referenced
+  if (busy) return;                   // a turn is already running
+  imageStore.clear(); imageSeq = 0;   // consumed into this turn
   busy = true;
-  log.addChild(new Text(`${bold(blue("you"))} › ${q}`));
-  await runTurn(q);
+  const bar = bold(blue("▌")) + " ";
+  log.addChild(new Spacer(1));
+  // The owner's own input, set off by a solid bright-blue left bar (the user-message convention).
+  log.addChild(new Block(new Text(q || dim("(image)"), 0, 0), bar, bar, 2));
+  await runTurn(q || "Here's an image.", "(no response)", images);
 }
 
-// First response on open: a fresh, full triage so the rail piggybacks off live data, never
-// stale cache. The model triages EVERY active thread (that enriches the rail by id); the chat
+// First response on open: a fresh, full triage so the sidebar piggybacks off live data, never
+// stale cache. The model triages EVERY active thread (that enriches the sidebar by id); the chat
 // renders only the focused brief. Runs every launch by design — you wanted fresh, not cached.
 async function startupBrief(): Promise<void> {
   if (busy) return;
@@ -332,8 +483,8 @@ function refreshNextStep(t: ThreadStatus): void {
 }
 
 function onPoll(snap: StatusSnapshot, diff: StatusDiff): void {
-  statusSnapshot = snap;   // live membership for the rail (every active thread, no filter)
-  refreshRail();
+  statusSnapshot = snap;   // live membership for the sidebar (every active thread, no filter)
+  refreshSidebar();
   if (!startupDone) return; // the startup full triage enriches the initial set
   // working→needs-you transitions (new assistant output) + brand-new needs-you threads not yet
   // triaged → targeted single-thread refresh enriches them. Never touch unchanged/idle.
@@ -342,15 +493,15 @@ function onPoll(snap: StatusSnapshot, diff: StatusDiff): void {
 }
 
 // ---- start ----
-refreshRail();                              // instant: last snapshot + triage cache, so it isn't blank
+refreshSidebar();                              // instant: last snapshot + triage cache, so it isn't blank
 if (backend.subscribe) {
-  // Daemon mode: the daemon owns the poll loop (interval + fs.watch); the rail rides its
+  // Daemon mode: the daemon owns the poll loop (interval + fs.watch); the sidebar rides its
   // push stream. Triage saved by ANY surface arrives here too — multi-surface consistency.
   unsubscribePush = backend.subscribe((e) => {
     if (e.type === "snapshot") onPoll(e.snapshot, e.diff);
     else if (e.type === "triage") {
       for (const [id, info] of Object.entries(e.entries)) triageCache.set(id, info);
-      refreshRail();
+      refreshSidebar();
     }
   });
 } else {
@@ -361,13 +512,18 @@ if (backend.subscribe) {
   poller.watch();   // fs.watch on the session dirs — the responsive path (debounced ~600ms)
 }
 
-// Animate the `working` spinner (~8 fps) only while something is actually working.
-spin = setInterval(() => { if (sidebar.hasWorking()) { sidebar.tick(); tui.requestRender(); } }, 120);
+// Animate spinners (~8 fps): the sidebar's `working` rows and the current turn's single status line.
+spin = setInterval(() => {
+  let dirty = false;
+  if (sidebar.hasWorking()) { sidebar.tick(); dirty = true; }
+  if (current?.status) { current.status.tick(); dirty = true; }
+  if (dirty) tui.requestRender();
+}, 120);
 spin.unref?.();
 
 tui.start();
 tui.requestRender();
 
-// First response on open is a fresh full triage (cards); the rail piggybacks off it. Targeted
+// First response on open is a fresh full triage (cards); the sidebar piggybacks off it. Targeted
 // per-thread refreshes only kick in afterwards, on needs-you transitions.
 void startupBrief().then(() => { startupDone = true; });

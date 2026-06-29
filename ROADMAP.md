@@ -29,3 +29,7 @@ Concrete things to build, beyond the phase-level vision in [VISION.md](VISION.md
 - [ ] **Agent-to-agent startup.** `--json` emits the triage `Thread[]` without lifecycle
   `state`. Think about agent-to-agent optimization: what startup looks like, whether to
   preload context or expose start flags.
+- [ ] **Assess pi interactive-mode vs hand-rolled TUI.** Whether to adopt pi's
+  `modes/interactive` (less custom chrome — commands, effort-cycle, paste for free) and whether
+  the Sidebar earns its place vs a chat-first shape. Research first.
+  ([#7](https://github.com/lhotwll217/owner-operator/issues/7))

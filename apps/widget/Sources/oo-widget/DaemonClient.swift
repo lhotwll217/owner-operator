@@ -35,7 +35,7 @@ final class DaemonClient: ObservableObject {
 
     /// Threads whose turn JUST completed — now needs-you and entered that state within `window`
     /// seconds. Most-recently-finished first. The set the collapsed HUD softly pulses through.
-    func freshNeedsYou(window: TimeInterval = 300) -> [RailRow] {
+    func freshNeedsYou(window: TimeInterval = 300) -> [SidebarRow] {
         let now = Date()
         return groups.flatMap { $0.rows }
             .filter { $0.state == .needsYou }
@@ -106,7 +106,7 @@ final class DaemonClient: ObservableObject {
         guard let snap = lastSnapshot else { return }
         let active = Set(snap.threads.filter { $0.state != .done }.map { $0.id })
         pendingDone.formIntersection(active)
-        let built = buildRail(snapshot: snap, triage: lastTriage, hidden: pendingDone)
+        let built = buildSidebar(snapshot: snap, triage: lastTriage, hidden: pendingDone)
         groups = built.groups
         counts = built.counts
         polledAt = snap.polledAt

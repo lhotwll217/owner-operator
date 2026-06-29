@@ -1,6 +1,6 @@
-// Deterministic test of the SIDEBAR rail — no poll, no model, no TTY.
+// Deterministic test of the SIDEBAR — no poll, no model, no TTY.
 //   npm run preview:sidebar   (from harness/)
-// The rail = the LIVE poll snapshot enriched by the triage cache. Threads with status
+// The sidebar = the LIVE poll snapshot enriched by the triage cache. Threads with status
 // `done` leave the body but stay in the ✓ count.
 // Asserts: numbered rows 1…n in display order (the /done handles), uniform rows (num · glyph ·
 // priority · title · recency · grey next-step), triaged + untriaged both render, no cursor.
@@ -58,7 +58,7 @@ const numbered = lines.filter((l) => /^\s*\d [◐●○⠋]/.test(l));
 assert.deepEqual(numbered.map((l) => Number(l.trim()[0])), [1, 2, 3, 4], "rows render 1…n in display order");
 assert.equal(byNum.get(1)!.id, "n", "number 1 = the loudest displayed row");
 
-// --- wrapping: long title + next-step keep every word (the rail must not lose information) ---
+// --- wrapping: the title caps at 2 lines (ellipsized); the next-step still keeps every word ---
 const longTopic = "Reconsider the JSON output shape for agent-to-agent consumption and lifecycle state";
 const longStep = "Decide whether JSON should emit a focused brief or the full lossless thread list";
 const wrapSnap: StatusSnapshot = { polledAt: NOW, threads: [st("L", "owner-operator", "needs-you", longTopic, "2 minutes ago")] };
@@ -67,19 +67,38 @@ const wpanel = new SidebarList(20);
 wpanel.setThreads(toSidebarThreads(wrapSnap, wrapTriage));
 const wlines = wpanel.render(51).map(stripAnsi);
 process.stdout.write(wlines.map((l) => "  " + l).join("\n") + "\n\n");
-// Words can't be reassembled by a naive join (the right-aligned age sits between title
-// segments), so assert losslessly at the word level: every word must appear somewhere.
 const haystack = wlines.join(" ").replace(/\s+/g, " ");
-assert.ok(!wlines.some((l) => /…|\.\.\.$/.test(l)), "no ellipsis — text wraps, never truncates");
-for (const w of longTopic.split(" ")) assert.ok(haystack.includes(w), `title word "${w}" survives the wrap`);
+// The title = the glyph row + the lines up to the "→" next-step. Capped at 2 lines total (1 + 1).
+const rowIdx = wlines.findIndex((l) => /Reconsider/.test(l));
+const stepIdx = wlines.findIndex((l) => /^\s*→/.test(l));
+assert.ok(rowIdx >= 0 && stepIdx > rowIdx, "row and next-step rendered");
+assert.equal(stepIdx - rowIdx, 2, "the title is the row + exactly one continuation (2 lines)");
+assert.ok(wlines.some((l) => /…$/.test(l)), "an over-long title is ellipsized, not wrapped forever");
+for (const w of longTopic.split(" ").slice(0, 4)) assert.ok(haystack.includes(w), `the start of the title survives ("${w}")`);
+// The next-step is NOT capped — it still keeps every word (the sidebar must not drop the action).
 for (const w of longStep.split(" ")) assert.ok(haystack.includes(w), `next-step word "${w}" survives the wrap`);
 assert.ok(wlines.every((l) => visibleWidth(l) <= 51), "every wrapped line fits the column width");
-// A continuation line: indented, carries a tail word of the title, and has no row glyph.
-assert.ok(wlines.some((l) => /^\s+\S/.test(l) && /lifecycle|consumption/.test(l) && !/[◐●○⠋]/.test(l)), "title wrapped onto an indented continuation line");
+
+// --- scrolling: when threads overflow a short sidebar, the window pages through them (Shift+↑/↓) ---
+const tall = new SidebarList(7); // a short body → the 4-thread digest overflows it
+tall.setThreads(rows);
+const atTop = tall.render(51).map(stripAnsi);
+assert.ok(!atTop.some((l) => /↑ \d+ more/.test(l)), "at the top: no upward marker");
+assert.ok(atTop.some((l) => /↓ \d+ more/.test(l)), "overflow shows a downward marker");
+assert.ok(!atTop.some((l) => /Push the fix/.test(l)), "the last group sits below the fold at the top");
+
+tall.scroll(20); // page down past the middle (clamped to the content height at render)
+const lower = tall.render(51).map(stripAnsi);
+assert.ok(lower.some((l) => /↑ \d+ more/.test(l)), "after scrolling down: an upward marker appears");
+assert.notEqual(lower.join("\n"), atTop.join("\n"), "the visible window actually moved");
+assert.ok(lower.some((l) => /Push the fix|owner-operator/.test(l)), "scrolling down reveals the last group");
+
+tall.scroll(-100); // back above the top → clamps to 0, identical to where we started
+assert.equal(tall.render(51).map(stripAnsi).join("\n"), atTop.join("\n"), "scrolling back up clamps to the top");
 
 // --- empty ---
 const empty = new SidebarList().render(51).map(stripAnsi);
 assert.match(empty[0], /^Threads\s+0/, "empty header");
 assert.ok(empty.some((l) => /no active threads/.test(l)), "empty notice");
 
-process.stdout.write("ok — sidebar rail preview passed\n");
+process.stdout.write("ok — sidebar preview passed\n");

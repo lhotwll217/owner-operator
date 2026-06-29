@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
-const opts = { limit: 20, before: 1, after: 1, role: 'all', source: 'all', sort: 'newest', json: false };
+const opts = { limit: 20, before: 1, after: 1, role: 'all', source: 'all', sort: 'newest', json: false, regex: false };
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--query') opts.query = args[++i];
@@ -16,6 +16,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--source') opts.source = args[++i];
   else if (a === '--since') opts.since = args[++i];
   else if (a === '--sort') opts.sort = args[++i];
+  else if (a === '--regex') opts.regex = true;
   else if (a === '--case-sensitive') opts.caseSensitive = true;
   else if (a === '--json') opts.json = true;
   else if (a === '--help' || a === '-h') usage(0);
@@ -31,6 +32,7 @@ if (!['all', 'claude', 'codex'].includes(opts.source)) usage(1, '--source must b
 if (!['newest', 'oldest', 'file'].includes(opts.sort)) usage(1, '--sort must be newest, oldest, or file');
 const sinceTime = opts.since ? parseSince(opts.since) : null;
 if (opts.since && sinceTime == null) usage(1, '--since must be today, Nd, or YYYY-MM-DD');
+const queryRegex = opts.regex ? compileRegex(opts.query, opts.caseSensitive) : null;
 
 const home = os.homedir();
 const sourceRoots = {
@@ -44,13 +46,18 @@ const roots = Object.entries(sourceRoots)
 
 const rg = spawnSync('rg', [
   ...(opts.caseSensitive ? [] : ['-i']),
-  '--fixed-strings',
+  ...(opts.regex ? [] : ['--fixed-strings']),
   '--files-with-matches',
   '--glob',
   '*.jsonl',
   opts.query,
   ...roots,
 ], { encoding: 'utf8' });
+
+if (rg.status === 2) {
+  const detail = rg.stderr.trim() ? `\n${rg.stderr.trim()}` : '';
+  usage(1, `Invalid ${opts.regex ? 'regex' : 'query'} for ripgrep.${detail}`);
+}
 
 const files = rg.status === 0 ? rg.stdout.trim().split('\n').filter(Boolean) : [];
 const matches = [];
@@ -63,7 +70,7 @@ for (const file of files) {
     const msg = messages[i];
     if (opts.role !== 'all' && msg.role !== opts.role) continue;
     const haystack = opts.caseSensitive ? msg.text : msg.text.toLowerCase();
-    if (!haystack.includes(q)) continue;
+    if (opts.regex ? !queryRegex.test(msg.text) : !haystack.includes(q)) continue;
     const time = timeOf(msg.timestamp) ?? timeOf(messages[0]?.timestamp) ?? fs.statSync(file).mtimeMs;
     if (sinceTime != null && time < sinceTime) continue;
     matches.push({
@@ -85,9 +92,9 @@ else if (opts.sort === 'oldest') matches.sort((a, b) => a.time - b.time);
 const limited = matches.slice(0, opts.limit);
 
 if (opts.json) {
-  console.log(JSON.stringify({ query: opts.query, rawFilesWithHits: files.length, totalMatches: matches.length, count: limited.length, matches: limited }, null, 2));
+  console.log(JSON.stringify({ query: opts.query, regex: opts.regex, rawFilesWithHits: files.length, totalMatches: matches.length, count: limited.length, matches: limited }, null, 2));
 } else {
-  console.log(`query=${JSON.stringify(opts.query)} raw_files_with_hits=${files.length} total_message_matches=${matches.length} shown=${limited.length} sort=${opts.sort}${opts.since ? ` since=${opts.since}` : ''}${opts.caseSensitive ? ' case_sensitive=true' : ''}`);
+  console.log(`query=${JSON.stringify(opts.query)}${opts.regex ? ' regex=true' : ''} raw_files_with_hits=${files.length} total_message_matches=${matches.length} shown=${limited.length} sort=${opts.sort}${opts.since ? ` since=${opts.since}` : ''}${opts.caseSensitive ? ' case_sensitive=true' : ''}`);
   limited.forEach((m, idx) => {
     console.log(`\n[${idx + 1}] ${m.source} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ''}`);
     console.log(`path=${m.path}`);
@@ -166,8 +173,16 @@ function parseSince(value) {
   return null;
 }
 
+function compileRegex(pattern, caseSensitive) {
+  try {
+    return new RegExp(pattern, caseSensitive ? 'u' : 'iu');
+  } catch (error) {
+    usage(1, `Invalid JavaScript regex: ${error.message}`);
+  }
+}
+
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: sessions-grep.mjs --query TEXT [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|all] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
+  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|all] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
   process.exit(code);
 }
