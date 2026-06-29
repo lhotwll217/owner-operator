@@ -1,5 +1,5 @@
 // Mirrors @owner-operator/core (status.ts + sidebar.ts): the daemon's ThreadStatus and
-// TriageInfo, joined into a loudest-first rail. The widget NEVER computes state — it renders
+// TriageInfo, joined into a loudest-first sidebar. The widget NEVER computes state — it renders
 // what the daemon owns. Keep the glyphs/ranks in lockstep with sidebar.ts.
 
 import Foundation
@@ -22,7 +22,7 @@ enum ThreadState: String, Decodable {
         }
     }
 
-    /// Glyphs == the TUI rail (harness/src/sidebar.ts GLYPH).
+    /// Glyphs == the TUI sidebar (harness/src/sidebar.ts GLYPH).
     var glyph: String {
         switch self {
         case .needsYou: return "◐"
@@ -41,7 +41,7 @@ enum ThreadState: String, Decodable {
     }
 }
 
-/// One polled thread (the subset the rail renders). Decodes leniently so an unexpected
+/// One polled thread (the subset the sidebar renders). Decodes leniently so an unexpected
 /// field never drops the whole snapshot.
 struct ThreadStatus: Decodable, Identifiable {
     let id: String
@@ -103,8 +103,8 @@ struct Snapshot: Decodable {
     let threads: [ThreadStatus]
 }
 
-/// A rail row: live thread + optional cached triage (the enrichment overlay).
-struct RailRow: Identifiable {
+/// A sidebar row: live thread + optional cached triage (the enrichment overlay).
+struct SidebarRow: Identifiable {
     let thread: ThreadStatus
     let triage: TriageInfo?
     var id: String { thread.id }
@@ -121,15 +121,15 @@ struct RailRow: Identifiable {
 /// Rows grouped under one repo == core RepoGroup.
 struct RepoGroup: Identifiable {
     let repo: String
-    let rows: [RailRow]
+    let rows: [SidebarRow]
     var id: String { repo }
 }
 
-/// Join snapshot + triage into the grouped, loudest-first rail — the exact ordering of
-/// core/sidebar.ts (groupByRepo + sortByAttention). Counts include done; the rail body omits it.
+/// Join snapshot + triage into the grouped, loudest-first sidebar — the exact ordering of
+/// core/sidebar.ts (groupByRepo + sortByAttention). Counts include done; the sidebar body omits it.
 /// `hidden` are ids marked done locally but not yet confirmed by the daemon — counted as done,
 /// dropped from the body, so the row vanishes the instant you click without lying about state.
-func buildRail(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<String> = []) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
+func buildSidebar(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<String> = []) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
     var counts: [ThreadState: Int] = [.needsYou: 0, .working: 0, .idle: 0, .done: 0]
     for t in snapshot.threads {
         if hidden.contains(t.id) { counts[.done, default: 0] += 1; continue }
@@ -138,10 +138,10 @@ func buildRail(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<Str
 
     let rows = snapshot.threads
         .filter { $0.state != .done && !hidden.contains($0.id) }
-        .map { RailRow(thread: $0, triage: triage[$0.id]) }
+        .map { SidebarRow(thread: $0, triage: triage[$0.id]) }
 
     // attention sort: state rank asc, then most-recent message first.
-    func attention(_ a: [RailRow]) -> [RailRow] {
+    func attention(_ a: [SidebarRow]) -> [SidebarRow] {
         a.sorted { l, r in
             l.state.rank != r.state.rank
                 ? l.state.rank < r.state.rank
@@ -149,7 +149,7 @@ func buildRail(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<Str
         }
     }
 
-    var byRepo: [String: [RailRow]] = [:]
+    var byRepo: [String: [SidebarRow]] = [:]
     for r in rows { byRepo[r.thread.repo, default: []].append(r) }
 
     var groups = byRepo.map { RepoGroup(repo: $0.key, rows: attention($0.value)) }
