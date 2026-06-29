@@ -1,4 +1,4 @@
-// `oo-widget --once` — a headless render of the current rail to stdout (mirrors `oo --json`'s
+// `oo-widget --once` — a headless render of the current sidebar to stdout (mirrors `oo --json`'s
 // spirit). The same join + ordering the GUI uses, so it doubles as the widget's smoke test:
 // run it and you see exactly what the menu bar would show.
 
@@ -16,7 +16,7 @@ private func glyphColored(_ st: ThreadState) -> String {
 }
 
 func renderText(snapshot: Snapshot, triage: [String: TriageInfo], port: Int) -> String {
-    let (groups, counts) = buildRail(snapshot: snapshot, triage: triage)
+    let (groups, counts) = buildSidebar(snapshot: snapshot, triage: triage)
     let total = groups.reduce(0) { $0 + $1.rows.count }
 
     let stats: [String] = [
