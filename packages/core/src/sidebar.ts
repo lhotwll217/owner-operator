@@ -1,9 +1,9 @@
 // Owner Operator — the sidebar data model.
 //
-// The rail is LIVE: its membership is the cheap poll's snapshot, minus threads whose status
+// The sidebar is LIVE: its membership is the cheap poll's snapshot, minus threads whose status
 // has been marked `done` — so new threads you start show up on the next tick. The model's triage is
 // an ENRICHMENT overlay (title · priority · nextStep) joined by id; the chat cards are a
-// separate, frozen render and the rail is NOT coupled to them. Untriaged/new threads still
+// separate, frozen render and the sidebar is NOT coupled to them. Untriaged/new threads still
 // appear (raw digest topic + live status) until a triage enriches them. Pure + UI-independent.
 
 import { isActiveState, sortByAttention, STATE_RANK, type StatusSnapshot, type ThreadState, type ThreadStatus } from "./status";
@@ -12,19 +12,19 @@ import { isActiveState, sortByAttention, STATE_RANK, type StatusSnapshot, type T
 export interface TriageInfo {
   topic?: string;      // a nicer title than the raw scan topic
   summary?: string;    // short card summary, when a model triage has produced one
-  nextSteps?: string;  // the concrete next action (greyed on the rail)
+  nextSteps?: string;  // the concrete next action (greyed on the sidebar)
   priority?: number;   // 5 (loudest) … 1
 }
 
-/** A rail row: the live polled thread + its (optional) cached triage enrichment. */
+/** A sidebar row: the live polled thread + its (optional) cached triage enrichment. */
 export interface SidebarThread extends ThreadStatus {
   triagedTopic?: string;
   summary?: string;
   nextSteps?: string;
   priority?: number;
-  /** False once status is `done`; done rows leave the active rail. */
+  /** False once status is `done`; done rows leave the active sidebar. */
   active: boolean;
-  /** Rail row number (1…n in display order) — the handle `/done 1,3` resolves. */
+  /** Sidebar row number (1…n in display order) — the handle `/done 1,3` resolves. */
   num?: number;
 }
 
@@ -34,7 +34,7 @@ export function displayTopic(t: SidebarThread): string {
 }
 
 /**
- * The rail = threads in the poll snapshot, each enriched by the cached
+ * The sidebar = threads in the poll snapshot, each enriched by the cached
  * triage (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
  */
 export function toSidebarThreads(
@@ -55,13 +55,13 @@ export function toSidebarThreads(
   });
 }
 
-export interface NumberedRail { groups: RepoGroup[]; byNum: Map<number, SidebarThread>; }
+export interface NumberedSidebar { groups: RepoGroup[]; byNum: Map<number, SidebarThread>; }
 
 /**
- * Group + number the rail: ACTIVE threads only (done rows drop off), numbered 1…n in display
+ * Group + number the sidebar: ACTIVE threads only (done rows drop off), numbered 1…n in display
  * order — so the number you see is the number `/done` addresses. Pure: numbers go on copies.
  */
-export function numberThreads(threads: readonly SidebarThread[]): NumberedRail {
+export function numberThreads(threads: readonly SidebarThread[]): NumberedSidebar {
   const groups = groupByRepo(threads.filter((t) => t.active))
     .map((g): RepoGroup => ({ ...g, threads: g.threads.map((t) => ({ ...t })) }));
   const byNum = new Map<number, SidebarThread>();
