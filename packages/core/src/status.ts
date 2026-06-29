@@ -73,7 +73,7 @@ export interface ThreadStatus {
   /** ISO of when it entered its current `state` (drives "has been waiting 20m"). */
   stateSince: string;
   previousState?: ThreadState;
-  /** Workspace line delta vs the repo's base branch — the rail's +N −N badge. */
+  /** Workspace line delta vs the repo's base branch — the sidebar's +N −N badge. */
   diffAdded?: number;
   diffDeleted?: number;
 }
