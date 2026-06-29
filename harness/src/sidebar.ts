@@ -1,7 +1,7 @@
-// Owner Operator — the live thread rail (glance-only). Grouped by project; every ACTIVE thread
+// Owner Operator — the live thread sidebar (glance-only). Grouped by project; every ACTIVE thread
 // is rendered identically with all its data points: row number · status glyph · priority ·
 // title · recency · greyed next-step (no summary). Title and next-step WRAP rather than
-// truncate — the rail is the core primitive and must never drop information. The number is the
+// truncate — the sidebar is the core primitive and must never drop information. The number is the
 // owner's handle — `/done 1,3` in the chat resolves through the same core numbering (see
 // core/sidebar.ts). No selection/cursor/navigation — it's a consistent display the chat sits
 // beside. Renders RAW lines; the Columns layout in screen.ts pads each line and draws the separator.
@@ -34,21 +34,25 @@ function shortAge(lastActive: string): string {
 }
 
 /**
- * Glance-only thread rail: grouped by project, every row showing the same data points. Fed the
- * rail rows (live status joined with the cached triage). Shows every active thread — no
+ * Glance-only thread sidebar: grouped by project, every row showing the same data points. Fed the
+ * sidebar rows (live status joined with the cached triage). Shows every active thread — no
  * filtering — and wraps long titles/next-steps so nothing is lost. No interaction — pure render.
  */
 export class SidebarList {
   private groups: RepoGroup[] = [];
   private counts: Record<ThreadState, number> = { "needs-you": 0, working: 0, idle: 0, done: 0 };
   private frame = 0; // spinner frame for `working` rows
+  private scrollTop = 0; // first body line shown — for when threads overflow the sidebar (clamped at render)
 
   constructor(private bodyHeight = 18) {}
 
-  /** Body rows the rail may use; the fixed-viewport layout sets this from terminal height. */
+  /** Body rows the sidebar may use; the fixed-viewport layout sets this from terminal height. */
   setBodyHeight(h: number): void { this.bodyHeight = Math.max(3, h - 3); } // minus the 3-line header
 
-  /** Takes ALL rail rows; done (inactive) rows leave the body but stay in the ✓ count. */
+  /** Scroll the sidebar body by `delta` lines (negative = up); clamped to content at render. */
+  scroll(delta: number): void { this.scrollTop = Math.max(0, this.scrollTop + delta); }
+
+  /** Takes ALL sidebar rows; done (inactive) rows leave the body but stay in the ✓ count. */
   setThreads(threads: readonly SidebarThread[]): void {
     this.counts = stateCounts(threads);
     this.groups = numberThreads(threads).groups;
@@ -73,7 +77,7 @@ export class SidebarList {
     // Every thread: line 1 = number · glyph · priority · title (right-aligned recency); the
     // title WRAPS onto continuation lines aligned under it. Then the grey next-step (wrapped),
     // then the origin (git ±delta · the app it came from), right-aligned. The number is what
-    // `/done` takes. Title/next-step never truncate — the rail keeps every word.
+    // `/done` takes. Title/next-step never truncate — the sidebar keeps every word.
     const numW = String(all.length).length;
     const body: string[] = [];
     for (const g of this.groups) {
@@ -87,8 +91,12 @@ export class SidebarList {
         const left = " " + dim(String(t.num ?? 0).padStart(numW)) + " " + glyph + " " + badge;
         const indent = visibleWidth(left);
         // Wrap the title; reserve the recency gutter across the block so continuation lines stay
-        // in column and the age never collides. Continuation segments align under the title.
-        const segs = wrapTextWithAnsi(displayTopic(t).replace(/\s+/g, " ").trim(), Math.max(8, W - indent - ageW - 1));
+        // in column and the age never collides. Continuation segments align under the title. Capped
+        // at 2 lines (1 + one continuation), ellipsized if longer — the sidebar stays scannable; the
+        // full topic lives in the chat brief.
+        const titleW = Math.max(8, W - indent - ageW - 1);
+        const segs = wrapTextWithAnsi(displayTopic(t).replace(/\s+/g, " ").trim(), titleW);
+        if (segs.length > 2) { const rest = segs.slice(1).join(" "); segs.length = 1; segs.push(truncateToWidth(rest, titleW, "…")); }
         const l1 = left + (segs[0] ?? "");
         const gap = Math.max(1, W - visibleWidth(l1) - ageW);
         body.push(l1 + " ".repeat(gap) + age);
@@ -105,10 +113,16 @@ export class SidebarList {
       }
     }
 
-    // Glance-only: no scroll cursor — show the top (loudest groups first) + an overflow marker.
+    // Scrollable window (loudest groups first). No selection cursor — it's still glance-only;
+    // scrolling (Shift+↑/↓ in tui.ts) just pages overflow into view. Markers top and bottom show
+    // what's hidden either way; scrollTop is clamped here, where the content height is known.
     const h = Math.max(3, this.bodyHeight);
-    const slice = body.slice(0, h);
-    if (body.length > h) slice[h - 1] = dim(`  ↓ ${body.length - h + 1} more`);
+    const maxTop = Math.max(0, body.length - h);
+    const top = Math.min(Math.max(0, this.scrollTop), maxTop);
+    this.scrollTop = top;
+    const slice = body.slice(top, top + h);
+    if (top > 0) slice[0] = dim(`  ↑ ${top + 1} more`);
+    if (top + h < body.length) slice[slice.length - 1] = dim(`  ↓ ${body.length - (top + h) + 1} more`);
     return [...head, ...slice];
   }
 }
