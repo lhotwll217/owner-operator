@@ -1,7 +1,7 @@
 // Deterministic test of the BRIEF RENDERER only (not the agent). No model, no TTY.
 //   npm run preview:brief   (from harness/)
 // Feeds fixed SidebarThread data into buildBrief() and asserts the rendering invariants
-// (headline counts match the data, only needs-you threads are surfaced, the rail-remainder
+// (headline counts match the data, only needs-you threads are surfaced, the sidebar-remainder
 // footer, the empty/all-clear cases). The full card renderer is covered by cards.preview.ts.
 
 import assert from "node:assert";
@@ -59,14 +59,14 @@ const focus = block.filter((l) => /^\s+• /.test(l));
 assert.equal(focus.length, 2, "only the two needs-you threads are surfaced (not all six)");
 assert.match(focus[0], /owner-operator — review the diff & push\s+P5/, "loudest needs-you first, with repo · action · priority");
 assert.match(focus[1], /amplify — paste the drafted 422 reply\s+P3/, "second needs-you next");
-assert.ok(block.some((l) => /Everything else is in the rail/.test(l)), "points at the rail for the working/idle remainder");
+assert.ok(block.some((l) => /Everything else is in the sidebar/.test(l)), "points at the sidebar for the working/idle remainder");
 
 // all-clear: actives, but none need you → no card wall, just an all-clear line
 const clear = buildBrief([row({ repo: "amplify", state: "working" }), row({ repo: "insights", state: "idle" })], width).map(stripAnsi);
 assert.ok(clear.some((l) => /Nothing needs you right now/.test(l)), "no needs-you → all-clear, not a list");
 assert.ok(!clear.some((l) => /^\s+• /.test(l)), "all-clear has no focus rows");
 
-// empty: same notice the rail shows
+// empty: same notice the sidebar shows
 assert.deepEqual(buildBrief([], width).map(stripAnsi), ["(no active threads)"], "empty → notice");
 
 // cap: 5 needs-you → 4 shown + a surfaced overflow count (never a silent cap)
