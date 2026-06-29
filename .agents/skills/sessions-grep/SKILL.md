@@ -1,14 +1,14 @@
 ---
 name: sessions-grep
 description: >-
-  Literal grep across local AI session transcripts with bounded message context. Use when the user asks to search exact words, punctuation, phrases like "why did you", or wants messages before/after a hit. This is for targeted drill-in, not broad topic discovery.
+  Literal or regex grep across local AI session transcripts with bounded message context. Use when the user asks to search exact words, punctuation, hashtags/patterns, phrases like "why did you", or wants messages before/after a hit. This is for targeted drill-in, not broad topic discovery.
 ---
 
 # sessions-grep
 
-Searches local AI CLI session files with exact literal matching and returns only bounded
-message context around each hit. Use this when BM25 search is too fuzzy or cannot search
-punctuation/common phrases.
+Searches local AI CLI session files with exact literal matching or opt-in regex matching and returns only bounded
+message context around each hit. Use this when BM25 search is too fuzzy, cannot search
+punctuation/common phrases, or when you need a simple pattern like hashtags.
 
 ## When to use
 
@@ -29,11 +29,13 @@ missing or insufficient.
 
 ```bash
 node .agents/skills/sessions-grep/sessions-grep.mjs --query "why did you" --since 7d --limit 12 --before 2 --after 2
+node .agents/skills/sessions-grep/sessions-grep.mjs --regex --query "#[A-Za-z0-9_][A-Za-z0-9_-]*" --since 7d --limit 20
 ```
 
 Common flags:
 
-- `--query TEXT` required literal query
+- `--query TEXT` required literal query, or a JavaScript regex pattern when `--regex` is set
+- `--regex` treat `--query` as a JavaScript regular expression; useful for hashtags and lightweight patterns
 - `--limit N` max matching messages, default 20; use a high number for "all"
 - `--before N` messages before each hit, default 1
 - `--after N` messages after each hit, default 1
