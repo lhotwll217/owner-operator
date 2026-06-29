@@ -6,8 +6,8 @@ import Testing
 import Foundation
 @testable import oo_widget
 
-@Suite("rail")
-struct RailTests {
+@Suite("sidebar")
+struct SidebarTests {
 
     // ThreadStatus only has a JSON decoder, so build threads as JSON.
     private func thread(
@@ -44,7 +44,7 @@ struct RailTests {
             thread(id: "n", state: "needs-you"),
             thread(id: "w", state: "working"),
         ])
-        let (groups, _) = buildRail(snapshot: snap, triage: [:])
+        let (groups, _) = buildSidebar(snapshot: snap, triage: [:])
         #expect(groups.count == 1)
         #expect(groups[0].rows.map(\.id) == ["n", "w", "i"])   // needs-you → working → idle
     }
@@ -54,7 +54,7 @@ struct RailTests {
             thread(id: "old", state: "needs-you", lastMessageAt: "2026-01-01T00:00:00.000Z"),
             thread(id: "new", state: "needs-you", lastMessageAt: "2026-01-02T00:00:00.000Z"),
         ])
-        let (groups, _) = buildRail(snapshot: snap, triage: [:])
+        let (groups, _) = buildSidebar(snapshot: snap, triage: [:])
         #expect(groups[0].rows.map(\.id) == ["new", "old"])    // most recent first
     }
 
@@ -63,7 +63,7 @@ struct RailTests {
             thread(id: "a", repo: "alpha", state: "idle"),
             thread(id: "b", repo: "beta", state: "needs-you"),
         ])
-        let (groups, _) = buildRail(snapshot: snap, triage: [:])
+        let (groups, _) = buildSidebar(snapshot: snap, triage: [:])
         #expect(groups.map(\.repo) == ["beta", "alpha"])       // beta has the needs-you → first
     }
 
@@ -74,7 +74,7 @@ struct RailTests {
             thread(id: "x", state: "needs-you"),
             thread(id: "y", state: "working"),
         ])
-        let (groups, counts) = buildRail(snapshot: snap, triage: [:], hidden: ["x"])
+        let (groups, counts) = buildSidebar(snapshot: snap, triage: [:], hidden: ["x"])
         let ids = groups.flatMap { $0.rows.map(\.id) }
         #expect(!ids.contains("x"))
         #expect(ids.contains("y"))
@@ -88,7 +88,7 @@ struct RailTests {
             thread(id: "d", state: "done"),
             thread(id: "w", state: "working"),
         ])
-        let (groups, counts) = buildRail(snapshot: snap, triage: [:])
+        let (groups, counts) = buildSidebar(snapshot: snap, triage: [:])
         #expect(groups.flatMap { $0.rows.map(\.id) } == ["w"])
         #expect(counts[.done] == 1)
     }
@@ -98,7 +98,7 @@ struct RailTests {
     @Test func triageEnrichmentWins() throws {
         let snap = try snapshot([thread(id: "t", state: "needs-you", topic: "raw topic")])
         let triage = ["t": TriageInfo(topic: "nice title", summary: nil, nextSteps: "do the thing", priority: 4)]
-        let row = buildRail(snapshot: snap, triage: triage).groups[0].rows[0]
+        let row = buildSidebar(snapshot: snap, triage: triage).groups[0].rows[0]
         #expect(row.title == "nice title")
         #expect(row.nextSteps == "do the thing")
         #expect(row.priority == 4)
@@ -106,7 +106,7 @@ struct RailTests {
 
     @Test func titleFallsBackToTopic() throws {
         let snap = try snapshot([thread(id: "t", state: "needs-you", topic: "raw topic")])
-        #expect(buildRail(snapshot: snap, triage: [:]).groups[0].rows[0].title == "raw topic")
+        #expect(buildSidebar(snapshot: snap, triage: [:]).groups[0].rows[0].title == "raw topic")
     }
 
     // MARK: - lenient decode
@@ -145,7 +145,7 @@ struct RailTests {
             thread(id: "busy", state: "working", stateSince: isoNow(-60)),       // working, not needs-you
         ])
         let client = DaemonClient()
-        client.groups = buildRail(snapshot: snap, triage: [:]).groups
+        client.groups = buildSidebar(snapshot: snap, triage: [:]).groups
         #expect(client.freshNeedsYou(window: 300).map(\.id) == ["fresh"])
     }
 }
