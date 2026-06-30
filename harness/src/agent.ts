@@ -196,8 +196,17 @@ export interface OwnerOperatorSession {
   modelLabel: string;
 }
 
+// The opinionated agent config, shared by every frontend (plain oo, branded TUI, pi
+// interactive) so they can't drift: one prompt, one set of custom tools, one allowlist.
+export const ownerOperatorPrompt = (): string =>
+  readFileSync(join(here, "..", "prompts", "owner-operator.md"), "utf8");
+export const ownerOperatorCustomTools = [presentThreadsTool, getSidebarThreadsTool, markThreadDoneTool];
+// read-only + bash to run the skills, plus our structured-output/owner tools. (This is an
+// allowlist, so custom tools must be listed or they would be disabled.)
+export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done"];
+
 export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession> {
-  const prompt = readFileSync(join(here, "..", "prompts", "owner-operator.md"), "utf8");
+  const prompt = ownerOperatorPrompt();
 
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
@@ -219,10 +228,8 @@ export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession
     sessionManager: SessionManager.inMemory(repoRoot),
     authStorage,
     modelRegistry,
-    customTools: [presentThreadsTool, getSidebarThreadsTool, markThreadDoneTool],
-    // read-only + bash to run the skills, plus our structured-output/owner tools.
-    // (This is an allowlist, so custom tools must be listed or they would be disabled.)
-    tools: ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done"],
+    customTools: ownerOperatorCustomTools,
+    tools: ownerOperatorTools,
   });
 
   let modelLabel = "model from .pi/settings.json";

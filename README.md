@@ -41,6 +41,27 @@ slot in as skills. Scanning the files directly — never
 loading full transcripts into a model — is the "look across everything" layer the operator
 triages on top of.
 
+## Terminal frontends
+
+Two terminal surfaces ride the same agent core (one prompt, skills, tools, model in
+[`harness/src/agent.ts`](harness/src/agent.ts)), and we're **maintaining both for now**:
+
+- **Branded TUI** (default — `./harness/oo`) — our fixed-viewport layout with a pinned
+  left **thread-sidebar** beside the chat. Hand-rolled because pi's TUI has no columns
+  primitive, and **no extension can add one** — `setWidget` only stacks above/below the
+  editor. The pinned sidebar is this surface's reason to exist.
+- **pi interactive mode** (flagged — `./harness/oo -i` / `--interactive`, or
+  `OO_INTERACTIVE=1`) — pi's **stock `InteractiveMode`**, wired to our config, so we get
+  its Editor (slash-command autocomplete, input history), theming, footer, and message
+  components for free. An owner-operator **extension** ([`harness/src/oo-extension.ts`](harness/src/oo-extension.ts))
+  closes the gap the way pi intends: `registerMessageRenderer` renders triage as our cards
+  inline, and `registerCommand` adds `/done`, `/threads`, `/help` with completion. This is
+  the "lean on the shared pattern" surface — ~30 lines of registrations instead of a second
+  shell.
+
+Both are good; the branded TUI earns its keep *only* for the sidebar layout. Branches:
+`main` (branded TUI) and `claude/pi-interactive-mode` (the flagged interactive surface).
+
 ## Status
 
 🌱 **Early, but real.** The read/triage layer works end to end: a plain `oo` CLI (REPL +

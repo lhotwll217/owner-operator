@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Owner Operator launcher — TypeScript runtime via tsx (pi SDK is the engine).
 #   ./harness/oo                      → branded TUI (interactive, pi-tui)
+#   ./harness/oo -i | --interactive   → pi's STOCK interactive mode, our agent config (A/B surface)
+#   OO_INTERACTIVE=1 ./harness/oo     → same, via env
 #   ./harness/oo "what's ongoing?"    → plain one-shot
 #   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
 # Works from the repo and when installed on PATH via `npm link` (resolves the symlink).
@@ -14,8 +16,21 @@ while [ -h "$SOURCE" ]; do
 done
 DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 
-ENTRY="$DIR/src/tui.ts"
-[ "$#" -gt 0 ] && ENTRY="$DIR/src/oo.ts"
+# Interactive mode: an explicit -i/--interactive flag (consumed here, not forwarded) or
+# OO_INTERACTIVE=1. Otherwise: branded TUI when run bare, plain oo for a one-shot question.
+INTERACTIVE="${OO_INTERACTIVE:-}"
+if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
+  INTERACTIVE=1
+  shift
+fi
+
+if [ -n "$INTERACTIVE" ]; then
+  ENTRY="$DIR/src/interactive.ts"
+elif [ "$#" -gt 0 ]; then
+  ENTRY="$DIR/src/oo.ts"
+else
+  ENTRY="$DIR/src/tui.ts"
+fi
 
 # Prefer the checkout's tsx (workspace-hoisted to repo root); fall back to npx.
 if [ -x "$DIR/node_modules/.bin/tsx" ]; then
