@@ -418,8 +418,16 @@ function parseSession({ file, source, mtime, btime }) {
   }
   if (source === "posthog-code") pcFlush(); // trailing assistant turn (no later user prompt to flush it)
 
+  // Cursor spawns sub-task agents as `agent-transcripts/<parentId>/subagents/<subId>.jsonl`. Fold those
+  // into their parent so a multi-task Cursor run stays ONE "core" thread rather than splitting into one
+  // per sub-task — key them to the parent id and let it win the dedup below.
+  const cursorSubagent = source === "cursor" && file.includes("/subagents/");
   // posthog-code's session id is the task-run dir, not the `logs.ndjson` leaf; others use the file stem.
-  if (!sessionId) sessionId = source === "posthog-code" ? basename(dirname(file)) : basename(file).replace(/\.(jsonl|ndjson)$/, "");
+  if (!sessionId) {
+    if (source === "posthog-code") sessionId = basename(dirname(file));
+    else if (cursorSubagent) sessionId = file.split("/agent-transcripts/")[1].split("/")[0];
+    else sessionId = basename(file).replace(/\.(jsonl|ndjson)$/, "");
+  }
   if (!project) project = "(unknown)";
   // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
   // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer. A
@@ -531,6 +539,7 @@ function parseSession({ file, source, mtime, btime }) {
     secondsSinceActivity: Math.max(0, Math.round((Date.now() - lastActivityTs) / 1000)),
     working,                                           // a turn is in progress (reasoning/tools)
     automated,
+    _subagent: cursorSubagent,                         // a Cursor sub-task; loses dedup to its parent
     link: guiLink(source, sessionId, project),
     file,
     firstMessages,          // earliest messages in the thread (array)
@@ -552,9 +561,13 @@ threads = threads.filter((t) => !isBlacklisted(blacklist, { cwd: t.project, repo
 const byId = new Map();
 for (const t of threads) {
   const p = byId.get(t.id);
-  const richer = !p || t.userMessages > p.userMessages
-    || (t.userMessages === p.userMessages && (t.messageCount > p.messageCount
-      || (t.messageCount === p.messageCount && t._sort > p._sort)));
+  // A Cursor sub-task never represents its core session: the parent transcript always wins, whatever
+  // its relative richness. Otherwise the richest (most user turns → most messages → most recent) wins.
+  const richer = !p
+    || (p._subagent && !t._subagent)
+    || (p._subagent === t._subagent && (t.userMessages > p.userMessages
+      || (t.userMessages === p.userMessages && (t.messageCount > p.messageCount
+        || (t.messageCount === p.messageCount && t._sort > p._sort)))));
   if (richer) byId.set(t.id, t);
 }
 threads = [...byId.values()];
@@ -576,7 +589,7 @@ if (threadArg) {
 }
 threads.sort((a, b) => b._sort - a._sort);
 if (!threadArg) threads = threads.slice(0, limit);
-threads.forEach((t) => delete t._sort);
+threads.forEach((t) => { delete t._sort; delete t._subagent; });
 
 // ---------- output ----------
 if (asJson) {

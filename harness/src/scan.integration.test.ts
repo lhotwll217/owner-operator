@@ -61,6 +61,16 @@ writeFileSync(
   JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Retry loop tightened; tests pass." }] } }) + "\n",
 );
 
+// Cursor sub-task agent — its own transcript under the parent's `subagents/` dir. Must fold into the
+// core session (same parent id), not split it into a separate thread.
+const cursorSubFile = join(home, ".cursor", "projects", slug, "agent-transcripts", cid, "subagents", "abababab-cccc-dddd-eeee-ffffffffffff.jsonl");
+mkdirSync(dirname(cursorSubFile), { recursive: true });
+writeFileSync(
+  cursorSubFile,
+  JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "<user_query>add a unit test for the backoff</user_query>" }] } }) + "\n" +
+  JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Backoff test added." }] } }) + "\n",
+);
+
 // Plain workspace stacked on a non-main base branch. The old scanner always tried
 // origin/main first, which made the diff include the release branch's own line.
 const stackedRepoDir = join(home, "dev", "feature-from-release");
@@ -223,6 +233,7 @@ try {
   assert.equal(cursor.state, "needs-you", "assistant yielded (no trailing tool_use) → needs-you");
   assert.ok(cursor.topic.includes("tighten the retry loop") && !cursor.topic.includes("<user_query>"), "topic clean of wrapper tags");
   assert.deepEqual([cursor.diffAdded, cursor.diffDeleted], [3, 1], "working-tree delta vs HEAD");
+  assert.equal(byId(fresh, "abababab-cccc-dddd-eeee-ffffffffffff"), undefined, "Cursor sub-task transcript folds into its core session, not its own thread");
   assert.deepEqual(
     [byId(fresh, stackedId)?.diffAdded, byId(fresh, stackedId)?.diffDeleted],
     [2, 0],
