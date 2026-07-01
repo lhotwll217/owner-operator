@@ -3,10 +3,15 @@
 // pi is the engine.
 
 import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   createAgentSession,
+  createAgentSessionServices,
+  createAgentSessionFromServices,
+  createAgentSessionRuntime,
   defineTool,
   DefaultResourceLoader,
   getAgentDir,
@@ -241,6 +246,102 @@ export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession
   }
 
   return { session, skills, modelLabel };
+}
+
+// ---- Read-only skill tools for the headless agent channel ---------------------
+// Run the specific scan/search scripts (which only READ local session files, and enforce the
+// privacy blacklist) instead of exposing a general shell. Fixed script path + typed args passed
+// through execFile (no shell) = no arbitrary commands.
+const execFileAsync = promisify(execFile);
+const skillScript = (dir: string, file: string): string => join(repoRoot, ".agents", "skills", dir, file);
+
+export const scanSessionsTool = defineTool({
+  name: "scan_sessions",
+  label: "Scan sessions",
+  description:
+    "Compact digest of the owner's active local agent sessions — topic, resolved state, and a sample " +
+    "of each thread's opening + most-recent messages. Read-only.",
+  promptSnippet: "scan_sessions — digest of active sessions (topic, state, message samples)",
+  promptGuidelines: ["Use scan_sessions for an overview of what's ongoing before reading individual session files."],
+  parameters: Type.Object({
+    since: Type.Optional(Type.String({ description: "Window: 24h | 7d | today | YYYY-MM-DD. Default today." })),
+    sample: Type.Optional(Type.Integer({ minimum: 0, maximum: 40, description: "Messages kept per thread (first N + last N). Default 4." })),
+    thread: Type.Optional(Type.String({ description: "Drill into ONE thread by id prefix; pair with a larger sample." })),
+  }),
+  async execute(_id, p) {
+    const args = ["--since", p.since || "today", "--sample", String(p.sample ?? 4)];
+    if (p.thread) args.push("--thread", p.thread);
+    const { stdout } = await execFileAsync(process.execPath, [skillScript("get-active-threads", "get-active-threads.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
+    return { content: [{ type: "text" as const, text: stdout.trim() || "(no active threads)" }], details: undefined };
+  },
+});
+
+export const searchSessionsTool = defineTool({
+  name: "search_sessions",
+  label: "Search sessions",
+  description: "Grep across the owner's local session transcripts, with bounded context around each hit. Read-only.",
+  promptSnippet: "search_sessions — grep session transcripts with context around each hit",
+  promptGuidelines: ["Use search_sessions to find where something was discussed across sessions."],
+  parameters: Type.Object({
+    query: Type.String({ description: "Literal text to find, or a JS regex when regex is true." }),
+    regex: Type.Optional(Type.Boolean({ description: "Treat query as a JavaScript regex." })),
+    since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD." })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Max matching messages. Default 20." })),
+    before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages before each hit. Default 1." })),
+    after: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages after each hit. Default 1." })),
+  }),
+  async execute(_id, p) {
+    const args = ["--query", p.query];
+    if (p.regex) args.push("--regex");
+    if (p.since) args.push("--since", p.since);
+    args.push("--limit", String(p.limit ?? 20), "--before", String(p.before ?? 1), "--after", String(p.after ?? 1));
+    const { stdout } = await execFileAsync(process.execPath, [skillScript("sessions-grep", "sessions-grep.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
+    return { content: [{ type: "text" as const, text: stdout.trim() || "(no matches)" }], details: undefined };
+  },
+});
+
+// ---- Neutral runtime for headless agent-to-agent use (RPC) --------------------
+// pi's runRpcMode needs an AgentSessionRuntime (not the raw session createAgentSession
+// returns), so we build one with pi's own factory — the same shape pi's main.js uses.
+// This session is deliberately NOT the triage persona, and is read-only at the TOOL layer
+// (no bash/shell) since it's an agent-facing channel: a neutral prompt, read-only tools only
+// (file reads + the scan/search skills + get_sidebar_threads), and NO present_threads.
+export const neutralAgentPrompt = (): string =>
+  readFileSync(join(here, "..", "prompts", "agent-rpc.md"), "utf8");
+export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
+export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
+
+export async function createNeutralAgentRuntime() {
+  const authStorage = AuthStorage.create();
+  const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json
+  const prompt = neutralAgentPrompt();
+
+  // The factory closes over our config; createAgentSessionRuntime calls it to build the
+  // initial session and reuses it across any later /new or /switch.
+  return createAgentSessionRuntime(
+    async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+      const services = await createAgentSessionServices({
+        cwd,
+        agentDir,
+        authStorage,
+        settingsManager,
+        resourceLoaderOptions: {
+          systemPromptOverride: () => prompt,
+          appendSystemPromptOverride: () => [],
+          noExtensions: true, // headless: skip interactive extensions (e.g. the MCP statusbar adapter)
+        },
+      });
+      const created = await createAgentSessionFromServices({
+        services,
+        sessionManager,
+        sessionStartEvent,
+        tools: neutralAgentTools,
+        customTools: neutralAgentCustomTools,
+      });
+      return { ...created, services, diagnostics: services.diagnostics };
+    },
+    { cwd: repoRoot, agentDir: getAgentDir(), sessionManager: SessionManager.inMemory(repoRoot) },
+  );
 }
 
 export function lastAssistantText(session: OwnerOperatorSession["session"]): string {
