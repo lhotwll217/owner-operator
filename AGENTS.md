@@ -4,15 +4,8 @@
 
 Read these before writing code — don't re-derive intent from the source:
 
-- **[VISION.md](VISION.md)** — what we're building and why.
+- **[README.md](README.md)** — what we're building, repo layout, current status.
 - **[docs/architecture.md](docs/architecture.md)** — the shape and component boundaries.
-- **[README.md](README.md)** — repo layout and current status.
-
-## Inspiration
-
-Don't reinvent the wheel — check [`docs/inspiration.md`](docs/inspiration.md) for existing
-tools we can learn from before building anything non-trivial, and add to it when you find
-something worth leaning on.
 
 ## Development conventions
 

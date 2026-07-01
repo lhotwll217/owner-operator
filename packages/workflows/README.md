@@ -1,12 +1,6 @@
-# packages/workflows — deterministic workflow scripts
+# packages/workflows
 
-Predictable, testable scripts the harness can invoke — not model-improvised.
-**Status: 📐 planned.**
-
-Examples (sketch):
-
-- "Summarize today's threads."
-- "Flag stale / lagging branches."
-- "Build the daily-brief triage." (V3 — pulls PR/MR, Slack, email signal.)
+**Not built yet** — only this README. Will hold deterministic scripts the harness runs (e.g.
+"summarize today's threads"), predictable and testable rather than model-improvised.
 
 See [../../docs/architecture.md](../../docs/architecture.md).

@@ -2,7 +2,7 @@
 // surface goes through: raw transcript scans produce CANDIDATE facts; the persisted status
 // store holds OWNER state (`done`); this module joins the two.
 //
-// Modeled on OpenClaw's state ownership (docs/inspiration.md): a single owner of session
+// Modeled on OpenClaw's state ownership: a single owner of session
 // state, surfaces query it rather than derive their own. Until a gateway process owns this
 // boundary, the shared module is the boundary — plain dependency-free ESM (not TS) so the
 // exact same code runs in the TS harness (re-exported via @owner-operator/core) AND inside

@@ -1,39 +1,19 @@
 # harness — "PI"
 
-The agentic core of Owner Operator, built on the open-source
-**[pi coding agent](https://github.com/earendil-works/pi)** toolkit.
+Agentic core of Owner Operator, on the **[pi coding agent](https://github.com/earendil-works/pi)**
+toolkit. pi is consumed as npm dependencies (`@earendil-works/pi-*`, MIT) — not a fork —
+same as [openclaw](https://github.com/openclaw/openclaw).
 
-**We consume pi as npm dependencies — not a fork, not a submodule.** pi is published as
-libraries (`@earendil-works/pi-*`, MIT), so we depend on the pieces we need and build the
-Owner Operator layer on top. This is exactly how [openclaw](https://github.com/openclaw/openclaw)
-(the largest pi-based product) does it: its own repo, pi pulled in via npm.
+Deps (see [`package.json`](package.json)), all pinned exact at `0.78.0` (pi is pre-1.0):
 
-Current deps (see [`package.json`](package.json)):
+- `@earendil-works/pi-coding-agent` — the agent SDK: sessions, tools, skills, RPC mode.
+- `@earendil-works/pi-ai` — LLM API + type system for the triage calls.
+- `@earendil-works/pi-tui` — terminal-UI primitives for the branded TUI.
 
-- `@earendil-works/pi-agent-core` — the agent framework we build the harness on.
-- `@earendil-works/pi-ai` — unified LLM API for the triage/summarize calls.
+## What's here
 
-Also available from the same toolkit when we need them: `@earendil-works/pi-tui`
-(terminal UI) and `@earendil-works/pi-coding-agent` (the full `pi` CLI). Pinned exact
-(`0.78.0`) because pi is pre-1.0 and ships fast.
+- Reads local agent sessions via the scan/grep skills in [`.agents/skills`](../.agents/skills/)
+  (see [supported sources](../README.md#how-it-works)) — never loading full transcripts into a model.
+- Ranks the threads; `oo daemon` serves them to the UIs.
 
-## Ecosystem we can lean on
-
-- [`BlackBeltTechnology/pi-agent-dashboard`](https://github.com/BlackBeltTechnology/pi-agent-dashboard)
-  — prior art for the web UI: multi-session view, live mirroring, diff viewer, mobile
-  remote control.
-- [`badlogic/pi-diff-review`](https://github.com/badlogic/pi-diff-review) — relevant to
-  the V3 inline-diff-review goal.
-
-## What we build here (the Owner Operator layer)
-
-- Read across local CLI agent sessions with our own dependency-free scan/grep skills
-  (Claude Code, Codex today; more sources as skills land). The `ai-sessions` MCP is wired
-  up (`harness/.mcp.json`) but optional — for drilling into a single thread, not the read.
-- Compute triage/priority over active threads; produce concise briefs on a schedule
-  ("monitor the situation").
-- Expose a **bounded, enumerated command set** — pi extensions/skills constrained to
-  read + triage. It reads and organizes; it does **not** drive sub-agents or author work
-  in branches.
-
-See [../VISION.md](../VISION.md) and [../docs/architecture.md](../docs/architecture.md).
+See [../docs/architecture.md](../docs/architecture.md).

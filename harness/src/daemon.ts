@@ -1,5 +1,5 @@
 // Owner Operator — the daemon: ONE process that owns state, openclaw's gateway pattern
-// (docs/inspiration.md) sized for local-first v1. It owns the poll loop (scan + resolver +
+// sized for local-first v1. It owns the poll loop (scan + resolver +
 // store), the schedule/trigger runner, and the push stream; surfaces (TUI, one-shot oo,
 // future web/widget) are thin clients over the protocol in @owner-operator/core.
 //
