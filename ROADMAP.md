@@ -1,7 +1,6 @@
 # Roadmap / Backlog
 
-> **Owner-controlled.** Agents/assistants: do **not** add items, check boxes, or rewrite
-> this file. Surface suggestions in chat; the owner decides what lands.
+> **Owner-controlled.** Agents/assistants: do **not** add items unless explicitly asked to do so. 
 
 Concrete things to build.
 
