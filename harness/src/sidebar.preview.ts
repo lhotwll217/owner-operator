@@ -19,11 +19,11 @@ const st = (id: string, repo: string, state: ThreadStatus["state"], topic: strin
 const snap: StatusSnapshot = {
   polledAt: NOW,
   threads: [
-    st("n", "amplify", "needs-you", "raw 422 topic", "7 minutes ago", { app: "Superset App", diffAdded: 12, diffDeleted: 4 }),
-    st("w", "amplify", "working", "Weekly update automation", "3 hours ago"),
+    st("n", "billing", "needs-you", "raw 422 topic", "7 minutes ago", { app: "Superset App", diffAdded: 12, diffDeleted: 4 }),
+    st("w", "billing", "working", "Weekly update automation", "3 hours ago"),
     st("o", "owner-operator", "working", "status sidebar wiring", "just now", { app: "Cursor" }),
-    st("old", "amplify", "idle", "ancient idle thread", "2 days ago"), // NOT filtered — must show
-    st("d", "amplify", "done", "already shipped thing", "1 hour ago"),
+    st("old", "billing", "idle", "ancient idle thread", "2 days ago"), // NOT filtered — must show
+    st("d", "billing", "done", "already shipped thing", "1 hour ago"),
   ],
 };
 const triage = new Map<string, TriageInfo>([
@@ -40,7 +40,7 @@ process.stdout.write(lines.map((l) => "  " + l).join("\n") + "\n\n");
 assert.match(lines[0], /^Threads\s+4/, "active threads shown — done row left the body");
 assert.match(lines[1], /◐ 1.*● 2.*○ 1.*✓ 1/, "stats by state — done stays in the ✓ count");
 assert.ok(!lines.some((l) => /already shipped/.test(l)), "/done'd row is gone from the body");
-assert.ok(lines.some((l) => /^▾ amplify\s+3/.test(l)), "grouped by project with per-group count");
+assert.ok(lines.some((l) => /^▾ billing\s+3/.test(l)), "grouped by project with per-group count");
 assert.ok(lines.some((l) => /1 ◐ P5 422 contract mismatch.*7m$/.test(l)), "numbered triaged row: num · glyph · P-badge · title · recency");
 assert.ok(lines.some((l) => /\d [●○] ancient idle thread/.test(l)), "untriaged idle thread still shows (raw topic, no badge)");
 assert.ok(!lines.some((l) => /^→ /.test(l)), "no selection cursor (glance-only)");

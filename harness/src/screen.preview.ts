@@ -20,7 +20,7 @@ const NOW = "2026-06-09T12:00:00.000Z";
 const snap: StatusSnapshot = {
   polledAt: NOW,
   threads: [
-    { id: "n", source: "claude", repo: "amplify", app: "Claude CLI", topic: "raw 422", state: "needs-you", lastActive: "7 minutes ago", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
+    { id: "n", source: "claude", repo: "billing", app: "Claude CLI", topic: "raw 422", state: "needs-you", lastActive: "7 minutes ago", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
     { id: "w", source: "claude", repo: "owner-operator", app: "Claude CLI", topic: "status sidebar wiring", state: "working", lastActive: "just now", createdAt: NOW, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW },
   ],
 };

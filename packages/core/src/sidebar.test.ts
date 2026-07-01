@@ -17,10 +17,10 @@ const st = (id: string, repo: string, state: ThreadStatus["state"], topic: strin
 const snap: StatusSnapshot = {
   polledAt: NOW,
   threads: [
-    st("n", "amplify", "needs-you", "raw 422 topic"),
+    st("n", "billing", "needs-you", "raw 422 topic"),
     st("o", "owner-operator", "working", "raw sidebar topic"),
-    st("old", "amplify", "idle", "raw roadmap topic", "2026-06-01T00:00:00.000Z"),
-    st("d", "amplify", "done", "raw done topic"),
+    st("old", "billing", "idle", "raw roadmap topic", "2026-06-01T00:00:00.000Z"),
+    st("d", "billing", "done", "raw done topic"),
   ],
 };
 // Triage enriches only some (by id); untriaged threads still appear with their raw topic.
@@ -46,7 +46,7 @@ assert.equal(displayTopic(o), "raw sidebar topic", "untriaged → raw digest top
 assert.equal(o.priority, undefined, "untriaged → no priority badge");
 
 // --- grouping + stats over the live set ---
-assert.deepEqual(groupByRepo(sidebar).map((g) => g.repo), ["amplify", "owner-operator"], "needs-you group first");
+assert.deepEqual(groupByRepo(sidebar).map((g) => g.repo), ["billing", "owner-operator"], "needs-you group first");
 assert.deepEqual(stateCounts(sidebar), { "needs-you": 1, working: 1, idle: 1, done: 1 });
 
 // --- numbering: ACTIVE rows only, 1…n in display order — the /done handle ---

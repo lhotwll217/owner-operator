@@ -19,6 +19,9 @@ DerivedData/
 .env.*
 !.env.example
 
+# Local pi settings (personal provider/model) — copy from .pi/settings.example.json
+.pi/settings.json
+
 # Logs
 *.log
 npm-debug.log*

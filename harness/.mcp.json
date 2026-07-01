@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "ai-sessions": {
-      "command": "/Users/otwell/.aisessions/bin/aisessions",
-      "args": []
-    }
-  }
-}
