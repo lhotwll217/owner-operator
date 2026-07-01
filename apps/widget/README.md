@@ -5,7 +5,7 @@ thread sidebar. Read-only. v1.
 
 ## Thin client over the daemon
 
-Owns no state — the daemon does ([gateway pattern](../../docs/inspiration.md)).
+Owns no state — the daemon does.
 
 - port — `~/.owner-operator/daemon.json`
 - data — `GET /snapshot` + `/triage`, joined by id (cf. [`core/sidebar.ts`](../../packages/core/src/sidebar.ts))
@@ -28,5 +28,5 @@ swift test     # unit tests — sidebar join, decode, fresh-window
 
 ## Notes
 
-- V1 read-only · V2 writes into the target session.
+- Read-only.
 - Not WidgetKit — can't float on top or hold a live connection.

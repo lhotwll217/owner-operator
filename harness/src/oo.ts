@@ -8,11 +8,33 @@
 
 import readline from "node:readline/promises";
 import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import { parseOoArgs } from "./oo-args";
 import type { Thread } from "@owner-operator/core";
 import { buildCardsBlock } from "./cards";
 
+const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessions.
+
+  oo                         branded TUI (interactive)
+  oo -i | --interactive      pi's stock interactive mode
+  oo "what's ongoing?"       one-shot question (cards)
+  oo --json "what needs me"  one-shot, headless JSON snapshot
+  oo daemon                  run the state-owning daemon
+  oo --rpc                   headless JSON-RPC on stdin/stdout (for agents)
+  oo --help | -h             this help
+
+Model: OO_MODEL or .pi/settings.json (default: codex gpt-5.5)`;
+
+const cli = parseOoArgs(process.argv.slice(2));
+
+// --help / -h: usage and exit BEFORE building a model session, so probing help never makes a
+// paid call.
+if (cli.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 // `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
-if (process.argv[2] === "daemon") {
+if (cli.daemon) {
   const { daemonMain } = await import("./daemon");
   await daemonMain();
   process.exit(0);
@@ -21,9 +43,8 @@ if (process.argv[2] === "daemon") {
 const { session, skills, modelLabel } = await createOwnerOperatorSession();
 console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
 
-const argv = process.argv.slice(2);
-const jsonMode = argv.includes("--json");
-const oneShot = argv.filter((a) => a !== "--json").join(" ").trim();
+const jsonMode = cli.json;
+const oneShot = cli.prompt;
 
 const DEBUG = !!process.env.OO_DEBUG;
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");

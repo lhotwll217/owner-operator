@@ -1,11 +1,8 @@
 # apps/web — localhost web UI
 
-The drill-in surface. **Status: 📐 planned.**
+**Not built yet** — only this README.
 
-- Open a session and see exactly where it left off — **read-first** in V1.
-- Later: diff review with inline comments tied to lines (Conductor-style), possibly via
-  draft PRs to start.
+Planned: a localhost page to open one agent session and read where it left off. Runs against
+the local harness.
 
-Runs on localhost against the local PI harness.
-
-See [../../VISION.md](../../VISION.md).
+See [../../docs/architecture.md](../../docs/architecture.md).

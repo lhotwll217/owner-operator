@@ -1,9 +1,6 @@
-# packages/core — shared domain model
+# packages/core — shared types
 
-Shared types the surfaces and harness agree on — sessions, threads, and whatever
-priority/triage shape we land on. **Status: 📐 planned.**
-
-Deliberately thin: a placeholder for a common vocabulary, **not** a committed schema.
-We'll define it as the harness and surfaces actually need it.
+The types the harness and the UIs both use — sessions, threads, priority sort, and the
+thread-state resolver. Grows as the harness and UIs need it.
 
 See [../../docs/architecture.md](../../docs/architecture.md).

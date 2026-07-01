@@ -24,7 +24,7 @@ try {
 
   // --- first poll: new thread → thread_added ---
   const r1 = db.recordScan({
-    id: "abc-123", repo: "amplify", app: "Claude CLI", source: "claude",
+    id: "abc-123", repo: "billing", app: "Claude CLI", source: "claude",
     transcriptPath: "/tmp/abc.jsonl", createdAt: "2026-06-09T10:00:00Z",
     lastActiveAt: "2026-06-09T11:00:00Z", rawTopic: "fix 422s",
     state: "working",
@@ -40,7 +40,7 @@ try {
 
   // --- omitted identity fields keep their stored value ---
   let row = db.listSidebar().find((r) => r.id === "abc-123")!;
-  assert.equal(row.repo, "amplify", "repo survives a partial observation");
+  assert.equal(row.repo, "billing", "repo survives a partial observation");
   assert.equal(row.topic, "fix 422s", "raw_topic shows until triage lands");
 
   // --- state flip: working → needs-you edge ---
@@ -62,8 +62,8 @@ try {
   db.recordScan({ id: "abc-123", state: "needs-you", stateReason: "agent asked a question" });
 
   // --- triage: versions are per-thread, monotonic; latest wins in the projection ---
-  const v1 = db.addTriage("abc-123", { priority: 3, topic: "Amplify 422 contract mismatch", nextSteps: "paste the drafted reply", source: "startup" });
-  const v2 = db.addTriage("abc-123", { priority: 5, topic: "Amplify 422 contract mismatch", nextSteps: "review and push", source: "targeted_refresh" });
+  const v1 = db.addTriage("abc-123", { priority: 3, topic: "Billing 422 contract mismatch", nextSteps: "paste the drafted reply", source: "startup" });
+  const v2 = db.addTriage("abc-123", { priority: 5, topic: "Billing 422 contract mismatch", nextSteps: "review and push", source: "targeted_refresh" });
   assert.equal(v1, 1);
   assert.equal(v2, 2);
   assert.deepEqual(events.at(-1), { type: "triage_updated", threadId: "abc-123", version: 2 });
@@ -71,7 +71,7 @@ try {
 
   // --- sidebar projection: triaged topic overrides raw, state + priority present ---
   row = db.listSidebar().find((r) => r.id === "abc-123")!;
-  assert.equal(row.topic, "Amplify 422 contract mismatch");
+  assert.equal(row.topic, "Billing 422 contract mismatch");
   assert.equal(row.priority, 5);
   assert.equal(row.state, "needs-you");
   assert.equal(row.stateReason, "agent asked a question");
@@ -119,7 +119,7 @@ try {
   pdb.saveSnapshot({
     polledAt: "2026-06-09T13:00:00Z",
     threads: [
-      status("keep-1", "amplify", "/u/dev/amplify"),
+      status("keep-1", "billing", "/u/dev/billing"),
       status("keep-2", "PersonalSite", "/u/Documents/PersonalSite"), // sibling prefix must NOT bleed
       status("priv-root", "Personal", "/u/Documents/Personal"),
       status("priv-deep", "acme", "/u/Documents/Personal/Career/Jobs/acme"), // lower-level repo
@@ -143,7 +143,7 @@ try {
   // silently vanishes once its activity falls outside the window. (Mirrors the listSidebar exemption.)
   const sdb = new ThreadDb(join(dir, "snapshot.db"), { now });
   const mk = (id: string, state: "needs-you" | "idle" | "working") => ({
-    id, source: "claude", repo: "amplify", app: "Claude CLI", topic: id, state, lastActive: "1 hour ago",
+    id, source: "claude", repo: "billing", app: "Claude CLI", topic: id, state, lastActive: "1 hour ago",
     createdAt: "2026-06-09T10:00:00Z", lastMessageAt: "2026-06-09T11:00:00Z",
     firstSeen: "2026-06-09T10:00:00Z", stateSince: "2026-06-09T10:30:00Z",
   });

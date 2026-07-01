@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // get-active-threads — deterministic, zero-install scan of local CLI agent sessions.
 //
-// Reads Claude Code (~/.claude/projects), Codex (~/.codex/sessions), and Cursor
-// (~/.cursor/projects/*/agent-transcripts) session files, finds recently-active threads,
+// Reads the KNOWN_SESSION_SOURCES (claude, codex, cursor, posthog-code — the canonical list
+// lives in packages/core/src/session-sources.mjs) session files, finds recently-active threads,
 // and prints a COMPACT digest: topic, light metadata (resolved state, origin app, git
 // delta), and a sample of each thread's messages (its opening few + most-recent few) so
 // an agent can triage "what's ongoing" WITHOUT loading full transcripts into a model.

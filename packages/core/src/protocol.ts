@@ -1,6 +1,6 @@
 // Owner Operator — the daemon wire protocol. UI-INDEPENDENT: every surface (TUI today,
 // web/widget tomorrow) speaks these shapes to the ONE process that owns state (the
-// daemon, harness/src/daemon.ts — openclaw's gateway pattern, docs/inspiration.md).
+// daemon, harness/src/daemon.ts — openclaw's gateway pattern).
 //
 // Transport: HTTP JSON on 127.0.0.1 + an SSE event stream — both zero-dependency on the
 // node side and native in browsers (fetch/EventSource), so the web surface needs no SDK.

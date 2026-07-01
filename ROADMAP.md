@@ -1,35 +1,30 @@
 # Roadmap / Backlog
 
-> **Owner-controlled — the owner drives this file.** Agents/assistants: do **not** add items, check
-> boxes, or rewrite this roadmap. Surface suggestions in chat; the owner decides what lands here.
+> **Owner-controlled.** Agents/assistants: do **not** add items, check boxes, or rewrite
+> this file. Surface suggestions in chat; the owner decides what lands.
 
-Concrete things to build, beyond the phase-level vision in [VISION.md](VISION.md).
+Concrete things to build.
 
 ## Scheduling ("monitor the situation")
 
-- [ ] **Scheduled keyword scan.** Run the `session-keywords` skill across all local sessions
-  on a recurring schedule (e.g. every 15–30 min) to find and index new `*keyword*`
-  breadcrumbs into the durable store (`~/.owner-operator/keywords.db`), so the operator gets
-  proactive pickups instead of searching on demand. First concrete piece of the
-  "monitor the situation" scheduler.
+- [ ] **Scheduled keyword scan.** Run `session-keywords` across all local sessions on a
+  recurring schedule (~15–30 min), indexing new `*keyword*` breadcrumbs into the durable
+  store (`~/.owner-operator/keywords.db`) for proactive pickups. First piece of the scheduler.
 
 ## Onboarding
 
-- [ ] **First-run onboarding.** A guided one-time setup where the owner sets their config —
-  the privacy blacklist (off-limits repos/paths), the active-thread window
-  (`settings.json` `activeWindow`, the rolling lookback the sidebar uses), and likely more.
-  Mention only — flow intentionally not defined yet.
+- [ ] **First-run onboarding.** Guided one-time setup: privacy blacklist (off-limits
+  repos/paths), active-thread window (`settings.json` `activeWindow`), likely more. Flow not
+  defined yet.
 
 ## Surfaces
 
-- [x] **Rethink the chat cards.** Today's chat cards are redundant with the sidebar. They
-  should probably surface only the few top things to focus on right now, not mirror every
-  thread. The sidebar stays the live, must-be-100%-accurate representation of global state;
-  the chat becomes a focused "what to do next" rather than a second list.
-- [ ] **Agent-to-agent startup.** `--json` emits the triage `Thread[]` without lifecycle
-  `state`. Think about agent-to-agent optimization: what startup looks like, whether to
-  preload context or expose start flags.
+- [ ] **Rethink the chat cards.** They mirror the sidebar — redundant. Chat should surface
+  only the top few things to focus on; the sidebar stays the live, 100%-accurate global
+  state, chat becomes "what to do next."
+- [ ] **Agent-to-agent startup.** `--json` emits triage `Thread[]` without lifecycle `state`.
+  Decide what agent-to-agent startup looks like — preload context, expose start flags.
 - [ ] **Assess pi interactive-mode vs hand-rolled TUI.** Whether to adopt pi's
-  `modes/interactive` (less custom chrome — commands, effort-cycle, paste for free) and whether
-  the Sidebar earns its place vs a chat-first shape. Research first.
+  `modes/interactive` (commands, effort-cycle, paste for free) and whether the sidebar earns
+  its place vs a chat-first shape. Research first.
   ([#7](https://github.com/lhotwll217/owner-operator/issues/7))

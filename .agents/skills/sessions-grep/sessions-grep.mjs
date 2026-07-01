@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { loadBlacklist, isBlacklisted, pathSlugs } from '../../../packages/core/src/blacklist.mjs';
 
 const args = process.argv.slice(2);
 const opts = { limit: 20, before: 1, after: 1, role: 'all', source: 'all', sort: 'newest', json: false, regex: false };
@@ -54,6 +55,9 @@ const rg = spawnSync('rg', [
   ...roots,
 ], { encoding: 'utf8' });
 
+if (rg.error) {
+  usage(1, `ripgrep (rg) is required but could not be run (${rg.error.code ?? rg.error.message}). Install it, e.g. \`brew install ripgrep\`.`);
+}
 if (rg.status === 2) {
   const detail = rg.stderr.trim() ? `\n${rg.stderr.trim()}` : '';
   usage(1, `Invalid ${opts.regex ? 'regex' : 'query'} for ripgrep.${detail}`);
@@ -63,9 +67,22 @@ const files = rg.status === 0 ? rg.stdout.trim().split('\n').filter(Boolean) : [
 const matches = [];
 const q = opts.caseSensitive ? opts.query : opts.query.toLowerCase();
 
+// Privacy blacklist (ABSOLUTE — no flag bypasses it), the same two layers as get-active-threads:
+// skip a file whose project-dir slug is blacklisted (before reading), and skip any file whose
+// session cwd sits in a blacklisted tree.
+const ooHome = process.env.OO_HOME ?? path.join(home, '.owner-operator');
+const blacklist = loadBlacklist(ooHome);
+const blockedSlugs = pathSlugs(blacklist);
+const slugBlocked = (dirName) => blockedSlugs.some((s) => dirName === s || dirName.startsWith(s + '-'));
+
 for (const file of files) {
+  if (slugBlocked(path.basename(path.dirname(file)))) continue; // layer 1: blacklisted project dir
   const source = file.includes('/.codex/') ? 'codex' : 'claude';
-  const messages = parseMessages(file, source);
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
+  const cwd = firstCwd(raw);
+  if (cwd && isBlacklisted(blacklist, { cwd })) continue; // layer 2: blacklisted cwd tree
+  const messages = parseMessages(raw, source);
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (opts.role !== 'all' && msg.role !== opts.role) continue;
@@ -104,10 +121,9 @@ if (opts.json) {
   });
 }
 
-function parseMessages(file, source) {
+function parseMessages(raw, source) {
   const out = [];
-  const lines = fs.readFileSync(file, 'utf8').split('\n');
-  for (const line of lines) {
+  for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
@@ -116,6 +132,19 @@ function parseMessages(file, source) {
     out.push(msg);
   }
   return out;
+}
+
+// The session's working directory, for the blacklist cwd check. Claude records carry `cwd`;
+// codex carries it on `payload.cwd`. First hit wins.
+function firstCwd(raw) {
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (typeof obj.cwd === 'string') return obj.cwd;
+    if (obj.payload && typeof obj.payload.cwd === 'string') return obj.payload.cwd;
+  }
+  return null;
 }
 
 function claudeMessage(obj) {
