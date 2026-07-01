@@ -23,7 +23,11 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Source kinds the scan knows how to parse. A root is only honored for one of these. */
+/**
+ * Source kinds the scan knows how to parse — THE source of truth for what's supported.
+ * A root is only honored for one of these. Docs that name the sources (README "How sessions
+ * are read", the get-active-threads skill) mirror this list; add a source here first.
+ */
 export const KNOWN_SESSION_SOURCES = ["claude", "codex", "cursor", "posthog-code"];
 
 function defaultRoots() {

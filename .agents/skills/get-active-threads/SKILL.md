@@ -22,8 +22,8 @@ a deterministic script; you (the model) only read its small, pre-digested output
 
 ## How to use
 
-Run the bundled script. **Do this instead of reading session files or calling session MCP
-tools yourself** — those overflow context and cost tokens.
+Run the bundled script. **Do this instead of reading session files yourself** — those
+overflow context and cost tokens.
 
 ```bash
 node .agents/skills/get-active-threads/get-active-threads.mjs --since today --sample 4
@@ -81,7 +81,7 @@ For each thread, reason over its `firstMessages` (what it was about) and `recent
 
 - `id` — copy the thread's `id` from the digest **verbatim** (this is how the sidebar matches the card to the live thread — don't omit or alter it).
 - `topic` — the SPECIFIC work, not the location: never repeat the repo or app name (the
-  card and sidebar show both separately). "Fix 422 contract mismatch", not "Amplify 422 fix".
+  card and sidebar show both separately). "Fix 422 contract mismatch", not "Billing 422 fix".
 - `priority` — integer **5 (highest, needs the owner now) → 1 (lowest)**.
 - `summary` — one SHORT, scannable sentence on current state (≤ ~15 words; the gist, not the whole story).
 - `nextSteps` — one short clause: the concrete next action (what's it waiting on). Rendered greyed, as the card's footer.
@@ -112,6 +112,5 @@ individual threads as you need across turns; `present_threads` is the last call,
 
 ## Drilling into one thread
 
-If the user wants more on a single thread, that's the only time to go deeper — read just
-that one via the `ai-sessions` MCP `get_session` (small page) or rerun this with a tighter
-`--limit`. Never expand all threads.
+If the user wants more on a single thread, rerun scoped to it: `--thread <id> --sample 15`
+(above). Never expand all threads.
