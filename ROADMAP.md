@@ -2,8 +2,6 @@
 
 > **Owner-controlled.** Agents/assistants: do **not** add items unless explicitly asked to do so. 
 
-Concrete things to build.
-
 ## Scheduling ("monitor the situation")
 
 - [ ] **Scheduled keyword scan.** Run `session-keywords` across all local sessions on a
