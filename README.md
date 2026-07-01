@@ -48,4 +48,7 @@ transcripts into a model. Supported agents live in
 [`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents can drive it headless
 over JSON-RPC with `oo --rpc`.
 
+So far this has only been tested with a Codex subscription as the driver for the pi harness.
+Other model backends should work but are unverified.
+
 Architecture: [docs/architecture.md](docs/architecture.md).
