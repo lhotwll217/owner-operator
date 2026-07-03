@@ -41,6 +41,7 @@ Common flags:
 - `--after N` messages after each hit, default 1
 - `--role user|assistant|all` filter matching messages, default `all`
 - `--source claude|codex|self|all` filter sources, default `all` (the owner's coding sessions; `self` is never included — see below)
+- `--surface tui|chat|interactive|rpc|one-shot` narrow `self` hits to one oo surface
 - `--since today|7d|YYYY-MM-DD` filter by message/session timestamp
 - `--sort newest|oldest|file` output order, default `newest`
 - `--case-sensitive` exact case match, useful for all-caps searches
@@ -48,16 +49,23 @@ Common flags:
 
 ## Self-reflection: `--source self`
 
-`self` targets Owner Operator's OWN past agent-to-agent threads (`oo one-shot`
-conversations), stored separately from the owner's coding sessions in
-`<OO_HOME>/agent-sessions` (default `~/.owner-operator/agent-sessions`). Use it to recall
-what you were previously asked and answered across invocations — e.g. "did I already
-report on this thread?", "what did I say last time?". It is deliberately excluded from
-`--source all`, so searches of the owner's sessions never surface your own chatter; target
-it explicitly:
+`self` targets Owner Operator's OWN past threads, stored separately from the owner's coding
+sessions in `<OO_HOME>/sessions` (default `~/.owner-operator/sessions`). EVERY oo surface
+saves there — owner chats (`tui`, plain `chat`, pi `interactive`) and the agent channel
+(`rpc`, `one-shot`) — and every invocation stamps an `oo-provenance` entry: the surface,
+owner-vs-agent origin, the caller's cwd + repo name, and (when the caller identifies itself
+via `--from-session` / `OO_FROM_SESSION`) the coding session id that made the call — an
+audit trail of who touched each thread.
+
+Use it to recall what you were previously asked and answered across invocations — e.g. "did
+I already report on this thread?", "what did the owner ask in the TUI?". Surface matters:
+filter with `--surface`, and grep by repo via the `repo=` label in hits (or `provenance` in
+`--json`). `self` is deliberately excluded from `--source all`, so searches of the owner's
+sessions never surface oo's own threads; target it explicitly:
 
 ```bash
 node .agents/skills/sessions-grep/sessions-grep.mjs --source self --query "widget rollout" --since 7d
+node .agents/skills/sessions-grep/sessions-grep.mjs --source self --surface tui --query "mark done"
 ```
 
 ## Output rules

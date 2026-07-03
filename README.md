@@ -48,7 +48,9 @@ transcripts into a model. Supported agents live in
 [`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents can drive it headless:
 `oo one-shot "question"` for a single read-only turn — it prints its session id on stderr, and
 `--continue` / `--session <id>` resume that thread on the next call — or `oo --rpc` for a
-persistent JSON-RPC channel.
+persistent JSON-RPC channel. Every oo chat, human or agent, is saved under
+`~/.owner-operator/sessions` (never mixed with your coding sessions), labeled with its surface
+and caller repo; agents pass `--from-session <id>` so the audit trail records who called.
 
 So far this has only been tested with a Codex subscription as the driver for the pi harness.
 Other model backends should work but are unverified.

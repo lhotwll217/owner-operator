@@ -17,6 +17,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--source') opts.source = args[++i];
   else if (a === '--since') opts.since = args[++i];
   else if (a === '--sort') opts.sort = args[++i];
+  else if (a === '--surface') opts.surface = args[++i];
   else if (a === '--regex') opts.regex = true;
   else if (a === '--case-sensitive') opts.caseSensitive = true;
   else if (a === '--json') opts.json = true;
@@ -36,11 +37,14 @@ if (opts.since && sinceTime == null) usage(1, '--since must be today, Nd, or YYY
 const queryRegex = opts.regex ? compileRegex(opts.query, opts.caseSensitive) : null;
 
 const home = os.homedir();
-// `self` = Owner Operator's OWN agent-to-agent threads (`oo one-shot`, pi session format),
-// kept in a separate dir under OO_HOME. Deliberately NOT part of `all`: owner-session
-// searches never mix with oo's own chatter — self-reflection is an explicit `--source self`.
+// `self` = Owner Operator's OWN threads (pi session format), kept in a separate dir under
+// OO_HOME. ALL oo surfaces save here — owner chats (tui, chat, interactive) and the agent
+// channel (rpc, one-shot) — each stamped with `oo-provenance` entries (surface, origin,
+// caller repo/cwd, calling session id). Deliberately NOT part of `all`: owner-session
+// searches never mix with oo's own threads — self-reflection is an explicit `--source self`.
+// `--surface tui|chat|interactive|rpc|one-shot` narrows self hits to one surface.
 const ooHome = process.env.OO_HOME ?? path.join(home, '.owner-operator');
-const selfRoot = path.join(ooHome, 'agent-sessions');
+const selfRoot = path.join(ooHome, 'sessions');
 const sourceRoots = {
   claude: [path.join(home, '.claude/projects')],
   codex: [path.join(home, '.codex/sessions'), path.join(home, '.codex/archived_sessions')],
@@ -87,6 +91,8 @@ for (const file of files) {
   try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
   const cwd = firstCwd(raw);
   if (cwd && isBlacklisted(blacklist, { cwd })) continue; // layer 2: blacklisted cwd tree
+  const provenance = source === 'self' ? piProvenance(raw) : null;
+  if (opts.surface && provenance?.surface !== opts.surface) continue; // --surface only matches labeled self threads
   const messages = parseMessages(raw, source);
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
@@ -102,6 +108,7 @@ for (const file of files) {
       index: i,
       timestamp: msg.timestamp,
       time,
+      ...(provenance ? { surface: provenance.surface, repo: provenance.callerRepo, provenance } : {}),
       before: messages.slice(Math.max(0, i - opts.before), i),
       match: msg,
       after: messages.slice(i + 1, i + 1 + opts.after),
@@ -118,7 +125,8 @@ if (opts.json) {
 } else {
   console.log(`query=${JSON.stringify(opts.query)}${opts.regex ? ' regex=true' : ''} raw_files_with_hits=${files.length} total_message_matches=${matches.length} shown=${limited.length} sort=${opts.sort}${opts.since ? ` since=${opts.since}` : ''}${opts.caseSensitive ? ' case_sensitive=true' : ''}`);
   limited.forEach((m, idx) => {
-    console.log(`\n[${idx + 1}] ${m.source} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ''}`);
+    const label = m.surface ? ` surface=${m.surface} repo=${m.repo ?? ''}` : '';
+    console.log(`\n[${idx + 1}] ${m.source}${label} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ''}`);
     console.log(`path=${m.path}`);
     for (const b of m.before) console.log(`  before ${b.role}: ${truncate(b.text, 180)}`);
     console.log(`  MATCH ${m.match.role}: ${truncate(m.match.text, 300)}`);
@@ -159,8 +167,22 @@ function claudeMessage(obj) {
   return null;
 }
 
-// pi session format (oo's own agent-to-agent threads): the header is {type:"session", cwd},
-// covered by firstCwd; conversation turns are {type:"message", timestamp, message:{role, content}}.
+// Latest oo-provenance stamp in an oo thread: {type:"custom", customType:"oo-provenance",
+// data:{surface, origin, callerCwd, callerRepo, fromSession?, ppid}}. Every invocation
+// (launch or resume) appends one, so the last stamp is the most recent caller.
+function piProvenance(raw) {
+  let latest = null;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (obj.type === 'custom' && obj.customType === 'oo-provenance' && obj.data) latest = obj.data;
+  }
+  return latest;
+}
+
+// pi session format (oo's own threads): the header is {type:"session", cwd}, covered by
+// firstCwd; conversation turns are {type:"message", timestamp, message:{role, content}}.
 function piMessage(obj) {
   if (obj.type !== 'message' || !obj.message || typeof obj.message !== 'object') return null;
   const role = obj.message.role;
@@ -226,6 +248,6 @@ function compileRegex(pattern, caseSensitive) {
 
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|self|all] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
+  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|self|all] [--surface tui|chat|interactive|rpc|one-shot] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
   process.exit(code);
 }

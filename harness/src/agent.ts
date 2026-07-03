@@ -3,9 +3,9 @@
 // pi is the engine.
 
 import { readFileSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
@@ -211,7 +211,12 @@ export const ownerOperatorCustomTools = [presentThreadsTool, getSidebarThreadsTo
 // allowlist, so custom tools must be listed or they would be disabled.)
 export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done"];
 
-export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession> {
+// Every owner chat is saved (and labeled with its surface) like any other oo thread;
+// `ephemeral` is the opt-out for harness tests that shouldn't leave files in OO_HOME.
+export async function createOwnerOperatorSession(
+  surface: "chat" | "tui" = "chat",
+  opts: { ephemeral?: boolean } = {},
+): Promise<OwnerOperatorSession> {
   const prompt = ownerOperatorPrompt();
 
   const authStorage = AuthStorage.create();
@@ -231,7 +236,7 @@ export async function createOwnerOperatorSession(): Promise<OwnerOperatorSession
     cwd: repoRoot,
     resourceLoader: loader,
     settingsManager,
-    sessionManager: SessionManager.inMemory(repoRoot),
+    sessionManager: opts.ephemeral ? SessionManager.inMemory(repoRoot) : createOoSession(ooProvenance(surface)),
     authStorage,
     modelRegistry,
     customTools: ownerOperatorCustomTools,
@@ -293,7 +298,8 @@ export const searchSessionsTool = defineTool({
   parameters: Type.Object({
     query: Type.String({ description: "Literal text to find, or a JS regex when regex is true." }),
     regex: Type.Optional(Type.Boolean({ description: "Treat query as a JavaScript regex." })),
-    source: Type.Optional(Type.String({ description: "all (default: the owner's coding sessions) | claude | codex | self (your own past agent-to-agent threads — self-reflection; never included in all)." })),
+    source: Type.Optional(Type.String({ description: "all (default: the owner's coding sessions) | claude | codex | self (oo's own past threads, every surface — self-reflection; never included in all)." })),
+    surface: Type.Optional(Type.String({ description: "With source self: narrow to one oo surface — tui | chat | interactive | rpc | one-shot." })),
     since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD." })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Max matching messages. Default 20." })),
     before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages before each hit. Default 1." })),
@@ -303,6 +309,7 @@ export const searchSessionsTool = defineTool({
     const args = ["--query", p.query];
     if (p.regex) args.push("--regex");
     if (p.source) args.push("--source", p.source);
+    if (p.surface) args.push("--surface", p.surface);
     if (p.since) args.push("--since", p.since);
     args.push("--limit", String(p.limit ?? 20), "--before", String(p.before ?? 1), "--after", String(p.after ?? 1));
     const { stdout } = await execFileAsync(process.execPath, [skillScript("sessions-grep", "sessions-grep.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
@@ -321,24 +328,71 @@ export const neutralAgentPrompt = (): string =>
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
 export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
 
-// ---- Where the private agent's threads live -----------------------------------
-// The neutral (agent-to-agent) sessions persist under oo's OWN home — NEVER pi's default
-// ~/.pi/agent/sessions — so the poller never scans oo's own agent-to-agent chatter as if it
-// were one of the owner's coding sessions. This module owns that policy: callers build
-// managers through the helpers below, which bake the dir in, instead of naming it themselves
-// (pi silently falls back to its own dir when a manager isn't given one). Same OO_HOME base
-// as the durable store (store.ts). All private-agent threads run with cwd = repoRoot, so
-// continueRecent/list scope to them correctly within the shared dir.
+// ---- Where oo's own threads live, and how they're labeled ----------------------
+// EVERY oo session — owner surfaces (TUI, plain chat, pi interactive) and the agent channel
+// (--rpc, one-shot) — persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
+// so the poller never scans oo's chatter as if it were one of the owner's coding sessions.
+// This module owns that policy: callers build managers through the helpers below, which bake
+// the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
+// manager isn't given one). Same OO_HOME base as the durable store (store.ts). All oo threads
+// run with cwd = repoRoot, so continueRecent/list scope to them correctly within one dir.
+//
+// Every invocation stamps an `oo-provenance` custom entry (never sent to the LLM): WHICH
+// surface, owner vs agent origin, the caller's cwd + repo, and — the audit trail — the
+// calling coding session's id when the caller identifies itself (`--from-session` on
+// one-shot, or OO_FROM_SESSION in the env for any surface). A resumed thread accrues one
+// stamp per invocation, so "who touched this thread, from where" is greppable later.
 const ooHome = (): string => process.env.OO_HOME ?? join(homedir(), ".owner-operator");
-export const agentSessionsDir = (): string => join(ooHome(), "agent-sessions");
-/** A fresh private-agent thread. */
-export const createPrivateAgentSession = (): SessionManager => SessionManager.create(repoRoot, agentSessionsDir());
-/** Resume the most recent private-agent thread (or a fresh one if none). */
-export const continuePrivateAgentSession = (): SessionManager => SessionManager.continueRecent(repoRoot, agentSessionsDir());
-/** List private-agent threads — for resolving a `--session <id>` reference. */
-export const listPrivateAgentSessions = () => SessionManager.list(repoRoot, agentSessionsDir());
-/** Open a specific private-agent thread file, keeping oo's dir for any later /new or /fork. */
-export const openPrivateAgentSession = (path: string): SessionManager => SessionManager.open(path, agentSessionsDir());
+export const ooSessionsDir = (): string => join(ooHome(), "sessions");
+
+export type OoSurface = "tui" | "chat" | "interactive" | "rpc" | "one-shot";
+export interface OoProvenance {
+  surface: OoSurface;
+  origin: "owner" | "agent"; // owner-facing surface vs the agent-to-agent channel
+  callerCwd: string; // where the process was invoked from (the launcher doesn't cd)
+  callerRepo: string; // basename of the caller's git repo, or of the cwd outside one
+  fromSession?: string; // audit: the coding session that called us, when it says so
+  ppid: number; // best-effort process audit (an agent shelling out shows as its shell)
+}
+
+export function ooProvenance(surface: OoSurface, fromSession?: string): OoProvenance {
+  const cwd = process.cwd();
+  const git = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  return {
+    surface,
+    origin: surface === "rpc" || surface === "one-shot" ? "agent" : "owner",
+    callerCwd: cwd,
+    callerRepo: basename((git.status === 0 && git.stdout.trim()) || cwd),
+    fromSession: fromSession ?? process.env.OO_FROM_SESSION ?? undefined,
+    ppid: process.ppid,
+  };
+}
+
+export function stampProvenance(sm: SessionManager, p: OoProvenance): void {
+  sm.appendCustomEntry("oo-provenance", p);
+  if (!sm.getSessionName()) sm.appendSessionInfo(`${p.surface}${p.fromSession ? ` ← ${p.fromSession}` : ""} @ ${p.callerRepo}`);
+}
+
+/** A fresh oo thread, stamped with its surface + caller provenance. */
+export function createOoSession(provenance: OoProvenance): SessionManager {
+  const sm = SessionManager.create(repoRoot, ooSessionsDir());
+  stampProvenance(sm, provenance);
+  return sm;
+}
+/** Resume the most recent oo thread (or a fresh one if none); each resume re-stamps. */
+export function continueOoSession(provenance: OoProvenance): SessionManager {
+  const sm = SessionManager.continueRecent(repoRoot, ooSessionsDir());
+  stampProvenance(sm, provenance);
+  return sm;
+}
+/** List oo threads — for resolving a `--session <id>` reference. */
+export const listOoSessions = () => SessionManager.list(repoRoot, ooSessionsDir());
+/** Open a specific oo thread file (re-stamped by the caller), keeping oo's dir for /new or /fork. */
+export function openOoSession(path: string, provenance: OoProvenance): SessionManager {
+  const sm = SessionManager.open(path, ooSessionsDir());
+  stampProvenance(sm, provenance);
+  return sm;
+}
 
 // Callers pick persistence: `oo --rpc` stays in-memory (the channel IS the thread);
 // `oo one-shot` passes a disk-backed manager (the helpers above) so the thread survives

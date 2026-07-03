@@ -5,27 +5,31 @@
 // commands, so there is nothing for the rpc-gate to vet.
 //
 // The thread persists ON DISK (the claude -p --resume / codex exec resume pattern):
-// each run appends to a pi session file under oo's agent-sessions dir — never
-// ~/.pi/agent/sessions, so the poller never triages oo's own agent-to-agent chatter — and
-// prints its session id on stderr. Chain calls with --continue (most recent) or --session
-// <id>. The dir and its managers are owned by agent.ts (the private agent's persistence
-// policy); this file only picks WHICH thread. Resumes are sequential; concurrent appends to
-// one session are not supported (pi makes no locking guarantee).
+// each run appends to a pi session file in oo's own sessions dir — never
+// ~/.pi/agent/sessions, so the poller never triages oo's own threads — and prints its
+// session id on stderr. Chain calls with --continue (most recent) or --session <id>.
+// Every invocation (including resumes) stamps surface=one-shot provenance with the
+// caller's cwd/repo, plus the calling session's id when given via --from-session — the
+// audit trail. The dir and its managers are owned by agent.ts (oo's persistence policy);
+// this file only picks WHICH thread. Resumes are sequential; concurrent appends to one
+// session are not supported (pi makes no locking guarantee).
 import { runPrintMode, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, resolve } from "node:path";
 import {
-  agentSessionsDir,
-  continuePrivateAgentSession,
+  continueOoSession,
   createNeutralAgentRuntime,
-  createPrivateAgentSession,
-  listPrivateAgentSessions,
-  openPrivateAgentSession,
+  createOoSession,
+  listOoSessions,
+  ooProvenance,
+  ooSessionsDir,
+  openOoSession,
 } from "./agent";
 import { parseOneShotArgs } from "./one-shot-args";
 
-const USAGE = `usage: oo one-shot [--continue | --session <id-or-path>] "<question>"
-  --continue, -c      resume the most recent agent thread
-  --session <id>      resume a specific thread (id prefix or session-file path)
+const USAGE = `usage: oo one-shot [--continue | --session <id-or-path>] [--from-session <id>] "<question>"
+  --continue, -c        resume the most recent agent thread
+  --session <id>        resume a specific thread (id prefix or session-file path)
+  --from-session <id>   audit: record which coding session is making this call
 Prints the answer on stdout and the thread's session id on stderr.`;
 
 const args = parseOneShotArgs(process.argv.slice(2));
@@ -34,8 +38,10 @@ if (!args.prompt) {
   process.exit(2);
 }
 
+const provenance = ooProvenance("one-shot", args.fromSession);
+
 // Same resolution rules as pi's own --session: path-like → open the file, otherwise match
-// a session id (exact, then prefix) — but only among oo's private-agent threads.
+// a session id (exact, then prefix) — but only among oo's own threads.
 async function resolveSessionManager(): Promise<SessionManager> {
   const ref = args.session;
   if (ref !== undefined) {
@@ -43,17 +49,17 @@ async function resolveSessionManager(): Promise<SessionManager> {
       process.stderr.write("--session needs an id or path\n" + USAGE + "\n");
       process.exit(2);
     }
-    if (ref.includes("/") || ref.endsWith(".jsonl") || isAbsolute(ref)) return openPrivateAgentSession(resolve(ref));
-    const sessions = await listPrivateAgentSessions();
+    if (ref.includes("/") || ref.endsWith(".jsonl") || isAbsolute(ref)) return openOoSession(resolve(ref), provenance);
+    const sessions = await listOoSessions();
     const match = sessions.find((s) => s.id === ref) ?? sessions.find((s) => s.id.startsWith(ref));
     if (!match) {
-      process.stderr.write(`no agent session matching "${ref}" in ${agentSessionsDir()}\n`);
+      process.stderr.write(`no agent session matching "${ref}" in ${ooSessionsDir()}\n`);
       process.exit(2);
     }
-    return openPrivateAgentSession(match.path);
+    return openOoSession(match.path, provenance);
   }
-  if (args.continue) return continuePrivateAgentSession();
-  return createPrivateAgentSession();
+  if (args.continue) return continueOoSession(provenance);
+  return createOoSession(provenance);
 }
 
 const sessionManager = await resolveSessionManager();

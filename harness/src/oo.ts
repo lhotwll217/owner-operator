@@ -42,7 +42,7 @@ if (cli.daemon) {
   process.exit(0);
 }
 
-const { session, skills, modelLabel } = await createOwnerOperatorSession();
+const { session, skills, modelLabel } = await createOwnerOperatorSession("chat");
 console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
 
 const jsonMode = cli.json;

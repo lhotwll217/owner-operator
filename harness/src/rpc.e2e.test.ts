@@ -15,7 +15,9 @@ const ooBin = join(repoRoot, "harness", "oo");
 const marker = join(tmpdir(), `oo-rpc-e2e-${process.pid}`);
 rmSync(marker, { force: true });
 
-const child = spawn(ooBin, ["--rpc"], { cwd: repoRoot, stdio: ["pipe", "pipe", "ignore"] });
+// Isolated OO_HOME: the rpc agent saves its thread there — a test run must not land in the real one.
+const ooHome = join(tmpdir(), `oo-rpc-e2e-home-${process.pid}`);
+const child = spawn(ooBin, ["--rpc"], { cwd: repoRoot, stdio: ["pipe", "pipe", "ignore"], env: { ...process.env, OO_HOME: ooHome } });
 const responses = new Map<string, { success?: boolean }>();
 let buf = "";
 child.stdout.setEncoding("utf8");
@@ -58,4 +60,5 @@ try {
 } finally {
   try { child.stdin.end(); child.kill(); } catch { /* already gone */ }
   rmSync(marker, { force: true });
+  rmSync(ooHome, { recursive: true, force: true });
 }
