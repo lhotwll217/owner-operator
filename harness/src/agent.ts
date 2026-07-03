@@ -4,6 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -311,8 +312,28 @@ export const neutralAgentPrompt = (): string =>
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
 export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
 
+// ---- Where the private agent's threads live -----------------------------------
+// The neutral (agent-to-agent) sessions persist under oo's OWN home — NEVER pi's default
+// ~/.pi/agent/sessions — so the poller never scans oo's own agent-to-agent chatter as if it
+// were one of the owner's coding sessions. This module owns that policy: callers build
+// managers through the helpers below, which bake the dir in, instead of naming it themselves
+// (pi silently falls back to its own dir when a manager isn't given one). Same OO_HOME base
+// as the durable store (store.ts). All private-agent threads run with cwd = repoRoot, so
+// continueRecent/list scope to them correctly within the shared dir.
+const ooHome = (): string => process.env.OO_HOME ?? join(homedir(), ".owner-operator");
+export const agentSessionsDir = (): string => join(ooHome(), "agent-sessions");
+/** A fresh private-agent thread. */
+export const createPrivateAgentSession = (): SessionManager => SessionManager.create(repoRoot, agentSessionsDir());
+/** Resume the most recent private-agent thread (or a fresh one if none). */
+export const continuePrivateAgentSession = (): SessionManager => SessionManager.continueRecent(repoRoot, agentSessionsDir());
+/** List private-agent threads — for resolving a `--session <id>` reference. */
+export const listPrivateAgentSessions = () => SessionManager.list(repoRoot, agentSessionsDir());
+/** Open a specific private-agent thread file, keeping oo's dir for any later /new or /fork. */
+export const openPrivateAgentSession = (path: string): SessionManager => SessionManager.open(path, agentSessionsDir());
+
 // Callers pick persistence: `oo --rpc` stays in-memory (the channel IS the thread);
-// `oo one-shot` passes a disk-backed manager so the thread survives across invocations.
+// `oo one-shot` passes a disk-backed manager (the helpers above) so the thread survives
+// across invocations. In-memory is the safe default — it never touches pi's session dir.
 export async function createNeutralAgentRuntime(sessionManager: SessionManager = SessionManager.inMemory(repoRoot)) {
   const authStorage = AuthStorage.create();
   const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json

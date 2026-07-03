@@ -5,15 +5,22 @@
 // commands, so there is nothing for the rpc-gate to vet.
 //
 // The thread persists ON DISK (the claude -p --resume / codex exec resume pattern):
-// each run appends to a pi session file under <ooHome>/agent-sessions — a dedicated dir,
-// NOT ~/.pi/agent/sessions, so the poller never triages oo's own agent-to-agent chatter —
-// and prints its session id on stderr. Chain calls with --continue (most recent) or
-// --session <id>. Resumes are sequential; concurrent appends to one session are not
-// supported (pi makes no locking guarantee).
-import { runPrintMode, SessionManager } from "@earendil-works/pi-coding-agent";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import { createNeutralAgentRuntime, repoRoot } from "./agent";
+// each run appends to a pi session file under oo's agent-sessions dir — never
+// ~/.pi/agent/sessions, so the poller never triages oo's own agent-to-agent chatter — and
+// prints its session id on stderr. Chain calls with --continue (most recent) or --session
+// <id>. The dir and its managers are owned by agent.ts (the private agent's persistence
+// policy); this file only picks WHICH thread. Resumes are sequential; concurrent appends to
+// one session are not supported (pi makes no locking guarantee).
+import { runPrintMode, type SessionManager } from "@earendil-works/pi-coding-agent";
+import { isAbsolute, resolve } from "node:path";
+import {
+  agentSessionsDir,
+  continuePrivateAgentSession,
+  createNeutralAgentRuntime,
+  createPrivateAgentSession,
+  listPrivateAgentSessions,
+  openPrivateAgentSession,
+} from "./agent";
 import { parseOneShotArgs } from "./one-shot-args";
 
 const USAGE = `usage: oo one-shot [--continue | --session <id-or-path>] "<question>"
@@ -27,10 +34,8 @@ if (!args.prompt) {
   process.exit(2);
 }
 
-const sessionsDir = join(process.env.OO_HOME ?? join(homedir(), ".owner-operator"), "agent-sessions");
-
 // Same resolution rules as pi's own --session: path-like → open the file, otherwise match
-// a session id (exact, then prefix) — but only within oo's agent-sessions dir.
+// a session id (exact, then prefix) — but only among oo's private-agent threads.
 async function resolveSessionManager(): Promise<SessionManager> {
   const ref = args.session;
   if (ref !== undefined) {
@@ -38,17 +43,17 @@ async function resolveSessionManager(): Promise<SessionManager> {
       process.stderr.write("--session needs an id or path\n" + USAGE + "\n");
       process.exit(2);
     }
-    if (ref.includes("/") || ref.endsWith(".jsonl") || isAbsolute(ref)) return SessionManager.open(resolve(ref), sessionsDir);
-    const sessions = await SessionManager.list(repoRoot, sessionsDir);
+    if (ref.includes("/") || ref.endsWith(".jsonl") || isAbsolute(ref)) return openPrivateAgentSession(resolve(ref));
+    const sessions = await listPrivateAgentSessions();
     const match = sessions.find((s) => s.id === ref) ?? sessions.find((s) => s.id.startsWith(ref));
     if (!match) {
-      process.stderr.write(`no agent session matching "${ref}" in ${sessionsDir}\n`);
+      process.stderr.write(`no agent session matching "${ref}" in ${agentSessionsDir()}\n`);
       process.exit(2);
     }
-    return SessionManager.open(match.path, sessionsDir);
+    return openPrivateAgentSession(match.path);
   }
-  if (args.continue) return SessionManager.continueRecent(repoRoot, sessionsDir);
-  return SessionManager.create(repoRoot, sessionsDir);
+  if (args.continue) return continuePrivateAgentSession();
+  return createPrivateAgentSession();
 }
 
 const sessionManager = await resolveSessionManager();
