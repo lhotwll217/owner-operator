@@ -1,7 +1,6 @@
 // e2e: `oo one-shot` argument contract through the real launcher. Both failure paths exit 2
 // BEFORE any model session is built (so they're fast and need no backend). The prompted path
-// needs a live model, so it isn't exercised here — the rpc e2e already covers building the
-// neutral session when one is configured.
+// needs a live model, so it isn't exercised here.
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

@@ -41,7 +41,7 @@ Common flags:
 - `--after N` messages after each hit, default 1
 - `--role user|assistant|all` filter matching messages, default `all`
 - `--source claude|codex|self|all` filter sources, default `all` (the owner's coding sessions; `self` is never included — see below)
-- `--surface tui|chat|interactive|rpc|one-shot` narrow `self` hits to one oo surface
+- `--surface tui|chat|interactive|one-shot` narrow `self` hits to one oo surface
 - `--since today|7d|YYYY-MM-DD` filter by message/session timestamp
 - `--sort newest|oldest|file` output order, default `newest`
 - `--case-sensitive` exact case match, useful for all-caps searches
@@ -52,7 +52,7 @@ Common flags:
 `self` targets Owner Operator's OWN past threads, stored separately from the owner's coding
 sessions in `<OO_HOME>/sessions` (default `~/.owner-operator/sessions`). EVERY oo surface
 saves there — owner chats (`tui`, plain `chat`, pi `interactive`) and the agent channel
-(`rpc`, `one-shot`) — and every invocation stamps an `oo-provenance` entry: the surface,
+(`one-shot`) — and every invocation stamps an `oo-provenance` entry: the surface,
 owner-vs-agent origin, the caller's cwd + repo name, and (when the caller identifies itself
 via `--from-session` / `OO_FROM_SESSION`) the coding session id that made the call — an
 audit trail of who touched each thread.

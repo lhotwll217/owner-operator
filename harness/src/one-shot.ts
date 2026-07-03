@@ -1,8 +1,7 @@
-// Owner Operator — `oo one-shot "<question>"`: the agent-to-agent channel as a single
-// invocation. Same neutral read-only session as `oo --rpc` (agent-rpc prompt, no shell,
-// scan/search skills), but one prompt in → the assistant's final text on stdout → exit.
-// No protocol to speak, no channel to hold open; the caller never reaches pi's RPC
-// commands, so there is nothing for the rpc-gate to vet.
+// Owner Operator — `oo one-shot "<question>"`: THE agent-to-agent channel. A neutral
+// read-only session (agent-channel prompt, no shell, scan/search skills), one prompt in →
+// the assistant's final text on stdout → exit. No protocol to speak, no channel to hold
+// open; read-only is enforced at the tool layer (neutralAgentTools has no bash/edit/write).
 //
 // The thread persists ON DISK (the claude -p --resume / codex exec resume pattern):
 // each run appends to a pi session file in oo's own sessions dir — never

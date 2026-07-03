@@ -299,7 +299,7 @@ export const searchSessionsTool = defineTool({
     query: Type.String({ description: "Literal text to find, or a JS regex when regex is true." }),
     regex: Type.Optional(Type.Boolean({ description: "Treat query as a JavaScript regex." })),
     source: Type.Optional(Type.String({ description: "all (default: the owner's coding sessions) | claude | codex | self (oo's own past threads, every surface — self-reflection; never included in all)." })),
-    surface: Type.Optional(Type.String({ description: "With source self: narrow to one oo surface — tui | chat | interactive | rpc | one-shot." })),
+    surface: Type.Optional(Type.String({ description: "With source self: narrow to one oo surface — tui | chat | interactive | one-shot." })),
     since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD." })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Max matching messages. Default 20." })),
     before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages before each hit. Default 1." })),
@@ -317,20 +317,20 @@ export const searchSessionsTool = defineTool({
   },
 });
 
-// ---- Neutral runtime for headless agent-to-agent use (RPC) --------------------
-// pi's runRpcMode needs an AgentSessionRuntime (not the raw session createAgentSession
+// ---- Neutral runtime for headless agent-to-agent use (`oo one-shot`) ----------
+// pi's runPrintMode needs an AgentSessionRuntime (not the raw session createAgentSession
 // returns), so we build one with pi's own factory — the same shape pi's main.js uses.
 // This session is deliberately NOT the triage persona, and is read-only at the TOOL layer
 // (no bash/shell) since it's an agent-facing channel: a neutral prompt, read-only tools only
 // (file reads + the scan/search skills + get_sidebar_threads), and NO present_threads.
 export const neutralAgentPrompt = (): string =>
-  readFileSync(join(here, "..", "prompts", "agent-rpc.md"), "utf8");
+  readFileSync(join(here, "..", "prompts", "agent-channel.md"), "utf8");
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
 export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
 // EVERY oo session — owner surfaces (TUI, plain chat, pi interactive) and the agent channel
-// (--rpc, one-shot) — persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
+// (one-shot) — persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
 // so the poller never scans oo's chatter as if it were one of the owner's coding sessions.
 // This module owns that policy: callers build managers through the helpers below, which bake
 // the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
@@ -345,7 +345,7 @@ export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool,
 const ooHome = (): string => process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 export const ooSessionsDir = (): string => join(ooHome(), "sessions");
 
-export type OoSurface = "tui" | "chat" | "interactive" | "rpc" | "one-shot";
+export type OoSurface = "tui" | "chat" | "interactive" | "one-shot";
 export interface OoProvenance {
   surface: OoSurface;
   origin: "owner" | "agent"; // owner-facing surface vs the agent-to-agent channel
@@ -360,7 +360,7 @@ export function ooProvenance(surface: OoSurface, fromSession?: string): OoProven
   const git = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
   return {
     surface,
-    origin: surface === "rpc" || surface === "one-shot" ? "agent" : "owner",
+    origin: surface === "one-shot" ? "agent" : "owner",
     callerCwd: cwd,
     callerRepo: basename((git.status === 0 && git.stdout.trim()) || cwd),
     fromSession: fromSession ?? process.env.OO_FROM_SESSION ?? undefined,
@@ -394,9 +394,9 @@ export function openOoSession(path: string, provenance: OoProvenance): SessionMa
   return sm;
 }
 
-// Callers pick persistence: `oo --rpc` stays in-memory (the channel IS the thread);
 // `oo one-shot` passes a disk-backed manager (the helpers above) so the thread survives
-// across invocations. In-memory is the safe default — it never touches pi's session dir.
+// across invocations. In-memory is the safe default (used by tests) — it never touches
+// pi's session dir.
 export async function createNeutralAgentRuntime(sessionManager: SessionManager = SessionManager.inMemory(repoRoot)) {
   const authStorage = AuthStorage.create();
   const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json

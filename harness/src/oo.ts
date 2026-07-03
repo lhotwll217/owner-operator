@@ -21,7 +21,6 @@ const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessio
   oo daemon                  run the state-owning daemon
   oo one-shot "<question>"   single agent-to-agent turn (read-only), text on stdout;
                              chain turns with --continue or --session <id>
-  oo --rpc                   headless JSON-RPC on stdin/stdout (for agents)
   oo --help | -h             this help
 
 Model: OO_MODEL or .pi/settings.json (default: codex gpt-5.5)`;

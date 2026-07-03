@@ -39,10 +39,10 @@ const queryRegex = opts.regex ? compileRegex(opts.query, opts.caseSensitive) : n
 const home = os.homedir();
 // `self` = Owner Operator's OWN threads (pi session format), kept in a separate dir under
 // OO_HOME. ALL oo surfaces save here — owner chats (tui, chat, interactive) and the agent
-// channel (rpc, one-shot) — each stamped with `oo-provenance` entries (surface, origin,
+// channel (one-shot) — each stamped with `oo-provenance` entries (surface, origin,
 // caller repo/cwd, calling session id). Deliberately NOT part of `all`: owner-session
 // searches never mix with oo's own threads — self-reflection is an explicit `--source self`.
-// `--surface tui|chat|interactive|rpc|one-shot` narrows self hits to one surface.
+// `--surface tui|chat|interactive|one-shot` narrows self hits to one surface.
 const ooHome = process.env.OO_HOME ?? path.join(home, '.owner-operator');
 const selfRoot = path.join(ooHome, 'sessions');
 const sourceRoots = {
@@ -248,6 +248,6 @@ function compileRegex(pattern, caseSensitive) {
 
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|self|all] [--surface tui|chat|interactive|rpc|one-shot] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
+  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|self|all] [--surface tui|chat|interactive|one-shot] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
   process.exit(code);
 }
