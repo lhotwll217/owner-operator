@@ -311,7 +311,9 @@ export const neutralAgentPrompt = (): string =>
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
 export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
 
-export async function createNeutralAgentRuntime() {
+// Callers pick persistence: `oo --rpc` stays in-memory (the channel IS the thread);
+// `oo one-shot` passes a disk-backed manager so the thread survives across invocations.
+export async function createNeutralAgentRuntime(sessionManager: SessionManager = SessionManager.inMemory(repoRoot)) {
   const authStorage = AuthStorage.create();
   const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json
   const prompt = neutralAgentPrompt();
@@ -340,7 +342,7 @@ export async function createNeutralAgentRuntime() {
       });
       return { ...created, services, diagnostics: services.diagnostics };
     },
-    { cwd: repoRoot, agentDir: getAgentDir(), sessionManager: SessionManager.inMemory(repoRoot) },
+    { cwd: repoRoot, agentDir: getAgentDir(), sessionManager },
   );
 }
 

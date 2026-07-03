@@ -19,7 +19,8 @@ const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessio
   oo "what's ongoing?"       one-shot question (cards)
   oo --json "what needs me"  one-shot, headless JSON snapshot
   oo daemon                  run the state-owning daemon
-  oo one-shot "<question>"   single agent-to-agent turn (read-only), text on stdout
+  oo one-shot "<question>"   single agent-to-agent turn (read-only), text on stdout;
+                             chain turns with --continue or --session <id>
   oo --rpc                   headless JSON-RPC on stdin/stdout (for agents)
   oo --help | -h             this help
 

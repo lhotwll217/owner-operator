@@ -46,8 +46,9 @@ Built on the [pi coding agent](https://github.com/earendil-works/pi). `oo` reads
 off disk with small scan/grep skills ([.agents/skills](.agents/skills/)) and never loads full
 transcripts into a model. Supported agents live in
 [`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents can drive it headless:
-`oo one-shot "question"` for a single read-only turn, or `oo --rpc` for a persistent JSON-RPC
-channel when the conversation should carry across prompts.
+`oo one-shot "question"` for a single read-only turn — it prints its session id on stderr, and
+`--continue` / `--session <id>` resume that thread on the next call — or `oo --rpc` for a
+persistent JSON-RPC channel.
 
 So far this has only been tested with a Codex subscription as the driver for the pi harness.
 Other model backends should work but are unverified.
