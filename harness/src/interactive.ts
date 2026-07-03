@@ -20,7 +20,6 @@
 import {
   AuthStorage,
   SettingsManager,
-  SessionManager,
   getAgentDir,
   createAgentSessionServices,
   createAgentSessionFromServices,
@@ -28,7 +27,7 @@ import {
   InteractiveMode,
   initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "./agent";
+import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "./agent";
 import { ownerOperatorExtension } from "./oo-extension";
 
 if (!process.stdout.isTTY) {
@@ -66,7 +65,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
 const runtime = await createAgentSessionRuntime(createRuntime, {
   cwd: repoRoot,
   agentDir: getAgentDir(),
-  sessionManager: SessionManager.inMemory(repoRoot), // no on-disk pi session files, like the other frontends
+  sessionManager: createOoSession(ooProvenance("interactive")), // saved + labeled like every oo surface
 });
 
 initTheme(runtime.services.settingsManager.getTheme(), true);

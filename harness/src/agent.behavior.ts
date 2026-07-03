@@ -18,7 +18,7 @@ function assertThread(t: any, i: number): asserts t is Thread {
   if (t.link != null) assert.equal(typeof t.link, "string", `thread[${i}].link is a string when present`);
 }
 
-const { session } = await createOwnerOperatorSession();
+const { session } = await createOwnerOperatorSession("chat", { ephemeral: true }); // a test run, not a real chat — keep it off disk
 
 let presented = false;
 let threads: unknown[] = [];

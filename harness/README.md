@@ -6,7 +6,7 @@ same as [openclaw](https://github.com/openclaw/openclaw).
 
 Deps (see [`package.json`](package.json)), all pinned exact at `0.78.0` (pi is pre-1.0):
 
-- `@earendil-works/pi-coding-agent` — the agent SDK: sessions, tools, skills, RPC mode.
+- `@earendil-works/pi-coding-agent` — the agent SDK: sessions, tools, skills, print mode.
 - `@earendil-works/pi-ai` — LLM API + type system for the triage calls.
 - `@earendil-works/pi-tui` — terminal-UI primitives for the branded TUI.
 

@@ -1,6 +1,8 @@
 // Integration: the real sessions-grep script enforces the privacy blacklist. A match inside a
 // blacklisted tree is never returned (both layers: project-dir slug, and post-parse cwd); a match
-// in a normal repo is. Needs ripgrep, like the skill — skips cleanly if it's absent.
+// in a normal repo is. Also: oo's own threads (`--source self`, pi format + oo-provenance labels,
+// under <OO_HOME>/sessions) are found only when targeted explicitly — never part of `all` — and
+// `--surface` narrows to one surface. Needs ripgrep, like the skill — skips cleanly if absent.
 import assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -46,17 +48,48 @@ try {
   const cwdCwd = join(privateRoot, "Jobs", "acme");
   writeSession(join(home, ".claude", "projects", "misc"), cwdId, cwdCwd);
 
-  const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--source", "claude", "--json"], {
-    env: { ...process.env, HOME: home, OO_HOME: ooHome },
-    encoding: "utf8",
-  });
-  const ids = JSON.parse(out).matches.map((m: { id: string }) => m.id);
+  // oo's own threads (pi session format + oo-provenance labels) in the separate self dir:
+  // one from the agent channel, one from the TUI.
+  const selfDir = join(ooHome, "sessions");
+  mkdirSync(selfDir, { recursive: true });
+  const provenance = (surface: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ type: "custom", id: "p1", parentId: null, timestamp: "2026-06-30T10:00:00.500Z", customType: "oo-provenance", data: { surface, origin: surface === "tui" ? "owner" : "agent", callerCwd: "/w", callerRepo: "acme-app", ppid: 1, ...extra } }) + "\n";
+  const writeSelf = (id: string, surface: string, extra: Record<string, unknown> = {}) =>
+    writeFileSync(
+      join(selfDir, `${id}.jsonl`),
+      JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-06-30T10:00:00.000Z", cwd: join(home, "dev", "normal-repo") }) + "\n" +
+        provenance(surface, extra) +
+        JSON.stringify({ type: "message", id: "m1", parentId: null, timestamp: "2026-06-30T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: `I already reported the ${NEEDLE} thread` }] } }) + "\n",
+    );
+  const selfId = "selfself-1111-2222-3333-444444444444";
+  const tuiId = "tuituitu-1111-2222-3333-444444444444";
+  writeSelf(selfId, "one-shot", { fromSession: "caller-abc" });
+  writeSelf(tuiId, "tui");
 
+  const run = (...extra: string[]): { id: string; surface?: string; repo?: string; provenance?: { fromSession?: string } }[] => {
+    const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--json", ...extra], {
+      env: { ...process.env, HOME: home, OO_HOME: ooHome },
+      encoding: "utf8",
+    });
+    return JSON.parse(out).matches;
+  };
+  const idsOf = (ms: { id: string }[]) => ms.map((m) => m.id);
+
+  const ids = idsOf(run("--source", "claude"));
   assert.ok(ids.includes(okId), "normal-repo match is returned");
   assert.ok(!ids.includes(slugId), "blacklisted project-dir slug (layer 1) is excluded");
   assert.ok(!ids.includes(cwdId), "blacklisted cwd tree (layer 2) is excluded");
 
-  process.stdout.write("ok — sessions-grep blacklist: slug layer + cwd layer both exclude private trees\n");
+  assert.ok(!idsOf(run()).includes(selfId), "self threads stay out of the default `all` search");
+  const selfMatches = run("--source", "self");
+  assert.deepEqual(idsOf(selfMatches).sort(), [selfId, tuiId].sort(), "self finds every oo surface, ONLY from the self dir");
+  const oneShotHit = selfMatches.find((m) => m.id === selfId);
+  assert.equal(oneShotHit?.surface, "one-shot", "hit is labeled with its surface");
+  assert.equal(oneShotHit?.repo, "acme-app", "hit is labeled with the caller repo");
+  assert.equal(oneShotHit?.provenance?.fromSession, "caller-abc", "audit trail: calling session id on the hit");
+  assert.deepEqual(idsOf(run("--source", "self", "--surface", "tui")), [tuiId], "--surface narrows to one surface");
+
+  process.stdout.write("ok — sessions-grep: blacklist layers hold; self source separate, labeled, surface-filterable\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });

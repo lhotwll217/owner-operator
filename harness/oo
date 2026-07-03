@@ -4,7 +4,8 @@
 #   ./harness/oo -i | --interactive   → pi's STOCK interactive mode, our agent config (A/B surface)
 #   OO_INTERACTIVE=1 ./harness/oo     → same, via env
 #   ./harness/oo "what's ongoing?"    → plain one-shot
-#   ./harness/oo --rpc                → headless JSON-RPC on stdin/stdout (for agents; no triage cards)
+#   ./harness/oo one-shot "question"  → single agent-to-agent turn (read-only channel), text out;
+#                                       --continue / --session <id> resume a persisted thread
 #   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
 # Works from the repo and when installed on PATH via `npm link` (resolves the symlink).
 
@@ -25,10 +26,9 @@ if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
   shift
 fi
 
-if [ "$1" = "__rpc-agent" ]; then
-  ENTRY="$DIR/src/rpc-agent.ts"    # internal: the pi RPC agent child, spawned by the --rpc supervisor
-elif [ "$1" = "--rpc" ]; then
-  ENTRY="$DIR/src/rpc.ts"          # headless JSON-RPC supervisor (read-only allowlist gate) for agents
+if [ "$1" = "one-shot" ]; then
+  ENTRY="$DIR/src/one-shot.ts"     # single agent-to-agent turn on the same read-only channel
+  shift                            # drop the subcommand; the rest is the prompt
 elif [ -n "$INTERACTIVE" ]; then
   ENTRY="$DIR/src/interactive.ts"
 elif [ "$#" -gt 0 ]; then

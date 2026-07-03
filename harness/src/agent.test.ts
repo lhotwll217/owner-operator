@@ -1,4 +1,4 @@
-// Unit: the neutral (agent-facing, `oo --rpc`) session is read-only at the TOOL layer.
+// Unit: the neutral (agent-facing, `oo one-shot`) session is read-only at the TOOL layer.
 import assert from "node:assert";
 import { neutralAgentTools, neutralAgentCustomTools } from "./agent";
 

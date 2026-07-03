@@ -55,7 +55,7 @@ const SIDEBAR_W = 51;   // sidebar column CAP — the split is responsive: min(5
 const SPLIT_MIN = 80;   // below this the sidebar hides entirely; above, it shrinks before the chat does
 const SIDEBAR_STEP = 3;    // sidebar lines per Shift+↑/↓ — about one thread block
 
-const { session, skills, modelLabel } = await createOwnerOperatorSession();
+const { session, skills, modelLabel } = await createOwnerOperatorSession("tui");
 
 // State backend: the daemon when it runs (spawned here if needed — it owns the poll loop
 // and pushes snapshots), the store + an embedded poller otherwise. One writer when daemon-
@@ -449,7 +449,9 @@ let draining = false;
 
 async function bgSession() {
   if (!triage) {
-    triage = await createOwnerOperatorSession();
+    // Internal enrichment worker, not an owner chat — ephemeral so it never lands in the
+    // saved-sessions dir as a phantom "tui" thread.
+    triage = await createOwnerOperatorSession("tui", { ephemeral: true });
     // capture its present_threads → enrich the cache for that one thread (no chat rendering)
     triage.session.subscribe((event: any) => {
       if (event.type === "tool_execution_start" && event.toolName === "present_threads") {
