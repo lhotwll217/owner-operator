@@ -1,6 +1,8 @@
 // Integration: the real sessions-grep script enforces the privacy blacklist. A match inside a
 // blacklisted tree is never returned (both layers: project-dir slug, and post-parse cwd); a match
-// in a normal repo is. Needs ripgrep, like the skill — skips cleanly if it's absent.
+// in a normal repo is. Also: oo's own agent-to-agent threads (`--source self`, pi format, under
+// <OO_HOME>/agent-sessions) are found only when targeted explicitly — never part of `all`.
+// Needs ripgrep, like the skill — skips cleanly if it's absent.
 import assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -46,17 +48,35 @@ try {
   const cwdCwd = join(privateRoot, "Jobs", "acme");
   writeSession(join(home, ".claude", "projects", "misc"), cwdId, cwdCwd);
 
-  const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--source", "claude", "--json"], {
-    env: { ...process.env, HOME: home, OO_HOME: ooHome },
-    encoding: "utf8",
-  });
-  const ids = JSON.parse(out).matches.map((m: { id: string }) => m.id);
+  // oo's own agent-to-agent thread (pi session format) in the separate self dir.
+  const selfId = "selfself-1111-2222-3333-444444444444";
+  const selfDir = join(ooHome, "agent-sessions");
+  mkdirSync(selfDir, { recursive: true });
+  writeFileSync(
+    join(selfDir, `${selfId}.jsonl`),
+    JSON.stringify({ type: "session", version: 3, id: selfId, timestamp: "2026-06-30T10:00:00.000Z", cwd: join(home, "dev", "normal-repo") }) + "\n" +
+      JSON.stringify({ type: "message", id: "m1", parentId: null, timestamp: "2026-06-30T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: `I already reported the ${NEEDLE} thread` }] } }) + "\n",
+  );
 
+  const run = (...extra: string[]): string[] => {
+    const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--json", ...extra], {
+      env: { ...process.env, HOME: home, OO_HOME: ooHome },
+      encoding: "utf8",
+    });
+    return JSON.parse(out).matches.map((m: { id: string }) => m.id);
+  };
+
+  const ids = run("--source", "claude");
   assert.ok(ids.includes(okId), "normal-repo match is returned");
   assert.ok(!ids.includes(slugId), "blacklisted project-dir slug (layer 1) is excluded");
   assert.ok(!ids.includes(cwdId), "blacklisted cwd tree (layer 2) is excluded");
 
-  process.stdout.write("ok — sessions-grep blacklist: slug layer + cwd layer both exclude private trees\n");
+  assert.ok(!run().includes(selfId), "self thread stays out of the default `all` search");
+  const selfIds = run("--source", "self");
+  assert.ok(selfIds.includes(selfId), "self thread found when targeted explicitly");
+  assert.ok(!selfIds.includes(okId), "--source self searches ONLY the self dir");
+
+  process.stdout.write("ok — sessions-grep: blacklist layers hold; self source is separate and explicit\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });

@@ -29,19 +29,25 @@ if (!Number.isFinite(opts.limit) || opts.limit < 1) usage(1, '--limit must be >=
 if (!Number.isFinite(opts.before) || opts.before < 0) usage(1, '--before must be >= 0');
 if (!Number.isFinite(opts.after) || opts.after < 0) usage(1, '--after must be >= 0');
 if (!['all', 'user', 'assistant'].includes(opts.role)) usage(1, '--role must be all, user, or assistant');
-if (!['all', 'claude', 'codex'].includes(opts.source)) usage(1, '--source must be all, claude, or codex');
+if (!['all', 'claude', 'codex', 'self'].includes(opts.source)) usage(1, '--source must be all, claude, codex, or self');
 if (!['newest', 'oldest', 'file'].includes(opts.sort)) usage(1, '--sort must be newest, oldest, or file');
 const sinceTime = opts.since ? parseSince(opts.since) : null;
 if (opts.since && sinceTime == null) usage(1, '--since must be today, Nd, or YYYY-MM-DD');
 const queryRegex = opts.regex ? compileRegex(opts.query, opts.caseSensitive) : null;
 
 const home = os.homedir();
+// `self` = Owner Operator's OWN agent-to-agent threads (`oo one-shot`, pi session format),
+// kept in a separate dir under OO_HOME. Deliberately NOT part of `all`: owner-session
+// searches never mix with oo's own chatter — self-reflection is an explicit `--source self`.
+const ooHome = process.env.OO_HOME ?? path.join(home, '.owner-operator');
+const selfRoot = path.join(ooHome, 'agent-sessions');
 const sourceRoots = {
   claude: [path.join(home, '.claude/projects')],
   codex: [path.join(home, '.codex/sessions'), path.join(home, '.codex/archived_sessions')],
+  self: [selfRoot],
 };
 const roots = Object.entries(sourceRoots)
-  .filter(([source]) => opts.source === 'all' || opts.source === source)
+  .filter(([source]) => (opts.source === 'all' ? source !== 'self' : opts.source === source))
   .flatMap(([, dirs]) => dirs)
   .filter((dir) => fs.existsSync(dir));
 
@@ -70,14 +76,13 @@ const q = opts.caseSensitive ? opts.query : opts.query.toLowerCase();
 // Privacy blacklist (ABSOLUTE — no flag bypasses it), the same two layers as get-active-threads:
 // skip a file whose project-dir slug is blacklisted (before reading), and skip any file whose
 // session cwd sits in a blacklisted tree.
-const ooHome = process.env.OO_HOME ?? path.join(home, '.owner-operator');
 const blacklist = loadBlacklist(ooHome);
 const blockedSlugs = pathSlugs(blacklist);
 const slugBlocked = (dirName) => blockedSlugs.some((s) => dirName === s || dirName.startsWith(s + '-'));
 
 for (const file of files) {
   if (slugBlocked(path.basename(path.dirname(file)))) continue; // layer 1: blacklisted project dir
-  const source = file.includes('/.codex/') ? 'codex' : 'claude';
+  const source = file.startsWith(selfRoot + path.sep) ? 'self' : file.includes('/.codex/') ? 'codex' : 'claude';
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
   const cwd = firstCwd(raw);
@@ -127,7 +132,7 @@ function parseMessages(raw, source) {
     if (!line.trim()) continue;
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
-    const msg = source === 'codex' ? codexMessage(obj) : claudeMessage(obj);
+    const msg = source === 'codex' ? codexMessage(obj) : source === 'self' ? piMessage(obj) : claudeMessage(obj);
     if (!msg || !msg.text.trim()) continue;
     out.push(msg);
   }
@@ -152,6 +157,15 @@ function claudeMessage(obj) {
     return { role: obj.message.role || obj.type, text: contentToText(obj.message.content), timestamp: obj.timestamp };
   }
   return null;
+}
+
+// pi session format (oo's own agent-to-agent threads): the header is {type:"session", cwd},
+// covered by firstCwd; conversation turns are {type:"message", timestamp, message:{role, content}}.
+function piMessage(obj) {
+  if (obj.type !== 'message' || !obj.message || typeof obj.message !== 'object') return null;
+  const role = obj.message.role;
+  if (!['user', 'assistant'].includes(role)) return null;
+  return { role, text: contentToText(obj.message.content), timestamp: obj.timestamp };
 }
 
 function codexMessage(obj) {
@@ -212,6 +226,6 @@ function compileRegex(pattern, caseSensitive) {
 
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|all] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
+  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|self|all] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
   process.exit(code);
 }

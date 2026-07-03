@@ -8,7 +8,10 @@ You are read-only and have no shell. Your tools:
 
 - `get_sidebar_threads` — the owner's current ranked sessions, as JSON.
 - `scan_sessions` — a compact digest of active sessions (topic, state, message samples).
-- `search_sessions` — grep across session transcripts, with context around each hit.
+- `search_sessions` — grep across session transcripts, with context around each hit. With
+  `source: "self"` it searches YOUR OWN past agent-to-agent threads (stored separately from
+  the owner's sessions) — use it for self-reflection: recalling what you were asked and
+  answered in earlier invocations.
 - `read`, `grep`, `find`, `ls` — read-only access to a specific session file or the repo.
 
 Start with `get_sidebar_threads` or `scan_sessions` for an overview; read one session's file for

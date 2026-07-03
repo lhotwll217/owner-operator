@@ -280,12 +280,20 @@ export const scanSessionsTool = defineTool({
 export const searchSessionsTool = defineTool({
   name: "search_sessions",
   label: "Search sessions",
-  description: "Grep across the owner's local session transcripts, with bounded context around each hit. Read-only.",
-  promptSnippet: "search_sessions — grep session transcripts with context around each hit",
-  promptGuidelines: ["Use search_sessions to find where something was discussed across sessions."],
+  description:
+    "Grep across the owner's local session transcripts, with bounded context around each hit. Read-only. " +
+    "Set source to 'self' for SELF-REFLECTION: it searches your own past agent-to-agent threads " +
+    "(kept in a separate directory, never mixed into the owner's sessions) — what you were asked " +
+    "and answered in previous invocations.",
+  promptSnippet: "search_sessions — grep session transcripts with context around each hit; source 'self' searches your own past threads (self-reflection)",
+  promptGuidelines: [
+    "Use search_sessions to find where something was discussed across sessions.",
+    "Use search_sessions with source 'self' to recall your own previous answers across invocations (self-reflection) — 'self' is separate and never part of the default search.",
+  ],
   parameters: Type.Object({
     query: Type.String({ description: "Literal text to find, or a JS regex when regex is true." }),
     regex: Type.Optional(Type.Boolean({ description: "Treat query as a JavaScript regex." })),
+    source: Type.Optional(Type.String({ description: "all (default: the owner's coding sessions) | claude | codex | self (your own past agent-to-agent threads — self-reflection; never included in all)." })),
     since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD." })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Max matching messages. Default 20." })),
     before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages before each hit. Default 1." })),
@@ -294,6 +302,7 @@ export const searchSessionsTool = defineTool({
   async execute(_id, p) {
     const args = ["--query", p.query];
     if (p.regex) args.push("--regex");
+    if (p.source) args.push("--source", p.source);
     if (p.since) args.push("--since", p.since);
     args.push("--limit", String(p.limit ?? 20), "--before", String(p.before ?? 1), "--after", String(p.after ?? 1));
     const { stdout } = await execFileAsync(process.execPath, [skillScript("sessions-grep", "sessions-grep.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
