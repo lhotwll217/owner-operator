@@ -299,10 +299,12 @@ struct RowView: View {
 }
 
 /// The origin line's app tag: the tool's real logo (a background-free mark rendered from the
-/// brand SVG, bundled in Resources/) beside the app name. Claude and Codex marks cover all
+/// brand SVG, bundled in Resources/) beside the app name — every app in the canonical
+/// vocabulary (see detectUi in the scan skill) has one. Claude and Codex marks cover all
 /// their variants (CLI / App / SDK). Monochrome marks render as templates so they tint to the
-/// current foreground in light and dark; Claude keeps its brand terracotta. Apps without a
-/// bundled logo (Cursor, Superset, PostHog Code, …) fall back to the plain text tag.
+/// current foreground in light and dark; color marks (Claude's terracotta, Antigravity's
+/// arch, PostHog's hedgehog) keep their brand colors. An unrecognized app falls back to the
+/// plain text tag.
 struct AppBadge: View {
     let app: String
 
@@ -311,6 +313,13 @@ struct AppBadge: View {
         ("Claude", "claude", false),
         ("Codex", "codex", true),
         ("Conductor", "conductor", true),
+        ("Cursor", "cursor", true),
+        ("Superset", "superset", true),
+        ("PostHog", "posthog", false),
+        ("Antigravity", "antigravity", false),
+        ("Grok", "grok", true),
+        ("opencode", "opencode", true),
+        ("pi", "pi", true),
     ]
     private static var cache: [String: (image: NSImage, template: Bool)] = [:]
 
