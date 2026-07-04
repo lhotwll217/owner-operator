@@ -22,6 +22,14 @@ try {
   );
   assert.ok(def.every((s) => s.root.startsWith(homedir())), "default roots live under home");
   assert.ok(has(def, "cursor", join(homedir(), ".cursor", "projects")), "cursor default present");
+  assert.ok(has(def, "pi", join(homedir(), ".pi", "agent", "sessions")), "pi default present");
+  assert.ok(has(def, "opencode", join(homedir(), ".local", "share", "opencode", "storage")), "opencode default present");
+  assert.ok(
+    has(def, "antigravity", join(homedir(), ".gemini", "antigravity")) &&
+      has(def, "antigravity", join(homedir(), ".gemini", "antigravity-cli")),
+    "antigravity covers both the IDE and CLI dirs",
+  );
+  assert.ok(has(def, "grok-build", join(homedir(), ".grok", "sessions")), "grok-build default present");
 
   // add appends; disable drops a default; ~ expands; unknown source ignored.
   writeFileSync(join(ooHome, "session_sources.json"), JSON.stringify({

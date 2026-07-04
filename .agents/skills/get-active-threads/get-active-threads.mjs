@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // get-active-threads — deterministic, zero-install scan of local CLI agent sessions.
 //
-// Reads the KNOWN_SESSION_SOURCES (claude, codex, cursor, posthog-code — the canonical list
-// lives in packages/core/src/session-sources.mjs) session files, finds recently-active threads,
+// Reads the KNOWN_SESSION_SOURCES (claude, codex, cursor, posthog-code, pi, opencode,
+// antigravity, grok-build — the canonical list lives in packages/core/src/session-sources.mjs)
+// session files, finds recently-active threads,
 // and prints a COMPACT digest: topic, light metadata (resolved state, origin app, git
 // delta), and a sample of each thread's messages (its opening few + most-recent few) so
 // an agent can triage "what's ongoing" WITHOUT loading full transcripts into a model.
@@ -82,10 +83,18 @@ function walk(dir, out) {
   for (const e of ents) {
     const p = join(dir, e.name);
     if (e.isDirectory()) walk(p, out);
-    // PostHog Code writes one ACP log per task as `logs.ndjson`; everyone else uses `.jsonl`.
-    else if (e.isFile() && (e.name.endsWith(".jsonl") || e.name.endsWith(".ndjson"))) out.push(p);
+    // PostHog Code writes one ACP log per task as `logs.ndjson`; opencode one `.json` per
+    // record; everyone else uses `.jsonl`. Per-source filters below keep only real sessions.
+    else if (e.isFile() && (e.name.endsWith(".jsonl") || e.name.endsWith(".ndjson") || e.name.endsWith(".json"))) out.push(p);
   }
 }
+// opencode stores one JSON per record; the per-session INFO file is the thread anchor
+// (storage/session/<projectID>/<id>.json, or the legacy storage/session/info/<id>.json).
+// Message/part records hang off it — the parser reads those, the scan never lists them.
+const opencodeInfoFile = (root, f) => {
+  const rel = f.slice(root.length + 1).split("/");
+  return rel[0] === "session" && rel.length === 3 && rel[1] !== "message" && rel[1] !== "part";
+};
 // Built-in defaults + owner overrides (<ooHome>/session_sources.json). Same list the poller
 // watches — one source of truth in @owner-operator/core.
 const roots = loadSessionSources(ooHome);
@@ -97,6 +106,12 @@ for (const { root, source } of roots) {
   for (const f of files) {
     // Cursor's projects dir also holds mcps/terminals — only agent transcripts are sessions.
     if (source === "cursor" && !f.includes("/agent-transcripts/")) continue;
+    // `.json` files are only sessions for opencode — and only its per-session info file
+    // (message/part records and the history index are read by the parser, not scanned).
+    if (f.endsWith(".json") !== (source === "opencode")) continue;
+    if (source === "opencode" && !opencodeInfoFile(root, f)) continue;
+    // Antigravity brains hold several .jsonl logs; the digest-friendly transcript is the session.
+    if (source === "antigravity" && !f.endsWith("/logs/transcript.jsonl")) continue;
     // Blacklisted tree → skip the file unread (Claude project dirs are cwd slugs).
     if (source === "claude" && slugBlocked(basename(dirname(f)))) continue;
     let st; try { st = statSync(f); } catch { continue; }
@@ -125,7 +140,8 @@ function claudeText(content) {
 }
 
 // Which GUI the thread lives in — the CANONICAL APP NAMES, a fixed display vocabulary:
-// Superset App, Conductor, Claude CLI, Claude App, Codex CLI, Codex App, Cursor. (SDK
+// Superset App, Conductor, Claude CLI, Claude App, Codex CLI, Codex App, Cursor, pi,
+// opencode, Antigravity, Grok Build. (SDK
 // worker sessions — hidden by default — carry an SDK label outside that set.) A session
 // spawned in a Superset/Conductor worktree belongs to that GUI — that's where the branch/
 // worktree lives — even if Codex/Claude/Cursor is the agent, so the worktree hosts are
@@ -136,6 +152,10 @@ function detectUi(source, cwd, entrypoint, meta = {}) {
   const host = interactiveHost(cwd, source, guiHosts);
   if (host) return host.ui;
   if (source === "cursor") return "Cursor";
+  if (source === "pi") return "pi";
+  if (source === "opencode") return "opencode";
+  if (source === "antigravity") return "Antigravity";
+  if (source === "grok-build") return "Grok Build";
   if (source === "codex") {
     if (meta.srcHint === "vscode") return "Codex App";
     if (meta.originator === "codex_sdk_ts") return "Codex SDK";
@@ -338,14 +358,54 @@ function parseSession({ file, source, mtime, btime }) {
   // is up — only _posthog/* telemetry. Capture repo (from the sandbox-image line), the latest
   // progress label, whether setup is still running, and local-vs-cloud, so the task still surfaces.
   let pcRepo = null, pcEnv = null, pcProgress = null, pcSetupActive = false;
+  let agLastStatus = null;                 // antigravity: the last step's status (non-DONE = running)
+  let ocAsstOpen = false;                  // opencode: newest assistant msg has no time.completed = streaming
 
   if (source === "cursor") project = cursorProject(file); // cwd lives in the dir slug, not the records
 
-  for (const line of raw.split("\n")) {
+  // opencode is not line-based: the candidate file is the session INFO record; the turns live
+  // in one-JSON-per-message files (with the text in one-JSON-per-part files) hanging off the
+  // storage root. Gen-2 keeps them at storage/{message,part}/, the legacy layout under
+  // storage/session/{message,part}/. (The newest opencode stores sessions in SQLite —
+  // opencode.db — which a zero-install scan can't read; those installs surface nothing here.)
+  if (source === "opencode") {
+    let info; try { info = JSON.parse(raw); } catch { return null; }
+    if (!info || typeof info !== "object" || typeof info.id !== "string") return null;
+    sessionId = info.id;
+    if (typeof info.directory === "string" && info.directory) project = info.directory;
+    if (info.time?.created) firstTs = info.time.created;
+    if (info.time?.updated) lastTs = info.time.updated;
+    const storageRoot = dirname(dirname(dirname(file))); // …/storage/session/<dir>/<id>.json
+    const readJson = (p) => { try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; } };
+    const list = (dirs) => { for (const d of dirs) { try { return { dir: d, names: readdirSync(d) }; } catch { /* next layout */ } } return null; };
+    const msgDir = list([join(storageRoot, "message", sessionId), join(storageRoot, "session", "message", sessionId)]);
+    let lastAsstTs = -1;
+    for (const name of msgDir?.names.filter((n) => n.endsWith(".json")).sort() ?? []) {
+      const m = readJson(join(msgDir.dir, name));
+      if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
+      const mts = m.time?.created ?? 0; // epoch ms
+      if (mts) { if (!firstTs || mts < firstTs) firstTs = mts; if (mts > lastTs) lastTs = mts; }
+      if (m.role === "assistant" && !project && m.path?.cwd) project = m.path.cwd;
+      if (m.role === "assistant" && mts >= lastAsstTs) { lastAsstTs = mts; ocAsstOpen = m.time?.completed == null; }
+      const mid = typeof m.id === "string" ? m.id : name.replace(/\.json$/, "");
+      const parts = list([join(storageRoot, "part", mid), join(storageRoot, "session", "part", sessionId, mid)]);
+      const text = (parts?.names.sort() ?? [])
+        .map((p) => readJson(join(parts.dir, p)))
+        .filter((p) => p?.type === "text" && typeof p.text === "string" && !p.synthetic && !p.ignored)
+        .map((p) => p.text).join(" ");
+      if (text && text.trim()) msgs.push({ role: m.role, text, ts: mts });
+    }
+    msgs.sort((a, b) => (a.ts || 0) - (b.ts || 0)); // file order ≠ turn order — ids/mtimes can interleave
+  }
+
+  for (const line of source === "opencode" ? [] : raw.split("\n")) {
     if (!line.trim()) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
 
-    const ts = o.timestamp ? Date.parse(o.timestamp) : (o.payload?.timestamp ? Date.parse(o.payload.timestamp) : 0);
+    // Entry timestamps: `timestamp` (claude/codex-event/pi), payload.timestamp (codex),
+    // created_at (antigravity steps).
+    const tsRaw = o.timestamp ?? o.payload?.timestamp ?? o.created_at;
+    const ts = tsRaw ? Date.parse(tsRaw) : 0;
     if (ts) { if (!firstTs || ts < firstTs) firstTs = ts; if (ts > lastTs) lastTs = ts; }
 
     if (source === "claude") {
@@ -396,6 +456,44 @@ function parseSession({ file, source, mtime, btime }) {
       } else if (!n.method && n.result && typeof n.result.stopReason === "string") {
         pcPromptDone++; // a session/prompt completed (end_turn) — only prompt results carry stopReason
       }
+    } else if (source === "pi") {
+      // pi session (format v3): line 1 is a {type:"session"} header carrying id + cwd; every
+      // turn is a {type:"message"} entry wrapping an AgentMessage. Assistant messages carry a
+      // stopReason — "toolUse" = mid agent loop, exactly Claude's "tool_use".
+      if (o.type === "session") {
+        if (o.cwd) project = o.cwd;
+        if (o.id) sessionId = o.id;
+      } else if (o.type === "message") {
+        const m = o.message || {};
+        if (m.role === "user" || m.role === "assistant") {
+          const text = claudeText(m.content); // same shape: string or [{type:"text",text}] blocks
+          if (text && text.trim()) msgs.push({ role: m.role, text, ts, stop: m.stopReason });
+        }
+      }
+    } else if (source === "antigravity") {
+      // Antigravity brain transcript: one step per line — {step_index, source, type, status,
+      // content, created_at}. USER_EXPLICIT USER_INPUT steps are the owner's prompts;
+      // PLANNER_RESPONSE steps are the agent's narration (tool steps like SEARCH_WEB are
+      // activity, not conversation). No cwd in the records — identity is the brain/<id> dir.
+      if (o.type === "USER_INPUT" && o.source === "USER_EXPLICIT") {
+        if (o.content && String(o.content).trim()) msgs.push({ role: "user", text: String(o.content), ts });
+      } else if (o.type === "PLANNER_RESPONSE") {
+        if (o.content && String(o.content).trim()) msgs.push({ role: "assistant", text: String(o.content), ts });
+      }
+      if (o.status) agLastStatus = o.status;
+    } else if (source === "grok-build") {
+      // Grok Build documents WHERE sessions live (~/.grok/sessions, organized by cwd) but not
+      // the record shape — parse best-effort: any record that reads as a chat turn (a
+      // user/assistant role plus string-or-blocks text, top-level or under `message`).
+      // Tighten this once the real shape is pinned down from a live install.
+      if (!project && typeof o.cwd === "string") project = o.cwd;
+      if (!sessionId && typeof (o.sessionId ?? o.session_id) === "string") sessionId = o.sessionId ?? o.session_id;
+      const m = o.message && typeof o.message === "object" ? o.message : o;
+      const role = m.role ?? o.type;
+      if (role === "user" || role === "assistant") {
+        const text = claudeText(m.content ?? m.text);
+        if (text && text.trim()) msgs.push({ role, text, ts });
+      }
     } else { // codex
       if (o.type === "session_meta") {
         project = o.payload?.cwd || project;
@@ -422,9 +520,11 @@ function parseSession({ file, source, mtime, btime }) {
   // into their parent so a multi-task Cursor run stays ONE "core" thread rather than splitting into one
   // per sub-task — key them to the parent id and let it win the dedup below.
   const cursorSubagent = source === "cursor" && file.includes("/subagents/");
-  // posthog-code's session id is the task-run dir, not the `logs.ndjson` leaf; others use the file stem.
+  // posthog-code's session id is the task-run dir, not the `logs.ndjson` leaf; antigravity's
+  // the brain/<id> dir above `.system_generated/logs/`; others use the file stem.
   if (!sessionId) {
     if (source === "posthog-code") sessionId = basename(dirname(file));
+    else if (source === "antigravity") sessionId = basename(dirname(dirname(dirname(file))));
     else if (cursorSubagent) sessionId = file.split("/agent-transcripts/")[1].split("/")[0];
     else sessionId = basename(file).replace(/\.(jsonl|ndjson)$/, "");
   }
@@ -479,18 +579,23 @@ function parseSession({ file, source, mtime, btime }) {
   const lastMsgTs = lastMsg.ts || lastTs || mtime;
 
   // Is a turn IN PROGRESS (still reasoning / running tools / streaming)? The last *message*
-  // role alone can't tell — an intermediate assistant message looks "done". Use the terminal
-  // signal: Codex → last lifecycle is task_started (no completion yet); Cursor → the last
-  // record ends on a tool_use block (no yield); Claude → the last assistant message is a
-  // tool_use step, not end_turn.
+  // role alone can't tell — an intermediate assistant message looks "done". Use each source's
+  // terminal signal: Codex → last lifecycle is task_started (no completion yet); Cursor → the
+  // last record ends on a tool_use block (no yield); Claude/pi → the last assistant message is
+  // a tool-use step, not an end of turn.
   const lastAsst = [...convo].reverse().find((m) => m.role === "assistant");
-  let working = source === "codex"
-    ? lastLifecycle === "task_started"
-    : source === "cursor"
-      ? cursorTail?.role === "assistant" && cursorTail.lastBlock === "tool_use"
-      : source === "posthog-code"
-        ? pcPromptReq > pcPromptDone || pcSetupActive // a prompt is running (no stopReason yet) or the sandbox is still provisioning
-        : (lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use");
+  let working;
+  switch (source) {
+    case "codex": working = lastLifecycle === "task_started"; break;
+    case "cursor": working = cursorTail?.role === "assistant" && cursorTail.lastBlock === "tool_use"; break;
+    // a prompt is running (no stopReason yet) or the sandbox is still provisioning
+    case "posthog-code": working = pcPromptReq > pcPromptDone || pcSetupActive; break;
+    case "pi": working = lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "toolUse"; break;
+    case "opencode": working = ocAsstOpen; break;
+    case "antigravity": working = agLastStatus != null && agLastStatus !== "DONE"; break;
+    case "grok-build": working = false; break; // no documented terminal signal yet — never claim "working"
+    default: working = lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use";
+  }
 
   // PostHog Code: a cloud task whose stream died/finished mid-provision leaves a frozen session log
   // (no repo, stuck "in_progress"). Backfill ONLY those gaps from the app's main.log, by task-run id

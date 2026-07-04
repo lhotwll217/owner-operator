@@ -82,7 +82,7 @@ struct CompactBar: View {
                     FreshTicker(items: fresh)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if !expanded, let top = topNeedsYou {
-                    Text(lineAttr(top)).font(.system(size: 11)).lineLimit(1)
+                    lineText(top).font(.system(size: 11)).lineLimit(1)
                     Spacer(minLength: 6)
                 } else {
                     Spacer(minLength: 6)
@@ -111,29 +111,32 @@ struct CompactBar: View {
     private var fresh: [SidebarRow] { client.freshNeedsYou() }
 }
 
-/// One thread as `Project → next step`: the project tinted light blue, an arrow (the sidebar's
-/// `→ next step` pattern), then the next step in full. Shared by the calm line and the ticker.
+/// One thread as `mark Project → next step`: the tool's logo (when bundled), the project
+/// tinted light blue, an arrow (the sidebar's `→ next step` pattern), then the next step in
+/// full. `Text` (not AttributedString) so the mark rides inline. Shared by the calm line and
+/// the ticker.
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
 
-private func lineAttr(_ r: SidebarRow) -> AttributedString {
+private func lineText(_ r: SidebarRow) -> Text {
     var proj = AttributeContainer(); proj.foregroundColor = projectBlue
     var out = AttributedString(r.thread.repo, attributes: proj)
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
     out.append(AttributedString(r.nextSteps ?? r.title, attributes: step))
-    return out
+    guard let mark = AppBadge.textMark(for: r.thread.app) else { return Text(out) }
+    return mark + Text(" ") + Text(out)
 }
 
 /// All fresh items joined into one ticker line, separated by a dim dot.
-private func tickerString(_ rows: [SidebarRow]) -> AttributedString {
-    var out = AttributedString()
+private func tickerText(_ rows: [SidebarRow]) -> Text {
+    var out = Text(verbatim: "")
     for (i, r) in rows.enumerated() {
         if i > 0 {
             var sep = AttributeContainer(); sep.foregroundColor = .secondary
-            out.append(AttributedString("    ·    ", attributes: sep))
+            out = out + Text(AttributedString("    ·    ", attributes: sep))
         }
-        out.append(lineAttr(r))
+        out = out + lineText(r)
     }
     return out
 }
@@ -158,11 +161,11 @@ struct FreshTicker: View {
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: gap) {
-                Text(tickerString(items)).font(.system(size: 11)).lineLimit(1).fixedSize()
+                tickerText(items).font(.system(size: 11)).lineLimit(1).fixedSize()
                     .background(GeometryReader { g in
                         Color.clear.preference(key: TickerTextWidthKey.self, value: g.size.width)
                     })
-                Text(tickerString(items)).font(.system(size: 11)).lineLimit(1).fixedSize()
+                tickerText(items).font(.system(size: 11)).lineLimit(1).fixedSize()
             }
             .offset(x: offset)
             .frame(width: geo.size.width, height: 15, alignment: .leading)
@@ -275,7 +278,7 @@ struct RowView: View {
                         Text("-\(row.thread.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
                     }
                     Spacer()
-                    Text(row.thread.app).foregroundStyle(.tertiary).font(.system(size: 10))
+                    AppBadge(app: row.thread.app)
                 }
             }
         }
@@ -292,5 +295,64 @@ struct RowView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Mark done")
+    }
+}
+
+/// The origin line's app tag: the tool's real logo (a background-free mark rendered from the
+/// brand SVG, bundled in Resources/) beside the app name — every app in the canonical
+/// vocabulary (see detectUi in the scan skill) has one. Claude and Codex marks cover all
+/// their variants (CLI / App / SDK). Monochrome marks render as templates so they tint to the
+/// current foreground in light and dark; color marks (Claude's terracotta, Antigravity's
+/// arch, PostHog's hedgehog) keep their brand colors. An unrecognized app falls back to the
+/// plain text tag.
+struct AppBadge: View {
+    let app: String
+
+    /// resource name + whether it's a monochrome template mark (tinted) vs a full-color mark.
+    private static let logos: [(prefix: String, resource: String, template: Bool)] = [
+        ("Claude", "claude", false),
+        ("Codex", "codex", true),
+        ("Conductor", "conductor", true),
+        ("Cursor", "cursor", true),
+        ("Superset", "superset", true),
+        ("PostHog", "posthog", false),
+        ("Antigravity", "antigravity", false),
+        ("Grok", "grok", true),
+        ("opencode", "opencode", true),
+        ("pi", "pi", true),
+    ]
+    private static var cache: [String: (image: NSImage, template: Bool)] = [:]
+
+    /// The tool's mark, point-sized to ride beside 11pt text (the hi-res rep keeps it crisp
+    /// on retina). Shared by the badge and the inline `Text` uses (calm line, ticker).
+    static func mark(for app: String) -> (image: NSImage, template: Bool)? {
+        guard let hit = logos.first(where: { app.hasPrefix($0.prefix) }) else { return nil }
+        if let m = cache[hit.resource] { return m }
+        guard let img = Bundle.module.image(forResource: hit.resource) else { return nil }
+        img.size = NSSize(width: 11, height: 11)
+        let m = (img, hit.template)
+        cache[hit.resource] = m
+        return m
+    }
+
+    /// The mark as a `Text`-inline image, nudged down to sit optically centered on the line.
+    static func textMark(for app: String) -> Text? {
+        guard let m = mark(for: app) else { return nil }
+        return Text(Image(nsImage: m.image).renderingMode(m.template ? .template : .original))
+            .foregroundColor(.secondary) // tints template marks; full-color marks ignore it
+            .baselineOffset(-2)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let m = Self.mark(for: app) {
+                Image(nsImage: m.image)
+                    .renderingMode(m.template ? .template : .original)
+                    .resizable().interpolation(.high).scaledToFit()
+                    .frame(width: 11, height: 11)
+                    .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
+            }
+            Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
+        }
     }
 }

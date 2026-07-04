@@ -1,7 +1,8 @@
 ---
 name: get-active-threads
 description: >-
-  Triage the user's ongoing local CLI agent sessions (Claude Code, Codex, Cursor, PostHog Code) — what's
+  Triage the user's ongoing local CLI agent sessions (Claude Code, Codex, Cursor, PostHog
+  Code, pi, opencode, Antigravity, Grok Build) — what's
   active, what needs a reply, what they left open. Use when asked "what's ongoing", "what
   threads do I have today", "what needs me", "what did I leave open", or to summarize/
   prioritize active work across sessions. Runs a cheap deterministic scan; never loads full
@@ -42,9 +43,11 @@ Flags:
 ### Where it scans
 
 Defaults cover Claude Code (`~/.claude/projects`), Codex (`~/.codex/sessions`), Cursor
-(`~/.cursor/projects`), and PostHog Code (`~/.posthog-code/sessions`). An owner whose sessions
-live elsewhere overrides via `~/.owner-operator/session_sources.json` (the same dir as
-`blacklist.json`):
+(`~/.cursor/projects`), PostHog Code (`~/.posthog-code/sessions`), pi
+(`~/.pi/agent/sessions`), opencode (`~/.local/share/opencode/storage`), Antigravity
+(`~/.gemini/antigravity` and `~/.gemini/antigravity-cli`), and Grok Build
+(`~/.grok/sessions`). An owner whose sessions live elsewhere overrides via
+`~/.owner-operator/session_sources.json` (the same dir as `blacklist.json`):
 
 ```json
 {
@@ -56,7 +59,8 @@ live elsewhere overrides via `~/.owner-operator/session_sources.json` (the same 
 }
 ```
 
-`source` must be one of `claude` / `codex` / `cursor` / `posthog-code` — config points at a new
+`source` must be one of `claude` / `codex` / `cursor` / `posthog-code` / `pi` / `opencode` /
+`antigravity` / `grok-build` — config points at a new
 **location**, not a new **format** (each format is parsed in code). To relocate a source,
 `disable` its default and `add` the new root.
 
@@ -64,7 +68,8 @@ Each thread carries a resolved `State` (needs-you / working / idle / done) — t
 candidates joined against the owner's status store by the canonical resolver. Threads
 the owner marked done are **excluded by default** and only reappear when a newer
 message wakes them; `--thread` drill-ins always answer. Threads also carry their origin
-`App` (Superset App / Conductor / Claude CLI / Claude App / Codex CLI / Codex App / Cursor / PostHog Code) and, when the workspace
+`App` (Superset App / Conductor / Claude CLI / Claude App / Codex CLI / Codex App / Cursor /
+PostHog Code / pi / opencode / Antigravity / Grok Build) and, when the workspace
 has changes vs its base branch, a `Diff: +N -N` line delta. PostHog Code threads also carry an
 `environment` (`local` / `cloud`); a `cloud` run is provisioning/working in a PostHog sandbox
 (it may have no local cwd and only a "Setting up sandbox" status until it streams) — call that

@@ -134,8 +134,9 @@ export class StatusPoller {
     for (const root of roots) {
       try {
         const w = fsWatch(root, { recursive: true }, (_event, file) => {
-          // PostHog Code appends to `logs.ndjson`; Claude/Codex use `.jsonl`.
-          if (typeof file === "string" && (file.endsWith(".jsonl") || file.endsWith(".ndjson"))) this.scheduleReconcile();
+          // PostHog Code appends to `logs.ndjson`; opencode writes one `.json` per record;
+          // Claude/Codex/Cursor/pi/Antigravity/Grok Build use `.jsonl`.
+          if (typeof file === "string" && (file.endsWith(".jsonl") || file.endsWith(".ndjson") || file.endsWith(".json"))) this.scheduleReconcile();
         });
         w.on("error", () => { /* transient watch error → interval poll covers it */ });
         w.unref?.();

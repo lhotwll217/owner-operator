@@ -28,7 +28,7 @@ import { join } from "node:path";
  * A root is only honored for one of these. Docs that name the sources (README "How sessions
  * are read", the get-active-threads skill) mirror this list; add a source here first.
  */
-export const KNOWN_SESSION_SOURCES = ["claude", "codex", "cursor", "posthog-code"];
+export const KNOWN_SESSION_SOURCES = ["claude", "codex", "cursor", "posthog-code", "pi", "opencode", "antigravity", "grok-build"];
 
 function defaultRoots() {
   const home = homedir();
@@ -37,6 +37,13 @@ function defaultRoots() {
     { source: "codex", root: join(home, ".codex", "sessions") },
     { source: "cursor", root: join(home, ".cursor", "projects") },
     { source: "posthog-code", root: join(home, ".posthog-code", "sessions") },
+    { source: "pi", root: join(home, ".pi", "agent", "sessions") },
+    // opencode keeps ~/.local/share on macOS too (no Application Support split).
+    { source: "opencode", root: join(home, ".local", "share", "opencode", "storage") },
+    // Antigravity writes brain transcripts under ~/.gemini — the IDE and the CLI each get a dir.
+    { source: "antigravity", root: join(home, ".gemini", "antigravity") },
+    { source: "antigravity", root: join(home, ".gemini", "antigravity-cli") },
+    { source: "grok-build", root: join(home, ".grok", "sessions") },
   ];
 }
 
