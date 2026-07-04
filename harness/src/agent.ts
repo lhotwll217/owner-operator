@@ -208,8 +208,10 @@ export const ownerOperatorPrompt = (): string =>
   readFileSync(join(here, "..", "prompts", "owner-operator.md"), "utf8");
 export const ownerOperatorCustomTools = [presentThreadsTool, getSidebarThreadsTool, markThreadDoneTool];
 // read-only + bash to run the skills, plus our structured-output/owner tools. (This is an
-// allowlist, so custom tools must be listed or they would be disabled.)
-export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done"];
+// allowlist, so custom tools must be listed or they would be disabled.) schedule_prompt comes
+// from the pi-schedule-prompt package (.pi/settings.json "packages") — lets the owner say
+// "re-triage every 15 min" or "remind me at 3pm"; jobs only fire while a session is open.
+export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done", "schedule_prompt"];
 
 // Every owner chat is saved (and labeled with its surface) like any other oo thread;
 // `ephemeral` is the opt-out for harness tests that shouldn't leave files in OO_HOME.

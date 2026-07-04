@@ -22,6 +22,11 @@ DerivedData/
 # Local pi settings (personal provider/model) — copy from .pi/settings.example.json
 .pi/settings.json
 
+# pi package installs + per-user scheduled jobs (pi-schedule-prompt)
+.pi/npm/
+.pi/schedule-prompts.json
+.pi/schedule-prompts-settings.json
+
 # Logs
 *.log
 npm-debug.log*
