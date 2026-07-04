@@ -1,10 +1,11 @@
 // Integration test of the scan skill — the REAL get-active-threads script against fake
-// session files (Claude + Cursor + PostHog Code), a real throwaway git repo, and a fake
-// status store. Proves: the canonical-resolver contract at the skill surface (done excluded
-// by default, --include-done audits, drill-in answers, newer message wakes), the Cursor
-// finder (slug → cwd reconstruction), the PostHog Code finder (ACP log → thread), origin-app
-// detection (Superset/Cursor/PostHog Code/Conductor), launch-mode classification (a Conductor
-// SDK session surfaces; a non-GUI SDK worker stays hidden), and the git ± delta.
+// session files (Claude + Cursor + PostHog Code + pi + opencode + Antigravity + Grok Build),
+// a real throwaway git repo, and a fake status store. Proves: the canonical-resolver contract
+// at the skill surface (done excluded by default, --include-done audits, drill-in answers,
+// newer message wakes), each source's finder (Cursor slug → cwd reconstruction, PostHog Code
+// ACP log → thread, opencode info + message/part join, Antigravity brain transcript, pi
+// header + entries, Grok Build best-effort), origin-app detection, launch-mode classification
+// (a Conductor SDK session surfaces; a non-GUI SDK worker stays hidden), and the git ± delta.
 //   npm run test:scan      (from harness/)
 
 import assert from "node:assert";
@@ -204,6 +205,71 @@ writeFileSync(
   sdkMsg(workerId, workerCwd, "assistant", "Anytime.", at(36)),
 );
 
+// pi session: format v3 JSONL — a {type:"session"} header (id + cwd) then {type:"message"}
+// entries wrapping AgentMessages. Assistant stopReason "stop" = yielded → needs-you.
+const piId = "01980000-1111-2222-3333-444444444444";
+const piCwd = join(home, "dev", "pi-app");
+mkdirSync(piCwd, { recursive: true });
+const piFile = join(home, ".pi", "agent", "sessions", `--${piCwd.slice(1).replace(/[/\\:]/g, "-")}--`, `2026-01-01T00-00-00-000Z_${piId}.jsonl`);
+mkdirSync(dirname(piFile), { recursive: true });
+writeFileSync(
+  piFile,
+  JSON.stringify({ type: "session", version: 3, id: piId, timestamp: at(50), cwd: piCwd }) + "\n" +
+  JSON.stringify({ type: "message", id: "aaaa0001", parentId: null, timestamp: at(26), message: { role: "user", content: "add retry backoff to the fetcher" } }) + "\n" +
+  JSON.stringify({ type: "message", id: "aaaa0002", parentId: "aaaa0001", timestamp: at(21), message: { role: "assistant", content: [{ type: "text", text: "Backoff added with jitter; fetcher retries clean." }], stopReason: "stop" } }) + "\n",
+);
+
+// opencode session (gen-2 layout): the per-session info JSON is the scanned candidate; turns
+// are one-JSON-per-message with the text in one-JSON-per-part files. Assistant
+// time.completed present → yielded.
+const ocId = "ses_scantest0001";
+const ocCwd = join(home, "dev", "oc-app");
+mkdirSync(ocCwd, { recursive: true });
+const ocStorage = join(home, ".local", "share", "opencode", "storage");
+const ocMs = (minAgo: number) => Date.now() - minAgo * 60_000;
+mkdirSync(join(ocStorage, "session", "proj_x"), { recursive: true });
+writeFileSync(join(ocStorage, "session", "proj_x", `${ocId}.json`), JSON.stringify({
+  id: ocId, projectID: "proj_x", directory: ocCwd, title: "job queue refactor", version: "1.0.0",
+  time: { created: ocMs(28), updated: ocMs(9) },
+}));
+mkdirSync(join(ocStorage, "message", ocId), { recursive: true });
+mkdirSync(join(ocStorage, "part", "msg_a"), { recursive: true });
+mkdirSync(join(ocStorage, "part", "msg_b"), { recursive: true });
+writeFileSync(join(ocStorage, "message", ocId, "msg_a.json"),
+  JSON.stringify({ id: "msg_a", sessionID: ocId, role: "user", time: { created: ocMs(28) } }));
+writeFileSync(join(ocStorage, "part", "msg_a", "prt_1.json"),
+  JSON.stringify({ id: "prt_1", sessionID: ocId, messageID: "msg_a", type: "text", text: "refactor the job queue" }));
+writeFileSync(join(ocStorage, "message", ocId, "msg_b.json"),
+  JSON.stringify({ id: "msg_b", sessionID: ocId, role: "assistant", time: { created: ocMs(10), completed: ocMs(9) }, path: { cwd: ocCwd, root: ocCwd } }));
+writeFileSync(join(ocStorage, "part", "msg_b", "prt_2.json"),
+  JSON.stringify({ id: "prt_2", sessionID: ocId, messageID: "msg_b", type: "text", text: "Queue refactored; workers drain cleanly." }));
+
+// Antigravity brain transcript: one step per line. USER_EXPLICIT USER_INPUT = the owner,
+// PLANNER_RESPONSE = the agent; the brain/<id> dir is the session id. The history.jsonl
+// index beside brain/ shares the extension but is NOT a session — it must be filtered out.
+const agId = "conv-scantest-1";
+const agRoot = join(home, ".gemini", "antigravity-cli");
+const agLogs = join(agRoot, "brain", agId, ".system_generated", "logs");
+mkdirSync(agLogs, { recursive: true });
+const agStep = (i: number, source: string, type: string, content: string, ts: string) =>
+  JSON.stringify({ step_index: i, source, type, status: "DONE", content, created_at: ts }) + "\n";
+writeFileSync(join(agLogs, "transcript.jsonl"),
+  agStep(0, "USER_EXPLICIT", "USER_INPUT", "profile the slow dashboard query", at(22)) +
+  agStep(1, "MODEL", "PLANNER_RESPONSE", "Query profiled — missing index on events.team_id.", at(18)));
+writeFileSync(join(agRoot, "history.jsonl"),
+  agStep(0, "USER_EXPLICIT", "USER_INPUT", "history index — must not become a thread", at(5)));
+
+// Grok Build: only the root (~/.grok/sessions, organized by cwd) is documented — the parser
+// is best-effort over chat-turn-shaped records. Id falls back to the file stem.
+const grokId = "grok-sess-1";
+const grokCwd = join(home, "dev", "grok-app");
+mkdirSync(grokCwd, { recursive: true });
+const grokFile = join(home, ".grok", "sessions", "home-dev-grok-app", `${grokId}.jsonl`);
+mkdirSync(dirname(grokFile), { recursive: true });
+writeFileSync(grokFile,
+  JSON.stringify({ timestamp: at(16), cwd: grokCwd, message: { role: "user", content: "tighten the rate limiter" } }) + "\n" +
+  JSON.stringify({ timestamp: at(12), message: { role: "assistant", content: [{ type: "text", text: "Rate limiter tightened." }] } }) + "\n");
+
 interface ScanThread {
   id: string; state: string; lastMessageAt: string; repo: string; ui: string; environment?: string;
   topic: string; working?: boolean; diffAdded?: number; diffDeleted?: number;
@@ -220,7 +286,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 7, "scan finds the Claude, Cursor, PostHog Code (local + cloud), and Conductor sessions");
+  assert.equal(fresh.count, 11, "scan finds the Claude, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode, Antigravity, and Grok Build sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -277,6 +343,35 @@ try {
   assert.equal(conductor.state, "needs-you", "assistant yielded → needs-you");
   assert.ok(conductor.topic.includes("fix the active-thread filter"), "topic from the first user turn");
 
+  // The pi finder: header cwd → repo, blocks-or-string content, stopReason "stop" = yielded.
+  const pi = byId(fresh, piId)!;
+  assert.equal(pi.ui, "pi", "pi source → pi app");
+  assert.equal(pi.repo, "pi-app", "repo from the session header cwd");
+  assert.equal(pi.state, "needs-you", "assistant yielded (stopReason stop) → needs-you");
+  assert.ok(pi.topic.includes("retry backoff"), "topic from the first user turn");
+
+  // The opencode finder: info record → thread; message + part files join into turns.
+  const oc = byId(fresh, ocId)!;
+  assert.equal(oc.ui, "opencode", "opencode source → opencode app");
+  assert.equal(oc.repo, "oc-app", "repo from the info record's directory");
+  assert.equal(oc.state, "needs-you", "assistant time.completed present → yielded");
+  assert.equal(oc.working, false, "completed assistant turn → not working");
+  assert.deepEqual(oc.firstMessages.map((m) => m.role), ["user", "assistant"], "parts join into turns");
+  assert.ok(oc.firstMessages[0].text.includes("refactor the job queue"), "user text from its part file");
+
+  // The Antigravity finder: brain transcript steps → turns; the history index is filtered out.
+  const ag = byId(fresh, agId)!;
+  assert.equal(ag.ui, "Antigravity", "antigravity source → Antigravity app");
+  assert.equal(ag.state, "needs-you", "last step DONE → not working");
+  assert.ok(ag.topic.includes("slow dashboard query"), "topic from the USER_INPUT step");
+  assert.ok(!fresh.threads.some((t) => t.topic.includes("history index")), "history.jsonl is not a session");
+
+  // The Grok Build finder: best-effort chat-turn records, id from the file stem.
+  const grok = byId(fresh, grokId)!;
+  assert.equal(grok.ui, "Grok Build", "grok-build source → Grok Build app");
+  assert.equal(grok.repo, "grok-app", "cwd from the records");
+  assert.equal(grok.state, "needs-you", "assistant replied last → needs-you");
+
   // The inverse: a headless SDK worker in a plain cwd (no GUI host) stays hidden by default,
   // and only --all audits it. Exempting GUI hosts must not resurface real workers.
   assert.equal(byId(fresh, workerId), undefined, "non-GUI sdk-ts worker hidden by default");
@@ -298,16 +393,16 @@ try {
   }));
 
   const afterDone = run();
-  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [6, undefined], "done thread excluded by default; others unaffected");
+  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [10, undefined], "done thread excluded by default; others unaffected");
   const audit = run("--include-done");
-  assert.deepEqual([audit.count, byId(audit, sid)?.state], [7, "done"], "--include-done audits it, resolved done");
+  assert.deepEqual([audit.count, byId(audit, sid)?.state], [11, "done"], "--include-done audits it, resolved done");
   const drill = run("--thread", sid);
   assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
 
   // A newer message lands → the same scan wakes the thread (no owner action needed).
   appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
   const woken = run();
-  assert.deepEqual([woken.count, byId(woken, sid)?.state], [7, "needs-you"], "newer message wakes a done thread");
+  assert.deepEqual([woken.count, byId(woken, sid)?.state], [11, "needs-you"], "newer message wakes a done thread");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");
@@ -335,11 +430,11 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 7, "visible set unchanged");
+  assert.equal(run().count, 11, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 
-  process.stdout.write("ok — scan skill: resolver join, cursor finder, origin app, launch-mode (Conductor vs worker), git delta, blacklist\n");
+  process.stdout.write("ok — scan skill: resolver join, per-source finders (cursor, posthog, pi, opencode, antigravity, grok), origin app, launch-mode (Conductor vs worker), git delta, blacklist\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });
