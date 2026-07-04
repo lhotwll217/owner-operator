@@ -38,7 +38,7 @@
 `harness/src/` is split by component, dependencies pointing inward only (the onion rule,
 laid out the way OpenClaw does — see [inspiration.md](inspiration.md)):
 
-```
+```text
 core (packages/core) ← shared ← gateway ← { agent, tui, cli }
 ```
 

@@ -4,13 +4,13 @@
 // (*.test.ts, *.smoke.ts) are exempt — they may drive outer layers to exercise this one.
 import assert from "node:assert";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const runtime = readdirSync(here).filter(
-  (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".smoke.ts"),
-);
+const runtime = readdirSync(here, { recursive: true, withFileTypes: false })
+  .map((f) => relative(here, join(here, String(f))))
+  .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".smoke.ts"));
 assert.ok(runtime.length >= 5, `gateway runtime modules found (${runtime.length})`);
 
 const FORBIDDEN = [

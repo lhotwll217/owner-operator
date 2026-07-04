@@ -14,6 +14,9 @@ concurrency:
   group: widget-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   swift:
     name: build · test
@@ -23,5 +26,7 @@ jobs:
         working-directory: apps/widget
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: swift build
       - run: swift test

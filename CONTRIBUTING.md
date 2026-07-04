@@ -29,8 +29,8 @@ the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
 
 ## Standards
 
-- **Don't reinvent the wheel.** Prefer battle-tested, maintained open-source patterns over
-  inventing something less robust — start from [docs/inspiration.md](docs/inspiration.md).
+- **Don't reinvent the wheel** — the canonical rule and its pattern sources live in
+  [AGENTS.md](AGENTS.md) and [docs/inspiration.md](docs/inspiration.md).
 - **Dependencies.** pi (`@earendil-works/pi-*`) is consumed as npm deps — pinned exact while
   pre-1.0, never forked. The widget takes no external deps (system frameworks only).
 - **Vendored code** (`.agents/skills/*/vendor/`) is upstream-owned: never hand-edit it.

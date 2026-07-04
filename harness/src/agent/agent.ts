@@ -5,8 +5,7 @@
 import { readFileSync } from "node:fs";
 import { execFile, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import {
   createAgentSession,
@@ -27,8 +26,6 @@ import { resolveBackend } from "../gateway/client";
 import { repoRoot } from "../shared/repo-root";
 
 export { repoRoot };
-
-const here = dirname(fileURLToPath(import.meta.url)); // harness/src/agent
 
 // ---- Structured triage output -------------------------------------------------
 // The model emits its thread triage as a tool call (structured JSON) instead of prose;
@@ -207,7 +204,7 @@ export interface OwnerOperatorSession {
 // The opinionated agent config, shared by every frontend (plain oo, branded TUI, pi
 // interactive) so they can't drift: one prompt, one set of custom tools, one allowlist.
 export const ownerOperatorPrompt = (): string =>
-  readFileSync(join(here, "..", "..", "prompts", "owner-operator.md"), "utf8");
+  readFileSync(join(repoRoot, "harness", "prompts", "owner-operator.md"), "utf8");
 export const ownerOperatorCustomTools = [presentThreadsTool, getSidebarThreadsTool, markThreadDoneTool];
 // read-only + bash to run the skills, plus our structured-output/owner tools. (This is an
 // allowlist, so custom tools must be listed or they would be disabled.) schedule_prompt comes
@@ -348,7 +345,7 @@ export const searchSessionsTool = defineTool({
 // (no bash/shell) since it's an agent-facing channel: a neutral prompt, read-only tools only
 // (file reads + the scan/search skills + get_sidebar_threads), and NO present_threads.
 export const neutralAgentPrompt = (): string =>
-  readFileSync(join(here, "..", "..", "prompts", "agent-channel.md"), "utf8");
+  readFileSync(join(repoRoot, "harness", "prompts", "agent-channel.md"), "utf8");
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
 export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
 

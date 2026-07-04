@@ -116,7 +116,7 @@ export async function connectDaemon(): Promise<Backend | null> {
       return stop;
     },
     close() {
-      for (const stop of Array.from(stops)) stop(); // snapshot — stop() deletes itself from the set
+      for (const stop of stops) stop(); // Set iteration tolerates stop() deleting itself
     },
   };
 }
