@@ -27,14 +27,14 @@ if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
 fi
 
 if [ "$1" = "one-shot" ]; then
-  ENTRY="$DIR/src/one-shot.ts"     # single agent-to-agent turn on the same read-only channel
+  ENTRY="$DIR/src/agent/one-shot.ts"     # single agent-to-agent turn on the same read-only channel
   shift                            # drop the subcommand; the rest is the prompt
 elif [ -n "$INTERACTIVE" ]; then
-  ENTRY="$DIR/src/interactive.ts"
+  ENTRY="$DIR/src/tui/interactive.ts"
 elif [ "$#" -gt 0 ]; then
-  ENTRY="$DIR/src/oo.ts"
+  ENTRY="$DIR/src/cli/oo.ts"
 else
-  ENTRY="$DIR/src/tui.ts"
+  ENTRY="$DIR/src/tui/tui.ts"
 fi
 
 # Prefer the checkout's tsx (workspace-hoisted to repo root); fall back to npx.

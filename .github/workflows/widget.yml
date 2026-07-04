@@ -1,0 +1,32 @@
+# Build + test the macOS widget when it changes. Separate from ci.yml so the (slower,
+# 10x-billed) macOS runner only spins up for apps/widget work. SwiftPM only — no Xcode
+# project, no signing, no network deps (see apps/widget/Package.swift).
+name: Widget
+
+on:
+  pull_request:
+    paths: ["apps/widget/**"]
+  push:
+    branches: [main]
+    paths: ["apps/widget/**"]
+
+concurrency:
+  group: widget-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    name: build · test
+    runs-on: macos-15 # Swift Testing needs the Swift 6 toolchain (Xcode 16)
+    defaults:
+      run:
+        working-directory: apps/widget
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: swift build
+      - run: swift test

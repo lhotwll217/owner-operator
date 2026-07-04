@@ -21,10 +21,10 @@
 
 - **Harness "PI"** (`harness/`) — reads local agent sessions, ranks them by what needs you,
   runs on a schedule. Exposes a fixed set of commands, not a free-form agent loop.
-- **daemon** (`harness/src/daemon.ts`) — one local process that owns the state: runs the
-  poll loop (scan → resolve thread state → store), runs schedules/triggers, and serves
-  HTTP + SSE on 127.0.0.1. The UIs are thin clients over the protocol in `packages/core`.
-  `oo daemon` to run; the TUI auto-spawns it and falls back to an in-process poller when
+- **gateway** (`harness/src/gateway/`) — one local process (`oo daemon`) that owns the
+  state: runs the poll loop (scan → resolve thread state → store), runs schedules/triggers,
+  and serves HTTP + SSE on 127.0.0.1. The UIs are thin clients over the protocol in
+  `packages/core`. The TUI auto-spawns it and falls back to an in-process poller when
   disabled (`OO_DAEMON=0`).
 - **core** (`packages/core/`) — the shared types the harness and UIs agree on (sessions,
   threads, priority).
@@ -33,11 +33,27 @@
 - **widget** (`apps/widget/`) — macOS app showing the ranked thread list. Reads from the daemon.
 - **web** (`apps/web/`) — *not built yet.* localhost page to open one session and read it.
 
+## Layout & the dependency rule
+
+`harness/src/` is split by component, dependencies pointing inward only (the onion rule,
+laid out the way OpenClaw does — see [inspiration.md](inspiration.md)):
+
+```text
+core (packages/core) ← shared ← gateway ← { agent, tui, cli }
+```
+
+- `gateway/` — daemon, poller, store, threads-db, and the `Backend` client seam. Model-free
+  and agent-free; [#14](https://github.com/lhotwll217/owner-operator/issues/14)'s arrow.
+  Enforced by `gateway/gateway.boundaries.test.ts`, so CI fails on a leak.
+- `agent/` — the pi-based Operator; a client of the gateway like every surface.
+- `tui/` `cli/` — the terminal surfaces and entrypoints.
+- `shared/` — repo-root resolution and card rendering used across components.
+
 ## Rules
 
-1. The harness only reads — it never writes into your sessions.
-2. It runs a fixed set of commands, not an open-ended agent loop.
-3. The UIs show the current state of each thread, not full transcripts.
+1. It runs a fixed set of commands, not an open-ended agent loop.
+2. The UIs show the current state of each thread, not full transcripts.
+3. Dependencies point inward — `gateway/` imports only core, shared, and node.
 
 ## Ranking
 

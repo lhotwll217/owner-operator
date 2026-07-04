@@ -25,7 +25,7 @@ assert.equal(heads.length, sample.length, "one head line per thread");
 assert.match(heads[0], /P5/, "highest priority renders first");
 assert.match(heads[heads.length - 1], /P1/, "lowest priority renders last");
 assert.ok(block.some((l) => /owner-operator · Superset App · \+208 -47/.test(l)), "meta line carries the git ±delta next to the app");
-assert.ok(block.some((l) => /billing · Claude CLI$/.test(l.trimEnd())), "no delta → plain repo · app");
+assert.ok(block.some((l) => l.trimEnd().endsWith("billing · Claude CLI")), "no delta → plain repo · app");
 assert.deepEqual(buildCardsBlock([], width).map(stripAnsi), ["(no active threads)"], "empty → notice");
 
 process.stdout.write("\nok — card rendering preview passed\n");

@@ -43,11 +43,11 @@ assert.ok(!lines.some((l) => /already shipped/.test(l)), "/done'd row is gone fr
 assert.ok(lines.some((l) => /^▾ billing\s+3/.test(l)), "grouped by project with per-group count");
 assert.ok(lines.some((l) => /1 ◐ P5 422 contract mismatch.*7m$/.test(l)), "numbered triaged row: num · glyph · P-badge · title · recency");
 assert.ok(lines.some((l) => /\d [●○] ancient idle thread/.test(l)), "untriaged idle thread still shows (raw topic, no badge)");
-assert.ok(!lines.some((l) => /^→ /.test(l)), "no selection cursor (glance-only)");
+assert.ok(!lines.some((l) => l.startsWith("→ ")), "no selection cursor (glance-only)");
 assert.ok(lines.some((l) => /→ Paste the drafted reply/.test(l)) && lines.some((l) => /→ Push the fix/.test(l)), "next-step on every triaged row");
 
 // --- the origin row: git ±delta (when the workspace has one) + the app, right-aligned ---
-assert.ok(lines.some((l) => /\+12 -4  Superset App$/.test(l)), "delta sits just left of the app, right-aligned");
+assert.ok(lines.some((l) => l.endsWith("+12 -4  Superset App")), "delta sits just left of the app, right-aligned");
 assert.ok(lines.some((l) => /^\s+Cursor$/.test(l)), "app-only origin row when there is no delta");
 assert.equal(lines.filter((l) => /(Superset App|Cursor|Claude CLI)\s*$/.test(l)).length, 4, "every active row carries its origin");
 
@@ -73,7 +73,7 @@ const rowIdx = wlines.findIndex((l) => /Reconsider/.test(l));
 const stepIdx = wlines.findIndex((l) => /^\s*→/.test(l));
 assert.ok(rowIdx >= 0 && stepIdx > rowIdx, "row and next-step rendered");
 assert.equal(stepIdx - rowIdx, 2, "the title is the row + exactly one continuation (2 lines)");
-assert.ok(wlines.some((l) => /…$/.test(l)), "an over-long title is ellipsized, not wrapped forever");
+assert.ok(wlines.some((l) => l.endsWith("…")), "an over-long title is ellipsized, not wrapped forever");
 for (const w of longTopic.split(" ").slice(0, 4)) assert.ok(haystack.includes(w), `the start of the title survives ("${w}")`);
 // The next-step is NOT capped — it still keeps every word (the sidebar must not drop the action).
 for (const w of longStep.split(" ")) assert.ok(haystack.includes(w), `next-step word "${w}" survives the wrap`);

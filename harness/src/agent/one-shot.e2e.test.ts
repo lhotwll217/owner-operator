@@ -5,11 +5,9 @@ import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { repoRoot } from "../shared/repo-root";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
 const ooBin = join(repoRoot, "harness", "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-one-shot-e2e-")); // empty OO_HOME: no real agent sessions
 const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: { ...process.env, OO_HOME: ooHome } } as const;

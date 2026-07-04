@@ -7,7 +7,7 @@ import assert from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DaemonEvent, DaemonInfo, ScanRow } from "@owner-operator/core";
-import { fakeScanRow, tempOoHome, waitFor } from "../test/helpers";
+import { fakeScanRow, tempOoHome, waitFor } from "../../test/helpers";
 
 const { dir, cleanup } = tempOoHome("oo-daemon");
 

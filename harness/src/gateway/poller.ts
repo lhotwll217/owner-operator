@@ -16,7 +16,7 @@ import {
   type StatusSnapshot,
   type StatusDiff,
 } from "@owner-operator/core";
-import { repoRoot } from "./agent";
+import { repoRoot } from "../shared/repo-root";
 import { loadSnapshot, saveSnapshot } from "./store";
 
 const execFileP = promisify(execFile);

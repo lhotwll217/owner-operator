@@ -13,8 +13,8 @@ import {
   type ExtensionFactory,
   type MessageRenderer,
 } from "@earendil-works/pi-coding-agent";
-import { buildCardsBlock } from "./cards";
-import { resolveBackend } from "./client";
+import { buildCardsBlock } from "../shared/cards";
+import { resolveBackend } from "../gateway/client";
 import {
   numberThreads,
   toSidebarThreads,

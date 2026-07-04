@@ -19,15 +19,15 @@ import {
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
-import { createOwnerOperatorSession, lastAssistantText, shutdownSessionExtensions } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText, shutdownSessionExtensions } from "../agent/agent";
 import { toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo, type SidebarThread } from "@owner-operator/core";
 import { buildBrief } from "./brief";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { Block, StatusLine, StatusFooter, PromptEditor, type FooterData } from "./chat";
 import { readClipboardImage } from "./clipboard";
-import { StatusPoller } from "./poller";
-import { resolveBackend } from "./client";
+import { StatusPoller } from "../gateway/poller";
+import { resolveBackend } from "../gateway/client";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
@@ -38,7 +38,7 @@ if (!process.stdout.isTTY) {
 type Styler = (s: string) => string;
 const sgr = (...c: number[]): Styler => (s) => `\x1b[${c.join(";")}m${s}\x1b[0m`;
 const dim = sgr(2), bold = sgr(1), italic = sgr(3), underline = sgr(4), strike = sgr(9);
-const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), red = sgr(1, 31), white = sgr(1, 37);
+const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), white = sgr(1, 37);
 
 const mdTheme: MarkdownTheme = {
   heading: (t) => bold(cyan(t)), link: blue, linkUrl: dim, code: yellow, codeBlock: green,

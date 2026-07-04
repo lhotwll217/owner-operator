@@ -16,4 +16,5 @@ Deps (see [`package.json`](package.json)), all pinned exact at `0.78.0` (pi is p
   (see [supported sources](../README.md#how-it-works)) — never loading full transcripts into a model.
 - Ranks the threads; `oo daemon` serves them to the UIs.
 
-See [../docs/architecture.md](../docs/architecture.md).
+`src/` is split into `gateway/ · agent/ · tui/ · cli/ · shared/` — the layout and its
+dependency rule live in [../docs/architecture.md](../docs/architecture.md#layout--the-dependency-rule).

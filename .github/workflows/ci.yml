@@ -1,0 +1,49 @@
+# Hermetic gate for every PR and every landing on main. Two parallel jobs — static
+# analysis and the model-free test tiers (see docs/testing.md) — so a failure points
+# at its own status check. Never makes a paid model call. The widget's Swift tests
+# run in widget.yml (macOS, path-filtered).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: typecheck · lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  test:
+    name: test (unit · integration · e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # the sessions-grep blacklist test silently skips without rg — install so it gates
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+      - run: npm ci
+      - run: npm test

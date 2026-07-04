@@ -3,7 +3,7 @@
 
 import assert from "node:assert";
 import type { ScanRow } from "@owner-operator/core";
-import { fakeScanRow, tempOoHome } from "../test/helpers";
+import { fakeScanRow, tempOoHome } from "../../test/helpers";
 
 const { cleanup } = tempOoHome("oo-poller");
 

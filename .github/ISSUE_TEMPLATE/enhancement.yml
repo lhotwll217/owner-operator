@@ -1,0 +1,26 @@
+name: Enhancement
+description: A capability Owner Operator should have.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Start with the user. What can't the owner do (or discover) today, and where does the limitation live? Link the code that embodies it.
+      placeholder: "defaultRoots() assumes each tool writes to a fixed home-relative path, but these are configurable per agent — a relocated ~/.claude is invisible today."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What's in — concrete, checkable outcomes. Name the seams to change (KNOWN_SESSION_SOURCES, the scan skill, docs that enumerate sources, …).
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / out of scope
+      description: Constraints, guardrails, prior art to borrow (docs/inspiration.md), related issues.
+    validations:
+      required: false

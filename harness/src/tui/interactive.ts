@@ -27,8 +27,8 @@ import {
   InteractiveMode,
   initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "./agent";
-import { ownerOperatorExtension } from "./oo-extension";
+import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
+import { ownerOperatorExtension } from "../agent/oo-extension";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./harness/oo --interactive` in a real terminal, or `./harness/oo \"question\"` for a one-shot.");
