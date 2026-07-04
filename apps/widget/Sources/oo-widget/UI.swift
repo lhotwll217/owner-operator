@@ -403,15 +403,24 @@ struct AppBadge: View {
             .baselineOffset(-2)
     }
 
+    @State private var hovering = false
+
     var body: some View {
-        // The mark alone carries the tag (name on hover); text only when there's no mark.
+        // The mark alone carries the tag; hovering slides the name out to its left (inline —
+        // .help() tooltips don't show reliably in a nonactivating panel). The tag sits at the
+        // row's trailing edge, so the reveal grows into Spacer room and nothing else moves.
         if let m = Self.mark(for: app) {
-            Image(nsImage: m.image)
-                .renderingMode(m.template ? .template : .original)
-                .resizable().interpolation(.high).scaledToFit()
-                .frame(width: 11, height: 11)
-                .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
-                .help(app)
+            HStack(spacing: 4) {
+                if hovering {
+                    Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
+                }
+                Image(nsImage: m.image)
+                    .renderingMode(m.template ? .template : .original)
+                    .resizable().interpolation(.high).scaledToFit()
+                    .frame(width: 11, height: 11)
+                    .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
+            }
+            .onHover { hovering = $0 }
         } else {
             Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
         }
