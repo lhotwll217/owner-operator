@@ -12,6 +12,7 @@
 //   GET  /events                    → SSE stream of DaemonEvent
 //   POST /poll                      → StatusSnapshot           (force a reconcile pass)
 //   POST /done      { ids }         → MarkThreadsDone result
+//   POST /rename    { id, title }   → { ok }                   (owner title; "" clears → generated titles show again)
 //   POST /triage    { entries }     → { ok }                   (upsert triage cache)
 //   GET  /schedules                 → Schedule[]
 //   PUT  /schedules/:name           → Schedule                 (upsert by name)

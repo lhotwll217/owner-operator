@@ -90,6 +90,18 @@ try {
   assert.equal((await get("/triage")).body["abc-123"].topic, "Daemon wiring");
   await waitFor(() => events.some((e) => e.type === "triage"), 2_000, "triage push");
 
+  // --- owner rename: pinned through the daemon's own reconcile; empty clears it ---
+  assert.equal((await send("POST", "/rename", { id: "abc-123" })).status, 400, "title required");
+  assert.equal((await send("POST", "/rename", { id: "nope", title: "x" })).status, 404, "unknown thread → 404");
+  assert.equal((await send("POST", "/rename", { id: "abc-123", title: "  Billing hotfix  " })).body.ok, true);
+  await send("POST", "/poll"); // the rename is owner state — a reconcile pass can't clear it
+  assert.equal((await get("/snapshot")).body.threads[0].ownerTitle, "Billing hotfix", "rename survives the reconcile (trimmed)");
+  await send("POST", "/triage", { entries: { "abc-123": { topic: "Model retitle" } } });
+  assert.equal((await get("/triage")).body["abc-123"].topic, "Model retitle", "model triage keeps recording titles (audit trail); display prefers the rename");
+  await send("POST", "/rename", { id: "abc-123", title: "" });
+  await send("POST", "/poll");
+  assert.equal((await get("/snapshot")).body.threads[0].ownerTitle, undefined, "empty title clears — model titles resume");
+
   // --- schedule delete + shutdown cleanup ---
   assert.equal((await send("DELETE", "/schedules/touch")).status, 200);
   assert.equal((await send("DELETE", "/schedules/touch")).status, 404, "second delete → 404");

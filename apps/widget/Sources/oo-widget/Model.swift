@@ -49,6 +49,8 @@ struct ThreadStatus: Decodable, Identifiable {
     let repo: String
     let app: String
     let topic: String
+    /// Owner-set title (rename). Preferred over every generated topic; nil = generated titles show.
+    let ownerTitle: String?
     let state: ThreadState
     let lastActive: String
     let createdAt: String
@@ -59,7 +61,7 @@ struct ThreadStatus: Decodable, Identifiable {
     let diffDeleted: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, source, repo, app, topic, state, lastActive, createdAt, lastMessageAt, stateSince, diffAdded, diffDeleted
+        case id, source, repo, app, topic, ownerTitle, state, lastActive, createdAt, lastMessageAt, stateSince, diffAdded, diffDeleted
     }
 
     init(from decoder: Decoder) throws {
@@ -69,6 +71,7 @@ struct ThreadStatus: Decodable, Identifiable {
         repo = (try? c.decode(String.self, forKey: .repo)) ?? "?"
         app = (try? c.decode(String.self, forKey: .app)) ?? "?"
         topic = (try? c.decode(String.self, forKey: .topic)) ?? "(untitled)"
+        ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
         let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
         state = ThreadState(rawValue: raw) ?? .idle
         lastActive = (try? c.decode(String.self, forKey: .lastActive)) ?? ""
@@ -107,11 +110,24 @@ struct Snapshot: Decodable {
 struct SidebarRow: Identifiable {
     let thread: ThreadStatus
     let triage: TriageInfo?
+    /// Optimistic owner rename not yet confirmed by the daemon ("" = a pending clear).
+    var pendingTitle: String? = nil
     var id: String { thread.id }
-    /// displayTopic == core: triaged title when present, else the raw scan topic.
+    /// displayTopic == core: owner rename first, then the triaged title, else the raw scan topic.
+    /// A pending rename previews immediately; a pending clear skips the (stale) owner title.
     var title: String {
+        if let pending = pendingTitle {
+            if !pending.isEmpty { return pending }
+        } else if let t = thread.ownerTitle, !t.isEmpty {
+            return t
+        }
         if let t = triage?.topic, !t.isEmpty { return t }
         return thread.topic
+    }
+    /// The title is owner-pinned (generated titles keep landing underneath but don't show).
+    var isRenamed: Bool {
+        if let pending = pendingTitle { return !pending.isEmpty }
+        return !(thread.ownerTitle ?? "").isEmpty
     }
     var nextSteps: String? { triage?.nextSteps }
     var priority: Int? { triage?.priority }
@@ -129,7 +145,8 @@ struct RepoGroup: Identifiable {
 /// core/sidebar.ts (groupByRepo + sortByAttention). Counts include done; the sidebar body omits it.
 /// `hidden` are ids marked done locally but not yet confirmed by the daemon — counted as done,
 /// dropped from the body, so the row vanishes the instant you click without lying about state.
-func buildSidebar(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<String> = []) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
+/// `renames` are owner titles POSTed but not yet confirmed — shown immediately, same idea.
+func buildSidebar(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<String> = [], renames: [String: String] = [:]) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
     var counts: [ThreadState: Int] = [.needsYou: 0, .working: 0, .idle: 0, .done: 0]
     for t in snapshot.threads {
         if hidden.contains(t.id) { counts[.done, default: 0] += 1; continue }
@@ -138,7 +155,7 @@ func buildSidebar(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<
 
     let rows = snapshot.threads
         .filter { $0.state != .done && !hidden.contains($0.id) }
-        .map { SidebarRow(thread: $0, triage: triage[$0.id]) }
+        .map { SidebarRow(thread: $0, triage: triage[$0.id], pendingTitle: renames[$0.id]) }
 
     // attention sort: state rank asc, then most-recent message first.
     func attention(_ a: [SidebarRow]) -> [SidebarRow] {

@@ -28,9 +28,9 @@ export interface SidebarThread extends ThreadStatus {
   num?: number;
 }
 
-/** Title to show — the triaged title when we have one, else the raw digest topic. */
+/** Title to show — an owner rename always wins, then the triaged title, else the raw digest topic. */
 export function displayTopic(t: SidebarThread): string {
-  return t.triagedTopic || t.topic;
+  return t.ownerTitle || t.triagedTopic || t.topic;
 }
 
 /**

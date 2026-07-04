@@ -24,9 +24,11 @@ struct WidgetRoot: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(client.groups) { group in
-                                GroupView(group: group) { id in
+                                GroupView(group: group, onDone: { id in
                                     withAnimation(.easeInOut(duration: 0.28)) { client.markDone(id) }
-                                }
+                                }, onRename: { id, title in
+                                    client.rename(id, to: title)
+                                })
                                 .transition(.move(edge: .top).combined(with: .opacity))
                             }
                         }
@@ -230,6 +232,7 @@ struct CountsRow: View {
 struct GroupView: View {
     let group: RepoGroup
     let onDone: (String) -> Void
+    let onRename: (String, String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -238,7 +241,7 @@ struct GroupView: View {
                 Text("\(group.rows.count)").foregroundStyle(.secondary).font(.system(size: 11))
             }
             ForEach(group.rows) { row in
-                RowView(row: row) { onDone(row.id) }
+                RowView(row: row, onDone: { onDone(row.id) }, onRename: { onRename(row.id, $0) })
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -247,10 +250,16 @@ struct GroupView: View {
 
 /// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
 /// grey next-step, then origin (±diff · app). Matches sidebar.ts's "keep every word".
+/// Double-click the title to rename it — your title is preferred over the AI's (which keeps
+/// titling underneath); submit it empty (or use the context menu) to show AI titles again.
 struct RowView: View {
     let row: SidebarRow
     let onDone: () -> Void
+    let onRename: (String) -> Void
     @State private var hovering = false
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
@@ -262,7 +271,7 @@ struct RowView: View {
                     if let p = row.priority {
                         Text("P\(p)").foregroundStyle(priorityColor(p)).font(.system(size: 10, weight: .bold))
                     }
-                    Text(row.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    title
                     Spacer(minLength: 6)
                     Text(shortAge(row.thread.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
@@ -282,6 +291,39 @@ struct RowView: View {
                 }
             }
         }
+        .contextMenu {
+            Button("Rename…") { startEditing() }
+            if row.isRenamed {
+                Button("Use AI title") { onRename("") }
+            }
+        }
+    }
+
+    /// The title, or its inline editor while renaming. Return commits, Escape cancels.
+    @ViewBuilder private var title: some View {
+        if editing {
+            TextField("title", text: $draft)
+                .textFieldStyle(.plain).font(.system(size: 12))
+                .focused($titleFocused)
+                .onSubmit { editing = false; commit() }
+                .onExitCommand { editing = false }
+        } else {
+            Text(row.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                .onTapGesture(count: 2) { startEditing() }
+                .help("Double-click to rename — your title shows instead of the AI's until you clear it")
+        }
+    }
+
+    private func startEditing() {
+        draft = row.title
+        editing = true
+        titleFocused = true
+    }
+
+    private func commit() {
+        let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty clears the rename (AI titles resume); an unchanged title is a no-op.
+        if t != row.title { onRename(t) }
     }
 
     /// Mark-done affordance: a quiet grey check that lights green on hover; click resolves the

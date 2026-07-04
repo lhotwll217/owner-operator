@@ -29,7 +29,7 @@ import {
   type TriageInfo,
 } from "@owner-operator/core";
 import { StatusPoller, type PollerOptions } from "./poller";
-import { DAEMON_FILE, loadTriage, markThreadsDone, saveTriage, storeDb } from "./store";
+import { DAEMON_FILE, loadTriage, markThreadsDone, renameThread, saveTriage, storeDb } from "./store";
 
 export interface DaemonOptions {
   /** 0 = ephemeral (tests). Default: OO_PORT or 47711. */
@@ -167,6 +167,19 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
           setTimeout(() => void poller.poll(), 0).unref?.();
         }
         return respond(200, result);
+      }
+
+      if (route === "POST /rename") {
+        const body = (await readBody(req)) as { id?: unknown; title?: unknown };
+        if (typeof body.id !== "string" || !body.id.trim() || typeof body.title !== "string") {
+          return respond(400, { error: "id: string and title: string required (empty title clears the rename)" });
+        }
+        const snapshot = renameThread(body.id, body.title);
+        if (!snapshot) return respond(404, { error: "no such thread" });
+        // Push the rename immediately (same shape as /done): the stored truth, then surfaces refetch.
+        broadcast({ type: "snapshot", snapshot, diff: { appeared: [], transitioned: [], resolved: [] } });
+        setTimeout(() => void poller.poll(), 0).unref?.();
+        return respond(200, { ok: true });
       }
 
       if (route === "POST /triage") {

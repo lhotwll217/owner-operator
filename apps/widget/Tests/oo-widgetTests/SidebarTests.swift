@@ -12,6 +12,7 @@ struct SidebarTests {
     // ThreadStatus only has a JSON decoder, so build threads as JSON.
     private func thread(
         id: String, repo: String = "repo", state: String = "idle", topic: String = "topic",
+        ownerTitle: String? = nil,
         lastMessageAt: String = "2026-01-01T00:00:00.000Z",
         stateSince: String = "2026-01-01T00:00:00.000Z",
         diffAdded: Int? = nil
@@ -21,6 +22,7 @@ struct SidebarTests {
             "state": state, "lastActive": "now", "createdAt": "2026-01-01T00:00:00.000Z",
             "lastMessageAt": lastMessageAt, "stateSince": stateSince,
         ]
+        if let ownerTitle { d["ownerTitle"] = ownerTitle }
         if let diffAdded { d["diffAdded"] = diffAdded }
         return d
     }
@@ -107,6 +109,31 @@ struct SidebarTests {
     @Test func titleFallsBackToTopic() throws {
         let snap = try snapshot([thread(id: "t", state: "needs-you", topic: "raw topic")])
         #expect(buildSidebar(snapshot: snap, triage: [:]).groups[0].rows[0].title == "raw topic")
+    }
+
+    // MARK: - owner rename
+
+    @Test func ownerTitleOutranksTriage() throws {
+        let snap = try snapshot([thread(id: "t", topic: "raw topic", ownerTitle: "my name")])
+        let triage = ["t": TriageInfo(topic: "nice title", summary: nil, nextSteps: nil, priority: nil)]
+        let row = buildSidebar(snapshot: snap, triage: triage).groups[0].rows[0]
+        #expect(row.title == "my name")
+        #expect(row.isRenamed)
+    }
+
+    @Test func pendingRenamePreviewsImmediately() throws {
+        let snap = try snapshot([thread(id: "t", topic: "raw topic")])
+        let row = buildSidebar(snapshot: snap, triage: [:], renames: ["t": "typed just now"]).groups[0].rows[0]
+        #expect(row.title == "typed just now")
+        #expect(row.isRenamed)
+    }
+
+    @Test func pendingClearSkipsStaleOwnerTitle() throws {
+        let snap = try snapshot([thread(id: "t", topic: "raw topic", ownerTitle: "old rename")])
+        let triage = ["t": TriageInfo(topic: "nice title", summary: nil, nextSteps: nil, priority: nil)]
+        let row = buildSidebar(snapshot: snap, triage: triage, renames: ["t": ""]).groups[0].rows[0]
+        #expect(row.title == "nice title")   // the pending clear falls through the stale owner title
+        #expect(!row.isRenamed)
     }
 
     // MARK: - lenient decode
