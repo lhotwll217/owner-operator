@@ -250,13 +250,17 @@ struct GroupView: View {
 
 /// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
 /// grey next-step, then origin (±diff · app). Matches sidebar.ts's "keep every word".
-/// Double-click the title to rename it — your title is preferred over the AI's (which keeps
-/// titling underneath); submit it empty (or use the context menu) to show AI titles again.
+/// Rename via the pencil that appears on hover (or double-click the title) — your title is
+/// preferred over the AI's (which keeps titling underneath); submit it empty (or use the
+/// context menu) to show AI titles again. STABILITY RULE: hover/edit state may only swap
+/// what's drawn inside space that is always reserved — never insert or remove layout — so
+/// text never re-wraps and neighbors never move.
 struct RowView: View {
     let row: SidebarRow
     let onDone: () -> Void
     let onRename: (String) -> Void
     @State private var hovering = false
+    @State private var rowHovering = false
     @State private var editing = false
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
@@ -272,6 +276,7 @@ struct RowView: View {
                         Text("P\(p)").foregroundStyle(priorityColor(p)).font(.system(size: 10, weight: .bold))
                     }
                     title
+                    titleAffordance
                     Spacer(minLength: 6)
                     Text(shortAge(row.thread.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
@@ -291,6 +296,7 @@ struct RowView: View {
                 }
             }
         }
+        .onHover { rowHovering = $0 }
         .contextMenu {
             Button("Rename…") { startEditing() }
             if row.isRenamed {
@@ -299,19 +305,46 @@ struct RowView: View {
         }
     }
 
-    /// The title, or its inline editor while renaming. Return commits, Escape cancels.
+    /// The title, or its inline editor while renaming. The editor wraps exactly like the
+    /// title text (no reflow on entry) and carries a quiet fill so edit mode reads as a mode.
+    /// Return commits, Escape cancels.
     @ViewBuilder private var title: some View {
         if editing {
-            TextField("title", text: $draft)
+            TextField("title", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain).font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+                .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.08)).padding(-2))
                 .focused($titleFocused)
                 .onSubmit { editing = false; commit() }
                 .onExitCommand { editing = false }
         } else {
             Text(row.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 .onTapGesture(count: 2) { startEditing() }
-                .help("Double-click to rename — your title shows instead of the AI's until you clear it")
         }
+    }
+
+    /// One FIXED slot beside the title — pencil on row hover, an explicit commit check while
+    /// editing, invisible otherwise. It always occupies its frame so the title's wrap width
+    /// never changes across idle/hover/edit (HIG edit-in-place stability; WCAG 3.2.1/3.2.2 —
+    /// no layout change on focus or input).
+    private var titleAffordance: some View {
+        Group {
+            if editing {
+                Button(action: { editing = false; commit() }) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .help("Save title (Return commits, Escape cancels)")
+            } else {
+                Button(action: startEditing) {
+                    Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .opacity(rowHovering ? 1 : 0)
+                .help("Rename — your title shows instead of the AI's until you clear it")
+            }
+        }
+        .frame(width: 12, alignment: .leading)
     }
 
     private func startEditing() {
@@ -341,7 +374,7 @@ struct RowView: View {
 }
 
 /// The origin line's app tag: the tool's real logo (a background-free mark rendered from the
-/// brand SVG, bundled in Resources/) beside the app name — every app in the canonical
+/// brand SVG, bundled in Resources/), app name on hover — every app in the canonical
 /// vocabulary (see detectUi in the scan skill) has one. Claude and Codex marks cover all
 /// their variants (CLI / App / SDK). Monochrome marks render as templates so they tint to the
 /// current foreground in light and dark; color marks (Claude's terracotta, Antigravity's
@@ -385,15 +418,31 @@ struct AppBadge: View {
             .baselineOffset(-2)
     }
 
+    @State private var hovering = false
+
     var body: some View {
-        HStack(spacing: 4) {
-            if let m = Self.mark(for: app) {
-                Image(nsImage: m.image)
-                    .renderingMode(m.template ? .template : .original)
-                    .resizable().interpolation(.high).scaledToFit()
-                    .frame(width: 11, height: 11)
-                    .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
-            }
+        // The mark alone carries the tag; hovering reveals the name as an OVERLAY floating to
+        // the mark's left (inline .help() tooltips don't show reliably in a nonactivating
+        // panel). An overlay takes no layout space, so hovering moves nothing — the mark and
+        // every neighbor stay put.
+        if let m = Self.mark(for: app) {
+            Image(nsImage: m.image)
+                .renderingMode(m.template ? .template : .original)
+                .resizable().interpolation(.high).scaledToFit()
+                .frame(width: 11, height: 11)
+                .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
+                .onHover { hovering = $0 }
+                .overlay(alignment: .trailing) {
+                    if hovering {
+                        Text(app).foregroundStyle(.secondary).font(.system(size: 10))
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 3).fill(.background))
+                            .fixedSize()
+                            .offset(x: -14) // float just left of the mark
+                            .allowsHitTesting(false)
+                    }
+                }
+        } else {
             Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
         }
     }

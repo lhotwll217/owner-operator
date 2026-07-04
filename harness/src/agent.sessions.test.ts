@@ -3,7 +3,8 @@
 // oo-provenance entry labeling surface/origin/caller repo (+ the calling session id when
 // given), and re-stamping a resumed thread accrues an audit trail.
 import assert from "node:assert";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { basename, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 process.env.OO_HOME = join(process.cwd(), ".oo-home-fixture"); // set before importing the module
@@ -12,10 +13,14 @@ const { ooSessionsDir, ooProvenance, stampProvenance } = await import("./agent")
 assert.equal(ooSessionsDir(), join(process.env.OO_HOME, "sessions"), "dir is <OO_HOME>/sessions");
 assert.ok(!ooSessionsDir().includes(`${".pi"}/`), "never under pi's session dir");
 
+// The invoking checkout may be a worktree with any name — derive the expectation like git does.
+const toplevel = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });
+const repo = basename((toplevel.status === 0 && toplevel.stdout.trim()) || process.cwd());
+
 const p = ooProvenance("one-shot", "caller-session-123");
 assert.equal(p.origin, "agent", "one-shot is the agent channel");
 assert.equal(p.fromSession, "caller-session-123", "--from-session lands in provenance");
-assert.equal(p.callerRepo, "owner-operator", "caller repo derived from the invoking git checkout");
+assert.equal(p.callerRepo, repo, "caller repo derived from the invoking git checkout");
 assert.equal(ooProvenance("tui").origin, "owner", "tui is an owner surface");
 
 // Stamp in-memory (same append path as on disk): entry + human-readable session name.
@@ -24,7 +29,7 @@ stampProvenance(sm, p);
 const stamps = sm.getEntries().filter((e: any) => e.type === "custom" && e.customType === "oo-provenance");
 assert.equal(stamps.length, 1, "one provenance stamp per invocation");
 assert.equal((stamps[0] as any).data.surface, "one-shot", "stamp carries the surface");
-assert.equal(sm.getSessionName(), "one-shot ← caller-session-123 @ owner-operator", "session named for pickers/greps");
+assert.equal(sm.getSessionName(), `one-shot ← caller-session-123 @ ${repo}`, "session named for pickers/greps");
 
 stampProvenance(sm, ooProvenance("one-shot", "caller-session-456")); // a later resume by someone else
 const trail = sm.getEntries().filter((e: any) => e.type === "custom" && e.customType === "oo-provenance");
