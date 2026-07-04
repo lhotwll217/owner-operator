@@ -30,6 +30,6 @@ swift test     # unit tests — sidebar join, decode, fresh-window
 ## Notes
 
 - Read-only over your sessions. Owner actions write only owner state: mark done, and rename
-  (double-click a title; a renamed thread keeps its title — the AI stops retitling it until
-  you clear the rename, via an empty title or the row's context menu).
+  (double-click a title; your title shows instead of the AI's — which keeps titling underneath
+  as an audit trail — until you clear the rename via an empty title or the row's context menu).
 - Not WidgetKit — can't float on top or hold a live connection.

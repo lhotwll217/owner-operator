@@ -49,7 +49,7 @@ struct ThreadStatus: Decodable, Identifiable {
     let repo: String
     let app: String
     let topic: String
-    /// Owner-set title (rename). Wins over every generated topic; nil = model titles.
+    /// Owner-set title (rename). Preferred over every generated topic; nil = generated titles show.
     let ownerTitle: String?
     let state: ThreadState
     let lastActive: String
@@ -124,7 +124,7 @@ struct SidebarRow: Identifiable {
         if let t = triage?.topic, !t.isEmpty { return t }
         return thread.topic
     }
-    /// The title is owner-pinned (so the AI has stopped retitling it).
+    /// The title is owner-pinned (generated titles keep landing underneath but don't show).
     var isRenamed: Bool {
         if let pending = pendingTitle { return !pending.isEmpty }
         return !(thread.ownerTitle ?? "").isEmpty

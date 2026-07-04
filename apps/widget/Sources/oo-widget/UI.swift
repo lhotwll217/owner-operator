@@ -250,8 +250,8 @@ struct GroupView: View {
 
 /// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
 /// grey next-step, then origin (±diff · app). Matches sidebar.ts's "keep every word".
-/// Double-click the title to rename it — a renamed title is pinned (the AI stops retitling);
-/// submit it empty (or use the context menu) to hand titling back to the AI.
+/// Double-click the title to rename it — your title is preferred over the AI's (which keeps
+/// titling underneath); submit it empty (or use the context menu) to show AI titles again.
 struct RowView: View {
     let row: SidebarRow
     let onDone: () -> Void
@@ -310,7 +310,7 @@ struct RowView: View {
         } else {
             Text(row.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 .onTapGesture(count: 2) { startEditing() }
-                .help("Double-click to rename — a renamed thread keeps its title (the AI stops retitling it)")
+                .help("Double-click to rename — your title shows instead of the AI's until you clear it")
         }
     }
 

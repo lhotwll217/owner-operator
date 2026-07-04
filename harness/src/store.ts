@@ -132,8 +132,8 @@ export function saveTriage(triage: ReadonlyMap<string, TriageInfo>): void {
 }
 
 /**
- * Owner rename: pin a thread's title (empty title clears the pin — model titles resume),
- * then refresh the export. Returns the stored snapshot, or null for an unknown thread.
+ * Owner rename: pin a thread's title (empty title clears the pin — generated titles show
+ * again), then refresh the export. Returns the stored snapshot, or null for an unknown thread.
  */
 export function renameThread(id: string, title: string): StatusSnapshot | null {
   const d = getDb();

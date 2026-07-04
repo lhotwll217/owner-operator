@@ -97,7 +97,7 @@ try {
   await send("POST", "/poll"); // the rename is owner state — a reconcile pass can't clear it
   assert.equal((await get("/snapshot")).body.threads[0].ownerTitle, "Billing hotfix", "rename survives the reconcile (trimmed)");
   await send("POST", "/triage", { entries: { "abc-123": { topic: "Model retitle" } } });
-  assert.equal((await get("/triage")).body["abc-123"].topic, "Daemon wiring", "the model can no longer retitle a renamed thread");
+  assert.equal((await get("/triage")).body["abc-123"].topic, "Model retitle", "model triage keeps recording titles (audit trail); display prefers the rename");
   await send("POST", "/rename", { id: "abc-123", title: "" });
   await send("POST", "/poll");
   assert.equal((await get("/snapshot")).body.threads[0].ownerTitle, undefined, "empty title clears — model titles resume");

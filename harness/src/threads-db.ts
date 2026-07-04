@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS threads (
   first_seen_at   TEXT NOT NULL,
   last_seen_at    TEXT NOT NULL,
   raw_topic       TEXT,
-  owner_title     TEXT, -- owner rename: wins over triage topics; NULL = model titles
+  owner_title     TEXT, -- owner rename: preferred over triage topics at display; NULL = generated titles
   state             TEXT NOT NULL DEFAULT 'idle'
                     CHECK (state IN ('needs-you', 'working', 'idle', 'done')),
   state_reason      TEXT,
@@ -532,9 +532,10 @@ export class ThreadDb {
   }
 
   /**
-   * Owner rename: pin a title on the thread. It wins over every generated topic at display,
-   * and upsertTriage keeps the model from retitling while it's set. An empty/whitespace
-   * title clears the pin (model titles resume). Returns false for an unknown thread.
+   * Owner rename: pin a title on the thread. It wins over every generated topic at display;
+   * model triage keeps writing topics into the versioned history (the audit trail) — they
+   * just don't show while the pin is set. An empty/whitespace title clears the pin
+   * (generated titles show again). Returns false for an unknown thread.
    */
   setOwnerTitle(threadId: string, title: string): boolean {
     const r = this.db.prepare("UPDATE threads SET owner_title = ? WHERE id = ?")
@@ -587,13 +588,6 @@ export class ThreadDb {
       ).get(threadId) as
         | { version: number; priority: number | null; topic: string | null; summary: string | null; nextSteps: string | null }
         | undefined;
-      // An owner-renamed thread is off-limits to model retitles: carry the stored topic
-      // forward so a model pass still refreshes summary/next-steps without touching the title.
-      if (source === "model") {
-        const owner = this.db.prepare("SELECT owner_title FROM threads WHERE id = ?")
-          .get(threadId) as { owner_title: string | null } | undefined;
-        if (owner?.owner_title != null) t = { ...t, topic: latest?.topic ?? undefined };
-      }
       const same = latest
         && latest.priority === (t.priority ?? null) && latest.topic === (t.topic ?? null)
         && latest.summary === (t.summary ?? null) && latest.nextSteps === (t.nextSteps ?? null);
