@@ -4,7 +4,8 @@
 
 <!-- What user-facing problem does this solve? One or two sentences, symptom first. -->
 
-Closes #<!-- every non-trivial PR traces to an issue; use Closes/Fixes so the link auto-resolves -->
+<!-- Preferred: link the issue with "Closes #N" when one exists — small fixes can skip. -->
+Closes #
 
 ## What changed
 

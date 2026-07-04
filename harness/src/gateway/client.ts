@@ -9,8 +9,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdirSync, openSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { DaemonEvent, DaemonInfo, StatusSnapshot, TriageInfo } from "@owner-operator/core";
 import {
   DAEMON_FILE,
@@ -22,8 +21,7 @@ import {
   type MarkThreadsDoneResult,
 } from "./store";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
+import { repoRoot } from "../shared/repo-root";
 
 /** What a surface needs from state, daemon- or store-backed. All ops async to keep one shape. */
 export interface Backend {

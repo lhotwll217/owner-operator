@@ -6,11 +6,12 @@ to humans and agents alike.
 
 ## Workflow
 
-1. **Issue first.** Non-trivial work starts as an issue: problem first — who hits it and
-   what happens today — then scope. The forms in `.github/ISSUE_TEMPLATE/` enforce the shape.
+1. **Issue first (preferred).** Non-trivial work starts as an issue: problem first — who
+   hits it and what happens today — then scope. The forms in `.github/ISSUE_TEMPLATE/`
+   enforce the shape. Small, self-evident fixes can go straight to a PR.
 2. **Branch → PR → link the issue.** Branch from `main`; the PR follows the template
-   (problem → what changed → verification) and carries `Closes #N` so the trail from
-   problem to landing is one click.
+   (problem → what changed → verification) and carries `Closes #N` when an issue exists,
+   so the trail from problem to landing is one click.
 3. **Green before review.** Run the checks below locally; CI runs the same set on every PR
    and again on every landing on `main`.
 
@@ -23,9 +24,8 @@ to humans and agents alike.
 | Hermetic tests (unit · integration · e2e) | `npm test` | `ci.yml` |
 | Widget (Swift) | `cd apps/widget && swift test` | `widget.yml` (macOS, path-filtered) |
 
-`npm test` is hermetic — it never makes a paid model call and never reads your real sessions
-([docs/testing.md](docs/testing.md)). The `smoke` and `live` tiers are manual/opt-in and stay
-out of CI by design.
+`npm test` is hermetic; the `smoke`/`live` tiers are manual and stay out of CI by design —
+the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
 
 ## Standards
 

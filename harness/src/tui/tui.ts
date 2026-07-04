@@ -19,15 +19,15 @@ import {
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
-import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText } from "../agent/agent";
 import { toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo, type SidebarThread } from "@owner-operator/core";
 import { buildBrief } from "./brief";
 import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { Block, StatusLine, StatusFooter, PromptEditor, type FooterData } from "./chat";
 import { readClipboardImage } from "./clipboard";
-import { StatusPoller } from "./poller";
-import { resolveBackend } from "./client";
+import { StatusPoller } from "../gateway/poller";
+import { resolveBackend } from "../gateway/client";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');

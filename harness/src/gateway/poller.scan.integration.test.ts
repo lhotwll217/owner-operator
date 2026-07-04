@@ -12,7 +12,7 @@ import assert from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { tempOoHome } from "../test/helpers";
+import { tempOoHome } from "../../test/helpers";
 
 const realHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), "oo-poller-scan-home-"));

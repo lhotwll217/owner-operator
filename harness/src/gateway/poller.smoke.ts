@@ -6,7 +6,7 @@
 
 import { toSidebarThreads } from "@owner-operator/core";
 import { StatusPoller } from "./poller";
-import { SidebarList } from "./sidebar";
+import { SidebarList } from "../tui/sidebar";
 import { loadSnapshot, loadTriage, STATUS_FILE } from "./store";
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");

@@ -7,10 +7,10 @@
 //   tsx src/oo.ts --json "what's ongoing?"   # one-shot, headless JSON snapshot
 
 import readline from "node:readline/promises";
-import { createOwnerOperatorSession, lastAssistantText } from "./agent";
+import { createOwnerOperatorSession, lastAssistantText } from "../agent/agent";
 import { parseOoArgs } from "./oo-args";
 import type { Thread } from "@owner-operator/core";
-import { buildCardsBlock } from "./cards";
+import { buildCardsBlock } from "../shared/cards";
 
 const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessions.
 
@@ -36,7 +36,7 @@ if (cli.help) {
 
 // `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
 if (cli.daemon) {
-  const { daemonMain } = await import("./daemon");
+  const { daemonMain } = await import("../gateway/daemon");
   await daemonMain();
   process.exit(0);
 }

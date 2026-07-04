@@ -9,7 +9,7 @@ taxonomy and the hermetic rule.
   Scaffolded and ready; empty today since we build fixtures inline. Promote one into its
   source dir once it's reused or too bulky to inline. Conductor/Superset are *hosts*, not
   sources — tested as a cwd-marker variant inside a source's fixture, never their own dir.
-- **`helpers/index.ts`** — shared harness, imported from a colocated test as `../test/helpers`:
+- **`helpers/index.ts`** — shared harness, imported from a colocated test as `../../test/helpers`:
   `tempOoHome` (throwaway `$OO_HOME` + cleanup), `fakeScanRow`, `waitFor`. Promote a helper
   here only once a second test needs it.
 - **`e2e/`** — full-stack tests not bound to one module (e.g. launch the real `oo` CLI and
