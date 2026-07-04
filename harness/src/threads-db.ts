@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS threads (
   first_seen_at   TEXT NOT NULL,
   last_seen_at    TEXT NOT NULL,
   raw_topic       TEXT,
+  owner_title     TEXT, -- owner rename: wins over triage topics; NULL = model titles
   state             TEXT NOT NULL DEFAULT 'idle'
                     CHECK (state IN ('needs-you', 'working', 'idle', 'done')),
   state_reason      TEXT,
@@ -212,6 +213,7 @@ export class ThreadDb {
     if (!cols.has("diff_added")) add("diff_added INTEGER");
     if (!cols.has("diff_deleted")) add("diff_deleted INTEGER");
     if (!cols.has("project")) add("project TEXT");
+    if (!cols.has("owner_title")) add("owner_title TEXT");
   }
 
   /** Listen for change events (edges, not snapshots). Returns an unsubscribe fn. */
@@ -360,7 +362,7 @@ export class ThreadDb {
     const stmt = this.db.prepare(
       `SELECT
          t.id, t.repo, t.app,
-         COALESCE(latest.topic, t.raw_topic) AS topic,
+         COALESCE(t.owner_title, latest.topic, t.raw_topic) AS topic,
          latest.next_steps AS nextSteps,
          latest.priority,
          t.state,
@@ -401,13 +403,15 @@ export class ThreadDb {
    */
   saveSnapshot(snapshot: StatusSnapshot): void {
     const upsert = this.db.prepare(
-      `INSERT INTO threads (id, repo, project, app, source, raw_topic, created_at, last_active_at,
+      `INSERT INTO threads (id, repo, project, app, source, raw_topic, owner_title, created_at, last_active_at,
          first_seen_at, last_seen_at, state, last_message_at, last_active_rel,
          state_since, previous_state, in_snapshot, last_checked_at, diff_added, diff_deleted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          repo = excluded.repo, app = excluded.app, source = excluded.source,
          project = COALESCE(excluded.project, threads.project),
+         -- an owner rename is owner state: a poll snapshot (which never carries one) can't clear it
+         owner_title = COALESCE(excluded.owner_title, threads.owner_title),
          raw_topic = excluded.raw_topic, created_at = excluded.created_at,
          last_active_at = excluded.last_active_at, last_seen_at = excluded.last_seen_at,
          diff_added = excluded.diff_added, diff_deleted = excluded.diff_deleted,
@@ -427,7 +431,7 @@ export class ThreadDb {
       this.db.exec("UPDATE threads SET in_snapshot = 0 WHERE in_snapshot = 1");
       for (const t of snapshot.threads) {
         upsert.run(
-          t.id, t.repo, t.project ?? null, t.app, t.source, t.topic, t.createdAt,
+          t.id, t.repo, t.project ?? null, t.app, t.source, t.topic, t.ownerTitle ?? null, t.createdAt,
           t.lastMessageAt, // closest ISO activity signal the snapshot carries
           t.firstSeen, snapshot.polledAt, t.state, t.lastMessageAt, t.lastActive,
           t.stateSince, t.previousState ?? null, snapshot.polledAt,
@@ -460,7 +464,7 @@ export class ThreadDb {
       | { value: string } | undefined;
     if (!polled) return null;
     const rows = this.db.prepare(
-      `SELECT id, source, repo, project, app, raw_topic AS topic, state,
+      `SELECT id, source, repo, project, app, raw_topic AS topic, owner_title AS ownerTitle, state,
               last_active_rel AS lastActive, created_at AS createdAt,
               last_message_at AS lastMessageAt, first_seen_at AS firstSeen,
               state_since AS stateSince, previous_state AS previousState,
@@ -477,6 +481,7 @@ export class ThreadDb {
         ...(r.project ? { project: r.project } : {}),
         app: r.app ?? "",
         topic: r.topic ?? "",
+        ...(r.ownerTitle ? { ownerTitle: r.ownerTitle } : {}),
         state: r.state as ThreadState,
         lastActive: r.lastActive ?? "",
         createdAt: r.createdAt ?? "",
@@ -527,6 +532,17 @@ export class ThreadDb {
   }
 
   /**
+   * Owner rename: pin a title on the thread. It wins over every generated topic at display,
+   * and upsertTriage keeps the model from retitling while it's set. An empty/whitespace
+   * title clears the pin (model titles resume). Returns false for an unknown thread.
+   */
+  setOwnerTitle(threadId: string, title: string): boolean {
+    const r = this.db.prepare("UPDATE threads SET owner_title = ? WHERE id = ?")
+      .run(title.trim() || null, threadId);
+    return Number(r.changes) > 0;
+  }
+
+  /**
    * Privacy purge: delete every thread (triage rows follow via CASCADE) that belongs to a
    * blacklisted tree or repo. Matches the stored cwd (`project`), the repo name
    * (case-insensitive), and the transcript path's Claude project-dir slug — historical
@@ -571,6 +587,13 @@ export class ThreadDb {
       ).get(threadId) as
         | { version: number; priority: number | null; topic: string | null; summary: string | null; nextSteps: string | null }
         | undefined;
+      // An owner-renamed thread is off-limits to model retitles: carry the stored topic
+      // forward so a model pass still refreshes summary/next-steps without touching the title.
+      if (source === "model") {
+        const owner = this.db.prepare("SELECT owner_title FROM threads WHERE id = ?")
+          .get(threadId) as { owner_title: string | null } | undefined;
+        if (owner?.owner_title != null) t = { ...t, topic: latest?.topic ?? undefined };
+      }
       const same = latest
         && latest.priority === (t.priority ?? null) && latest.topic === (t.topic ?? null)
         && latest.summary === (t.summary ?? null) && latest.nextSteps === (t.nextSteps ?? null);

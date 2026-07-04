@@ -45,6 +45,13 @@ const o = sidebar.find((t) => t.id === "o")!;
 assert.equal(displayTopic(o), "raw sidebar topic", "untriaged → raw digest topic");
 assert.equal(o.priority, undefined, "untriaged → no priority badge");
 
+// --- an owner rename outranks both the triaged title and the raw topic ---
+const renamed = toSidebarThreads(
+  { polledAt: NOW, threads: [{ ...st("r", "billing", "idle", "raw topic"), ownerTitle: "Owner's name" }] },
+  new Map([["r", { topic: "Model title" }]]),
+)[0];
+assert.equal(displayTopic(renamed), "Owner's name", "owner rename wins over the triaged title");
+
 // --- grouping + stats over the live set ---
 assert.deepEqual(groupByRepo(sidebar).map((g) => g.repo), ["billing", "owner-operator"], "needs-you group first");
 assert.deepEqual(stateCounts(sidebar), { "needs-you": 1, working: 1, idle: 1, done: 1 });

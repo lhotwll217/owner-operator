@@ -155,6 +155,26 @@ try {
   assert.deepEqual(survived, ["other", "waiting"], "needs-you survives aging out; the idle thread drops");
   sdb.close();
 
+  // --- owner rename: pins the title; the model can no longer retitle until cleared ---
+  const rdb = new ThreadDb(join(dir, "rename.db"), { now });
+  rdb.recordScan({ id: "r-1", repo: "billing", app: "Claude CLI", rawTopic: "raw scan topic", state: "working" });
+  rdb.upsertTriage("r-1", { topic: "Model title", nextSteps: "n1", priority: 3 }, "model");
+  assert.equal(rdb.setOwnerTitle("nope", "x"), false, "unknown thread → false");
+  assert.equal(rdb.setOwnerTitle("r-1", "  My rename  "), true);
+  assert.equal(rdb.listSidebar()[0].topic, "My rename", "owner title wins the projection (trimmed)");
+  rdb.upsertTriage("r-1", { topic: "Model retitle", nextSteps: "n2", priority: 4 }, "model");
+  const tri = rdb.getLatestTriage("r-1")!;
+  assert.equal(tri.topic, "Model title", "a model pass keeps the stored topic while renamed");
+  assert.equal(tri.nextSteps, "n2", "…but still refreshes the other fields");
+  // The snapshot carries the rename, and a poll snapshot (which never has one) can't clear it.
+  rdb.saveSnapshot({ polledAt: "2026-06-09T14:00:00Z", threads: [status("r-1", "billing")] });
+  assert.equal(rdb.loadSnapshot()!.threads[0].ownerTitle, "My rename", "snapshot serves the rename; a plain poll can't clear it");
+  assert.equal(rdb.setOwnerTitle("r-1", "   "), true, "whitespace clears the pin");
+  assert.equal(rdb.loadSnapshot()!.threads[0].ownerTitle, undefined, "cleared pin leaves the snapshot");
+  rdb.upsertTriage("r-1", { topic: "Fresh model title", nextSteps: "n2", priority: 4 }, "model");
+  assert.equal(rdb.getLatestTriage("r-1")!.topic, "Fresh model title", "cleared → model titles resume");
+  rdb.close();
+
   process.stdout.write("ok — thread db passed\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });

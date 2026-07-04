@@ -131,6 +131,18 @@ export function saveTriage(triage: ReadonlyMap<string, TriageInfo>): void {
   for (const [id, info] of triage) d.upsertTriage(id, info, "model");
 }
 
+/**
+ * Owner rename: pin a thread's title (empty title clears the pin — model titles resume),
+ * then refresh the export. Returns the stored snapshot, or null for an unknown thread.
+ */
+export function renameThread(id: string, title: string): StatusSnapshot | null {
+  const d = getDb();
+  if (!d.setOwnerTitle(id, title)) return null;
+  const snapshot = d.loadSnapshot();
+  if (snapshot) writeAtomic(STATUS_FILE, snapshot);
+  return snapshot;
+}
+
 export interface MarkThreadsDoneResult {
   snapshot: StatusSnapshot | null;
   marked: ThreadStatus[];

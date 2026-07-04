@@ -63,6 +63,9 @@ export interface ThreadStatus {
   project?: string;
   app: string;
   topic: string;
+  /** Owner-set title (widget rename). Wins over every generated topic; while set, the
+   *  model stops retitling the thread. Absent = titles stay model-generated. */
+  ownerTitle?: string;
   state: ThreadState;
   /** Relative freshness for display, e.g. "7 minutes ago". */
   lastActive: string;

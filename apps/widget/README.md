@@ -1,7 +1,8 @@
 # apps/widget — macOS floating HUD
 
 Always-on-top SwiftUI panel (borderless `NSPanel`, all Spaces). Collapses to a bar, expands to the
-thread sidebar. Read-only. v1.
+thread sidebar. Read-only over your sessions; owner state (mark done, rename a title) goes through
+the daemon. v1.
 
 ## Thin client over the daemon
 
@@ -28,5 +29,7 @@ swift test     # unit tests — sidebar join, decode, fresh-window
 
 ## Notes
 
-- Read-only.
+- Read-only over your sessions. Owner actions write only owner state: mark done, and rename
+  (double-click a title; a renamed thread keeps its title — the AI stops retitling it until
+  you clear the rename, via an empty title or the row's context menu).
 - Not WidgetKit — can't float on top or hold a live connection.

@@ -28,6 +28,7 @@ final class DaemonClient: ObservableObject {
     private var lastSnapshot: Snapshot?
     private var lastTriage: [String: TriageInfo] = [:]
     private var pendingDone: Set<String> = []
+    private var pendingRenames: [String: String] = [:]
 
     var needsYou: Int { counts[.needsYou] ?? 0 }
     var working: Int { counts[.working] ?? 0 }
@@ -100,13 +101,38 @@ final class DaemonClient: ObservableObject {
         }
     }
 
+    /// Rename a thread: show the new title immediately (optimistic), then tell the daemon. An
+    /// empty title clears the rename — the AI resumes titling. A failed POST reverts the preview.
+    func rename(_ id: String, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingRenames[id] = trimmed
+        rebuild()
+        Task { await postRename(id, to: trimmed) }
+    }
+
+    private func postRename(_ id: String, to title: String) async {
+        let p = Self.discoverPort()
+        do {
+            try await Self.postJSON("/rename", port: p, body: ["id": id, "title": title])
+            await refresh()
+        } catch {
+            if pendingRenames[id] == title { pendingRenames.removeValue(forKey: id) }
+            rebuild()
+        }
+    }
+
     /// Re-render groups/counts from the last daemon payload, hiding still-pending dones. Pending ids
     /// the daemon now reports inactive (done/gone) are confirmed → dropped from the pending set.
     private func rebuild() {
         guard let snap = lastSnapshot else { return }
         let active = Set(snap.threads.filter { $0.state != .done }.map { $0.id })
         pendingDone.formIntersection(active)
-        let built = buildSidebar(snapshot: snap, triage: lastTriage, hidden: pendingDone)
+        // A pending rename the daemon now reports back (or a cleared one it reports gone) is
+        // confirmed → dropped, so the snapshot's owner title takes over seamlessly.
+        for t in snap.threads where pendingRenames[t.id] == (t.ownerTitle ?? "") {
+            pendingRenames.removeValue(forKey: t.id)
+        }
+        let built = buildSidebar(snapshot: snap, triage: lastTriage, hidden: pendingDone, renames: pendingRenames)
         groups = built.groups
         counts = built.counts
         polledAt = snap.polledAt
