@@ -1,253 +1,264 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { loadBlacklist, isBlacklisted, pathSlugs } from '../../../packages/core/src/blacklist.mjs';
+// sessions-grep — Owner Operator's wrapper around the vendored `session-grep` primitive
+// (vendor/, a verbatim copy of the standalone repo). The primitive owns the hard part —
+// rg discovery, per-format parsing, rarity ranking, budgets, browse modes. This wrapper
+// owns only what the primitive must NOT: WHERE the owner's sessions live (from oo config)
+// and WHAT is off-limits (the privacy blacklist). Keeping those here — not forked into the
+// primitive — is what lets an upstream release drop into vendor/ untouched.
+//
+// The seam is small and stable:
+//   • sources     → SESSION_GREP_SOURCES_FILE (typed {type,root} roots from loadSessionSources)
+//   • blacklist   → layer 1 (claude project-dir slug) as --exclude-re; layer 2 (session cwd)
+//                   post-filtered on the few hit files (search) or pre-scanned (browse)
+//   • self        → oo's own pi-format threads, routed as `type: pi`, labeled from provenance
+//
+// oo-only surface kept identical to before: --source claude|codex|self|all (self excluded
+// from `all`), --surface to narrow self by oo surface, provenance/repo labels on self hits.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { loadBlacklist, isBlacklisted, pathSlugs } from "../../../packages/core/src/blacklist.mjs";
+import { loadSessionSources } from "../../../packages/core/src/session-sources.mjs";
+import { firstCwdFromFile, resolveRepo } from "../../../packages/core/src/session-cwd.mjs";
 
-const args = process.argv.slice(2);
-const opts = { limit: 20, before: 1, after: 1, role: 'all', source: 'all', sort: 'newest', json: false, regex: false };
-for (let i = 0; i < args.length; i++) {
-  const a = args[i];
-  if (a === '--query') opts.query = args[++i];
-  else if (a === '--limit') opts.limit = Number(args[++i]);
-  else if (a === '--before') opts.before = Number(args[++i]);
-  else if (a === '--after') opts.after = Number(args[++i]);
-  else if (a === '--role') opts.role = args[++i];
-  else if (a === '--source') opts.source = args[++i];
-  else if (a === '--since') opts.since = args[++i];
-  else if (a === '--sort') opts.sort = args[++i];
-  else if (a === '--surface') opts.surface = args[++i];
-  else if (a === '--regex') opts.regex = true;
-  else if (a === '--case-sensitive') opts.caseSensitive = true;
-  else if (a === '--json') opts.json = true;
-  else if (a === '--help' || a === '-h') usage(0);
-  else usage(1, `Unknown arg: ${a}`);
+const here = path.dirname(fileURLToPath(import.meta.url));
+const TOOL = path.join(here, "vendor", "session-grep.mjs");
+const ooHome = process.env.OO_HOME ?? path.join(os.homedir(), ".owner-operator");
+const selfRoot = path.join(ooHome, "sessions");
+
+// ---------- parse the oo-only flags, pass everything else straight through ----------
+// --limit / --max-chars are also intercepted (search mode only): layer-2 blacklist filtering
+// happens AFTER the primitive applies them, so the wrapper over-fetches and re-applies the
+// caller's real numbers on output — blacklisted hits must not eat the caller's budget.
+const argv = process.argv.slice(2);
+let source = "all", surface = null, userWantsJson = false;
+let limit = 20, maxChars = 8000, limitSet = false, maxCharsSet = false;
+const passthrough = [];
+// Flags whose presence means a browse/window/list mode: the primitive streams TEXT for
+// these (no per-hit json to annotate), so the wrapper enforces the blacklist up front and
+// lets the primitive's output through unchanged.
+const BROWSE = new Set(["--overview", "--skim", "--session", "--at", "--list-roots"]);
+let browse = false, listRoots = false;
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === "--source") source = argv[++i];
+  else if (a === "--surface") surface = argv[++i];
+  else if (a === "--limit") { limit = Number(argv[++i]); limitSet = true; }
+  else if (a === "--max-chars") { maxChars = Number(argv[++i]); maxCharsSet = true; }
+  else {
+    if (a === "--json") userWantsJson = true;
+    if (a === "--list-roots") listRoots = true;
+    if (BROWSE.has(a)) browse = true;
+    passthrough.push(a);
+  }
 }
-
-if (!opts.query) usage(1, 'Missing --query');
-if (!Number.isFinite(opts.limit) || opts.limit < 1) usage(1, '--limit must be >= 1');
-if (!Number.isFinite(opts.before) || opts.before < 0) usage(1, '--before must be >= 0');
-if (!Number.isFinite(opts.after) || opts.after < 0) usage(1, '--after must be >= 0');
-if (!['all', 'user', 'assistant'].includes(opts.role)) usage(1, '--role must be all, user, or assistant');
-if (!['all', 'claude', 'codex', 'self'].includes(opts.source)) usage(1, '--source must be all, claude, codex, or self');
-if (!['newest', 'oldest', 'file'].includes(opts.sort)) usage(1, '--sort must be newest, oldest, or file');
-const sinceTime = opts.since ? parseSince(opts.since) : null;
-if (opts.since && sinceTime == null) usage(1, '--since must be today, Nd, or YYYY-MM-DD');
-const queryRegex = opts.regex ? compileRegex(opts.query, opts.caseSensitive) : null;
-
-const home = os.homedir();
-// `self` = Owner Operator's OWN threads (pi session format), kept in a separate dir under
-// OO_HOME. ALL oo surfaces save here — owner chats (tui, chat, interactive) and the agent
-// channel (one-shot) — each stamped with `oo-provenance` entries (surface, origin,
-// caller repo/cwd, calling session id). Deliberately NOT part of `all`: owner-session
-// searches never mix with oo's own threads — self-reflection is an explicit `--source self`.
-// `--surface tui|chat|interactive|one-shot` narrows self hits to one surface.
-const ooHome = process.env.OO_HOME ?? path.join(home, '.owner-operator');
-const selfRoot = path.join(ooHome, 'sessions');
-const sourceRoots = {
-  claude: [path.join(home, '.claude/projects')],
-  codex: [path.join(home, '.codex/sessions'), path.join(home, '.codex/archived_sessions')],
-  self: [selfRoot],
-};
-const roots = Object.entries(sourceRoots)
-  .filter(([source]) => (opts.source === 'all' ? source !== 'self' : opts.source === source))
-  .flatMap(([, dirs]) => dirs)
-  .filter((dir) => fs.existsSync(dir));
-
-const rg = spawnSync('rg', [
-  ...(opts.caseSensitive ? [] : ['-i']),
-  ...(opts.regex ? [] : ['--fixed-strings']),
-  '--files-with-matches',
-  '--glob',
-  '*.jsonl',
-  opts.query,
-  ...roots,
-], { encoding: 'utf8' });
-
-if (rg.error) {
-  usage(1, `ripgrep (rg) is required but could not be run (${rg.error.code ?? rg.error.message}). Install it, e.g. \`brew install ripgrep\`.`);
+if (!["all", "claude", "codex", "self"].includes(source)) {
+  console.error("--source must be all, claude, codex, or self");
+  process.exit(1);
 }
-if (rg.status === 2) {
-  const detail = rg.stderr.trim() ? `\n${rg.stderr.trim()}` : '';
-  usage(1, `Invalid ${opts.regex ? 'regex' : 'query'} for ripgrep.${detail}`);
+// --surface labels come from oo-provenance stamps, which only self threads carry — with any
+// other source every hit would be silently skipped, which can only be a mistake.
+if (surface && source !== "self") {
+  console.error("--surface filters oo's own threads — combine it with --source self");
+  process.exit(1);
 }
+// The caller's real output knobs, re-injected verbatim in browse modes so the primitive's
+// own defaults (e.g. --skim's roomier budget when --max-chars is unset) survive.
+const knobArgs = [
+  ...(limitSet ? ["--limit", String(limit)] : []),
+  ...(maxCharsSet ? ["--max-chars", String(maxChars)] : []),
+];
 
-const files = rg.status === 0 ? rg.stdout.trim().split('\n').filter(Boolean) : [];
-const matches = [];
-const q = opts.caseSensitive ? opts.query : opts.query.toLowerCase();
+// ---------- WHERE to search: typed roots from oo config (fail closed) ----------
+// `self` = oo's own threads (pi format) under <OO_HOME>/sessions, deliberately excluded
+// from `all`. Otherwise the owner's coding sessions — but ONLY sources the vendored
+// primitive can parse AND we can blacklist-resolve (claude, codex). cursor/posthog-code are
+// in oo's config for triage but have no session-grep adapter, so they're dropped here
+// rather than silently mis-parsed: privacy scope is bounded by what we can actually vet.
+const codingRoots = loadSessionSources(ooHome)
+  .filter((r) => r.source === "claude" || r.source === "codex")
+  .map((r) => ({ type: r.source, root: r.root }));
+const sourcesEntries = source === "self" ? [{ type: "pi", root: selfRoot }] : codingRoots;
+// The primitive's own --source filters among the loaded roots; for `self` we hand it only
+// the pi root, so `all` there means "every self surface".
+const toolSource = source === "self" ? "all" : source;
 
-// Privacy blacklist (ABSOLUTE — no flag bypasses it), the same two layers as get-active-threads:
-// skip a file whose project-dir slug is blacklisted (before reading), and skip any file whose
-// session cwd sits in a blacklisted tree.
+const sourcesFile = path.join(os.tmpdir(), `oo-sessions-grep-sources-${process.pid}.json`);
+fs.writeFileSync(sourcesFile, JSON.stringify(sourcesEntries));
+const cleanup = () => { try { fs.unlinkSync(sourcesFile); } catch { /* already gone */ } };
+
+// ---------- WHAT is off-limits: the blacklist (ABSOLUTE — no flag bypasses it) ----------
 const blacklist = loadBlacklist(ooHome);
-const blockedSlugs = pathSlugs(blacklist);
-const slugBlocked = (dirName) => blockedSlugs.some((s) => dirName === s || dirName.startsWith(s + '-'));
+// Layer 1: a claude session whose project-dir slug is blacklisted — excluded by path so
+// rg never even reads it. Slug match mirrors the scan: dirName === slug || startsWith(slug-).
+const slugRes = pathSlugs(blacklist).map((s) => {
+  const esc = s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return `(?:^|/)${esc}(?:-[^/]*)?/[^/]+\\.jsonl$`;
+});
+// Layer 2: a session whose recorded cwd/repo sits in a blacklisted tree (catches codex and
+// claude sessions whose dir name isn't the slug). Bounded-prefix read (the cwd sits in the
+// first records), cached per file.
+const cwdCache = new Map();
+function fileBlacklisted(file) {
+  if (cwdCache.has(file)) return cwdCache.get(file);
+  let verdict = false;
+  try {
+    const cwd = firstCwdFromFile(file);
+    verdict = !!cwd && isBlacklisted(blacklist, { cwd, repo: resolveRepo(cwd) });
+  } catch { /* unreadable → don't surface it anyway */ verdict = true; }
+  cwdCache.set(file, verdict);
+  return verdict;
+}
 
-for (const file of files) {
-  if (slugBlocked(path.basename(path.dirname(file)))) continue; // layer 1: blacklisted project dir
-  const source = file.startsWith(selfRoot + path.sep) ? 'self' : file.includes('/.codex/') ? 'codex' : 'claude';
-  let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
-  const cwd = firstCwd(raw);
-  if (cwd && isBlacklisted(blacklist, { cwd })) continue; // layer 2: blacklisted cwd tree
-  const provenance = source === 'self' ? piProvenance(raw) : null;
-  if (opts.surface && provenance?.surface !== opts.surface) continue; // --surface only matches labeled self threads
-  const messages = parseMessages(raw, source);
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    if (opts.role !== 'all' && msg.role !== opts.role) continue;
-    const haystack = opts.caseSensitive ? msg.text : msg.text.toLowerCase();
-    if (opts.regex ? !queryRegex.test(msg.text) : !haystack.includes(q)) continue;
-    const time = timeOf(msg.timestamp) ?? timeOf(messages[0]?.timestamp) ?? fs.statSync(file).mtimeMs;
-    if (sinceTime != null && time < sinceTime) continue;
-    matches.push({
-      source,
-      id: sessionId(file),
-      path: file,
-      index: i,
-      timestamp: msg.timestamp,
-      time,
-      ...(provenance ? { surface: provenance.surface, repo: provenance.callerRepo, provenance } : {}),
-      before: messages.slice(Math.max(0, i - opts.before), i),
-      match: msg,
-      after: messages.slice(i + 1, i + 1 + opts.after),
-    });
+const excludeRes = [...slugRes];
+// Browse/window modes stream text and can't be post-filtered per hit, so enforce layer 2
+// there by pre-scanning EVERY root and excluding blacklisted files by path. The slug layer
+// (above) still short-circuits most claude hits cheaply, but a claude session whose dir
+// name isn't the blacklisted slug (cwd blacklisted post-parse) is only caught by this scan
+// — so it must include claude too. Browse is itself a full scan, so the header reads are
+// proportionate; search mode skips this and post-filters just the hit files instead.
+// --list-roots prints no session content, so it skips the scan entirely.
+if (browse && !listRoots) {
+  for (const { root } of sourcesEntries) {
+    if (!fs.existsSync(root)) continue;
+    for (const f of walk(root)) {
+      if (fileBlacklisted(f)) excludeRes.push(`^${f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+    }
   }
 }
 
-if (opts.sort === 'newest') matches.sort((a, b) => b.time - a.time);
-else if (opts.sort === 'oldest') matches.sort((a, b) => a.time - b.time);
-const limited = matches.slice(0, opts.limit);
+const excludeArgs = excludeRes.flatMap((r) => ["--exclude-re", r]);
+const env = { ...process.env, SESSION_GREP_SOURCES_FILE: sourcesFile };
 
-if (opts.json) {
-  console.log(JSON.stringify({ query: opts.query, regex: opts.regex, rawFilesWithHits: files.length, totalMatches: matches.length, count: limited.length, matches: limited }, null, 2));
-} else {
-  console.log(`query=${JSON.stringify(opts.query)}${opts.regex ? ' regex=true' : ''} raw_files_with_hits=${files.length} total_message_matches=${matches.length} shown=${limited.length} sort=${opts.sort}${opts.since ? ` since=${opts.since}` : ''}${opts.caseSensitive ? ' case_sensitive=true' : ''}`);
-  limited.forEach((m, idx) => {
-    const label = m.surface ? ` surface=${m.surface} repo=${m.repo ?? ''}` : '';
-    console.log(`\n[${idx + 1}] ${m.source}${label} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ''}`);
-    console.log(`path=${m.path}`);
-    for (const b of m.before) console.log(`  before ${b.role}: ${truncate(b.text, 180)}`);
-    console.log(`  MATCH ${m.match.role}: ${truncate(m.match.text, 300)}`);
-    for (const a of m.after) console.log(`  after  ${a.role}: ${truncate(a.text, 180)}`);
-  });
+// ---------- browse/window/list: stream the primitive's output, blacklist already applied ----------
+if (browse) {
+  const r = spawnSync(process.execPath, [TOOL, ...passthrough, ...knobArgs, "--source", toolSource, ...excludeArgs], { stdio: "inherit", env });
+  cleanup();
+  process.exit(r.status ?? 0);
 }
 
-function parseMessages(raw, source) {
+// ---------- search: run the primitive in JSON, then blacklist-filter + self-annotate ----------
+// Force --json so we can drop blacklisted hits (layer 2) and label self hits before output.
+// Over-fetch limit and budget (the primitive computes every match regardless — the scaled
+// numbers only widen its output window), then trim back to the caller's real numbers after
+// filtering so blacklisted hits don't shortchange --limit.
+if (!Number.isFinite(limit) || limit < 1) { console.error("--limit must be >= 1"); cleanup(); process.exit(1); }
+if (!Number.isFinite(maxChars) || maxChars < 500) { console.error("--max-chars must be >= 500"); cleanup(); process.exit(1); }
+const FETCH_FACTOR = 3;
+// The internal budget must CARRY the over-fetched entries, not just scale the caller's
+// number — a small --max-chars would otherwise starve the backfill before filtering.
+// ~1200 chars bounds a slim JSON entry at default context; the caller's budget is
+// re-applied on output either way, so generous here costs nothing downstream.
+const internalMaxChars = Math.max(maxChars * FETCH_FACTOR, limit * FETCH_FACTOR * 1200);
+const jsonArgs = [
+  ...passthrough.filter((a) => a !== "--json"), "--json",
+  "--limit", String(limit * FETCH_FACTOR),
+  "--max-chars", String(internalMaxChars),
+];
+const r = spawnSync(process.execPath, [TOOL, ...jsonArgs, "--source", toolSource, ...excludeArgs], { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
+if (r.stderr) process.stderr.write(r.stderr);
+if (r.status !== 0 || !r.stdout.trim()) { cleanup(); process.exit(r.status ?? 1); }
+cleanup();
+
+let out;
+try { out = JSON.parse(r.stdout); } catch { process.stdout.write(r.stdout); process.exit(0); }
+
+const kept = [];
+let blacklistedDropped = 0;
+for (const m of out.matches ?? []) {
+  if (fileBlacklisted(m.path)) { blacklistedDropped++; continue; } // layer 2 (search): only hit files are read
+  if (m.source === "pi") {
+    // oo's own thread: label from the latest oo-provenance stamp; --surface narrows here.
+    const prov = piProvenance(m.path);
+    if (surface && prov?.surface !== surface) continue;
+    kept.push({ ...m, source: "self", surface: prov?.surface, repo: prov?.callerRepo, provenance: prov ?? undefined });
+  } else {
+    kept.push(m);
+  }
+}
+const trimmed = kept.slice(0, limit);
+// Even the over-fetch couldn't backfill what the blacklist dropped — say so rather than
+// letting a short result read as "that's all there is".
+const shortfall = blacklistedDropped > 0 && trimmed.length < limit && out.totalMatches > (out.matches?.length ?? 0)
+  ? `fewer than --limit shown: ${blacklistedDropped} hit(s) fell in blacklisted sessions — raise --limit or --max-chars to search past them`
+  : null;
+
+// Re-apply the caller's real output budget (the internal call ran with it scaled). Mirrors
+// the primitive: hits emitted in rank order until the budget runs out, never dumped.
+function emitWithinBudget(renderLen) {
+  const emitted = [];
+  let size = 300; // header allowance, mirrors the primitive
+  for (const m of trimmed) {
+    const len = renderLen(m);
+    if (size + len > maxChars && emitted.length) break;
+    size += len;
+    emitted.push(m);
+  }
+  return emitted;
+}
+const budgetNote = (n) => `... ${n} more matching messages omitted by the ${maxChars}-char output budget — narrow with --role/--since, or raise --max-chars`;
+
+if (userWantsJson) {
+  const emitted = emitWithinBudget((m) => JSON.stringify(m).length);
+  const omitted = trimmed.length - emitted.length;
+  out.matches = emitted;
+  out.shown = emitted.length;
+  delete out.omittedByBudget; // recomputed against the caller's budget, not the scaled one
+  delete out.note;
+  if (blacklistedDropped) out.blacklistedDropped = blacklistedDropped;
+  if (shortfall) out.shortfall = shortfall;
+  if (omitted) { out.omittedByBudget = omitted; out.note = budgetNote(omitted); }
+  process.stdout.write(JSON.stringify(out) + "\n");
+} else {
+  // Mirror the primitive's text layout, adding oo's self labels (surface/repo).
+  const renderHit = (m) => [
+    `${m.source}${m.surface ? ` surface=${m.surface} repo=${m.repo ?? ""}` : ""} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ""}${m.matchedWords ? ` matched=[${m.matchedWords.join(",")}] score=${m.score}` : ""}`,
+    `path=${m.path}`,
+    ...(m.before ?? []).map((b) => `  before ${b.role}: ${b.text}`),
+    `  MATCH ${m.match.role}: ${m.match.text}`,
+    ...(m.after ?? []).map((a) => `  after  ${a.role}: ${a.text}`),
+  ];
+  const emitted = emitWithinBudget((m) => renderHit(m).reduce((t, l) => t + l.length + 1, 6));
+  const omitted = trimmed.length - emitted.length;
+  console.log(`query=${JSON.stringify(out.query ?? "")}${out.regex ? " regex=true" : ""}${out.any ? " any=true" : ""} raw_files_with_hits=${out.rawFilesWithHits} total_message_matches=${out.totalMatches} shown=${emitted.length}${source !== "all" ? ` source=${source}` : ""}${blacklistedDropped ? ` blacklisted_dropped=${blacklistedDropped}` : ""}`);
+  if (out.wordHits) console.log(`word_hits: ${Object.entries(out.wordHits).map(([w, c]) => `${w}=${c}`).join(" ")} (of ${out.messagesScanned} messages in matched files; high-count words are low-signal — prefer the rare ones)`);
+  if (out.hint) console.log(`hint: ${out.hint}`);
+  emitted.forEach((m, idx) => {
+    const [head, ...rest] = renderHit(m);
+    console.log(`\n[${idx + 1}] ${head}`);
+    for (const l of rest) console.log(l);
+  });
+  if (shortfall) console.log(`\nnote: ${shortfall}`);
+  if (omitted) console.log(`\n${budgetNote(omitted)}`);
+}
+
+// ---------- helpers ----------
+function walk(dir) {
   const out = [];
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
-    const msg = source === 'codex' ? codexMessage(obj) : source === 'self' ? piMessage(obj) : claudeMessage(obj);
-    if (!msg || !msg.text.trim()) continue;
-    out.push(msg);
+  let ents;
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of ents) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...walk(p));
+    else if (e.isFile() && p.endsWith(".jsonl")) out.push(p);
   }
   return out;
 }
 
-// The session's working directory, for the blacklist cwd check. Claude records carry `cwd`;
-// codex carries it on `payload.cwd`. First hit wins.
-function firstCwd(raw) {
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
-    if (typeof obj.cwd === 'string') return obj.cwd;
-    if (obj.payload && typeof obj.payload.cwd === 'string') return obj.payload.cwd;
-  }
-  return null;
-}
-
-function claudeMessage(obj) {
-  if ((obj.type === 'user' || obj.type === 'assistant') && obj.message && typeof obj.message === 'object') {
-    return { role: obj.message.role || obj.type, text: contentToText(obj.message.content), timestamp: obj.timestamp };
-  }
-  return null;
-}
-
 // Latest oo-provenance stamp in an oo thread: {type:"custom", customType:"oo-provenance",
 // data:{surface, origin, callerCwd, callerRepo, fromSession?, ppid}}. Every invocation
-// (launch or resume) appends one, so the last stamp is the most recent caller.
-function piProvenance(raw) {
+// appends one, so the last stamp is the most recent caller.
+function piProvenance(file) {
   let latest = null;
-  for (const line of raw.split('\n')) {
+  let raw;
+  try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
+  for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
-    if (obj.type === 'custom' && obj.customType === 'oo-provenance' && obj.data) latest = obj.data;
+    if (obj.type === "custom" && obj.customType === "oo-provenance" && obj.data) latest = obj.data;
   }
   return latest;
-}
-
-// pi session format (oo's own threads): the header is {type:"session", cwd}, covered by
-// firstCwd; conversation turns are {type:"message", timestamp, message:{role, content}}.
-function piMessage(obj) {
-  if (obj.type !== 'message' || !obj.message || typeof obj.message !== 'object') return null;
-  const role = obj.message.role;
-  if (!['user', 'assistant'].includes(role)) return null;
-  return { role, text: contentToText(obj.message.content), timestamp: obj.timestamp };
-}
-
-function codexMessage(obj) {
-  if (obj.type !== 'response_item' || !obj.payload || obj.payload.type !== 'message') return null;
-  const role = obj.payload.role || 'unknown';
-  if (!['user', 'assistant'].includes(role)) return null;
-  const text = contentToText(obj.payload.content);
-  if (text.startsWith('# AGENTS.md instructions') || text.startsWith('# Context from my IDE setup:') || text.startsWith('<turn_aborted>') || text.slice(0, 5000).includes('<environment_context>')) return null;
-  return { role, text, timestamp: obj.timestamp };
-}
-
-function contentToText(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const chunks = [];
-  for (const item of content) {
-    if (typeof item === 'string') chunks.push(item);
-    else if (item && typeof item === 'object') {
-      for (const key of ['text', 'output_text', 'input_text', 'content']) {
-        if (typeof item[key] === 'string') chunks.push(item[key]);
-      }
-    }
-  }
-  return chunks.join('\n');
-}
-
-function sessionId(file) {
-  return path.basename(file, '.jsonl');
-}
-
-function truncate(s, n) {
-  const oneLine = s.replace(/\s+/g, ' ').trim();
-  return oneLine.length > n ? `${oneLine.slice(0, n)}...` : oneLine;
-}
-
-function timeOf(value) {
-  if (!value) return null;
-  const t = Date.parse(value);
-  return Number.isFinite(t) ? t : null;
-}
-
-function parseSince(value) {
-  const now = new Date();
-  if (value === 'today') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const days = value.match(/^(\d+)d$/);
-  if (days) return now.getTime() - Number(days[1]) * 24 * 60 * 60 * 1000;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return Date.parse(`${value}T00:00:00`);
-  return null;
-}
-
-function compileRegex(pattern, caseSensitive) {
-  try {
-    return new RegExp(pattern, caseSensitive ? 'u' : 'iu');
-  } catch (error) {
-    usage(1, `Invalid JavaScript regex: ${error.message}`);
-  }
-}
-
-function usage(code, msg) {
-  if (msg) console.error(msg);
-  console.error('Usage: sessions-grep.mjs --query TEXT [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|self|all] [--surface tui|chat|interactive|one-shot] [--since today|7d|YYYY-MM-DD] [--sort newest|oldest|file] [--case-sensitive] [--json]');
-  process.exit(code);
 }
