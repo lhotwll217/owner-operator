@@ -37,9 +37,8 @@
 
 ## Rules
 
-1. The harness only reads — it never writes into your sessions.
-2. It runs a fixed set of commands, not an open-ended agent loop.
-3. The UIs show the current state of each thread, not full transcripts.
+1. It runs a fixed set of commands, not an open-ended agent loop.
+2. The UIs show the current state of each thread, not full transcripts.
 
 ## Ranking
 

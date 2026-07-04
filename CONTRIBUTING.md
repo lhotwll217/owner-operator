@@ -37,5 +37,3 @@ out of CI by design.
   Re-sync per the directory's `UPSTREAM.md` and update the pin there. Vendor dirs are
   excluded from lint.
 - **Shared types** live in `packages/core` so the harness and every surface speak one language.
-- **The harness only reads** — it never writes into your sessions
-  ([architecture rule #1](docs/architecture.md#rules)). PRs don't bend this.
