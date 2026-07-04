@@ -53,7 +53,7 @@ core (packages/core) ← shared ← gateway ← { agent, tui, cli }
 
 1. It runs a fixed set of commands, not an open-ended agent loop.
 2. The UIs show the current state of each thread, not full transcripts.
-3. Dependencies point inward: nothing in `gateway/` imports pi or an outer component.
+3. Dependencies point inward — `gateway/` imports only core, shared, and node.
 
 ## Ranking
 

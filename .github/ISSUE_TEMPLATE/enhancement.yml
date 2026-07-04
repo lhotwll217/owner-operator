@@ -21,6 +21,6 @@ body:
     id: notes
     attributes:
       label: Notes / out of scope
-      description: Constraints, guardrails, prior art (is there a battle-tested pattern to borrow? see docs/inspiration.md), related issues.
+      description: Constraints, guardrails, prior art to borrow (docs/inspiration.md), related issues.
     validations:
       required: false

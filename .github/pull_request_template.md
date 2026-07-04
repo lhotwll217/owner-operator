@@ -9,10 +9,10 @@ Closes #
 
 ## What changed
 
-<!-- The shipped solution and the key decisions — not a file-by-file narration. -->
+<!-- The shipped solution and the key decisions, at the level a reviewer needs. -->
 
 ## Verification
 
-<!-- Evidence, not assertion: commands run and their result (npm test / npm run typecheck /
-     npm run lint; swift test for the widget), screenshots for UI changes, repro-before /
-     fixed-after for bugs. CI must be green. -->
+<!-- Evidence: commands run and their result (npm test / npm run typecheck / npm run lint;
+     swift test for the widget), screenshots for UI changes, repro-before / fixed-after for
+     bugs. CI green. -->

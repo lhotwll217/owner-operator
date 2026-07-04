@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: Start with the user. Who hits this, doing what, and what goes wrong — observable behavior, not implementation guesses.
+      description: Start with the user. Who hits this, doing what, and what goes wrong — observable behavior.
       placeholder: "Marking a thread done makes it disappear, then the next poll brings it back into the sidebar."
     validations:
       required: true
@@ -25,7 +25,7 @@ body:
     id: expected
     attributes:
       label: Expected
-      description: What should happen instead.
+      description: The behavior you expected.
     validations:
       required: true
   - type: textarea

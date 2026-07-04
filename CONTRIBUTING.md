@@ -29,11 +29,10 @@ the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
 
 ## Standards
 
-- **Don't reinvent the wheel** — the canonical rule and its pattern sources live in
-  [AGENTS.md](AGENTS.md) and [docs/inspiration.md](docs/inspiration.md).
-- **Dependencies.** pi (`@earendil-works/pi-*`) is consumed as npm deps — pinned exact while
-  pre-1.0, never forked. The widget takes no external deps (system frameworks only).
-- **Vendored code** (`.agents/skills/*/vendor/`) is upstream-owned: never hand-edit it.
-  Re-sync per the directory's `UPSTREAM.md` and update the pin there. Vendor dirs are
-  excluded from lint.
+- **Prior art first** — canonical rule and pattern sources: [AGENTS.md](AGENTS.md),
+  [docs/inspiration.md](docs/inspiration.md).
+- **Dependencies.** pi (`@earendil-works/pi-*`) is consumed as npm deps, pinned exact while
+  pre-1.0. The widget builds on system frameworks only.
+- **Vendored code** (`.agents/skills/*/vendor/`) is upstream-owned: re-sync per the
+  directory's `UPSTREAM.md` and update the pin there. Lint skips vendor dirs.
 - **Shared types** live in `packages/core` so the harness and every surface speak one language.
