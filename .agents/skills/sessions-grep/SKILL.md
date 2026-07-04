@@ -1,7 +1,7 @@
 ---
 name: sessions-grep
 description: >-
-  Precision search over session history with bounded context: grep the owner's local coding-agent transcripts for exact text, punctuation, or regex patterns, and browse or skim a single session before drilling in. Also Owner Operator's memory — self-reflection over its OWN past threads to recall what it was asked, answered, or already reported; check that memory proactively before answering anything about past work.
+  Search local coding-agent session transcripts with bounded message context: literal or regex grep for exact text, punctuation, or patterns, and browsing or skimming one session before drilling in. Sources cover the owner's coding sessions and Owner Operator's own past threads (self-reflection on what it already asked, answered, or reported).
 ---
 
 # sessions-grep
