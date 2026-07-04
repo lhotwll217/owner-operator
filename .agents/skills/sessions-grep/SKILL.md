@@ -73,7 +73,8 @@ Roots come from the owner's config — the same `session_sources.json` the triag
 (built-in `claude`/`codex` homes plus any `add`/`disable`; sessions the owner relocated are
 honored without editing this skill). The privacy **blacklist** (`<OO_HOME>/blacklist.json`)
 is absolute: a session in a blacklisted tree is never returned, in any mode — no flag
-bypasses it. (Cursor/PostHog Code sessions appear in triage but not here: the grep primitive
+bypasses it. Withheld hits don't shortchange `--limit` (the wrapper backfills past them),
+and when results still come up short the output says so (`blacklisted_dropped=N`). (Cursor/PostHog Code sessions appear in triage but not here: the grep primitive
 has no parser for those formats yet, so they're left out rather than mis-read.)
 
 ## Self-reflection: `--source self`
