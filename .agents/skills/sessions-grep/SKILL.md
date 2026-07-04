@@ -1,7 +1,7 @@
 ---
 name: sessions-grep
 description: >-
-  Literal or regex grep across local AI session transcripts with bounded message context, plus SELF-REFLECTION: search Owner Operator's OWN past threads to recall what you were previously asked, answered, or reported — "did I already report on this?", "what did the owner ask before?". Use when the user asks to search exact words, punctuation, hashtags/patterns, phrases like "why did you", wants messages before/after a hit, or wants to browse/skim one session before drilling in — and PROACTIVELY before answering about past work, to check your own prior threads first.
+  Precision search over session history with bounded context: grep the owner's local coding-agent transcripts for exact text, punctuation, or regex patterns, and browse or skim a single session before drilling in. Also Owner Operator's memory — self-reflection over its OWN past threads to recall what it was asked, answered, or already reported; check that memory proactively before answering anything about past work.
 ---
 
 # sessions-grep
