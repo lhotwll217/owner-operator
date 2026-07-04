@@ -275,7 +275,7 @@ struct RowView: View {
                         Text("-\(row.thread.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
                     }
                     Spacer()
-                    Text(row.thread.app).foregroundStyle(.tertiary).font(.system(size: 10))
+                    AppBadge(app: row.thread.app)
                 }
             }
         }
@@ -292,5 +292,43 @@ struct RowView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Mark done")
+    }
+}
+
+/// The origin line's app tag: the tool's real logo (a background-free PNG mark, bundled in
+/// Resources/) beside the app name. Claude and Codex marks cover all their variants
+/// (CLI / App / SDK). Monochrome marks render as templates so they tint to the current
+/// foreground in light and dark; Claude keeps its brand terracotta. Apps without a bundled
+/// logo (Cursor, Superset, PostHog Code, …) fall back to the plain text tag.
+struct AppBadge: View {
+    let app: String
+
+    /// resource name + whether it's a monochrome template mark (tinted) vs a full-color mark.
+    private static let logos: [(prefix: String, resource: String, template: Bool)] = [
+        ("Claude", "claude", false),
+        ("Codex", "codex", true),
+        ("Conductor", "conductor", true),
+    ]
+    private static var cache: [String: NSImage] = [:]
+
+    private var logo: (image: NSImage, template: Bool)? {
+        guard let hit = Self.logos.first(where: { app.hasPrefix($0.prefix) }) else { return nil }
+        if let img = Self.cache[hit.resource] { return (img, hit.template) }
+        guard let img = Bundle.module.image(forResource: hit.resource) else { return nil }
+        Self.cache[hit.resource] = img
+        return (img, hit.template)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let logo {
+                Image(nsImage: logo.image)
+                    .renderingMode(logo.template ? .template : .original)
+                    .resizable().interpolation(.high).scaledToFit()
+                    .frame(width: 11, height: 11)
+                    .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
+            }
+            Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
+        }
     }
 }
