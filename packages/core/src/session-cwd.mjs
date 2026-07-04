@@ -9,7 +9,7 @@
 // parseSession); converging it onto this module is the intended follow-up so there is a
 // single cwd/repo authority.
 
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 /**
@@ -27,6 +27,32 @@ export function firstCwd(raw) {
     if (obj.payload && typeof obj.payload.cwd === "string") return obj.payload.cwd;
   }
   return null;
+}
+
+// The cwd sits in a session's first records, so a bounded prefix almost always holds it —
+// 256 KiB is orders of magnitude past any header yet spares reading a multi-MB transcript.
+const CWD_PREFIX_BYTES = 256 * 1024;
+
+/**
+ * `firstCwd` for a file on disk, reading only a bounded prefix. Falls back to a full read
+ * in the rare case the prefix ends before any record declares a cwd (e.g. an enormous
+ * pasted first message), so the answer is always identical to firstCwd(whole file).
+ * Throws on an unreadable file — callers decide what unreadable means for them.
+ */
+export function firstCwdFromFile(file, maxBytes = CWD_PREFIX_BYTES) {
+  const fd = openSync(file, "r");
+  let size, prefix;
+  try {
+    size = fstatSync(fd).size;
+    const buf = Buffer.alloc(Math.min(size, maxBytes));
+    readSync(fd, buf, 0, buf.length, 0);
+    prefix = buf.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+  const cwd = firstCwd(prefix);
+  if (cwd != null || size <= maxBytes) return cwd;
+  return firstCwd(readFileSync(file, "utf8"));
 }
 
 /**

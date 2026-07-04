@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../../packages/core/src/blacklist.mjs";
 import { loadSessionSources } from "../../../packages/core/src/session-sources.mjs";
-import { firstCwd, resolveRepo } from "../../../packages/core/src/session-cwd.mjs";
+import { firstCwdFromFile, resolveRepo } from "../../../packages/core/src/session-cwd.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TOOL = path.join(here, "vendor", "session-grep.mjs");
@@ -29,20 +29,27 @@ const ooHome = process.env.OO_HOME ?? path.join(os.homedir(), ".owner-operator")
 const selfRoot = path.join(ooHome, "sessions");
 
 // ---------- parse the oo-only flags, pass everything else straight through ----------
+// --limit / --max-chars are also intercepted (search mode only): layer-2 blacklist filtering
+// happens AFTER the primitive applies them, so the wrapper over-fetches and re-applies the
+// caller's real numbers on output — blacklisted hits must not eat the caller's budget.
 const argv = process.argv.slice(2);
 let source = "all", surface = null, userWantsJson = false;
+let limit = 20, maxChars = 8000, limitSet = false, maxCharsSet = false;
 const passthrough = [];
 // Flags whose presence means a browse/window/list mode: the primitive streams TEXT for
 // these (no per-hit json to annotate), so the wrapper enforces the blacklist up front and
 // lets the primitive's output through unchanged.
 const BROWSE = new Set(["--overview", "--skim", "--session", "--at", "--list-roots"]);
-let browse = false;
+let browse = false, listRoots = false;
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--source") source = argv[++i];
   else if (a === "--surface") surface = argv[++i];
+  else if (a === "--limit") { limit = Number(argv[++i]); limitSet = true; }
+  else if (a === "--max-chars") { maxChars = Number(argv[++i]); maxCharsSet = true; }
   else {
     if (a === "--json") userWantsJson = true;
+    if (a === "--list-roots") listRoots = true;
     if (BROWSE.has(a)) browse = true;
     passthrough.push(a);
   }
@@ -51,6 +58,18 @@ if (!["all", "claude", "codex", "self"].includes(source)) {
   console.error("--source must be all, claude, codex, or self");
   process.exit(1);
 }
+// --surface labels come from oo-provenance stamps, which only self threads carry — with any
+// other source every hit would be silently skipped, which can only be a mistake.
+if (surface && source !== "self") {
+  console.error("--surface filters oo's own threads — combine it with --source self");
+  process.exit(1);
+}
+// The caller's real output knobs, re-injected verbatim in browse modes so the primitive's
+// own defaults (e.g. --skim's roomier budget when --max-chars is unset) survive.
+const knobArgs = [
+  ...(limitSet ? ["--limit", String(limit)] : []),
+  ...(maxCharsSet ? ["--max-chars", String(maxChars)] : []),
+];
 
 // ---------- WHERE to search: typed roots from oo config (fail closed) ----------
 // `self` = oo's own threads (pi format) under <OO_HOME>/sessions, deliberately excluded
@@ -79,13 +98,14 @@ const slugRes = pathSlugs(blacklist).map((s) => {
   return `(?:^|/)${esc}(?:-[^/]*)?/[^/]+\\.jsonl$`;
 });
 // Layer 2: a session whose recorded cwd/repo sits in a blacklisted tree (catches codex and
-// claude sessions whose dir name isn't the slug). Read a file's cwd once; cache it.
+// claude sessions whose dir name isn't the slug). Bounded-prefix read (the cwd sits in the
+// first records), cached per file.
 const cwdCache = new Map();
 function fileBlacklisted(file) {
   if (cwdCache.has(file)) return cwdCache.get(file);
   let verdict = false;
   try {
-    const cwd = firstCwd(fs.readFileSync(file, "utf8"));
+    const cwd = firstCwdFromFile(file);
     verdict = !!cwd && isBlacklisted(blacklist, { cwd, repo: resolveRepo(cwd) });
   } catch { /* unreadable → don't surface it anyway */ verdict = true; }
   cwdCache.set(file, verdict);
@@ -99,7 +119,8 @@ const excludeRes = [...slugRes];
 // name isn't the blacklisted slug (cwd blacklisted post-parse) is only caught by this scan
 // — so it must include claude too. Browse is itself a full scan, so the header reads are
 // proportionate; search mode skips this and post-filters just the hit files instead.
-if (browse) {
+// --list-roots prints no session content, so it skips the scan entirely.
+if (browse && !listRoots) {
   for (const { root } of sourcesEntries) {
     if (!fs.existsSync(root)) continue;
     for (const f of walk(root)) {
@@ -113,15 +134,30 @@ const env = { ...process.env, SESSION_GREP_SOURCES_FILE: sourcesFile };
 
 // ---------- browse/window/list: stream the primitive's output, blacklist already applied ----------
 if (browse) {
-  const r = spawnSync(process.execPath, [TOOL, ...passthrough, "--source", toolSource, ...excludeArgs], { stdio: "inherit", env });
+  const r = spawnSync(process.execPath, [TOOL, ...passthrough, ...knobArgs, "--source", toolSource, ...excludeArgs], { stdio: "inherit", env });
   cleanup();
   process.exit(r.status ?? 0);
 }
 
 // ---------- search: run the primitive in JSON, then blacklist-filter + self-annotate ----------
 // Force --json so we can drop blacklisted hits (layer 2) and label self hits before output.
-const jsonArgs = passthrough.includes("--json") ? passthrough : [...passthrough, "--json"];
-const r = spawnSync(process.execPath, [TOOL, ...jsonArgs, "--source", toolSource, ...excludeArgs], { encoding: "utf8", env });
+// Over-fetch limit and budget (the primitive computes every match regardless — the scaled
+// numbers only widen its output window), then trim back to the caller's real numbers after
+// filtering so blacklisted hits don't shortchange --limit.
+if (!Number.isFinite(limit) || limit < 1) { console.error("--limit must be >= 1"); cleanup(); process.exit(1); }
+if (!Number.isFinite(maxChars) || maxChars < 500) { console.error("--max-chars must be >= 500"); cleanup(); process.exit(1); }
+const FETCH_FACTOR = 3;
+// The internal budget must CARRY the over-fetched entries, not just scale the caller's
+// number — a small --max-chars would otherwise starve the backfill before filtering.
+// ~1200 chars bounds a slim JSON entry at default context; the caller's budget is
+// re-applied on output either way, so generous here costs nothing downstream.
+const internalMaxChars = Math.max(maxChars * FETCH_FACTOR, limit * FETCH_FACTOR * 1200);
+const jsonArgs = [
+  ...passthrough.filter((a) => a !== "--json"), "--json",
+  "--limit", String(limit * FETCH_FACTOR),
+  "--max-chars", String(internalMaxChars),
+];
+const r = spawnSync(process.execPath, [TOOL, ...jsonArgs, "--source", toolSource, ...excludeArgs], { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
 if (r.stderr) process.stderr.write(r.stderr);
 if (r.status !== 0 || !r.stdout.trim()) { cleanup(); process.exit(r.status ?? 1); }
 cleanup();
@@ -130,35 +166,72 @@ let out;
 try { out = JSON.parse(r.stdout); } catch { process.stdout.write(r.stdout); process.exit(0); }
 
 const kept = [];
+let blacklistedDropped = 0;
 for (const m of out.matches ?? []) {
-  if (fileBlacklisted(m.path)) continue; // layer 2 (search): only hit files are read
+  if (fileBlacklisted(m.path)) { blacklistedDropped++; continue; } // layer 2 (search): only hit files are read
   if (m.source === "pi") {
     // oo's own thread: label from the latest oo-provenance stamp; --surface narrows here.
     const prov = piProvenance(m.path);
     if (surface && prov?.surface !== surface) continue;
     kept.push({ ...m, source: "self", surface: prov?.surface, repo: prov?.callerRepo, provenance: prov ?? undefined });
   } else {
-    if (surface) continue; // --surface only matches labeled self threads
     kept.push(m);
   }
 }
+const trimmed = kept.slice(0, limit);
+// Even the over-fetch couldn't backfill what the blacklist dropped — say so rather than
+// letting a short result read as "that's all there is".
+const shortfall = blacklistedDropped > 0 && trimmed.length < limit && out.totalMatches > (out.matches?.length ?? 0)
+  ? `fewer than --limit shown: ${blacklistedDropped} hit(s) fell in blacklisted sessions — raise --limit or --max-chars to search past them`
+  : null;
 
-out.matches = kept;
-out.shown = kept.length;
+// Re-apply the caller's real output budget (the internal call ran with it scaled). Mirrors
+// the primitive: hits emitted in rank order until the budget runs out, never dumped.
+function emitWithinBudget(renderLen) {
+  const emitted = [];
+  let size = 300; // header allowance, mirrors the primitive
+  for (const m of trimmed) {
+    const len = renderLen(m);
+    if (size + len > maxChars && emitted.length) break;
+    size += len;
+    emitted.push(m);
+  }
+  return emitted;
+}
+const budgetNote = (n) => `... ${n} more matching messages omitted by the ${maxChars}-char output budget — narrow with --role/--since, or raise --max-chars`;
 
 if (userWantsJson) {
+  const emitted = emitWithinBudget((m) => JSON.stringify(m).length);
+  const omitted = trimmed.length - emitted.length;
+  out.matches = emitted;
+  out.shown = emitted.length;
+  delete out.omittedByBudget; // recomputed against the caller's budget, not the scaled one
+  delete out.note;
+  if (blacklistedDropped) out.blacklistedDropped = blacklistedDropped;
+  if (shortfall) out.shortfall = shortfall;
+  if (omitted) { out.omittedByBudget = omitted; out.note = budgetNote(omitted); }
   process.stdout.write(JSON.stringify(out) + "\n");
 } else {
   // Mirror the primitive's text layout, adding oo's self labels (surface/repo).
-  console.log(`query=${JSON.stringify(out.query ?? "")}${out.any ? " any=true" : ""} shown=${kept.length}${source !== "all" ? ` source=${source}` : ""}`);
-  kept.forEach((m, idx) => {
-    const label = m.surface ? ` surface=${m.surface} repo=${m.repo ?? ""}` : "";
-    console.log(`\n[${idx + 1}] ${m.source}${label} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ""}`);
-    console.log(`path=${m.path}`);
-    for (const b of m.before ?? []) console.log(`  before ${b.role}: ${b.text}`);
-    console.log(`  MATCH ${m.match.role}: ${m.match.text}`);
-    for (const a of m.after ?? []) console.log(`  after  ${a.role}: ${a.text}`);
+  const renderHit = (m) => [
+    `${m.source}${m.surface ? ` surface=${m.surface} repo=${m.repo ?? ""}` : ""} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ""}${m.matchedWords ? ` matched=[${m.matchedWords.join(",")}] score=${m.score}` : ""}`,
+    `path=${m.path}`,
+    ...(m.before ?? []).map((b) => `  before ${b.role}: ${b.text}`),
+    `  MATCH ${m.match.role}: ${m.match.text}`,
+    ...(m.after ?? []).map((a) => `  after  ${a.role}: ${a.text}`),
+  ];
+  const emitted = emitWithinBudget((m) => renderHit(m).reduce((t, l) => t + l.length + 1, 6));
+  const omitted = trimmed.length - emitted.length;
+  console.log(`query=${JSON.stringify(out.query ?? "")}${out.regex ? " regex=true" : ""}${out.any ? " any=true" : ""} raw_files_with_hits=${out.rawFilesWithHits} total_message_matches=${out.totalMatches} shown=${emitted.length}${source !== "all" ? ` source=${source}` : ""}${blacklistedDropped ? ` blacklisted_dropped=${blacklistedDropped}` : ""}`);
+  if (out.wordHits) console.log(`word_hits: ${Object.entries(out.wordHits).map(([w, c]) => `${w}=${c}`).join(" ")} (of ${out.messagesScanned} messages in matched files; high-count words are low-signal — prefer the rare ones)`);
+  if (out.hint) console.log(`hint: ${out.hint}`);
+  emitted.forEach((m, idx) => {
+    const [head, ...rest] = renderHit(m);
+    console.log(`\n[${idx + 1}] ${head}`);
+    for (const l of rest) console.log(l);
   });
+  if (shortfall) console.log(`\nnote: ${shortfall}`);
+  if (omitted) console.log(`\n${budgetNote(omitted)}`);
 }
 
 // ---------- helpers ----------

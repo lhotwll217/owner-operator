@@ -27,7 +27,7 @@ homes:
 |---|---|---|
 | Claude Code | `~/.claude/projects` | jsonl (supported) |
 | Codex CLI | `~/.codex/sessions`, `~/.codex/archived_sessions` | jsonl (supported) |
-| pi | `~/.pi/sessions` (and tools built on pi) | jsonl (supported) |
+| Pi | `~/.pi/agent/sessions` | jsonl (supported) |
 | Cursor | `~/Library/Application Support/Cursor/User/workspaceStorage` (macOS), `~/.config/Cursor/...` (linux) | sqlite (not yet parseable) |
 | Gemini CLI | `~/.gemini/tmp` | json (not yet parseable) |
 | opencode | `~/.local/share/opencode/storage` | split json (not yet parseable) |
@@ -120,11 +120,11 @@ Common flags:
 - `--before N` messages before each hit, default 1
 - `--after N` messages after each hit, default 1
 - `--role user|assistant|all` filter matching messages, default `all`
-- `--source claude|codex|pi|all` filter sources, default `all` (values follow the loaded adapters)
+- `--source claude|codex|pi|all` filter sources, default `all`
 - `--since today|Nd|YYYY-MM-DD` filter by message/session timestamp
 - `--sort newest|oldest|file` output order, default `newest`
 - `--root DIR` search this directory of `*.jsonl` transcripts instead of the default live stores (repeatable)
-- `--exclude-re REGEX` skip any transcript whose file path matches this JS regex; applies to every mode (search, `--overview`, `--skim`, `--session`). Repeatable — the hook for layering a path-based privacy filter on top of the tool
+- `--exclude-re REGEX` exclude any session file whose path matches this JavaScript regex (repeatable) — applies to every mode (search, `--overview`, `--skim`, `--session/--at`), so wrappers can enforce a path blacklist
 - `--list-roots` print the configured source/root map and whether each root exists
 - `--max-chars N` output budget, default 8000 — excess hits are omitted with a notice, never dumped
 - `--include-tools` also match inside tool_result blocks (excluded by default: they are file/command echoes, ~45% of bytes, and mostly restate the conversation)
