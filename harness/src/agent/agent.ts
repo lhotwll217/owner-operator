@@ -247,6 +247,27 @@ export async function createOwnerOperatorSession(
     tools: ownerOperatorTools,
   });
 
+  // Extensions initialize their state on `session_start`, which pi's own modes emit via
+  // bindExtensions — a raw createAgentSession never does. Without this, package tools
+  // (schedule_prompt) execute against uninitialized state and crash. Ephemeral sessions
+  // stay unbound so a triage/test session never runs a second scheduler against the same
+  // job store. Pair with shutdownSessionExtensions before dispose.
+  if (!opts.ephemeral) await session.bindExtensions({});
+
+  return { session, skills, modelLabel: readModelLabel() };
+}
+
+/** Extension teardown (session_shutdown: cron auto-cleanup, timer stops) — pi's modes emit
+ * this on quit; surfaces holding a raw session must emit it themselves before dispose(). */
+export async function shutdownSessionExtensions(session: OwnerOperatorSession["session"]): Promise<void> {
+  try {
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+  } catch {
+    // best-effort: never let extension teardown block exit
+  }
+}
+
+function readModelLabel(): string {
   let modelLabel = "model from .pi/settings.json";
   try {
     const s = JSON.parse(readFileSync(join(repoRoot, ".pi", "settings.json"), "utf8"));
@@ -254,8 +275,7 @@ export async function createOwnerOperatorSession(
   } catch {
     // no project settings — fall back to pi defaults
   }
-
-  return { session, skills, modelLabel };
+  return modelLabel;
 }
 
 // ---- Read-only skill tools for the headless agent channel ---------------------

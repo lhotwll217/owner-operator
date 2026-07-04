@@ -19,7 +19,7 @@ import {
   type MarkdownTheme,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
-import { createOwnerOperatorSession, lastAssistantText } from "../agent/agent";
+import { createOwnerOperatorSession, lastAssistantText, shutdownSessionExtensions } from "../agent/agent";
 import { toSidebarThreads, numberThreads, parseNumbers, displayTopic, becameNeedsYou, type Thread, type StatusSnapshot, type StatusDiff, type ThreadStatus, type TriageInfo, type SidebarThread } from "@owner-operator/core";
 import { buildBrief } from "./brief";
 import { SidebarList } from "./sidebar";
@@ -161,11 +161,12 @@ function cacheTriage(threads: Thread[]): void {
 let poller: StatusPoller | undefined;
 let unsubscribePush: (() => void) | undefined;
 let spin: NodeJS.Timeout | undefined;
-function quit(): never {
+async function quit(): Promise<never> {
   try { unsubscribePush?.(); } catch { /* ignore */ }
   try { backend.close(); } catch { /* ignore */ }
   try { poller?.stop(); } catch { /* ignore */ }
   try { if (spin) clearInterval(spin); } catch { /* ignore */ }
+  await shutdownSessionExtensions(session); // cron auto-cleanup etc. (triage is unbound — skip)
   try { session.dispose(); } catch { /* ignore */ }
   try { triage?.session.dispose(); } catch { /* ignore */ }
   tui.stop();

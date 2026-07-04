@@ -7,7 +7,7 @@
 //   tsx src/oo.ts --json "what's ongoing?"   # one-shot, headless JSON snapshot
 
 import readline from "node:readline/promises";
-import { createOwnerOperatorSession, lastAssistantText } from "../agent/agent";
+import { createOwnerOperatorSession, lastAssistantText, shutdownSessionExtensions } from "../agent/agent";
 import { parseOoArgs } from "./oo-args";
 import type { Thread } from "@owner-operator/core";
 import { buildCardsBlock } from "../shared/cards";
@@ -115,5 +115,6 @@ try {
     rl.close();
   }
 } finally {
+  await shutdownSessionExtensions(session); // cron auto-cleanup etc. — dispose alone never emits it
   session.dispose();
 }
