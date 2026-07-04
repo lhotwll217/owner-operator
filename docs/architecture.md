@@ -25,7 +25,9 @@
   poll loop (scan → resolve thread state → store), runs schedules/triggers, and serves
   HTTP + SSE on 127.0.0.1. The UIs are thin clients over the protocol in `packages/core`.
   `oo daemon` to run; the TUI auto-spawns it and falls back to an in-process poller when
-  disabled (`OO_DAEMON=0`).
+  disabled (`OO_DAEMON=0`). Promoting it to a true top-level gateway (agent → gateway,
+  never the reverse — OpenClaw's pattern, see [docs/inspiration.md](inspiration.md)) is
+  [#14](https://github.com/lhotwll217/owner-operator/issues/14).
 - **core** (`packages/core/`) — the shared types the harness and UIs agree on (sessions,
   threads, priority).
 - **workflows** (`packages/workflows/`) — *not built yet.* Deterministic scripts the harness

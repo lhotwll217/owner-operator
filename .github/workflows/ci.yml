@@ -1,0 +1,28 @@
+# Hermetic gate for every PR and every landing on main: typecheck, lint, and the
+# model-free test tiers (unit + integration + e2e — see docs/testing.md). Never makes
+# a paid model call. The widget's Swift tests run in widget.yml (macOS, path-filtered).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: typecheck · lint · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test

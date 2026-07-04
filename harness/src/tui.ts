@@ -38,7 +38,7 @@ if (!process.stdout.isTTY) {
 type Styler = (s: string) => string;
 const sgr = (...c: number[]): Styler => (s) => `\x1b[${c.join(";")}m${s}\x1b[0m`;
 const dim = sgr(2), bold = sgr(1), italic = sgr(3), underline = sgr(4), strike = sgr(9);
-const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), red = sgr(1, 31), white = sgr(1, 37);
+const cyan = sgr(36), blue = sgr(34), yellow = sgr(33), green = sgr(32), white = sgr(1, 37);
 
 const mdTheme: MarkdownTheme = {
   heading: (t) => bold(cyan(t)), link: blue, linkUrl: dim, code: yellow, codeBlock: green,

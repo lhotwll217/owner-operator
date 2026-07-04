@@ -55,4 +55,5 @@ records who called.
 So far this has only been tested with a Codex subscription as the driver for the pi harness.
 Other model backends should work but are unverified.
 
-Architecture: [docs/architecture.md](docs/architecture.md).
+Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,
+standards): [CONTRIBUTING.md](CONTRIBUTING.md).

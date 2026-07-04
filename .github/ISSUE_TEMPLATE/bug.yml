@@ -1,0 +1,37 @@
+name: Bug report
+description: Something is broken or behaves wrong.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Start with the user. Who hits this, doing what, and what goes wrong — observable behavior, not implementation guesses.
+      placeholder: "Marking a thread done makes it disappear, then the next poll brings it back into the sidebar."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduce
+      description: Smallest path to see it. Commands, flags, which surface (widget / oo TUI / oo -i / one-shot).
+      placeholder: |
+        1. ./harness/oo
+        2. /done 3
+        3. wait for the next poll
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: macOS + Node versions, which agent tools' sessions are in play (claude / codex / cursor / …), daemon or in-process poller.
+    validations:
+      required: false

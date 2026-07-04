@@ -13,4 +13,7 @@ Read these before writing code — don't re-derive intent from the source:
   types, workflows). Keep shared types in `packages/core/` so surfaces and harness speak one
   language.
 - **Match the surrounding code** — its naming, comment density, and idioms.
+- **Don't reinvent the wheel.** Prefer battle-tested patterns from maintained open source —
+  start from [docs/inspiration.md](docs/inspiration.md); look for prior art beyond it when needed.
+- **Issue-first, linked PRs.** Workflow and checks: [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Concise.** High-signal, low-noise — in the product, the docs, and your output.
