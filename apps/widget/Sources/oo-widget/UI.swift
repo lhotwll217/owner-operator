@@ -252,7 +252,9 @@ struct GroupView: View {
 /// grey next-step, then origin (±diff · app). Matches sidebar.ts's "keep every word".
 /// Rename via the pencil that appears on hover (or double-click the title) — your title is
 /// preferred over the AI's (which keeps titling underneath); submit it empty (or use the
-/// context menu) to show AI titles again.
+/// context menu) to show AI titles again. STABILITY RULE: hover/edit state may only swap
+/// what's drawn inside space that is always reserved — never insert or remove layout — so
+/// text never re-wraps and neighbors never move.
 struct RowView: View {
     let row: SidebarRow
     let onDone: () -> Void
@@ -274,9 +276,7 @@ struct RowView: View {
                         Text("P\(p)").foregroundStyle(priorityColor(p)).font(.system(size: 10, weight: .bold))
                     }
                     title
-                    if rowHovering && !editing {
-                        renamePencil
-                    }
+                    titleAffordance
                     Spacer(minLength: 6)
                     Text(shortAge(row.thread.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
@@ -323,13 +323,28 @@ struct RowView: View {
         }
     }
 
-    /// Rename affordance, doneCheck's quiet idiom: appears on row hover, click to edit inline.
-    private var renamePencil: some View {
-        Button(action: startEditing) {
-            Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(.secondary)
+    /// One FIXED slot beside the title — pencil on row hover, an explicit commit check while
+    /// editing, invisible otherwise. It always occupies its frame so the title's wrap width
+    /// never changes across idle/hover/edit (HIG edit-in-place stability; WCAG 3.2.1/3.2.2 —
+    /// no layout change on focus or input).
+    private var titleAffordance: some View {
+        Group {
+            if editing {
+                Button(action: { editing = false; commit() }) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .help("Save title (Return commits, Escape cancels)")
+            } else {
+                Button(action: startEditing) {
+                    Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .opacity(rowHovering ? 1 : 0)
+                .help("Rename — your title shows instead of the AI's until you clear it")
+            }
         }
-        .buttonStyle(.plain)
-        .help("Rename — your title shows instead of the AI's until you clear it")
+        .frame(width: 12, alignment: .leading)
     }
 
     private func startEditing() {
@@ -406,21 +421,27 @@ struct AppBadge: View {
     @State private var hovering = false
 
     var body: some View {
-        // The mark alone carries the tag; hovering slides the name out to its left (inline —
-        // .help() tooltips don't show reliably in a nonactivating panel). The tag sits at the
-        // row's trailing edge, so the reveal grows into Spacer room and nothing else moves.
+        // The mark alone carries the tag; hovering reveals the name as an OVERLAY floating to
+        // the mark's left (inline .help() tooltips don't show reliably in a nonactivating
+        // panel). An overlay takes no layout space, so hovering moves nothing — the mark and
+        // every neighbor stay put.
         if let m = Self.mark(for: app) {
-            HStack(spacing: 4) {
-                if hovering {
-                    Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
+            Image(nsImage: m.image)
+                .renderingMode(m.template ? .template : .original)
+                .resizable().interpolation(.high).scaledToFit()
+                .frame(width: 11, height: 11)
+                .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
+                .onHover { hovering = $0 }
+                .overlay(alignment: .trailing) {
+                    if hovering {
+                        Text(app).foregroundStyle(.secondary).font(.system(size: 10))
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 3).fill(.background))
+                            .fixedSize()
+                            .offset(x: -14) // float just left of the mark
+                            .allowsHitTesting(false)
+                    }
                 }
-                Image(nsImage: m.image)
-                    .renderingMode(m.template ? .template : .original)
-                    .resizable().interpolation(.high).scaledToFit()
-                    .frame(width: 11, height: 11)
-                    .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
-            }
-            .onHover { hovering = $0 }
         } else {
             Text(app).foregroundStyle(.tertiary).font(.system(size: 10))
         }
