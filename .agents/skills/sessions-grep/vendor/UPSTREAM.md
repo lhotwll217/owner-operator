@@ -6,7 +6,7 @@ eval-tuned grep primitive. Owner Operator wraps it (see `../sessions-grep.mjs`) 
 its own session sources and enforce the privacy blacklist; it does **not** fork it.
 
 - **Upstream:** https://github.com/lhotwll217/session-grep
-- **Synced from:** `claude/oo-integration-exclude-pi` @ `4ae7b0f177693727f036c94bd531e95e4ff79ede`
+- **Synced from:** `main` @ `83c3b95d41ef55b6ac8e72ac1c9a69e5a0005fc4`
 
 ## Rules
 
