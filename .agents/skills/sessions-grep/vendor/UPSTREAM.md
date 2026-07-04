@@ -23,10 +23,21 @@ its own session sources and enforce the privacy blacklist; it does **not** fork 
 
 ## Re-syncing an upstream release
 
-1. `npx skills add lhotwll217/session-grep` (or copy `skills/session-grep/` from the repo)
-   over this directory.
-2. **Rename the incoming `SKILL.md` to `SKILL.upstream.md`** (see Rules above).
-3. Update **Synced from** above to the new commit.
-4. `node vendor/session-grep.mjs --self-test` — the primitive's own assertions.
-5. Run the wrapper's integration test (`harness/src/sessions-grep.integration.test.ts`):
-   the seam is stable, so a green run means the new version dropped in clean.
+```bash
+node .agents/skills/sessions-grep/sync-vendor.mjs --apply <ref>
+```
+
+Fetches upstream at `<ref>`, replaces this directory (applying the `SKILL.upstream.md`
+rename), updates **Synced from** above, and runs the primitive's `--self-test`. Then run
+the wrapper's integration test (`npx tsx harness/src/sessions-grep.integration.test.ts`):
+the seam is stable, so a green run means the new version dropped in clean.
+
+## Verifying this copy is verbatim
+
+```bash
+node .agents/skills/sessions-grep/sync-vendor.mjs --check
+```
+
+Diffs this directory against the pinned commit and fails on any drift — the "do not edit"
+rule above, enforced mechanically. Run it after anything touches `vendor/` (and in CI once
+the repo grows one).
