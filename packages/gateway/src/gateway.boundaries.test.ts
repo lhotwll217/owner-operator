@@ -1,7 +1,6 @@
-// Guard for the gateway's dependency direction (#14): the gateway is the innermost
-// component after core — model-free, agent-free. Runtime modules here must never import
-// pi (`@earendil-works/*`) or anything from src/agent, src/tui, or src/cli. Dev scripts
-// (*.test.ts, *.smoke.ts) are exempt — they may drive outer layers to exercise this one.
+// Guard for the gateway's dependency direction (#14): the gateway is its own package,
+// model-free and agent-free. Runtime modules here must never import pi, harness, or UI
+// surfaces. Dev scripts (*.test.ts, *.smoke.ts) are exempt — they may drive the package.
 import assert from "node:assert";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -15,7 +14,9 @@ assert.ok(runtime.length >= 5, `gateway runtime modules found (${runtime.length}
 
 const FORBIDDEN = [
   { re: /from\s+["']@earendil-works\//, why: "pi import — the gateway is model-free" },
-  { re: /from\s+["']\.\.\/(agent|tui|cli)\//, why: "outward import — agent/surfaces are clients of the gateway, never the reverse" },
+  { re: /from\s+["']@owner-operator\/harness/, why: "harness import — harness is a gateway client" },
+  { re: /from\s+["'][^"']*harness\//, why: "harness path import — package boundary bypass" },
+  { re: /from\s+["']\.\.\/\.\.\//, why: "upward source import — use core or a gateway-local seam" },
 ];
 
 for (const file of runtime) {
@@ -25,4 +26,4 @@ for (const file of runtime) {
   }
 }
 
-console.log(`ok — gateway boundary: ${runtime.length} runtime modules import no pi, no agent/tui/cli`);
+console.log(`ok — gateway boundary: ${runtime.length} runtime modules import no pi and no harness`);

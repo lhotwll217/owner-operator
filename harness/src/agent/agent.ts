@@ -22,7 +22,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { displayTopic, numberThreads, toSidebarThreads, type SidebarThread, type Thread } from "@owner-operator/core";
-import { resolveBackend } from "../gateway/client";
+import { resolveBackend } from "@owner-operator/gateway/client";
 import { repoRoot } from "../shared/repo-root";
 import { blacklistAwareFileToolsExtension } from "./privacy-tools";
 

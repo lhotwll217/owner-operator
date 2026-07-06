@@ -1,5 +1,4 @@
-// Repo-root resolution, shared by the gateway (locating the scan skills) and the agent
-// (cwd, settings, skill paths). Lives here so the gateway never imports the agent (#14).
+// Repo-root resolution for the pi harness (cwd, settings, prompts, and skill paths).
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

@@ -36,7 +36,7 @@ if (cli.help) {
 
 // `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
 if (cli.daemon) {
-  const { daemonMain } = await import("../gateway/daemon");
+  const { daemonMain } = await import("@owner-operator/gateway/daemon");
   await daemonMain();
   process.exit(0);
 }

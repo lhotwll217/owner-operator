@@ -1,0 +1,36 @@
+{
+  "name": "@owner-operator/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./daemon": "./src/daemon.ts",
+    "./poller": "./src/poller.ts",
+    "./store": "./src/store.ts",
+    "./threads-db": "./src/threads-db.ts"
+  },
+  "scripts": {
+    "poll:smoke": "tsx src/poller.smoke.ts",
+    "test": "node test/run.mjs unit && node test/run.mjs integration && node test/run.mjs e2e",
+    "test:unit": "node test/run.mjs unit",
+    "test:integration": "node test/run.mjs integration",
+    "test:e2e": "node test/run.mjs e2e",
+    "test:poller": "tsx src/poller.integration.test.ts",
+    "test:store": "tsx src/store.test.ts",
+    "test:daemon": "tsx src/daemon.e2e.test.ts",
+    "test:db": "tsx src/threads-db.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@owner-operator/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

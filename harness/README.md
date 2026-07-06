@@ -14,7 +14,8 @@ Deps (see [`package.json`](package.json)), all pinned exact at `0.78.0` (pi is p
 
 - Reads local agent sessions via the scan/grep skills in [`.agents/skills`](../.agents/skills/)
   (see [supported sources](../README.md#how-it-works)) — never loading full transcripts into a model.
-- Ranks the threads; `oo daemon` serves them to the UIs.
+- The pi-based Operator and terminal surfaces. State comes from
+  [`@owner-operator/gateway`](../packages/gateway/); `oo daemon` delegates to that package.
 
-`src/` is split into `gateway/ · agent/ · tui/ · cli/ · shared/` — the layout and its
-dependency rule live in [../docs/architecture.md](../docs/architecture.md#layout--the-dependency-rule).
+`src/` is split into `agent/ · tui/ · cli/ · shared/` — the layout and its dependency rule
+live in [../docs/architecture.md](../docs/architecture.md#layout--the-dependency-rule).

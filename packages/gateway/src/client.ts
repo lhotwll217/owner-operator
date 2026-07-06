@@ -21,7 +21,7 @@ import {
   type MarkThreadsDoneResult,
 } from "./store";
 
-import { repoRoot } from "../shared/repo-root";
+import { repoRoot } from "./repo-root";
 
 /** What a surface needs from state, daemon- or store-backed. All ops async to keep one shape. */
 export interface Backend {

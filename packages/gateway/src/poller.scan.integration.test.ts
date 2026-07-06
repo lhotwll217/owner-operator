@@ -6,13 +6,13 @@
 // Hermetic: temp HOME + OO_HOME, no model. (daemon.e2e + poller.integration keep the fake
 // seam on purpose — they test daemon/store mechanics, not the scan; this is where the real
 // scan path earns its coverage.)
-//   npm run test:integration   (from harness/)
+//   npm run test:integration   (from packages/gateway/)
 
 import assert from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { tempOoHome } from "../../test/helpers";
+import { tempOoHome } from "../test/helpers";
 
 const realHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), "oo-poller-scan-home-"));

@@ -7,7 +7,7 @@ anything new; hunt beyond this list when it comes up short; cite the borrow in t
 
 - **[OpenClaw](https://github.com/openclaw/openclaw)** — [gateway daemon pattern](https://docs.openclaw.ai/gateway):
   one long-lived process owns all state, every surface a thin client. Ours:
-  `harness/src/gateway/` ([architecture](architecture.md#layout--the-dependency-rule)).
+  `packages/gateway/` ([architecture](architecture.md#layout--the-dependency-rule)).
   Also adopted: [oxlint](https://oxc.rs/docs/guide/usage/linter), pi as pinned npm deps,
   CI gating every PR.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven

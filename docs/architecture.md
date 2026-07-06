@@ -7,8 +7,8 @@
         │  UIs:  terminal (oo)  ·  macOS widget  ·  web (not built)      │
         └───────────────────────────▲──────────────────────────────────┘
         ┌───────────────────────────┴──────────────────────────────────┐
-        │                    HARNESS "PI"  (local)                      │
-        │       reads sessions · ranks them · runs on a schedule        │
+        │                 GATEWAY  (local, always-on)                   │
+        │       reads sessions · owns state · runs schedules            │
         └───────────────────────────▲──────────────────────────────────┘
                                     │
                     ┌───────────────┴────────────────┐
@@ -19,13 +19,13 @@
 
 ## What each part does
 
-- **Harness "PI"** (`harness/`) — reads local agent sessions, ranks them by what needs you,
-  runs on a schedule. Exposes a fixed set of commands, not a free-form agent loop.
-- **gateway** (`harness/src/gateway/`) — one local process (`oo daemon`) that owns the
-  state: runs the poll loop (scan → resolve thread state → store), runs schedules/triggers,
-  and serves HTTP + SSE on 127.0.0.1. The UIs are thin clients over the protocol in
-  `packages/core`. The TUI auto-spawns it and falls back to an in-process poller when
-  disabled (`OO_DAEMON=0`).
+- **gateway** (`packages/gateway/`) — one local process (`oo daemon`) that owns state: runs
+  the poll loop (scan → resolve thread state → store), runs schedules/triggers, and serves
+  HTTP + SSE on 127.0.0.1. The UIs are thin clients over the protocol in `packages/core`.
+  The TUI auto-spawns it and falls back to an in-process poller when disabled
+  (`OO_DAEMON=0`).
+- **Harness "PI"** (`harness/`) — the pi-based Operator and terminal surfaces. It reads the
+  gateway through `@owner-operator/gateway/*`; it does not contain the state-owning daemon.
 - **core** (`packages/core/`) — the shared types the harness and UIs agree on (sessions,
   threads, priority).
 - **workflows** (`packages/workflows/`) — *not built yet.* Deterministic scripts the harness
@@ -35,25 +35,26 @@
 
 ## Layout & the dependency rule
 
-`harness/src/` is split by component, dependencies pointing inward only (the onion rule,
-laid out the way OpenClaw does — see [inspiration.md](inspiration.md)):
+The gateway is its own package. Dependencies point toward state ownership, never back out
+to agent/UI code (see [inspiration.md](inspiration.md)):
 
 ```text
-core (packages/core) ← shared ← gateway ← { agent, tui, cli }
+core (packages/core) ← gateway (packages/gateway) ← { harness agent/tui/cli, widget, web }
 ```
 
-- `gateway/` — daemon, poller, store, threads-db, and the `Backend` client seam. Model-free
-  and agent-free; [#14](https://github.com/lhotwll217/owner-operator/issues/14)'s arrow.
-  Enforced by `gateway/gateway.boundaries.test.ts`, so CI fails on a leak.
+- `packages/gateway/` — daemon, poller, store, threads-db, and the `Backend` client seam.
+  Model-free and agent-free; [#14](https://github.com/lhotwll217/owner-operator/issues/14)'s
+  arrow. Enforced by `packages/gateway/src/gateway.boundaries.test.ts`, so CI fails on a
+  leak.
 - `agent/` — the pi-based Operator; a client of the gateway like every surface.
 - `tui/` `cli/` — the terminal surfaces and entrypoints.
-- `shared/` — repo-root resolution and card rendering used across components.
+- `harness/src/shared/` — harness-only repo-root resolution and card rendering.
 
 ## Rules
 
 1. It runs a fixed set of commands, not an open-ended agent loop.
 2. The UIs show the current state of each thread, not full transcripts.
-3. Dependencies point inward — `gateway/` imports only core, shared, and node.
+3. Dependencies point inward — `packages/gateway/` imports only core and node/runtime APIs.
 
 ## Ranking
 

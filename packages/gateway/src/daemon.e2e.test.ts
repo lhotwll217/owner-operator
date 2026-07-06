@@ -1,13 +1,13 @@
 // End-to-end test of the daemon: state endpoints, done-persist through the daemon's own
 // reconcile, SSE push, client discovery, schedules (validation, run-now, bookkeeping), and
 // the needs-you event trigger. Fake scan seam, ephemeral port, no model.
-//   npm run test:daemon    (from harness/)
+//   npm run test:daemon    (from packages/gateway/)
 
 import assert from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DaemonEvent, DaemonInfo, ScanRow } from "@owner-operator/core";
-import { fakeScanRow, tempOoHome, waitFor } from "../../test/helpers";
+import { fakeScanRow, tempOoHome, waitFor } from "../test/helpers";
 
 const { dir, cleanup } = tempOoHome("oo-daemon");
 

@@ -25,13 +25,13 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | File | Tier | Covers |
 |------|------|--------|
 | `packages/core/src/*.test.ts` | unit | resolve, status, sidebar, blacklist, session-sources, gui-hosts, settings |
-| `harness/src/gateway/store.test.ts`, `threads-db.test.ts` | unit | store seams, injected clock |
-| `harness/src/gateway/gateway.boundaries.test.ts` | unit | dependency rule: gateway imports no pi, no agent/tui/cli |
-| `harness/src/gateway/poller.integration.test.ts` | integration | real poller + store; done-status regression |
-| `harness/src/gateway/poller.scan.integration.test.ts` | integration | real scan path → `ScanRow` mapping |
+| `packages/gateway/src/store.test.ts`, `threads-db.test.ts` | unit | store seams, injected clock |
+| `packages/gateway/src/gateway.boundaries.test.ts` | unit | dependency rule: gateway imports no pi, no harness/UI |
+| `packages/gateway/src/poller.integration.test.ts` | integration | real poller + store; done-status regression |
+| `packages/gateway/src/poller.scan.integration.test.ts` | integration | real scan path → `ScanRow` mapping |
 | `harness/test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
-| `harness/src/gateway/daemon.e2e.test.ts` | e2e | in-process daemon, ephemeral port, SSE, schedules, triggers (fake scan seam) |
-| `harness/src/gateway/poller.smoke.ts` | smoke | "today" digest against the live machine |
+| `packages/gateway/src/daemon.e2e.test.ts` | e2e | in-process daemon, ephemeral port, SSE, schedules, triggers (fake scan seam) |
+| `packages/gateway/src/poller.smoke.ts` | smoke | "today" digest against the live machine |
 | `harness/src/agent/agent.behavior.ts` | live | real agent; asserts the `Thread[]` contract, not content |
 
 ## Layout
@@ -56,7 +56,8 @@ Committed fixtures must be sanitized: no personal paths, repos, or names.
 ```sh
 npm test                                              # hermetic: unit + integration + e2e
 npm run typecheck                                     # tsc across workspaces
+npm run -w @owner-operator/gateway test:integration   # gateway tier
 npm run -w @owner-operator/harness test:integration   # one tier
-npm run -w @owner-operator/harness poll:smoke         # smoke — reads your live sessions
+npm run -w @owner-operator/gateway poll:smoke         # smoke — reads your live sessions
 npm run -w @owner-operator/harness test:agent         # live — needs model auth, paid
 ```

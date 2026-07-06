@@ -37,8 +37,9 @@ Either one starts the background daemon.
 
 ## The daemon
 
-`oo daemon` watches your sessions and serves both UIs. The terminals start it automatically;
-run it yourself when you only want the widget.
+`oo daemon` runs the gateway from `packages/gateway`: it watches your sessions, owns the
+state store, and serves both UIs. The terminals start it automatically; run it yourself when
+you only want the widget.
 
 ## How it works
 

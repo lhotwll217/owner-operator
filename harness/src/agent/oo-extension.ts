@@ -14,7 +14,7 @@ import {
   type MessageRenderer,
 } from "@earendil-works/pi-coding-agent";
 import { buildCardsBlock } from "../shared/cards";
-import { resolveBackend } from "../gateway/client";
+import { resolveBackend } from "@owner-operator/gateway/client";
 import {
   numberThreads,
   toSidebarThreads,

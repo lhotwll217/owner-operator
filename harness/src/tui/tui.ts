@@ -27,8 +27,8 @@ import { SidebarList } from "./sidebar";
 import { Screen, Columns, ChatPane } from "./screen";
 import { Block, StatusLine, StatusFooter, PromptEditor, type FooterData } from "./chat";
 import { readClipboardImage } from "./clipboard";
-import { StatusPoller } from "../gateway/poller";
-import { resolveBackend } from "../gateway/client";
+import { StatusPoller } from "@owner-operator/gateway/poller";
+import { resolveBackend } from "@owner-operator/gateway/client";
 
 if (!process.stdout.isTTY) {
   console.error('Owner Operator TUI needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo "question"` for a one-shot.');
