@@ -24,6 +24,7 @@ import {
   type SidebarThread,
   type StatusSnapshot,
 } from "@owner-operator/core";
+import { registerBlacklistAwareFileTools } from "./privacy-tools";
 
 // Custom message types we render. The model/agent never sees these — they're display-only
 // entries we append, rendered by the renderers registered below.
@@ -62,6 +63,7 @@ function sendCards(pi: ExtensionAPI, threads: Thread[]): void {
 }
 
 export const ownerOperatorExtension: ExtensionFactory = (pi: ExtensionAPI) => {
+  registerBlacklistAwareFileTools(pi);
   pi.registerMessageRenderer(CARDS, cardsRenderer);
   pi.registerMessageRenderer(NOTICE, noticeRenderer);
 

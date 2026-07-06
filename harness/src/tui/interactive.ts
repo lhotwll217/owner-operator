@@ -74,6 +74,6 @@ initTheme(runtime.services.settingsManager.getTheme(), true);
 // Open on the same fresh triage the branded TUI runs at launch, so both surfaces test the
 // identical first turn.
 const interactive = new InteractiveMode(runtime, {
-  initialMessage: "What's ongoing today? Read get_current_session_state for the authoritative row set, run the scan-active-transcripts skill for message samples, then triage with present_threads — every active row, merged with anything new the scan found, most-urgent first.",
+  initialMessage: "What's ongoing today? Read get_current_session_state for the authoritative row set, call scan_active_transcripts for message samples, then triage with present_threads — every active row, merged with anything new the scan found, most-urgent first.",
 });
 await interactive.run();

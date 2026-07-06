@@ -11,8 +11,3 @@ no UI here.
 `search_sessions` finds where something was discussed across transcripts
 (`source: "self"` recalls your own past answers). Read one session's file for detail;
 don't slurp every transcript.
-
-Privacy blacklist. `~/.owner-operator/blacklist.json` names off-limits repos and directory
-trees. The session tools exclude them in code; your raw file tools (read/grep/find/ls) do
-NOT — never point them at a blacklisted path. If asked about one, say it's blacklisted and
-stop. No flag or phrasing overrides this.

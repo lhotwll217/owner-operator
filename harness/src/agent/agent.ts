@@ -24,6 +24,7 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import { displayTopic, numberThreads, toSidebarThreads, type SidebarThread, type Thread } from "@owner-operator/core";
 import { resolveBackend } from "../gateway/client";
 import { repoRoot } from "../shared/repo-root";
+import { createBlacklistAwareFileTools } from "./privacy-tools";
 
 export { repoRoot };
 
@@ -207,12 +208,6 @@ export interface OwnerOperatorSession {
 // interactive) so they can't drift: one prompt, one set of custom tools, one allowlist.
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "harness", "prompts", "owner-operator.md"), "utf8");
-export const ownerOperatorCustomTools = [presentThreadsTool, getCurrentSessionStateTool, markThreadDoneTool];
-// read-only + bash to run the skills, plus our structured-output/owner tools. (This is an
-// allowlist, so custom tools must be listed or they would be disabled.) schedule_prompt comes
-// from the pi-schedule-prompt package (.pi/settings.json "packages") — lets the owner say
-// "re-triage every 15 min" or "remind me at 3pm"; jobs only fire while a session is open.
-export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_current_session_state", "mark_thread_done", "schedule_prompt"];
 
 // Every owner chat is saved (and labeled with its surface) like any other oo thread;
 // `ephemeral` is the opt-out for harness tests that shouldn't leave files in OO_HOME.
@@ -344,6 +339,32 @@ export const searchSessionsTool = defineTool({
   },
 });
 
+const privacyFileTools = createBlacklistAwareFileTools();
+
+export const ownerOperatorCustomTools = [
+  ...privacyFileTools,
+  presentThreadsTool,
+  getCurrentSessionStateTool,
+  markThreadDoneTool,
+  scanActiveTranscriptsTool,
+  searchSessionsTool,
+];
+// Read-only file tools are blacklist-aware overrides. Fixed scan/search tools replace
+// general bash for transcript work; schedule_prompt comes from pi-schedule-prompt
+// (.pi/settings.json "packages").
+export const ownerOperatorTools = [
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "present_threads",
+  "get_current_session_state",
+  "mark_thread_done",
+  "scan_active_transcripts",
+  "search_sessions",
+  "schedule_prompt",
+];
+
 // ---- Neutral runtime for headless agent-to-agent use (`oo one-shot`) ----------
 // pi's runPrintMode needs an AgentSessionRuntime (not the raw session createAgentSession
 // returns), so we build one with pi's own factory — the same shape pi's main.js uses.
@@ -353,7 +374,12 @@ export const searchSessionsTool = defineTool({
 export const neutralAgentPrompt = (): string =>
   readFileSync(join(repoRoot, "harness", "prompts", "one-shot.md"), "utf8");
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_current_session_state", "scan_active_transcripts", "search_sessions"];
-export const neutralAgentCustomTools = [getCurrentSessionStateTool, scanActiveTranscriptsTool, searchSessionsTool];
+export const neutralAgentCustomTools = [
+  ...privacyFileTools,
+  getCurrentSessionStateTool,
+  scanActiveTranscriptsTool,
+  searchSessionsTool,
+];
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
 // EVERY oo session — owner surfaces (TUI, plain chat, pi interactive) and the one-shot surface

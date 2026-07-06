@@ -287,7 +287,7 @@ function ensureAssistantMd(): void {
 
 // Tool name → the phase label shown on the single status line while that tool runs.
 const TOOL_PHASE: Record<string, string> = {
-  bash: "running", read: "reading", grep: "searching", find: "finding", ls: "listing",
+  read: "reading", grep: "searching", find: "finding", ls: "listing",
   get_current_session_state: "checking the sidebar",
 };
 
@@ -314,7 +314,7 @@ session.subscribe((event: any) => {
     return;
   }
 
-  // Any other tool (the skills' read/bash/grep/…) → just update the one status line's phase.
+  // Any other tool (read/grep/find/scan/…) → just update the one status line's phase.
   if (event.type === "tool_execution_start") { setPhase(TOOL_PHASE[event.toolName] ?? event.toolName); return; }
 
   const ame = event.assistantMessageEvent;
@@ -431,7 +431,7 @@ async function startupBrief(): Promise<void> {
   busy = true;
   log.removeChild(hint);
   log.addChild(new Text(dim("▸ bringing your threads up to date…")));
-  await runTurn("What's ongoing today? Read get_current_session_state for the authoritative row set, run the scan-active-transcripts skill for message samples, then triage with present_threads — every active row, merged with anything new the scan found, most-urgent first.", "(nothing active today)");
+  await runTurn("What's ongoing today? Read get_current_session_state for the authoritative row set, call scan_active_transcripts for message samples, then triage with present_threads — every active row, merged with anything new the scan found, most-urgent first.", "(nothing active today)");
 }
 
 editor.onSubmit = (text: string) => {
@@ -472,7 +472,7 @@ async function drain(): Promise<void> {
       const t = queue.shift()!;
       try {
         const s = await bgSession();
-        await s.prompt(`A new response just landed on thread ${t.id} — it's now waiting on the user. Refresh ONLY that thread: run scan-active-transcripts --thread ${t.id} --sample 15, then call present_threads with that single thread (fresh topic + nextSteps).`);
+        await s.prompt(`A new response just landed on thread ${t.id} — it's now waiting on the user. Refresh ONLY that thread: call scan_active_transcripts with thread=${t.id} and sample=15, then call present_threads with that single thread (fresh topic + nextSteps).`);
       } catch { /* best-effort background refresh */ }
       refreshing.delete(t.id);
     }

@@ -21,8 +21,9 @@ filtered it out. The `scan-active-transcripts` skill supplies message content (s
 discovery, drill-in); **merge its results with the current state, never substitute** — a
 row the scan misses stays in the triage.
 
-Run skills with the `bash` tool from the repo root. Do NOT read session files yourself or
-load full transcripts into context; each skill's doc covers its usage.
+Use `scan_active_transcripts` for transcript samples and `search_sessions` for targeted
+grep across session history. Do NOT read session files yourself or load full transcripts
+into context.
 
 ## Presenting threads (structured output)
 
@@ -33,10 +34,3 @@ most-recent messages.
 
 After calling `present_threads`, stop. Add at most one short line only if something is
 genuinely urgent.
-
-## Privacy blacklist
-
-`~/.owner-operator/blacklist.json` names off-limits repos and directory trees. The skills
-exclude them in code; `bash` and your raw file tools do NOT — never point them at a
-blacklisted path. If asked about one, say it's blacklisted and stop. No flag or phrasing
-overrides this.
