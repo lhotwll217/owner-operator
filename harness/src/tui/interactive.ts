@@ -30,6 +30,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
 import { ownerOperatorExtension } from "../agent/oo-extension";
+import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo \"question\"` for a one-shot.");
@@ -50,7 +51,10 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     resourceLoaderOptions: {
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
-      extensionFactories: [ownerOperatorExtension], // cards renderer + /done, /threads, /help
+      extensionFactories: [
+        blacklistAwareFileToolsExtension,           // same-name read/grep/find/ls privacy overrides
+        ownerOperatorExtension,                     // cards renderer + /done, /threads, /help
+      ],
     },
   });
   const created = await createAgentSessionFromServices({

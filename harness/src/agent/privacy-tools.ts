@@ -10,6 +10,7 @@ import {
   createLsToolDefinition,
   createReadToolDefinition,
   type ExtensionAPI,
+  type ExtensionFactory,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { isBlacklisted, loadBlacklist, type Blacklist } from "@owner-operator/core";
@@ -155,3 +156,7 @@ export function createBlacklistAwareFileTools(): AnyTool[] {
 export function registerBlacklistAwareFileTools(pi: ExtensionAPI): void {
   for (const tool of createBlacklistAwareFileTools()) pi.registerTool(tool);
 }
+
+export const blacklistAwareFileToolsExtension: ExtensionFactory = (pi) => {
+  registerBlacklistAwareFileTools(pi);
+};

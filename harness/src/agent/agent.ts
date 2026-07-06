@@ -24,7 +24,7 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import { displayTopic, numberThreads, toSidebarThreads, type SidebarThread, type Thread } from "@owner-operator/core";
 import { resolveBackend } from "../gateway/client";
 import { repoRoot } from "../shared/repo-root";
-import { createBlacklistAwareFileTools } from "./privacy-tools";
+import { blacklistAwareFileToolsExtension } from "./privacy-tools";
 
 export { repoRoot };
 
@@ -226,6 +226,7 @@ export async function createOwnerOperatorSession(
     agentDir: getAgentDir(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
+    extensionFactories: [blacklistAwareFileToolsExtension],
   });
   await loader.reload();
   const { skills } = loader.getSkills();
@@ -339,19 +340,17 @@ export const searchSessionsTool = defineTool({
   },
 });
 
-const privacyFileTools = createBlacklistAwareFileTools();
-
 export const ownerOperatorCustomTools = [
-  ...privacyFileTools,
   presentThreadsTool,
   getCurrentSessionStateTool,
   markThreadDoneTool,
   scanActiveTranscriptsTool,
   searchSessionsTool,
 ];
-// Read-only file tools are blacklist-aware overrides. Fixed scan/search tools replace
-// general bash for transcript work; schedule_prompt comes from pi-schedule-prompt
-// (.pi/settings.json "packages").
+// Read-only file tools are blacklist-aware overrides registered by
+// blacklistAwareFileToolsExtension. Fixed scan/search tools replace general bash for
+// transcript work; schedule_prompt comes from pi-schedule-prompt (.pi/settings.json
+// "packages").
 export const ownerOperatorTools = [
   "read",
   "grep",
@@ -375,7 +374,6 @@ export const neutralAgentPrompt = (): string =>
   readFileSync(join(repoRoot, "harness", "prompts", "one-shot.md"), "utf8");
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_current_session_state", "scan_active_transcripts", "search_sessions"];
 export const neutralAgentCustomTools = [
-  ...privacyFileTools,
   getCurrentSessionStateTool,
   scanActiveTranscriptsTool,
   searchSessionsTool,
@@ -467,6 +465,7 @@ export async function createNeutralAgentRuntime(sessionManager: SessionManager =
         resourceLoaderOptions: {
           systemPromptOverride: () => prompt,
           appendSystemPromptOverride: () => [],
+          extensionFactories: [blacklistAwareFileToolsExtension],
           noExtensions: true, // headless: skip interactive extensions (e.g. the MCP statusbar adapter)
         },
       });

@@ -18,13 +18,13 @@ for (const t of ["read", "grep", "find", "ls", "present_threads", "get_current_s
   assert.ok(ownerOperatorTools.includes(t), `owner tools must include ${t}`);
 }
 
-// Every allowlisted custom tool ships (so the allowlist can't reference a missing tool), and
-// the raw file tools are SDK overrides so the blacklist is code-enforced in one-shot too.
-for (const t of ["read", "grep", "find", "ls", "get_current_session_state", "scan_active_transcripts", "search_sessions"]) {
+// Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).
+// The raw file tools are same-name extension overrides, covered by privacy-tools.test.
+for (const t of ["get_current_session_state", "scan_active_transcripts", "search_sessions"]) {
   assert.ok(neutralAgentCustomTools.some((tool) => tool.name === t), `neutral custom tools must include ${t}`);
 }
-for (const t of ["read", "grep", "find", "ls", "present_threads", "get_current_session_state", "mark_thread_done", "scan_active_transcripts", "search_sessions"]) {
+for (const t of ["present_threads", "get_current_session_state", "mark_thread_done", "scan_active_transcripts", "search_sessions"]) {
   assert.ok(ownerOperatorCustomTools.some((tool) => tool.name === t), `owner custom tools must include ${t}`);
 }
 
-process.stdout.write("ok — session tool allowlists: no shell/write tools; raw file tools are blacklist-aware overrides\n");
+process.stdout.write("ok — session tool allowlists: no shell/write tools; raw file tools are extension-owned overrides\n");
