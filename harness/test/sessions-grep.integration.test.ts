@@ -49,7 +49,7 @@ try {
   writeSession(join(home, ".claude", "projects", "misc"), cwdId, cwdCwd);
 
   // oo's own threads (pi session format + oo-provenance labels) in the separate self dir:
-  // one from the agent channel, one from the TUI.
+  // one from the one-shot surface, one from the TUI.
   const selfDir = join(ooHome, "sessions");
   mkdirSync(selfDir, { recursive: true });
   const provenance = (surface: string, extra: Record<string, unknown> = {}) =>

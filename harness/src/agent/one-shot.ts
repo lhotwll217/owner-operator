@@ -1,5 +1,5 @@
-// Owner Operator — `oo one-shot "<question>"`: THE agent-to-agent channel. A neutral
-// read-only session (agent-channel prompt, no shell, scan/search skills), one prompt in →
+// Owner Operator — `oo one-shot "<question>"`: THE agent-to-agent surface. A neutral
+// read-only session (one-shot prompt, no shell, scan/search skills), one prompt in →
 // the assistant's final text on stdout → exit. No protocol to speak, no channel to hold
 // open; read-only is enforced at the tool layer (neutralAgentTools has no bash/edit/write).
 //

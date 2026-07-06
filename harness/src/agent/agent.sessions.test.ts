@@ -18,7 +18,7 @@ const toplevel = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: 
 const repo = basename((toplevel.status === 0 && toplevel.stdout.trim()) || process.cwd());
 
 const p = ooProvenance("one-shot", "caller-session-123");
-assert.equal(p.origin, "agent", "one-shot is the agent channel");
+assert.equal(p.origin, "agent", "one-shot is the agent-facing surface");
 assert.equal(p.fromSession, "caller-session-123", "--from-session lands in provenance");
 assert.equal(p.callerRepo, repo, "caller repo derived from the invoking git checkout");
 assert.equal(ooProvenance("tui").origin, "owner", "tui is an owner surface");

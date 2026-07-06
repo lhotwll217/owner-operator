@@ -277,7 +277,7 @@ function readModelLabel(): string {
   return modelLabel;
 }
 
-// ---- Read-only skill tools for the headless agent channel ---------------------
+// ---- Read-only skill tools for the headless one-shot surface ---------------------
 // Run the specific scan/search scripts (which only READ local session files, and enforce the
 // privacy blacklist) instead of exposing a general shell. Fixed script path + typed args passed
 // through execFile (no shell) = no arbitrary commands.
@@ -351,12 +351,12 @@ export const searchSessionsTool = defineTool({
 // (no bash/shell) since it's an agent-facing channel: a neutral prompt, read-only tools only
 // (file reads + the scan/search skills + get_current_session_state), and NO present_threads.
 export const neutralAgentPrompt = (): string =>
-  readFileSync(join(repoRoot, "harness", "prompts", "agent-channel.md"), "utf8");
+  readFileSync(join(repoRoot, "harness", "prompts", "one-shot.md"), "utf8");
 export const neutralAgentTools = ["read", "grep", "find", "ls", "get_current_session_state", "scan_active_transcripts", "search_sessions"];
 export const neutralAgentCustomTools = [getCurrentSessionStateTool, scanActiveTranscriptsTool, searchSessionsTool];
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
-// EVERY oo session — owner surfaces (TUI, plain chat, pi interactive) and the agent channel
+// EVERY oo session — owner surfaces (TUI, plain chat, pi interactive) and the one-shot surface
 // (one-shot) — persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
 // so the poller never scans oo's chatter as if it were one of the owner's coding sessions.
 // This module owns that policy: callers build managers through the helpers below, which bake
@@ -375,7 +375,7 @@ export const ooSessionsDir = (): string => join(ooHome(), "sessions");
 export type OoSurface = "tui" | "chat" | "interactive" | "one-shot";
 export interface OoProvenance {
   surface: OoSurface;
-  origin: "owner" | "agent"; // owner-facing surface vs the agent-to-agent channel
+  origin: "owner" | "agent"; // owner-facing surface vs the agent-facing one-shot
   callerCwd: string; // where the process was invoked from (the launcher doesn't cd)
   callerRepo: string; // basename of the caller's git repo, or of the cwd outside one
   fromSession?: string; // audit: the coding session that called us, when it says so

@@ -81,7 +81,7 @@ has no parser for those formats yet, so they're left out rather than mis-read.)
 
 `self` targets Owner Operator's OWN past threads, stored separately from the owner's coding
 sessions in `<OO_HOME>/sessions` (default `~/.owner-operator/sessions`). EVERY oo surface
-saves there — owner chats (`tui`, plain `chat`, pi `interactive`) and the agent channel
+saves there — owner chats (`tui`, plain `chat`, pi `interactive`) and the one-shot surface
 (`one-shot`) — and every invocation stamps an `oo-provenance` entry: the surface,
 owner-vs-agent origin, the caller's cwd + repo name, and (when the caller identifies itself
 via `--from-session` / `OO_FROM_SESSION`) the coding session id that made the call — an
