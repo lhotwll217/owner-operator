@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Owner Operator launcher — TypeScript runtime via tsx (pi SDK is the engine).
-#   ./harness/oo                      → branded TUI (interactive, pi-tui)
-#   ./harness/oo -i | --interactive   → pi's STOCK interactive mode, our agent config (A/B surface)
-#   OO_INTERACTIVE=1 ./harness/oo     → same, via env
+#   ./harness/oo                      → chat (pi's stock interactive mode, our agent config)
+#   ./harness/oo --tui                → branded TUI with the pinned sidebar (A/B surface)
+#   OO_TUI=1 ./harness/oo             → same, via env
 #   ./harness/oo "what's ongoing?"    → plain one-shot
 #   ./harness/oo one-shot "question"  → single agent-to-agent turn (read-only channel), text out;
 #                                       --continue / --session <id> resume a persisted thread
@@ -18,23 +18,25 @@ while [ -h "$SOURCE" ]; do
 done
 DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 
-# Interactive mode: an explicit -i/--interactive flag (consumed here, not forwarded) or
-# OO_INTERACTIVE=1. Otherwise: branded TUI when run bare, plain oo for a one-shot question.
-INTERACTIVE="${OO_INTERACTIVE:-}"
-if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
-  INTERACTIVE=1
+# Interactive mode is the default. The branded TUI is opt-in: an explicit --tui flag
+# (consumed here, not forwarded) or OO_TUI=1. -i/--interactive stays as a no-op alias.
+TUI="${OO_TUI:-}"
+if [ "$1" = "--tui" ]; then
+  TUI=1
+  shift
+elif [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
   shift
 fi
 
 if [ "$1" = "one-shot" ]; then
   ENTRY="$DIR/src/agent/one-shot.ts"     # single agent-to-agent turn on the same read-only channel
   shift                            # drop the subcommand; the rest is the prompt
-elif [ -n "$INTERACTIVE" ]; then
-  ENTRY="$DIR/src/tui/interactive.ts"
+elif [ -n "$TUI" ]; then
+  ENTRY="$DIR/src/tui/tui.ts"
 elif [ "$#" -gt 0 ]; then
   ENTRY="$DIR/src/cli/oo.ts"
 else
-  ENTRY="$DIR/src/tui/tui.ts"
+  ENTRY="$DIR/src/tui/interactive.ts"
 fi
 
 # Prefer the checkout's tsx (workspace-hoisted to repo root); fall back to npx.

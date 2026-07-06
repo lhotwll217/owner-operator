@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// get-active-threads — deterministic, zero-install scan of local CLI agent sessions.
+// scan-active-transcripts — deterministic, zero-install scan of local CLI agent sessions.
 //
 // Reads the KNOWN_SESSION_SOURCES (claude, codex, cursor, posthog-code, pi, opencode,
 // antigravity, grok-build — the canonical list lives in packages/core/src/session-sources.mjs)
@@ -14,7 +14,7 @@
 // marked done stay hidden until a newer message wakes them; `--include-done` audits them.
 //
 // Usage:
-//   node get-active-threads.mjs [--since 24h|7d|today|2026-06-04] [--sample 4] [--thread <id>]
+//   node scan-active-transcripts.mjs [--since 24h|7d|today|2026-06-04] [--sample 4] [--thread <id>]
 //      --since default = owner's settings.json `activeWindow` (rolling "1d" if unset)
 //                               [--limit 40] [--all] [--include-done] [--json] [--truncate 280]
 //   --sample N       keeps the first N + most-recent N messages of each thread

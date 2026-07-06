@@ -1,10 +1,11 @@
-// Owner Operator — pi's STOCK interactive mode, wired to OUR agent config. A second frontend,
-// flagged on, to A/B against the branded TUI (tui.ts): same system prompt, skills, tool
-// allowlist, custom tools, and model — but pi's native chat shell (its Editor with slash-command
+// Owner Operator — pi's STOCK interactive mode, wired to OUR agent config. The DEFAULT
+// terminal surface: same system prompt, skills, tool allowlist, custom tools, and model as
+// the branded TUI (tui.ts), but pi's native chat shell (its Editor with slash-command
 // autocomplete + history, FooterComponent, message/tool components, theme) instead of our
-// hand-rolled one. The branded TUI stays the default; this is the "use the shared pattern" surface.
+// hand-rolled one. The branded TUI (--tui) is the A/B surface — its pinned sidebar is its
+// reason to exist.
 //
-//   ./harness/oo --interactive    (alias -i)    ·    OO_INTERACTIVE=1 ./harness/oo
+//   ./harness/oo    (bare — this is the default surface)
 //
 // Built by mirroring pi's own main.ts runtime wiring — createAgentSessionServices →
 // createAgentSessionFromServices → createAgentSessionRuntime → new InteractiveMode(runtime).run()
@@ -31,7 +32,7 @@ import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustom
 import { ownerOperatorExtension } from "../agent/oo-extension";
 
 if (!process.stdout.isTTY) {
-  console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./harness/oo --interactive` in a real terminal, or `./harness/oo \"question\"` for a one-shot.");
+  console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./harness/oo` in a real terminal, or `./harness/oo \"question\"` for a one-shot.");
   process.exit(1);
 }
 
@@ -73,6 +74,6 @@ initTheme(runtime.services.settingsManager.getTheme(), true);
 // Open on the same fresh triage the branded TUI runs at launch, so both surfaces test the
 // identical first turn.
 const interactive = new InteractiveMode(runtime, {
-  initialMessage: "What's ongoing today? Run get-active-threads, then triage every active thread with present_threads, most-urgent first.",
+  initialMessage: "What's ongoing today? Read get_current_session_state for the authoritative row set, run the scan-active-transcripts skill for message samples, then triage with present_threads — every active row, merged with anything new the scan found, most-urgent first.",
 });
 await interactive.run();

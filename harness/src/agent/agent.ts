@@ -32,7 +32,7 @@ export { repoRoot };
 // the TUI renders the payload as cards. This is the "structured output, rendered
 // differently" path — the model fills the fields, the surface decides how to show them.
 const ThreadCard = Type.Object({
-  id: Type.String({ description: "Stable session id — copy the `id` from the digest verbatim (lets the sidebar match this thread)" }),
+  id: Type.String({ description: "Stable session id — copy the `id` from the digest verbatim (lets the UI match this thread)" }),
   topic: Type.String({ description: "Short title of the SPECIFIC work — never repeat the repo or app name (the card shows both separately); spend the title on what's actually happening" }),
   priority: Type.Integer({ minimum: 1, maximum: 5, description: "Priority 5 (highest — needs the owner now) down to 1 (lowest)" }),
   summary: Type.String({ description: "One SHORT, scannable sentence on current state (≤ ~15 words) — the gist, not the full story" }),
@@ -52,14 +52,14 @@ const MarkThreadDoneParams = Type.Object({
   }))),
   indexes: Type.Optional(Type.Array(Type.Integer({
     minimum: 1,
-    description: "Current visible sidebar row numbers.",
+    description: "Current visible row numbers.",
   }))),
   queries: Type.Optional(Type.Array(Type.String({
-    description: "User-provided names, repos, or topic snippets to resolve against the current sidebar.",
+    description: "User-provided names, repos, or topic snippets to resolve against the current session state.",
   }))),
 });
 
-interface SidebarToolThread {
+interface SessionStateRow {
   index: number;
   id: string;
   repo: string;
@@ -74,7 +74,7 @@ interface SidebarToolThread {
 
 // Tools go through the Backend seam — the daemon when one runs (single writer), the
 // store directly otherwise. Same data either way; the tool can't tell and shouldn't.
-async function getCurrentSidebarThreads(): Promise<SidebarToolThread[]> {
+async function getCurrentSessionStateRows(): Promise<SessionStateRow[]> {
   const backend = await resolveBackend();
   const snapshot = (await backend.loadSnapshot()) ?? { polledAt: "", threads: [] };
   const rows = toSidebarThreads(snapshot, await backend.loadTriage());
@@ -100,21 +100,23 @@ const cleanIndexes = (indexes: readonly number[] | undefined): number[] =>
   unique((indexes ?? []).filter((n) => Number.isInteger(n) && n > 0));
 const cleanQueries = (queries: readonly string[] | undefined): string[] =>
   unique((queries ?? []).map((s) => s.trim()).filter(Boolean));
-const haystack = (t: SidebarToolThread): string =>
+const haystack = (t: SessionStateRow): string =>
   [t.id, t.repo, t.app, t.topic, t.summary, t.nextSteps].filter(Boolean).join(" ").toLowerCase();
 
-export const getSidebarThreadsTool = defineTool({
-  name: "get_sidebar_threads",
-  label: "Get sidebar threads",
+export const getCurrentSessionStateTool = defineTool({
+  name: "get_current_session_state",
+  label: "Get current session state",
   description:
-    "Read the current visible Owner Operator sidebar rows, including row number, id, repo, topic, status, priority, and next step.",
-  promptSnippet: "get_sidebar_threads — read current visible sidebar rows with index, id, topic, status, priority, and next step",
+    "Read the owner's current managed session state — the exact rows their widget shows, " +
+    "including row number, id, repo, topic, status, priority, and next step. The source of truth " +
+    "for what's ongoing.",
+  promptSnippet: "get_current_session_state — the owner's managed session state (source of truth for what's ongoing): index, id, topic, status, priority, next step",
   promptGuidelines: [
-    "Use get_sidebar_threads when the owner asks what is in the sidebar or wants current visible sidebar context.",
+    "For any 'what's ongoing / what needs me / what's active' triage, call get_current_session_state FIRST — it is the source of truth; every active row it returns must appear in the triage unless the owner explicitly filtered it out.",
   ],
   parameters: Type.Object({}),
   async execute() {
-    const threads = await getCurrentSidebarThreads();
+    const threads = await getCurrentSessionStateRows();
     return {
       content: [{ type: "text" as const, text: JSON.stringify({ threads }, null, 2) }],
       details: { threads },
@@ -126,20 +128,20 @@ export const markThreadDoneTool = defineTool({
   name: "mark_thread_done",
   label: "Mark thread done",
   description:
-    "Mark one or more current sidebar threads done by stable id, visible sidebar index, or name/topic query.",
-  promptSnippet: "mark_thread_done — set sidebar thread status to done by id, visible index, or name/topic query",
+    "Mark one or more threads in the current session state done by stable id, visible row number, or name/topic query.",
+  promptSnippet: "mark_thread_done — set a current thread's status to done by id, visible row number, or name/topic query",
   promptGuidelines: [
     "Use mark_thread_done only when the owner asks to mark threads done/resolved/inactive.",
     "Use ids when known, indexes for visible row numbers, or queries for user-provided names/topics.",
   ],
   parameters: MarkThreadDoneParams,
   async execute(_id, params) {
-    const sidebar = await getCurrentSidebarThreads();
-    const byIndex = new Map(sidebar.map((t) => [t.index, t]));
-    const indexTargets = cleanIndexes(params.indexes).map((n) => byIndex.get(n)).filter((t): t is SidebarToolThread => !!t);
+    const rows = await getCurrentSessionStateRows();
+    const byIndex = new Map(rows.map((t) => [t.index, t]));
+    const indexTargets = cleanIndexes(params.indexes).map((n) => byIndex.get(n)).filter((t): t is SessionStateRow => !!t);
     const queryResults = cleanQueries(params.queries).map((query) => {
       const q = query.toLowerCase();
-      const matches = sidebar.filter((t) => haystack(t).includes(q));
+      const matches = rows.filter((t) => haystack(t).includes(q));
       return { query, matches };
     });
     const queryTargets = queryResults
@@ -156,7 +158,7 @@ export const markThreadDoneTool = defineTool({
 
     const result = await (await resolveBackend()).markThreadsDone(ids);
 
-    const marked = result.marked.map((t) => sidebar.find((row) => row.id === t.id) ?? {
+    const marked = result.marked.map((t) => rows.find((row) => row.id === t.id) ?? {
       index: null,
       id: t.id,
       topic: t.topic,
@@ -205,12 +207,12 @@ export interface OwnerOperatorSession {
 // interactive) so they can't drift: one prompt, one set of custom tools, one allowlist.
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "harness", "prompts", "owner-operator.md"), "utf8");
-export const ownerOperatorCustomTools = [presentThreadsTool, getSidebarThreadsTool, markThreadDoneTool];
+export const ownerOperatorCustomTools = [presentThreadsTool, getCurrentSessionStateTool, markThreadDoneTool];
 // read-only + bash to run the skills, plus our structured-output/owner tools. (This is an
 // allowlist, so custom tools must be listed or they would be disabled.) schedule_prompt comes
 // from the pi-schedule-prompt package (.pi/settings.json "packages") — lets the owner say
 // "re-triage every 15 min" or "remind me at 3pm"; jobs only fire while a session is open.
-export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_sidebar_threads", "mark_thread_done", "schedule_prompt"];
+export const ownerOperatorTools = ["read", "grep", "find", "ls", "bash", "present_threads", "get_current_session_state", "mark_thread_done", "schedule_prompt"];
 
 // Every owner chat is saved (and labeled with its surface) like any other oo thread;
 // `ephemeral` is the opt-out for harness tests that shouldn't leave files in OO_HOME.
@@ -282,14 +284,18 @@ function readModelLabel(): string {
 const execFileAsync = promisify(execFile);
 const skillScript = (dir: string, file: string): string => join(repoRoot, ".agents", "skills", dir, file);
 
-export const scanSessionsTool = defineTool({
-  name: "scan_sessions",
-  label: "Scan sessions",
+export const scanActiveTranscriptsTool = defineTool({
+  name: "scan_active_transcripts",
+  label: "Scan active transcripts",
   description:
-    "Compact digest of the owner's active local agent sessions — topic, resolved state, and a sample " +
-    "of each thread's opening + most-recent messages. Read-only.",
-  promptSnippet: "scan_sessions — digest of active sessions (topic, state, message samples)",
-  promptGuidelines: ["Use scan_sessions for an overview of what's ongoing before reading individual session files."],
+    "Scan local session transcripts for a compact digest — topic, resolved state, and a sample " +
+    "of each thread's opening + most-recent messages. Read-only. Secondary to " +
+    "get_current_session_state: use it for message content, discovery, and drill-in; merge its " +
+    "results with the current session state, never substitute them for it.",
+  promptSnippet: "scan_active_transcripts — transcript digest (topic, state, message samples); secondary to get_current_session_state",
+  promptGuidelines: [
+    "Use scan_active_transcripts for message samples and drill-in AFTER get_current_session_state; merge its results with the current rows — a row the scan misses stays in the triage.",
+  ],
   parameters: Type.Object({
     since: Type.Optional(Type.String({ description: "Window: 24h | 7d | today | YYYY-MM-DD. Default today." })),
     sample: Type.Optional(Type.Integer({ minimum: 0, maximum: 40, description: "Messages kept per thread (first N + last N). Default 4." })),
@@ -298,7 +304,7 @@ export const scanSessionsTool = defineTool({
   async execute(_id, p) {
     const args = ["--since", p.since || "today", "--sample", String(p.sample ?? 4)];
     if (p.thread) args.push("--thread", p.thread);
-    const { stdout } = await execFileAsync(process.execPath, [skillScript("get-active-threads", "get-active-threads.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
+    const { stdout } = await execFileAsync(process.execPath, [skillScript("scan-active-transcripts", "scan-active-transcripts.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
     return { content: [{ type: "text" as const, text: stdout.trim() || "(no active threads)" }], details: undefined };
   },
 });
@@ -343,11 +349,11 @@ export const searchSessionsTool = defineTool({
 // returns), so we build one with pi's own factory — the same shape pi's main.js uses.
 // This session is deliberately NOT the triage persona, and is read-only at the TOOL layer
 // (no bash/shell) since it's an agent-facing channel: a neutral prompt, read-only tools only
-// (file reads + the scan/search skills + get_sidebar_threads), and NO present_threads.
+// (file reads + the scan/search skills + get_current_session_state), and NO present_threads.
 export const neutralAgentPrompt = (): string =>
   readFileSync(join(repoRoot, "harness", "prompts", "agent-channel.md"), "utf8");
-export const neutralAgentTools = ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"];
-export const neutralAgentCustomTools = [getSidebarThreadsTool, scanSessionsTool, searchSessionsTool];
+export const neutralAgentTools = ["read", "grep", "find", "ls", "get_current_session_state", "scan_active_transcripts", "search_sessions"];
+export const neutralAgentCustomTools = [getCurrentSessionStateTool, scanActiveTranscriptsTool, searchSessionsTool];
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
 // EVERY oo session — owner surfaces (TUI, plain chat, pi interactive) and the agent channel

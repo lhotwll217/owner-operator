@@ -1,4 +1,4 @@
-// Integration test of the scan skill — the REAL get-active-threads script against fake
+// Integration test of the scan skill — the REAL scan-active-transcripts script against fake
 // session files (Claude + Cursor + PostHog Code + pi + opencode + Antigravity + Grok Build),
 // a real throwaway git repo, and a fake status store. Proves: the canonical-resolver contract
 // at the skill surface (done excluded by default, --include-done audits, drill-in answers,
@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCAN = join(here, "..", "..", ".agents/skills/get-active-threads/get-active-threads.mjs");
+const SCAN = join(here, "..", "..", ".agents/skills/scan-active-transcripts/scan-active-transcripts.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "oo-scan-home-"));
 const ooHome = mkdtempSync(join(tmpdir(), "oo-scan-store-"));

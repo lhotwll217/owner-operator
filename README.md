@@ -29,8 +29,8 @@ Two terminal UIs on the same agent core, both for working across sessions: ask w
 on, pull context from several coding sessions at once, then drop into the right one.
 
 ```bash
-./harness/oo           # branded TUI: chat with your session list pinned beside it
-./harness/oo -i        # pi's stock chat, wired to our session cards and slash commands
+./harness/oo           # chat (default): pi's stock shell, wired to our session cards and slash commands
+./harness/oo --tui     # branded TUI: chat with your session list pinned beside it
 ```
 
 Either one starts the background daemon.

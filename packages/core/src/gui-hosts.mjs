@@ -1,6 +1,6 @@
 // Owner Operator — interactive GUI hosts. A session can be LAUNCHED from a GUI that drives an
 // agent over a non-interactive transport: Conductor and Superset open Claude/Codex via the
-// SDK; PostHog Code runs over ACP. The launch-mode classifier (get-active-threads.mjs) hides
+// SDK; PostHog Code runs over ACP. The launch-mode classifier (scan-active-transcripts.mjs) hides
 // SDK/CLI worker one-shots by default — right for headless `claude -p` and Task subagents, but
 // WRONG for these GUIs, whose sessions the owner opened deliberately. This is the single source
 // of truth for "which hosts are interactive", read by both the classifier and detectUi, so a

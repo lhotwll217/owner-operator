@@ -29,7 +29,7 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | `harness/src/gateway/gateway.boundaries.test.ts` | unit | dependency rule: gateway imports no pi, no agent/tui/cli |
 | `harness/src/gateway/poller.integration.test.ts` | integration | real poller + store; done-status regression |
 | `harness/src/gateway/poller.scan.integration.test.ts` | integration | real scan path → `ScanRow` mapping |
-| `harness/test/scan.integration.test.ts` | integration | real `get-active-threads.mjs` subprocess over session files + git |
+| `harness/test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
 | `harness/src/gateway/daemon.e2e.test.ts` | e2e | in-process daemon, ephemeral port, SSE, schedules, triggers (fake scan seam) |
 | `harness/src/gateway/poller.smoke.ts` | smoke | "today" digest against the live machine |
 | `harness/src/agent/agent.behavior.ts` | live | real agent; asserts the `Thread[]` contract, not content |

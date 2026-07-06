@@ -1,4 +1,5 @@
-// Owner Operator — branded terminal UI on pi-tui. A fixed-viewport layout (see screen.ts):
+// Owner Operator — branded terminal UI on pi-tui (opt-in: `oo --tui`; the default surface
+// is pi's stock interactive mode, interactive.ts). A fixed-viewport layout (see screen.ts):
 // a pinned left thread-sidebar beside the chat, with the editor at the bottom. The sidebar's CONTENT
 // is the active-thread digest (via the model-free poll); its titles/summary/priority are the
 // cached model triage (from present_threads) merged by id — the sidebar never calls the LLM.
@@ -287,7 +288,7 @@ function ensureAssistantMd(): void {
 // Tool name → the phase label shown on the single status line while that tool runs.
 const TOOL_PHASE: Record<string, string> = {
   bash: "running", read: "reading", grep: "searching", find: "finding", ls: "listing",
-  get_sidebar_threads: "checking the sidebar",
+  get_current_session_state: "checking the sidebar",
 };
 
 session.subscribe((event: any) => {
@@ -430,7 +431,7 @@ async function startupBrief(): Promise<void> {
   busy = true;
   log.removeChild(hint);
   log.addChild(new Text(dim("▸ bringing your threads up to date…")));
-  await runTurn("What's ongoing today? Run get-active-threads, then triage every active thread with present_threads, most-urgent first.", "(nothing active today)");
+  await runTurn("What's ongoing today? Read get_current_session_state for the authoritative row set, run the scan-active-transcripts skill for message samples, then triage with present_threads — every active row, merged with anything new the scan found, most-urgent first.", "(nothing active today)");
 }
 
 editor.onSubmit = (text: string) => {
@@ -471,7 +472,7 @@ async function drain(): Promise<void> {
       const t = queue.shift()!;
       try {
         const s = await bgSession();
-        await s.prompt(`A new response just landed on thread ${t.id} — it's now waiting on the user. Refresh ONLY that thread: run get-active-threads --thread ${t.id} --sample 15, then call present_threads with that single thread (fresh topic + nextSteps).`);
+        await s.prompt(`A new response just landed on thread ${t.id} — it's now waiting on the user. Refresh ONLY that thread: run scan-active-transcripts --thread ${t.id} --sample 15, then call present_threads with that single thread (fresh topic + nextSteps).`);
       } catch { /* best-effort background refresh */ }
       refreshing.delete(t.id);
     }

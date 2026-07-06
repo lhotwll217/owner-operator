@@ -1,5 +1,5 @@
 // Integration test of the poller's REAL scan path — the wiring the fake-seam tests can't reach.
-// StatusPoller with NO injected `scan` runs the actual get-active-threads skill (poller.ts's
+// StatusPoller with NO injected `scan` runs the actual scan-active-transcripts skill (poller.ts's
 // runScan) over a temp $HOME holding a real Claude session, then reconciles + persists. Proves
 // runScan spawns the scan, maps its JSON into ScanRow (notably `ui` → `app`, under
 // --sample 0 --include-done), and the snapshot reflects session data parsed off disk.
@@ -32,7 +32,7 @@ const msg = (type: "user" | "assistant", content: string, ts: string) =>
 mkdirSync(dirname(sessionFile), { recursive: true });
 // A real interactive terminal session has ≥2 user turns. The scan hides a single-turn bare
 // `claude` session as an indistinguishable `claude -p` one-shot (launch-mode rule in
-// get-active-threads.mjs), so a one-turn fixture would never surface.
+// scan-active-transcripts.mjs), so a one-turn fixture would never surface.
 writeFileSync(
   sessionFile,
   msg("user", "tighten the poll loop", at(20)) +
@@ -44,7 +44,7 @@ writeFileSync(
 try {
   const { StatusPoller } = await import("./poller");
 
-  // No `scan` seam → StatusPoller runs the REAL get-active-threads subprocess.
+  // No `scan` seam → StatusPoller runs the REAL scan-active-transcripts subprocess.
   const poller = new StatusPoller({ since: "7d", limit: 50 });
   const snap = await poller.poll();
   poller.stop();
@@ -57,7 +57,7 @@ try {
   assert.equal(t.state, "needs-you", "assistant yielded (end_turn) → needs-you");
   assert.ok(t.topic.includes("tighten the poll loop"), "topic carried from the first user turn");
 
-  process.stdout.write("ok — poller real scan path: get-active-threads → runScan → snapshot\n");
+  process.stdout.write("ok — poller real scan path: scan-active-transcripts → runScan → snapshot\n");
 } finally {
   cleanup();
   rmSync(home, { recursive: true, force: true });

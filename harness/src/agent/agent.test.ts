@@ -8,7 +8,7 @@ for (const forbidden of ["bash", "edit", "write", "present_threads", "mark_threa
 }
 
 // The read-only tools it needs are present.
-for (const t of ["read", "grep", "find", "ls", "get_sidebar_threads", "scan_sessions", "search_sessions"]) {
+for (const t of ["read", "grep", "find", "ls", "get_current_session_state", "scan_active_transcripts", "search_sessions"]) {
   assert.ok(neutralAgentTools.includes(t), `neutral tools must include ${t}`);
 }
 

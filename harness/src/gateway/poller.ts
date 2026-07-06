@@ -20,7 +20,7 @@ import { repoRoot } from "../shared/repo-root";
 import { loadSnapshot, saveSnapshot } from "./store";
 
 const execFileP = promisify(execFile);
-const SCAN = join(repoRoot, ".agents/skills/get-active-threads/get-active-threads.mjs");
+const SCAN = join(repoRoot, ".agents/skills/scan-active-transcripts/scan-active-transcripts.mjs");
 
 export type StatusListener = (snapshot: StatusSnapshot, diff: StatusDiff) => void;
 

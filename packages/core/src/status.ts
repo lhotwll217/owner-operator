@@ -27,7 +27,7 @@ export {
  */
 export type ThreadState = "needs-you" | "working" | "idle" | "done";
 
-/** The subset of a raw scan row (`get-active-threads --json`) the state machine needs. */
+/** The subset of a raw scan row (`scan-active-transcripts --json`) the state machine needs. */
 export interface ScanRow {
   id: string;
   source: string;
