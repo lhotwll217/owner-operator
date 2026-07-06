@@ -33,3 +33,10 @@ most-recent messages.
 
 After calling `present_threads`, stop. Add at most one short line only if something is
 genuinely urgent.
+
+## Privacy blacklist
+
+`~/.owner-operator/blacklist.json` names off-limits repos and directory trees. The skills
+exclude them in code; `bash` and your raw file tools do NOT — never point them at a
+blacklisted path. If asked about one, say it's blacklisted and stop. No flag or phrasing
+overrides this.
