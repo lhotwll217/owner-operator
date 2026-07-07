@@ -1,0 +1,64 @@
+# Owner Operator vs a naive session-search baseline (issue #31): does OO's composition —
+# its state DB as a locator + its neutral prompt — answer discovery/evidence questions at
+# >=parity correctness, ideally for less spend, versus a plain agent that only has grep?
+#
+# CONTROLLED: both arms run the SAME `oo` binary at the SAME model (.pi/settings.json,
+# codex gpt-5.5) against the SAME seeded fixture sandbox. They differ by exactly one thing:
+#   owner-operator — OO's shipped prompt + full toolset (query_database,
+#                    get_current_session_state, search_sessions, …)
+#   baseline       — a generic session-search prompt + ONLY search_sessions (the same grep
+#                    engine OO wraps). Set via OO_EVAL_BASELINE_PROMPT; see naive-agent.mjs.
+# Same framework + same model means the tool-call/token/correctness deltas are attributable
+# to OO's composition, not to a model or harness difference. (An earlier version compared
+# OO/gpt-5.5 against Claude Code/haiku — two variables at once; retired as unscientific,
+# and unrunnable anyway since pi has no Anthropic auth and `claude -p` can't run 5.5.)
+#
+# One chain, one case set: both arms attempt every case. The DB is one of OO's tools, so
+# there's no separate DB suite — the report breaks down by qtype to show WHERE OO reached
+# for query_database instead of grepping.
+#
+# Run:   npx promptfoo eval -c eval/promptfooconfig.yaml
+# Then:  node eval/compare.mjs                                  paired A/B breakdown
+#
+# Both arms run through `oo` (codex backend); only the grader uses `claude` (any capable
+# judge model works — it is not an arm). No API keys needed.
+
+description: Owner Operator vs naive session-search baseline — same model, correctness and spend
+
+prompts:
+  - '{{question}}'
+
+providers:
+  - id: file://providers/oo-agent.mjs
+    label: owner-operator
+    config: { timeoutMs: 600000 }
+  - id: file://providers/naive-agent.mjs
+    label: baseline
+    config: { timeoutMs: 600000 }
+
+defaultTest:
+  options:
+    provider: file://providers/claude-grader.mjs
+  assert:
+    # Correctness is graded per case (llm-rubric in cases.yaml).
+    # Soundness gate (#31 criterion 3): evidence answers must be read from a transcript,
+    # not an AI-written summary row. Fires ONLY on cases that declare expectToolAny, and
+    # ONLY on the owner-operator arm. It is NOT path-enforcement — locator/efficiency
+    # choices (DB-first on state questions) are observed in compare.mjs, never failed here.
+    # javascript-over-metadata: the documented path for a prose CLI that can't emit OTLP.
+    - type: javascript
+      value: file://asserts/tool-use.mjs
+      metric: tool_selection
+    # Efficiency telemetry as named scores (no native promptfoo assertion for tool-call
+    # count/token efficiency; cost/latency have absolute-threshold asserts, not ratios).
+    - type: javascript
+      value: file://asserts/efficiency.mjs
+      metric: efficiency_telemetry
+
+tests: file://cases.yaml
+
+# Resolved from the process cwd (repo root), not this file's dir.
+outputPath: eval/results/latest.json
+
+evaluateOptions:
+  maxConcurrency: 2

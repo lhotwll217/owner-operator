@@ -23,8 +23,9 @@
   the poll loop (scan → resolve thread state → store), runs schedules/triggers, and serves
   HTTP + SSE on 127.0.0.1. The widget, terminal, and session-state callers are thin clients over the
   protocol in `packages/core`.
-- **agent** (`src/agent/`) — the pi-based Operator session config: prompt, tools, skills,
-  model settings, and saved-session provenance. It is a gateway client.
+- **agent** (`src/agent/`) — the pi-based Operator session config: prompt, tools, model
+  settings, and saved-session provenance (the repo's `.agents/skills` are not injected —
+  the Operator's interface to them is its typed tools). It is a gateway client.
 - **CLI** (`src/cli/`) — terminal entrypoints: pi interactive mode for humans and headless
   single-turn calls for agents.
 - **core** (`packages/core/`) — the shared types every surface agrees on (sessions, threads,
@@ -52,6 +53,9 @@ core (packages/core) ← gateway (src/gateway) ← { src/agent, src/cli, widget,
 - `src/cli/` — terminal entrypoints only; no state ownership.
 - `src/prompts/` — Operator prompt text loaded by the agent core.
 - `src/shared/` — root-local utilities shared by the agent and CLI.
+- `eval/` — promptfoo harness proving OO's composition against a naive-baseline ablation
+  (both arms same `oo`/model, one variable) over synthetic fixtures. See
+  [eval/README.md](../eval/README.md).
 
 ## Rules
 

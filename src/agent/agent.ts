@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { resolveBackend } from "../gateway/client";
+import { describeTable, listTables, runQuery } from "../gateway/query-db";
 import { getCurrentSessionStateRows, type CurrentSessionStateRow } from "../gateway/session-state";
 import { repoRoot } from "../shared/repo-root";
 import { blacklistAwareFileToolsExtension } from "./privacy-tools";
@@ -52,13 +53,8 @@ export const getCurrentSessionStateTool = defineTool({
   name: "get_current_session_state",
   label: "Get current session state",
   description:
-    "Read the owner's current managed session state — the exact rows their widget shows, " +
-    "including row number, id, repo, topic, state, priority, and next step. The source of truth " +
-    "for what's ongoing.",
-  promptSnippet: "get_current_session_state — the owner's managed session state (source of truth for what's ongoing): index, id, topic, state, priority, next step",
-  promptGuidelines: [
-    "For any 'what's ongoing / what needs me / what's active' triage, call get_current_session_state FIRST — it is the source of truth; every active row it returns must appear in the triage unless the owner explicitly filtered it out.",
-  ],
+    "Read the owner's current session state — the exact rows their widget shows: row " +
+    "number, id, repo, topic, state, priority, next step.",
   parameters: Type.Object({}),
   async execute() {
     const threads = await getCurrentSessionStateRows();
@@ -73,12 +69,7 @@ export const markThreadDoneTool = defineTool({
   name: "mark_thread_done",
   label: "Mark thread done",
   description:
-    "Mark one or more threads in the current session state done by stable id, visible row number, or name/topic query.",
-  promptSnippet: "mark_thread_done — set a current thread's status to done by id, visible row number, or name/topic query",
-  promptGuidelines: [
-    "Use mark_thread_done only when the owner asks to mark threads done/resolved/inactive.",
-    "Use ids when known, indexes for visible row numbers, or queries for user-provided names/topics.",
-  ],
+    "Mark one or more threads in the current session state done, by stable id, visible row number, or name/topic query.",
   parameters: MarkThreadDoneParams,
   async execute(_id, params) {
     const directIds = cleanIds(params.ids);
@@ -124,7 +115,6 @@ export const markThreadDoneTool = defineTool({
 
 export interface OwnerOperatorSession {
   session: Awaited<ReturnType<typeof createAgentSession>>["session"];
-  skills: Array<{ name: string }>;
   modelLabel: string;
 }
 
@@ -144,7 +134,13 @@ export async function createOwnerOperatorSession(
   surface: "chat" | "interactive" = "chat",
   opts: OwnerOperatorSessionOptions = {},
 ): Promise<OwnerOperatorSession> {
-  const prompt = ownerOperatorPrompt();
+  // Eval-only: OO_EVAL_BASELINE_PROMPT swaps the Operator for a naive session-search agent
+  // — same binary, same model, same trace — so the eval's controlled arm differs from OO
+  // by exactly its prompt and toolset (no DB/state tools). Product runs never set it.
+  const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
+  const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
+  const customTools = baselinePrompt ? [searchSessionsTool] : ownerOperatorCustomTools;
+  const tools = baselinePrompt ? ["read", "search_sessions"] : ownerOperatorTools;
 
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
@@ -155,10 +151,12 @@ export async function createOwnerOperatorSession(
     agentDir: getAgentDir(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
+    // The repo's .agents/skills are script docs for headless callers and the poller; the
+    // Operator's interface to those scripts is its typed tools, so none inject here.
+    skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
     extensionFactories: [blacklistAwareFileToolsExtension],
   });
   await loader.reload();
-  const { skills } = loader.getSkills();
 
   const { session } = await createAgentSession({
     cwd: repoRoot,
@@ -167,8 +165,8 @@ export async function createOwnerOperatorSession(
     sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(repoRoot) : createOoSession(ooProvenance(surface))),
     authStorage,
     modelRegistry,
-    customTools: ownerOperatorCustomTools,
-    tools: ownerOperatorTools,
+    customTools,
+    tools,
   });
 
   // Extensions initialize their state on `session_start`, which pi's own modes emit via
@@ -178,7 +176,7 @@ export async function createOwnerOperatorSession(
   // job store. Pair with shutdownSessionExtensions before dispose.
   if (!opts.ephemeral) await session.bindExtensions({});
 
-  return { session, skills, modelLabel: readModelLabel() };
+  return { session, modelLabel: readModelLabel() };
 }
 
 /** Extension teardown (session_shutdown: cron auto-cleanup, timer stops) — pi's modes emit
@@ -209,57 +207,37 @@ function readModelLabel(): string {
 const execFileAsync = promisify(execFile);
 const skillScript = (dir: string, file: string): string => join(repoRoot, ".agents", "skills", dir, file);
 
-export const scanActiveTranscriptsTool = defineTool({
-  name: "scan_active_transcripts",
-  label: "Scan active transcripts",
-  description:
-    "Scan local session transcripts for a compact digest — topic, resolved state, and a sample " +
-    "of each thread's opening + most-recent messages. Read-only. Secondary to " +
-    "get_current_session_state: use it for message content, discovery, and drill-in; merge its " +
-    "results with the current session state, never substitute them for it.",
-  promptSnippet: "scan_active_transcripts — transcript digest (topic, state, message samples); secondary to get_current_session_state",
-  promptGuidelines: [
-    "Use scan_active_transcripts for message samples and drill-in AFTER get_current_session_state; merge its results with the current rows — a row the scan misses stays in the triage.",
-  ],
-  parameters: Type.Object({
-    since: Type.Optional(Type.String({ description: "Window: 24h | 7d | today | YYYY-MM-DD. Default today." })),
-    sample: Type.Optional(Type.Integer({ minimum: 0, maximum: 40, description: "Messages kept per thread (first N + last N). Default 4." })),
-    thread: Type.Optional(Type.String({ description: "Drill into ONE thread by id prefix; pair with a larger sample." })),
-  }),
-  async execute(_id, p) {
-    const args = ["--since", p.since || "today", "--sample", String(p.sample ?? 4)];
-    if (p.thread) args.push("--thread", p.thread);
-    const { stdout } = await execFileAsync(process.execPath, [skillScript("scan-active-transcripts", "scan-active-transcripts.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
-    return { content: [{ type: "text" as const, text: stdout.trim() || "(no active threads)" }], details: undefined };
-  },
-});
-
 export const searchSessionsTool = defineTool({
   name: "search_sessions",
   label: "Search sessions",
   description:
-    "Grep across local session transcripts, with bounded context around each hit. Read-only. " +
-    "Default search covers the owner's coding sessions. Set ownerOperator true to search " +
-    "Owner Operator's own stored sessions under OO_HOME.",
-  promptSnippet: "search_sessions — grep session transcripts with context around each hit; ownerOperator searches OO's own stored sessions",
-  promptGuidelines: [
-    "Use search_sessions to find where something was discussed across sessions.",
-    "Use ownerOperator true to recall what Owner Operator previously answered; it is searched by targeting <OO_HOME>/sessions from a typed sources file.",
-    "Use targetRoot when the owner asks to search one configured transcript folder; use targetType only to narrow parser/type.",
-  ],
+    "Read local session transcripts, two modes. grep (query): find literal text or a regex " +
+    "across transcripts, with bounded context messages around each hit. sample (sessionId): " +
+    "return one session's opening N and most-recent N messages plus its topic and state. " +
+    "Exactly one of query or sessionId. Read-only.",
   parameters: Type.Object({
-    query: Type.String({ description: "Literal text to find, or a JS regex when regex is true." }),
-    regex: Type.Optional(Type.Boolean({ description: "Treat query as a JavaScript regex." })),
-    ownerOperator: Type.Optional(Type.Boolean({ description: "Search Owner Operator's own stored sessions under OO_HOME." })),
-    targetType: Type.Optional(Type.String({ description: "all (default) | claude | codex. Optional parser/type narrowing, not a folder selector." })),
-    targetRoot: Type.Optional(Type.String({ description: "Configured transcript root to narrow to, preserving the parser mapping from the sources file." })),
-    since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD." })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Max matching messages. Default 20." })),
-    before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages before each hit. Default 1." })),
-    after: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages after each hit. Default 1." })),
+    query: Type.Optional(Type.String({ description: "grep mode: literal text to find, or a JS regex when regex is true." })),
+    sessionId: Type.Optional(Type.String({ description: "sample mode: session id (prefix ok) — returns the session's opening + most-recent messages." })),
+    sample: Type.Optional(Type.Integer({ minimum: 1, maximum: 40, description: "sample mode: messages kept from each end of the session. Default 4." })),
+    regex: Type.Optional(Type.Boolean({ description: "grep mode: treat query as a JavaScript regex." })),
+    ownerOperator: Type.Optional(Type.Boolean({ description: "grep mode: search Owner Operator's own stored sessions under OO_HOME instead of the owner's coding sessions." })),
+    targetType: Type.Optional(Type.String({ description: "grep mode: all (default) | claude | codex. Parser/type narrowing, not a folder selector." })),
+    targetRoot: Type.Optional(Type.String({ description: "grep mode: configured transcript root to narrow to, preserving the parser mapping from the sources file." })),
+    since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD. sample mode defaults to 7d." })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "grep mode: max matching messages. Default 20." })),
+    before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "grep mode: context messages before each hit. Default 1." })),
+    after: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "grep mode: context messages after each hit. Default 1." })),
   }),
   async execute(_id, p) {
-    const args = ["--query", p.query];
+    if (!!p.query === !!p.sessionId) throw new Error("search_sessions needs exactly one of query (grep) or sessionId (sample)");
+
+    if (p.sessionId) {
+      const args = ["--thread", p.sessionId, "--sample", String(p.sample ?? 4), "--since", p.since || "7d"];
+      const { stdout } = await execFileAsync(process.execPath, [skillScript("scan-active-transcripts", "scan-active-transcripts.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
+      return { content: [{ type: "text" as const, text: stdout.trim() || "(no session matched that id in the window)" }], details: undefined };
+    }
+
+    const args = ["--query", p.query!];
     if (p.regex) args.push("--regex");
     if (p.since) args.push("--since", p.since);
     if (p.targetRoot) args.push("--target-root", p.targetRoot);
@@ -283,24 +261,52 @@ export const searchSessionsTool = defineTool({
   },
 });
 
+export const queryDatabaseTool = defineTool({
+  name: "query_database",
+  label: "Query session database",
+  description:
+    "Run read-only SQL over the session state database (SQLite). Actions: list_tables " +
+    "(table names + row counts), describe_table (columns + CREATE statement), query " +
+    "(execute a SELECT; results capped at 200 rows). The connection is read-only; " +
+    "write statements fail.",
+  parameters: Type.Object({
+    action: Type.Union([Type.Literal("list_tables"), Type.Literal("describe_table"), Type.Literal("query")], {
+      description: "list_tables | describe_table | query.",
+    }),
+    table: Type.Optional(Type.String({ description: "Table name, for describe_table." })),
+    sql: Type.Optional(Type.String({ description: "SELECT statement, for query." })),
+  }),
+  async execute(_id, p) {
+    const asText = (value: unknown) => ({
+      content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
+      details: undefined,
+    });
+    if (p.action === "list_tables") return asText(listTables());
+    if (p.action === "describe_table") {
+      if (!p.table) throw new Error("describe_table needs a table name");
+      return asText(describeTable(p.table));
+    }
+    if (!p.sql) throw new Error("query needs a sql SELECT statement");
+    return asText(runQuery(p.sql));
+  },
+});
+
 export const ownerOperatorCustomTools = [
   getCurrentSessionStateTool,
   markThreadDoneTool,
-  scanActiveTranscriptsTool,
+  queryDatabaseTool,
   searchSessionsTool,
 ];
-// Read-only file tools are blacklist-aware overrides registered by
-// blacklistAwareFileToolsExtension. Fixed scan/search tools replace general bash for
-// transcript work; schedule_prompt comes from pi-schedule-prompt (.pi/settings.json
+// `read` is a blacklist-aware override registered by blacklistAwareFileToolsExtension —
+// the one general file tool, for owner-directed lookups. Transcript access goes through
+// search_sessions/query_database only (no grep/find/ls), so the no-raw-transcript-reads
+// policy is structural. schedule_prompt comes from pi-schedule-prompt (.pi/settings.json
 // "packages").
 export const ownerOperatorTools = [
   "read",
-  "grep",
-  "find",
-  "ls",
   "get_current_session_state",
   "mark_thread_done",
-  "scan_active_transcripts",
+  "query_database",
   "search_sessions",
   "schedule_prompt",
 ];

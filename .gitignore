@@ -27,6 +27,9 @@ DerivedData/
 .pi/schedule-prompts.json
 .pi/schedule-prompts-settings.json
 
+# Eval outputs (trajectory logs + result JSONs)
+eval/results/
+
 # Logs
 *.log
 npm-debug.log*
@@ -39,3 +42,6 @@ npm-debug.log*
 *.swp
 .vscode/*
 !.vscode/extensions.json
+
+# stray design asset, not part of the repo
+OWNER  OPERATOR.png

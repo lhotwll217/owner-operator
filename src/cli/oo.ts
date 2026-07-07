@@ -10,6 +10,7 @@
 
 import readline from "node:readline/promises";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
 
@@ -22,6 +23,7 @@ const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessio
   oo --session <id> "more"   resume a specific oo thread
   oo --from-session <id>     audit: record which coding session is calling
   oo --session-state         current session state snapshot
+  oo --done <id...>          mark threads done by id (model-free; ids from --session-state)
   oo daemon                  run the state-owning daemon
   oo --help | -h             this help
 
@@ -78,6 +80,22 @@ if (cli.sessionState) {
   process.exit(0);
 }
 
+// --done — model-free mark-done, the write twin of --session-state. Explicit ids only:
+// coding agents get theirs from --session-state; no env or cwd guessing, so a parallel
+// agent in the same repo can never mark a sibling's session by accident.
+if (cli.done) {
+  if (cli.done.length === 0) {
+    process.stderr.write("--done needs one or more thread ids (see oo --session-state)\n" + USAGE + "\n");
+    process.exit(2);
+  }
+  const { resolveBackend } = await import("../gateway/client");
+  const backend = await resolveBackend();
+  const result = await backend.markThreadsDone(cli.done);
+  backend.close();
+  process.stdout.write(JSON.stringify({ marked: result.marked, missingIds: result.missingIds }, null, 2) + "\n");
+  process.exit(result.missingIds.length > 0 ? 1 : 0);
+}
+
 const {
   continueOoSession,
   createOoSession,
@@ -87,6 +105,7 @@ const {
   ooProvenance,
   ooSessionsDir,
   openOoSession,
+  ownerOperatorTools,
   shutdownSessionExtensions,
 } = await import("../agent/agent");
 
@@ -113,12 +132,24 @@ async function resolveSessionManager(): Promise<SessionManager> {
 }
 
 const sessionManager = await resolveSessionManager();
-const { session, skills, modelLabel } = await createOwnerOperatorSession("chat", { sessionManager });
-console.error(`[oo] ${modelLabel} · skills: ${skills.map((s) => s.name).join(", ")}\n`);
+const { session, modelLabel } = await createOwnerOperatorSession("chat", { sessionManager });
+console.error(`[oo] ${modelLabel} · tools: ${ownerOperatorTools.join(", ")}\n`);
 
 const headlessPrompt = cli.prompt;
 
 const DEBUG = !!process.env.OO_DEBUG;
+
+// OO_TRACE — machine-readable run trace for harnesses (the eval provider): one NDJSON
+// line per tool call/result and per assistant turn (token usage + cost). A path appends
+// to that file; "1" writes to stderr. Prose on stdout is unchanged either way.
+const TRACE = process.env.OO_TRACE;
+const traceLine = !TRACE
+  ? null
+  : (record: Record<string, unknown>): void => {
+      const line = JSON.stringify(record) + "\n";
+      if (TRACE === "1") process.stderr.write(line);
+      else appendFileSync(TRACE, line);
+    };
 
 let streamed = false;
 session.subscribe((event: any) => {
@@ -128,6 +159,16 @@ session.subscribe((event: any) => {
     process.stdout.write(ame.delta);
   } else if (DEBUG) {
     process.stderr.write(`\n[ev] ${event.type}${ame?.type ? ":" + ame.type : ""}`);
+  }
+  if (!traceLine) return;
+  if (event.type === "tool_execution_start") {
+    traceLine({ event: "tool_call", id: event.toolCallId, tool: event.toolName, args: event.args });
+  } else if (event.type === "tool_execution_end") {
+    const resultChars = JSON.stringify(event.result?.content ?? event.result ?? "").length;
+    traceLine({ event: "tool_result", id: event.toolCallId, tool: event.toolName, isError: event.isError, resultChars });
+  } else if (event.type === "message_end" && event.message?.role === "assistant") {
+    const { usage, stopReason } = event.message;
+    traceLine({ event: "turn", stopReason, usage });
   }
 });
 

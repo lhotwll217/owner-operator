@@ -34,6 +34,13 @@ const f = parseOoArgs(["--from-session", "sess-9", "--continue", "status?"]);
 assert.deepEqual([f.fromSession, f.continue, f.prompt], ["sess-9", true, "status?"], "--from-session composes with resume flags");
 assert.equal(parseOoArgs(["--from-session"]).missingFromSession, true, "--from-session with no value is tracked");
 
+// --done collects ids up to the next flag; empty = ids missing (caller errors with usage).
+const d = parseOoArgs(["--done", "id-1", "id-2"]);
+assert.deepEqual(d.done, ["id-1", "id-2"], "--done collects multiple ids");
+assert.deepEqual(parseOoArgs(["--done"]).done, [], "--done with no ids → empty array for the usage error");
+assert.deepEqual(parseOoArgs(["--done", "--continue"]).done, [], "--done stops at the next flag");
+assert.equal(parseOoArgs(["what", "needs", "me"]).done, undefined, "no --done → undefined");
+
 // Unknown option-like tokens stay in the free-form prompt (the P2 regression codex caught).
 assert.equal(parseOoArgs(["what", "changed", "--since", "today"]).prompt, "what changed --since today", "unknown flags preserved in prompt");
 

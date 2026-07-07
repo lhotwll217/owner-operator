@@ -53,6 +53,12 @@ saved under `~/.owner-operator/sessions` (never mixed with your coding sessions)
 with its surface and caller repo; agents pass `--from-session <id>` so the audit trail
 records who called.
 
+Model-free calls for scripts and agents: `oo --session-state` prints the current state
+rows as JSON, and `oo --done <id...>` marks threads done (ids come from `--session-state`;
+explicit only — no environment guessing, so parallel agents in one repo can't mark each
+other). A coding harness that knows its own session id (e.g. a session-end hook) can
+self-mark with `oo --done <that id>`.
+
 So far this has only been tested with a Codex subscription as the driver for the pi agent.
 Other model backends should work but are unverified.
 
