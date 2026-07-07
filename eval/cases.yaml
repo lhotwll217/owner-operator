@@ -11,7 +11,7 @@
 - vars:
     id: evidence-flaky-error
     question: "What was the exact assertion error message in the flaky forecast cache test?"
-  metadata: { qtype: evidence }
+  metadata: { qtype: evidence, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-
@@ -23,7 +23,7 @@
 - vars:
     id: evidence-flaky-why-fakeclock
     question: "Why did we choose the FakeClock approach over padding the sleeps in the flaky test fix?"
-  metadata: { qtype: evidence }
+  metadata: { qtype: evidence, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-
@@ -35,7 +35,7 @@
 - vars:
     id: evidence-429-root-cause
     question: "What was the root cause of the spurious 429s in the rate limiter?"
-  metadata: { qtype: evidence }
+  metadata: { qtype: evidence, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-
@@ -47,7 +47,7 @@
 - vars:
     id: locator-dexie-decision
     question: "Did any session weigh Dexie against raw IndexedDB? Which session, and what was the recommendation?"
-  metadata: { qtype: locator }
+  metadata: { qtype: locator, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-
@@ -59,7 +59,7 @@
 - vars:
     id: summary-units-session
     question: "Summarize where the --units flag work stands right now."
-  metadata: { qtype: summary }
+  metadata: { qtype: summary, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-
@@ -71,7 +71,7 @@
 - vars:
     id: negative-graphql
     question: "Did we ever discuss GraphQL federation in any session?"
-  metadata: { qtype: negative }
+  metadata: { qtype: negative, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-
@@ -83,6 +83,8 @@
 - vars:
     id: state-what-needs-me
     question: "What needs me right now?"
+  # No tool gate: using the DB as a locator here is an efficiency preference, not a
+  # correctness requirement — observed in compare.mjs's per-qtype breakdown, not failed.
   metadata: { qtype: state }
   assert:
     - type: llm-rubric
@@ -106,6 +108,7 @@
 - vars:
     id: audit-thread-escalation
     question: "How did the flaky forecast cache test thread progress to the point of needing me? Walk me through how it escalated."
+  # Dual-path (triage history in the DB, or the transcript narrative) — observed, not gated.
   metadata: { qtype: audit }
   assert:
     - type: llm-rubric
@@ -119,7 +122,9 @@
 - vars:
     id: handoff-needs-me-evidence
     question: "For the thread that needs me: what exactly did the agent say it changed, and how do you know?"
-  metadata: { qtype: handoff }
+  # The #31 regression gate: OO must reach transcripts for the evidence, not answer from the
+  # state summary alone. search_sessions REQUIRED even though the DB locates the thread.
+  metadata: { qtype: handoff, expectToolAny: [search_sessions] }
   assert:
     - type: llm-rubric
       value: >-

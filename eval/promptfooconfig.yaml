@@ -38,6 +38,17 @@ defaultTest:
   options:
     provider: file://providers/claude-grader.mjs
   assert:
+    # Correctness is graded per case (llm-rubric in cases.yaml).
+    # Soundness gate (#31 criterion 3): evidence answers must be read from a transcript,
+    # not an AI-written summary row. Fires ONLY on cases that declare expectToolAny, and
+    # ONLY on the owner-operator arm. It is NOT path-enforcement — locator/efficiency
+    # choices (DB-first on state questions) are observed in compare.mjs, never failed here.
+    # javascript-over-metadata: the documented path for a prose CLI that can't emit OTLP.
+    - type: javascript
+      value: file://asserts/tool-use.mjs
+      metric: tool_selection
+    # Efficiency telemetry as named scores (no native promptfoo assertion for tool-call
+    # count/token efficiency; cost/latency have absolute-threshold asserts, not ratios).
     - type: javascript
       value: file://asserts/efficiency.mjs
       metric: efficiency_telemetry
