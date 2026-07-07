@@ -9,6 +9,7 @@ import { repoRoot } from "../shared/repo-root";
 
 const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
+process.env.OO_HOME = ooHome; // in-process store seam (the --done seed) targets the same hermetic home
 const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: { ...process.env, OO_HOME: ooHome } } as const;
 
 try {
@@ -46,6 +47,28 @@ try {
   assert.equal(missingSession.status, 2, `unknown --session exits 2 (got ${missingSession.status}; stderr: ${missingSession.stderr})`);
   assert.match(missingSession.stderr, /no oo session matching "nope123"/, "names the unmatched session ref");
   assert.equal(missingSession.stdout, "", "nothing on stdout for a bad session ref");
+
+  // --done: model-free write twin of --session-state. Seed a snapshot through the store
+  // seam (this OO_HOME is hermetic; marks only touch in-snapshot threads), mark via the
+  // CLI, and confirm the state edge landed.
+  const { saveSnapshot } = await import("../gateway/store");
+  saveSnapshot({
+    polledAt: "2026-07-07T10:00:00.000Z",
+    threads: [{
+      id: "e2e-done-1", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
+      state: "working", lastActive: "just now",
+      createdAt: "2026-07-07T09:00:00.000Z", lastMessageAt: "2026-07-07T09:55:00.000Z",
+      firstSeen: "2026-07-07T09:00:00.000Z", stateSince: "2026-07-07T09:55:00.000Z",
+    }],
+  });
+  const noIds = spawnSync(ooBin, ["--done"], opts);
+  assert.equal(noIds.status, 2, `bare --done exits 2 (got ${noIds.status}; stderr: ${noIds.stderr})`);
+  assert.match(noIds.stderr, /--done needs one or more thread ids/, "bare --done names the missing ids");
+  const done = spawnSync(ooBin, ["--done", "e2e-done-1", "ghost-id"], { ...opts, env: { ...opts.env, OO_DAEMON: "0" } });
+  assert.equal(done.status, 1, `--done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);
+  const doneOut = JSON.parse(done.stdout) as { marked: Array<{ id: string; previousState: string }>; missingIds: string[] };
+  assert.deepEqual(doneOut.marked.map((m) => [m.id, m.previousState]), [["e2e-done-1", "working"]], "seeded thread marked done with its state edge");
+  assert.deepEqual(doneOut.missingIds, ["ghost-id"], "unknown id reported, not silently dropped");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });
 }

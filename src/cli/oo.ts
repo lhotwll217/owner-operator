@@ -22,6 +22,7 @@ const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessio
   oo --session <id> "more"   resume a specific oo thread
   oo --from-session <id>     audit: record which coding session is calling
   oo --session-state         current session state snapshot
+  oo --done <id...>          mark threads done by id (model-free; ids from --session-state)
   oo daemon                  run the state-owning daemon
   oo --help | -h             this help
 
@@ -76,6 +77,22 @@ if (cli.sessionState) {
   const { getCurrentSessionStateRows } = await import("../gateway/session-state");
   process.stdout.write(JSON.stringify(await getCurrentSessionStateRows(), null, 2) + "\n");
   process.exit(0);
+}
+
+// --done — model-free mark-done, the write twin of --session-state. Explicit ids only:
+// coding agents get theirs from --session-state; no env or cwd guessing, so a parallel
+// agent in the same repo can never mark a sibling's session by accident.
+if (cli.done) {
+  if (cli.done.length === 0) {
+    process.stderr.write("--done needs one or more thread ids (see oo --session-state)\n" + USAGE + "\n");
+    process.exit(2);
+  }
+  const { resolveBackend } = await import("../gateway/client");
+  const backend = await resolveBackend();
+  const result = await backend.markThreadsDone(cli.done);
+  backend.close();
+  process.stdout.write(JSON.stringify({ marked: result.marked, missingIds: result.missingIds }, null, 2) + "\n");
+  process.exit(result.missingIds.length > 0 ? 1 : 0);
 }
 
 const {

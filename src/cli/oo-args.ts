@@ -13,6 +13,7 @@ export interface OoArgs {
   missingSession: boolean;
   fromSession?: string; // --from-session <id>
   missingFromSession: boolean;
+  done?: string[]; // --done <id...> (model-free mark-done; empty array = ids missing)
   prompt: string; // the free-form headless prompt ("" → interactive REPL)
 }
 
@@ -32,6 +33,7 @@ export function parseOoArgs(argv: readonly string[]): OoArgs {
   let interactive = false;
   let missingSession = false;
   let missingFromSession = false;
+  let done: string[] | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--session-state") sessionState = true;
@@ -47,6 +49,9 @@ export function parseOoArgs(argv: readonly string[]): OoArgs {
       } else {
         session = value;
       }
+    } else if (a === "--done") {
+      done ??= [];
+      while (argv[i + 1] !== undefined && !argv[i + 1].startsWith("--")) done.push(argv[++i]);
     } else if (a === "--from-session") {
       const value = argv[++i];
       if (value === undefined || value.startsWith("--")) {
@@ -70,6 +75,7 @@ export function parseOoArgs(argv: readonly string[]): OoArgs {
     missingSession,
     fromSession,
     missingFromSession,
+    done,
     prompt: rest.join(" ").trim(),
   };
 }
