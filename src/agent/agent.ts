@@ -53,13 +53,8 @@ export const getCurrentSessionStateTool = defineTool({
   name: "get_current_session_state",
   label: "Get current session state",
   description:
-    "Read the owner's current managed session state — the exact rows their widget shows, " +
-    "including row number, id, repo, topic, state, priority, and next step. The source of truth " +
-    "for what's ongoing.",
-  promptSnippet: "get_current_session_state — the owner's managed session state (source of truth for what's ongoing): index, id, topic, state, priority, next step",
-  promptGuidelines: [
-    "For any 'what's ongoing / what needs me / what's active' triage, call get_current_session_state FIRST — it is the source of truth; every active row it returns must appear in the triage unless the owner explicitly filtered it out.",
-  ],
+    "Read the owner's current session state — the exact rows their widget shows: row " +
+    "number, id, repo, topic, state, priority, next step.",
   parameters: Type.Object({}),
   async execute() {
     const threads = await getCurrentSessionStateRows();
@@ -74,12 +69,7 @@ export const markThreadDoneTool = defineTool({
   name: "mark_thread_done",
   label: "Mark thread done",
   description:
-    "Mark one or more threads in the current session state done by stable id, visible row number, or name/topic query.",
-  promptSnippet: "mark_thread_done — set a current thread's status to done by id, visible row number, or name/topic query",
-  promptGuidelines: [
-    "Use mark_thread_done only when the owner asks to mark threads done/resolved/inactive.",
-    "Use ids when known, indexes for visible row numbers, or queries for user-provided names/topics.",
-  ],
+    "Mark one or more threads in the current session state done, by stable id, visible row number, or name/topic query.",
   parameters: MarkThreadDoneParams,
   async execute(_id, params) {
     const directIds = cleanIds(params.ids);
@@ -125,7 +115,6 @@ export const markThreadDoneTool = defineTool({
 
 export interface OwnerOperatorSession {
   session: Awaited<ReturnType<typeof createAgentSession>>["session"];
-  skills: Array<{ name: string }>;
   modelLabel: string;
 }
 
@@ -156,10 +145,12 @@ export async function createOwnerOperatorSession(
     agentDir: getAgentDir(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
+    // The repo's .agents/skills are script docs for headless callers and the poller; the
+    // Operator's interface to those scripts is its typed tools, so none inject here.
+    skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
     extensionFactories: [blacklistAwareFileToolsExtension],
   });
   await loader.reload();
-  const { skills } = loader.getSkills();
 
   const { session } = await createAgentSession({
     cwd: repoRoot,
@@ -179,7 +170,7 @@ export async function createOwnerOperatorSession(
   // job store. Pair with shutdownSessionExtensions before dispose.
   if (!opts.ephemeral) await session.bindExtensions({});
 
-  return { session, skills, modelLabel: readModelLabel() };
+  return { session, modelLabel: readModelLabel() };
 }
 
 /** Extension teardown (session_shutdown: cron auto-cleanup, timer stops) — pi's modes emit

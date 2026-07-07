@@ -39,6 +39,9 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     resourceLoaderOptions: {
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
+      // The repo's .agents/skills are script docs for headless callers and the poller; the
+      // Operator's interface to those scripts is its typed tools, so none inject here.
+      skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
       extensionFactories: [
         blacklistAwareFileToolsExtension,           // same-name read/grep/find/ls privacy overrides
       ],
@@ -63,6 +66,6 @@ const runtime = await createAgentSessionRuntime(createRuntime, {
 initTheme(runtime.services.settingsManager.getTheme(), true);
 
 const interactive = new InteractiveMode(runtime, {
-  initialMessage: "What's ongoing today? Read get_current_session_state for the authoritative row set, call scan_active_transcripts for message samples, then answer concisely with every active row, merged with anything new the scan found, most-urgent first.",
+  initialMessage: "What's ongoing today?",
 });
 await interactive.run();
