@@ -34,8 +34,10 @@ function dedupe(roots) {
   });
 }
 
-// Resolve the roots to search. Precedence: --root flags > $SESSION_GREP_SOURCES_FILE
-// (a JSON array of { type, root }) > the built-in DEFAULT_SOURCES passed by the caller.
+// Resolve the roots to search. Precedence: --root flags > typed sources config
+// (--sources-file or $SESSION_GREP_SOURCES_FILE, a JSON array of { type, root }) >
+// the built-in DEFAULT_SOURCES passed by the caller. The CLI can then narrow the
+// resolved map with --target-root without losing parser type.
 // There is no cwd/project discovery: session transcripts live under $HOME per user, not
 // per project, so a bespoke store is either a --root for one call, an edit to the
 // built-in defaults (the skill is vendored via `npx skills add`), or the env override.

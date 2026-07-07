@@ -1,7 +1,7 @@
 ---
 name: sessions-grep
 description: >-
-  Search local coding-agent session transcripts with bounded message context: literal or regex grep for exact text, punctuation, or patterns, and browsing or skimming one session before drilling in. Sources cover the owner's coding sessions and Owner Operator's own past threads (self-reflection on what it already asked, answered, or reported).
+  Search local coding-agent session transcripts with bounded message context: literal or regex grep for exact text, punctuation, or patterns, and browsing or skimming one session before drilling in. Sources cover the owner's coding sessions and, when explicitly pointed at its session directory, Owner Operator's own past threads.
 ---
 
 # sessions-grep
@@ -36,7 +36,7 @@ missing or insufficient.
 
 ```bash
 node .agents/skills/sessions-grep/sessions-grep.mjs --query "why did you" --since 7d --limit 12 --before 2 --after 2
-node .agents/skills/sessions-grep/sessions-grep.mjs --query "sidebar poll triage" --any     # multi-word: match any word, rarity-ranked
+node .agents/skills/sessions-grep/sessions-grep.mjs --query "session state poll triage" --any     # multi-word: match any word, rarity-ranked
 node .agents/skills/sessions-grep/sessions-grep.mjs --overview --since 7d                    # digest per session — pick the right one first
 node .agents/skills/sessions-grep/sessions-grep.mjs --skim 269a                              # one session's conversation, sampled to budget
 node .agents/skills/sessions-grep/sessions-grep.mjs --regex --query "#[A-Za-z0-9_][A-Za-z0-9_-]*" --since 7d --limit 20
@@ -58,9 +58,10 @@ Common flags:
 - `--limit N` max matching messages, default 20; use a high number for "all"
 - `--before N` / `--after N` messages before/after each hit, default 1
 - `--role user|assistant|all` filter matching messages, default `all`
-- `--source claude|codex|self|all` filter sources, default `all` (the owner's coding sessions; `self` is never included — see below)
-- `--surface tui|chat|interactive|one-shot` narrow `self` hits to one oo surface
+- `--target-type claude|codex|all` narrow to one parser/source type, default `all` (the owner's coding sessions)
 - `--since today|7d|YYYY-MM-DD` filter by message/session timestamp
+- `--sources-file FILE` when calling the vendored primitive directly, use a JSON array of typed `{ type, root }` sources instead of defaults
+- `--target-root DIR` when calling the vendored primitive directly, narrow a sources file to a configured root while preserving its parser type
 - `--max-chars N` output budget (default 8000; `--skim` 16000) — excess hits are omitted, never dumped
 - `--include-tools` also match inside tool-output blocks (excluded by default: mostly file/command echoes)
 - `--sort newest|oldest|file` output order, default `newest`
@@ -77,25 +78,30 @@ bypasses it. Withheld hits don't shortchange `--limit` (the wrapper backfills pa
 and when results still come up short the output says so (`blacklisted_dropped=N`). (Cursor/PostHog Code sessions appear in triage but not here: the grep primitive
 has no parser for those formats yet, so they're left out rather than mis-read.)
 
-## Self-reflection: `--source self`
+## Owner Operator Sessions
 
-`self` targets Owner Operator's OWN past threads, stored separately from the owner's coding
-sessions in `<OO_HOME>/sessions` (default `~/.owner-operator/sessions`). EVERY oo surface
-saves there — owner chats (`tui`, plain `chat`, pi `interactive`) and the one-shot surface
-(`one-shot`) — and every invocation stamps an `oo-provenance` entry: the surface,
-owner-vs-agent origin, the caller's cwd + repo name, and (when the caller identifies itself
-via `--from-session` / `OO_FROM_SESSION`) the coding session id that made the call — an
-audit trail of who touched each thread.
+Owner Operator's own past threads are stored separately from the owner's coding sessions in
+`<OO_HOME>/sessions` (default `~/.owner-operator/sessions`). To search them, point the
+vendored grep primitive at the normal typed sources file and target that configured root.
+The sources file maps the folder to the `pi` parser; do not repeat parser selection with
+`--target-type pi`, and do not add an OO-only source alias to the wrapper.
 
-Use it to recall what you were previously asked and answered across invocations — e.g. "did
-I already report on this thread?", "what did the owner ask in the TUI?". Surface matters:
-filter with `--surface`, and grep by repo via the `repo=` label in hits (or `provenance` in
-`--json`). `self` is deliberately excluded from `--source all`, so searches of the owner's
-sessions never surface oo's own threads; target it explicitly:
+Use it to recall what Owner Operator was previously asked and answered across invocations,
+for example "did I already report on this thread?" or "what did we decide about the widget?".
+The output source will be `pi` because these are pi-format session files, but the target is
+the root path.
+
+The stable sources file should include the Owner Operator root alongside any other allowed
+roots:
+
+```json
+[{ "type": "pi", "root": "~/.owner-operator/sessions" }]
+```
 
 ```bash
-node .agents/skills/sessions-grep/sessions-grep.mjs --source self --query "widget rollout" --since 7d
-node .agents/skills/sessions-grep/sessions-grep.mjs --source self --surface tui --query "mark done"
+OO_HOME="${OO_HOME:-$HOME/.owner-operator}"
+node .agents/skills/sessions-grep/vendor/session-grep.mjs --sources-file "$OO_HOME/session-grep-sources.json" --target-root "$OO_HOME/sessions" --query "widget rollout" --since 7d
+node .agents/skills/sessions-grep/vendor/session-grep.mjs --sources-file "$OO_HOME/session-grep-sources.json" --target-root "$OO_HOME/sessions" --overview --since 7d
 ```
 
 ## Output rules

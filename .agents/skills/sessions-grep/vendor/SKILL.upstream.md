@@ -36,16 +36,19 @@ Hosts and launchers are not transcript formats. Roots are keyed by adapter `type
 (`claude`, `codex`, `pi`) and directory.
 
 Quick existence check: `ls -d ~/.claude/projects ~/.codex/sessions 2>/dev/null`.
-There are three ways to search somewhere other than the defaults, in order of
+There are four ways to search somewhere other than the defaults, in order of
 precedence:
 
 1. `--root DIR` — per call, no config; format auto-detected. Repeatable.
-2. `$SESSION_GREP_SOURCES_FILE` — path to a JSON array of `{ type, root }` that
-   *replaces* the defaults for that run. The single override hook for a global/npx
-   install you don't edit, and for CI.
-3. Edit `DEFAULT_SOURCES` in `session-grep.mjs` — the skill is vendored into your
+2. `--sources-file FILE` — per call path to a JSON array of `{ type, root }`; use this
+   when the directory does not reveal the parser type.
+3. `$SESSION_GREP_SOURCES_FILE` — env path to the same JSON array, useful for a
+   global/npx install or CI.
+4. Edit `DEFAULT_SOURCES` in `session-grep.mjs` — the skill is vendored into your
    repo via `npx skills add`, so this file is yours. Adding a bespoke tool means
    dropping an adapter in `adapters/` and adding a line here; commit both.
+
+`--sources-file` and `$SESSION_GREP_SOURCES_FILE` both *replace* the defaults for that run.
 
 The override file is a plain array:
 
@@ -58,10 +61,14 @@ The override file is a plain array:
 `type` must be an adapter that session-grep supports (`claude`, `codex`, or `pi` today) —
 it selects the parser, so a relocated Codex store does not need `codex` in its path.
 An override is authoritative: it does not teach a new format, only routes a known
-parser at a directory. If `$SESSION_GREP_SOURCES_FILE` points at a missing,
+parser at a directory. If `--sources-file` or `$SESSION_GREP_SOURCES_FILE` points at a missing,
 unparseable, or non-array file, session-grep warns on stderr and falls back to the
 built-in defaults rather than failing silently — `--list-roots` reports
 `config_error=true` in that case.
+
+Use `--target-root DIR` to narrow a configured source map to one or more roots while
+preserving the `{ type, root }` parser mapping. This is different from `--root DIR`,
+which is an untyped one-off root whose format must be auto-detected.
 
 The default routes live in `DEFAULT_SOURCES`, the source resolver lives in
 `sources.mjs`, and parser implementations live in `adapters/`.
@@ -99,6 +106,9 @@ node session-grep.mjs --overview                                          # dige
 node session-grep.mjs --skim 269a --max-chars 12000                      # one session's conversation, sampled
 node session-grep.mjs --list-roots                                        # show the source/root map being searched
 node session-grep.mjs --regex --query "#[A-Za-z0-9_][A-Za-z0-9_-]*" --since 7d --limit 20
+node session-grep.mjs --sources-file ./sources.json --query "widget rollout"
+node session-grep.mjs --sources-file ./sources.json --target-root ~/.owner-operator/sessions --query "widget rollout"
+node session-grep.mjs --sources-file ./sources.json --target-type codex --query "widget rollout"
 ```
 
 For broad questions (summarize a session, what was X about) start with `--overview`,
@@ -120,10 +130,12 @@ Common flags:
 - `--before N` messages before each hit, default 1
 - `--after N` messages after each hit, default 1
 - `--role user|assistant|all` filter matching messages, default `all`
-- `--source claude|codex|pi|all` filter sources, default `all`
+- `--target-type claude|codex|pi|all` narrow to one or more parser/source types, default `all`; repeatable
 - `--since today|Nd|YYYY-MM-DD` filter by message/session timestamp
 - `--sort newest|oldest|file` output order, default `newest`
 - `--root DIR` search this directory of `*.jsonl` transcripts instead of the default live stores (repeatable)
+- `--sources-file FILE` use a JSON array of typed `{ type, root }` sources instead of defaults
+- `--target-root DIR` narrow the configured source map to one or more roots while preserving parser type
 - `--exclude-re REGEX` exclude any session file whose path matches this JavaScript regex (repeatable) — applies to every mode (search, `--overview`, `--skim`, `--session/--at`), so wrappers can enforce a path blacklist
 - `--list-roots` print the configured source/root map and whether each root exists
 - `--max-chars N` output budget, default 8000 — excess hits are omitted with a notice, never dumped
