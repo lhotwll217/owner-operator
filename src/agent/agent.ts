@@ -210,57 +210,37 @@ function readModelLabel(): string {
 const execFileAsync = promisify(execFile);
 const skillScript = (dir: string, file: string): string => join(repoRoot, ".agents", "skills", dir, file);
 
-export const scanActiveTranscriptsTool = defineTool({
-  name: "scan_active_transcripts",
-  label: "Scan active transcripts",
-  description:
-    "Scan local session transcripts for a compact digest — topic, resolved state, and a sample " +
-    "of each thread's opening + most-recent messages. Read-only. Secondary to " +
-    "get_current_session_state: use it for message content, discovery, and drill-in; merge its " +
-    "results with the current session state, never substitute them for it.",
-  promptSnippet: "scan_active_transcripts — transcript digest (topic, state, message samples); secondary to get_current_session_state",
-  promptGuidelines: [
-    "Use scan_active_transcripts for message samples and drill-in AFTER get_current_session_state; merge its results with the current rows — a row the scan misses stays in the triage.",
-  ],
-  parameters: Type.Object({
-    since: Type.Optional(Type.String({ description: "Window: 24h | 7d | today | YYYY-MM-DD. Default today." })),
-    sample: Type.Optional(Type.Integer({ minimum: 0, maximum: 40, description: "Messages kept per thread (first N + last N). Default 4." })),
-    thread: Type.Optional(Type.String({ description: "Drill into ONE thread by id prefix; pair with a larger sample." })),
-  }),
-  async execute(_id, p) {
-    const args = ["--since", p.since || "today", "--sample", String(p.sample ?? 4)];
-    if (p.thread) args.push("--thread", p.thread);
-    const { stdout } = await execFileAsync(process.execPath, [skillScript("scan-active-transcripts", "scan-active-transcripts.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
-    return { content: [{ type: "text" as const, text: stdout.trim() || "(no active threads)" }], details: undefined };
-  },
-});
-
 export const searchSessionsTool = defineTool({
   name: "search_sessions",
   label: "Search sessions",
   description:
-    "Grep across local session transcripts, with bounded context around each hit. Read-only. " +
-    "Default search covers the owner's coding sessions. Set ownerOperator true to search " +
-    "Owner Operator's own stored sessions under OO_HOME.",
-  promptSnippet: "search_sessions — grep session transcripts with context around each hit; ownerOperator searches OO's own stored sessions",
-  promptGuidelines: [
-    "Use search_sessions to find where something was discussed across sessions.",
-    "Use ownerOperator true to recall what Owner Operator previously answered; it is searched by targeting <OO_HOME>/sessions from a typed sources file.",
-    "Use targetRoot when the owner asks to search one configured transcript folder; use targetType only to narrow parser/type.",
-  ],
+    "Read local session transcripts, two modes. grep (query): find literal text or a regex " +
+    "across transcripts, with bounded context messages around each hit. sample (sessionId): " +
+    "return one session's opening N and most-recent N messages plus its topic and state. " +
+    "Exactly one of query or sessionId. Read-only.",
   parameters: Type.Object({
-    query: Type.String({ description: "Literal text to find, or a JS regex when regex is true." }),
-    regex: Type.Optional(Type.Boolean({ description: "Treat query as a JavaScript regex." })),
-    ownerOperator: Type.Optional(Type.Boolean({ description: "Search Owner Operator's own stored sessions under OO_HOME." })),
-    targetType: Type.Optional(Type.String({ description: "all (default) | claude | codex. Optional parser/type narrowing, not a folder selector." })),
-    targetRoot: Type.Optional(Type.String({ description: "Configured transcript root to narrow to, preserving the parser mapping from the sources file." })),
-    since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD." })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Max matching messages. Default 20." })),
-    before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages before each hit. Default 1." })),
-    after: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Context messages after each hit. Default 1." })),
+    query: Type.Optional(Type.String({ description: "grep mode: literal text to find, or a JS regex when regex is true." })),
+    sessionId: Type.Optional(Type.String({ description: "sample mode: session id (prefix ok) — returns the session's opening + most-recent messages." })),
+    sample: Type.Optional(Type.Integer({ minimum: 1, maximum: 40, description: "sample mode: messages kept from each end of the session. Default 4." })),
+    regex: Type.Optional(Type.Boolean({ description: "grep mode: treat query as a JavaScript regex." })),
+    ownerOperator: Type.Optional(Type.Boolean({ description: "grep mode: search Owner Operator's own stored sessions under OO_HOME instead of the owner's coding sessions." })),
+    targetType: Type.Optional(Type.String({ description: "grep mode: all (default) | claude | codex. Parser/type narrowing, not a folder selector." })),
+    targetRoot: Type.Optional(Type.String({ description: "grep mode: configured transcript root to narrow to, preserving the parser mapping from the sources file." })),
+    since: Type.Optional(Type.String({ description: "Window: today | 7d | YYYY-MM-DD. sample mode defaults to 7d." })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "grep mode: max matching messages. Default 20." })),
+    before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "grep mode: context messages before each hit. Default 1." })),
+    after: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "grep mode: context messages after each hit. Default 1." })),
   }),
   async execute(_id, p) {
-    const args = ["--query", p.query];
+    if (!!p.query === !!p.sessionId) throw new Error("search_sessions needs exactly one of query (grep) or sessionId (sample)");
+
+    if (p.sessionId) {
+      const args = ["--thread", p.sessionId, "--sample", String(p.sample ?? 4), "--since", p.since || "7d"];
+      const { stdout } = await execFileAsync(process.execPath, [skillScript("scan-active-transcripts", "scan-active-transcripts.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
+      return { content: [{ type: "text" as const, text: stdout.trim() || "(no session matched that id in the window)" }], details: undefined };
+    }
+
+    const args = ["--query", p.query!];
     if (p.regex) args.push("--regex");
     if (p.since) args.push("--since", p.since);
     if (p.targetRoot) args.push("--target-root", p.targetRoot);
@@ -318,22 +298,18 @@ export const ownerOperatorCustomTools = [
   getCurrentSessionStateTool,
   markThreadDoneTool,
   queryDatabaseTool,
-  scanActiveTranscriptsTool,
   searchSessionsTool,
 ];
-// Read-only file tools are blacklist-aware overrides registered by
-// blacklistAwareFileToolsExtension. Fixed scan/search tools replace general bash for
-// transcript work; schedule_prompt comes from pi-schedule-prompt (.pi/settings.json
+// `read` is a blacklist-aware override registered by blacklistAwareFileToolsExtension —
+// the one general file tool, for owner-directed lookups. Transcript access goes through
+// search_sessions/query_database only (no grep/find/ls), so the no-raw-transcript-reads
+// policy is structural. schedule_prompt comes from pi-schedule-prompt (.pi/settings.json
 // "packages").
 export const ownerOperatorTools = [
   "read",
-  "grep",
-  "find",
-  "ls",
   "get_current_session_state",
   "mark_thread_done",
   "query_database",
-  "scan_active_transcripts",
   "search_sessions",
   "schedule_prompt",
 ];
