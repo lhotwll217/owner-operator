@@ -1,0 +1,79 @@
+// Unit test for onboarding writers + detection: the first-run marker, the merging config writers
+// (blacklist / session-sources / active-window), and source detection over a fake ooHome + roots.
+//   tsx src/onboarding.test.ts
+
+import assert from "node:assert";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadBlacklist } from "./blacklist.mjs";
+import { loadActiveWindow } from "./settings.mjs";
+import { loadSessionSources } from "./session-sources.mjs";
+import {
+  ONBOARDING_VERSION,
+  isOnboarded,
+  markOnboarded,
+  addBlacklistEntries,
+  addSessionRoot,
+  disableSessionSource,
+  saveActiveWindow,
+  detectSources,
+  summarizeDetectedSources,
+} from "./onboarding.mjs";
+
+const ooHome = mkdtempSync(join(tmpdir(), "oo-onboarding-"));
+
+try {
+  // First-run marker: absent before, present-and-versioned after. The writers create ooHome.
+  assert.equal(isOnboarded(ooHome), false, "no marker → not onboarded");
+  const marker = markOnboarded(ooHome, { via: "test" });
+  assert.equal(marker.version, ONBOARDING_VERSION, "marker records the version");
+  assert.equal(marker.via, "test", "marker carries provenance");
+  assert.ok(typeof marker.at === "string", "marker records a timestamp");
+  assert.equal(isOnboarded(ooHome), true, "marker present → onboarded");
+
+  // Blacklist writer merges + de-dupes with what the loader reads back, and strips trailing slashes.
+  addBlacklistEntries(ooHome, { paths: ["/work/clientX/"], repos: ["Personal"] });
+  addBlacklistEntries(ooHome, { paths: ["/work/clientX", "/home/me/secret"], repos: ["Personal", "Vault"] });
+  const bl = loadBlacklist(ooHome);
+  assert.deepEqual(bl.paths.sort(), ["/home/me/secret", "/work/clientX"], "paths merged, de-duped, slash-stripped");
+  assert.deepEqual(bl.repos.sort(), ["Personal", "Vault"], "repos merged and de-duped");
+
+  // Session-source writer: a known source at a new root shows up in loadSessionSources; a second
+  // identical add is a no-op; an unknown source throws (a root with no parser is dead config).
+  addSessionRoot(ooHome, "claude", "/alt/claude");
+  addSessionRoot(ooHome, "claude", "/alt/claude");
+  const roots = loadSessionSources(ooHome);
+  assert.equal(roots.filter((r) => r.source === "claude" && r.root === "/alt/claude").length, 1, "added root once, de-duped");
+  assert.throws(() => addSessionRoot(ooHome, "nope", "/x"), /unknown session source/, "unknown source rejected");
+
+  // Disabling a default source drops its built-in roots from the resolved list.
+  disableSessionSource(ooHome, "cursor");
+  assert.ok(!loadSessionSources(ooHome).some((r) => r.source === "cursor"), "disabled source dropped");
+
+  // Active-window writer validates against the shared grammar; a typo throws, a good spec loads back.
+  assert.throws(() => saveActiveWindow(ooHome, "whenever"), /invalid active window/, "typo rejected before write");
+  saveActiveWindow(ooHome, "36h");
+  assert.equal(loadActiveWindow(ooHome), "36h", "valid window written and loaded back");
+
+  // Detection over a fake root: seed session files and confirm exists+count, then the per-source rollup.
+  const detectHome = mkdtempSync(join(tmpdir(), "oo-detect-"));
+  const claudeRoot = join(detectHome, "sessions");
+  mkdirSync(join(claudeRoot, "proj"), { recursive: true });
+  writeFileSync(join(claudeRoot, "proj", "a.jsonl"), "{}\n");
+  writeFileSync(join(claudeRoot, "proj", "b.jsonl"), "{}\n");
+  writeFileSync(join(claudeRoot, "proj", "notes.txt"), "ignore me");
+  addSessionRoot(detectHome, "claude", claudeRoot);
+  const detected = detectSources(detectHome);
+  const claude = detected.find((d) => d.root === claudeRoot);
+  assert.ok(claude && claude.exists && claude.count === 2, "detects the 2 seeded session files, ignores .txt");
+  const missing = detected.find((d) => d.source === "codex" && !d.root.includes(claudeRoot));
+  assert.ok(missing && !missing.exists && missing.count === 0, "a non-existent default root reads as absent");
+  const summary = summarizeDetectedSources(detected);
+  assert.ok(summary.find((s) => s.source === "claude")?.count >= 2, "rollup sums a source's roots");
+  rmSync(detectHome, { recursive: true, force: true });
+
+  process.stdout.write("ok — onboarding: marker, merging writers (blacklist/sources/window), source detection\n");
+} finally {
+  rmSync(ooHome, { recursive: true, force: true });
+}

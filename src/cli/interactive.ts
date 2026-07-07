@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
+import { onboardingExtension } from "../agent/onboarding";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./oo` in a real terminal, or `./oo \"question\"` for a headless single turn.");
@@ -44,6 +45,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
       extensionFactories: [
         blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
+        onboardingExtension,                         // first-run guided setup + /onboarding command
       ],
     },
   });

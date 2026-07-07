@@ -25,6 +25,21 @@ export type { GuiHost } from "./gui-hosts.mjs";
 // settings validator can't drift. See settings.mjs.
 export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
 
+// First-run onboarding — the write half of the config loaders above (blacklist/sources/settings),
+// the run-once marker, and pre-scan source detection the guided flow shows. See onboarding.mjs.
+export {
+  ONBOARDING_VERSION,
+  isOnboarded,
+  markOnboarded,
+  addBlacklistEntries,
+  addSessionRoot,
+  disableSessionSource,
+  saveActiveWindow,
+  detectSources,
+  summarizeDetectedSources,
+} from "./onboarding.mjs";
+export type { DetectedRoot, DetectedSource } from "./onboarding.mjs";
+
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.
 export * from "./status";
 
