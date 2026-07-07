@@ -11,8 +11,9 @@
 // metadata.forbidTool (must NOT appear). Cases without either just pass — the gate is
 // per-case, not global.
 export default (_output, context) => {
-  // The gate is about OO's surface selection; the baseline reaches session-grep through
-  // Bash by design, so its tool names aren't comparable — skip it there.
+  // This gate encodes OO's soundness (evidence from transcripts, not summaries) — a claim
+  // about OO's composition, so it judges only the owner-operator arm. The baseline has only
+  // grep and isn't the subject of this gate.
   const arm = context.provider?.label ?? context.provider?.id ?? "";
   if (!arm.startsWith("owner-operator")) return { pass: true, score: 1, reason: "n/a (baseline arm)" };
 

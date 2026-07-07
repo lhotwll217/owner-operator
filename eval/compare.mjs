@@ -5,8 +5,8 @@
 //   correctness: owner-operator >= baseline overall (the issue's parity-or-better bar)
 //   spend:       tokens / tool calls / cost per arm, overall and broken down by qtype —
 //                the qtype breakdown is where the DB-as-locator payoff shows up (fewer
-//                tool calls on state/stale/audit/handoff cases). Informational, not
-//                gated: the arms run different models by design.
+//                tool calls on state/stale/audit/handoff cases). Reported, not gated —
+//                both arms run the same model, so spend is attributable to composition.
 //
 //   node eval/compare.mjs [results.json] [--gate]
 //
@@ -95,7 +95,7 @@ const bAcc = sums.baseline.n ? sums.baseline.correct / sums.baseline.n : 0;
 console.log(`correctness  owner-operator ${(oAcc * 100).toFixed(0)}%  vs  baseline ${(bAcc * 100).toFixed(0)}%   (criterion: oo >= baseline)`);
 console.log(`tokens       ${Math.round(sums[OO].tokens)} vs ${Math.round(sums.baseline.tokens)}   ratio=${ratio(sums[OO].tokens, sums.baseline.tokens)}`);
 console.log(`tool calls   ${round1(sums[OO].toolCalls)} vs ${round1(sums.baseline.toolCalls)}   ratio=${ratio(sums[OO].toolCalls, sums.baseline.toolCalls)}`);
-console.log(`cost         $${sums[OO].cost.toFixed(3)} vs $${sums.baseline.cost.toFixed(3)}   (informational — different models)`);
+console.log(`cost         $${sums[OO].cost.toFixed(3)} vs $${sums.baseline.cost.toFixed(3)}   (same model — spend tracks composition)`);
 
 // Where the DB earns its keep: per-qtype tool-call counts. state/stale/audit/handoff are
 // the locate-led cases; fewer OO tool calls there is the locator payoff.

@@ -1,5 +1,7 @@
-// Build the eval sandbox: fixture transcripts + a seeded OO_HOME, both outside the repo
-// tree (subjects must not be able to read cases.yaml — the answer key).
+// Build the eval sandbox: fixture transcripts + a seeded OO_HOME, both under
+// $TMPDIR/oo-eval-sandbox (outside the repo), so a subject's session sources never point
+// at repo files. (cases.yaml is still reachable via the read tool in principle — nothing
+// steers a subject there, but the isolation is by convention, not structural.)
 //
 //   npx tsx eval/seed/build-fixture-home.mjs        (idempotent; prints the sandbox path)
 //

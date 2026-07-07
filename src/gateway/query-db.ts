@@ -82,6 +82,14 @@ export function describeTable(table: string, dbPath: string = defaultDbPath()): 
 }
 
 export function runQuery(sql: string, dbPath: string = defaultDbPath()): QueryResult {
+  // The read-only connection blocks writes; this closes the one read that bypasses it.
+  // ATTACH would let a caller read arbitrary SQLite files outside this db — a second
+  // file-read surface that sidesteps the read tool's privacy blacklist. A SELECT never
+  // needs it. Comments stripped first so `/* */ ATTACH` can't slip through.
+  const bare = sql.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+  if (/(^|;)\s*(attach|detach)\b/i.test(bare)) {
+    throw new Error("ATTACH/DETACH is not allowed; query only the session database");
+  }
   return withDb(dbPath, (db) => {
     const rows = db.prepare(sql).all() as Record<string, unknown>[];
     return rows.length > QUERY_ROW_CAP

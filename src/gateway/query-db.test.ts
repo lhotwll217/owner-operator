@@ -61,6 +61,14 @@ try {
   assert.throws(() => runQuery("DELETE FROM threads", dbPath), /read.?only|READONLY/i);
   assert.throws(() => runQuery("UPDATE threads SET state = 'done'", dbPath), /read.?only|READONLY/i);
 
+  // ATTACH is the one read the read-only connection would otherwise allow — a cross-file
+  // read surface past the privacy blacklist. Rejected, including comment-obfuscated forms.
+  assert.throws(() => runQuery("ATTACH '/tmp/x.db' AS e; SELECT * FROM e.s", dbPath), /ATTACH/);
+  assert.throws(() => runQuery("SELECT 1;\n  attach database '/tmp/x.db' as e", dbPath), /ATTACH/);
+  assert.throws(() => runQuery("/* sneaky */ ATTACH '/tmp/x.db' AS e", dbPath), /ATTACH/);
+  // A legit SELECT that merely mentions "attach" in a filter is NOT rejected.
+  assert.equal(runQuery("SELECT topic FROM thread_triage WHERE topic LIKE '%attach%'", dbPath).rows.length, 0);
+
   console.log("query-db: ok");
 } finally {
   rmSync(dir, { recursive: true, force: true });

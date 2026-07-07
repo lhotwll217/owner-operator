@@ -13,8 +13,10 @@ composition:
 
 - **owner-operator** — OO's prompt + full toolset (`query_database`,
   `get_current_session_state`, `search_sessions`, …).
-- **baseline** — a generic session-search prompt + **only `search_sessions`** (the same
-  grep engine OO wraps), via `OO_EVAL_BASELINE_PROMPT` (see `providers/naive-agent.mjs`).
+- **baseline** — a generic session-search prompt + `search_sessions` (the same grep engine
+  OO wraps) and `read`, but **no DB/state tools**, via `OO_EVAL_BASELINE_PROMPT` (see
+  `providers/naive-agent.mjs`). Both arms hold `read`, so the single variable is OO's
+  DB tools + prompt.
 
 So the tool-call / token / correctness deltas are attributable to OO's composition, not to
 a model or harness difference. A cross-model version (OO/gpt-5.5 vs Claude Code/haiku) was
@@ -49,7 +51,7 @@ an LLM run.
 | `seed/build-fixture-home.mjs` | materializes `$TMPDIR/oo-eval-sandbox`: transcripts + seeded OO_HOME (sources config, threads.db with versioned triage history); timestamps relative to now |
 | `providers/pi-agent-core.mjs` | shared runner: seeds the sandbox once, spawns `oo`, parses `OO_TRACE` NDJSON into tool calls + usage |
 | `providers/oo-agent.mjs` | subject arm: OO as shipped (full prompt + toolset) |
-| `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + only `search_sessions` (`OO_EVAL_BASELINE_PROMPT`) |
+| `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + `search_sessions`/`read`, no DB tools (`OO_EVAL_BASELINE_PROMPT`) |
 | `fixtures/naive-baseline-prompt.md` | the control arm's generic session-search prompt |
 | `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded; judge only, not an arm) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; both arms attempt all of them |
@@ -72,9 +74,9 @@ Trajectories land in `results/logs/<run>/` for inspecting HOW each arm searched.
 
 ## Reading results
 
-- Comparative spend (tokens/tool calls) is the locator payoff; cost is informational —
-  the arms run different models by design (products as shipped).
-- The `state-evidence-handoff` case is the "no evidence answers from summaries alone"
+- Comparative spend (tokens/tool calls/cost) is the locator payoff, and since both arms
+  run the same model it is attributable to OO's composition.
+- The `handoff-needs-me-evidence` case is the "no evidence answers from summaries alone"
   criterion: passing requires transcript detail, not just the DB row.
 - One variable per run: change the prompt OR a tool, reseed nothing else, re-run both
   configs, then `compare.mjs`.

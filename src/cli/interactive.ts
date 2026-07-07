@@ -43,7 +43,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       // Operator's interface to those scripts is its typed tools, so none inject here.
       skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
       extensionFactories: [
-        blacklistAwareFileToolsExtension,           // same-name read/grep/find/ls privacy overrides
+        blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
       ],
     },
   });
