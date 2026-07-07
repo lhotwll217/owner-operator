@@ -23,6 +23,7 @@
     "eval": "promptfoo eval -c eval/promptfooconfig.yaml --no-cache",
     "eval:compare": "node eval/compare.mjs",
     "poll:smoke": "tsx src/gateway/poller.smoke.ts",
+    "onboard:smoke": "tsx src/agent/onboarding.smoke.ts",
     "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
     "lint": "oxlint --deny-warnings"
   },
