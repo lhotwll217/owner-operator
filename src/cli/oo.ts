@@ -10,6 +10,7 @@
 
 import readline from "node:readline/promises";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
 
@@ -138,6 +139,18 @@ const headlessPrompt = cli.prompt;
 
 const DEBUG = !!process.env.OO_DEBUG;
 
+// OO_TRACE — machine-readable run trace for harnesses (the eval provider): one NDJSON
+// line per tool call/result and per assistant turn (token usage + cost). A path appends
+// to that file; "1" writes to stderr. Prose on stdout is unchanged either way.
+const TRACE = process.env.OO_TRACE;
+const traceLine = !TRACE
+  ? null
+  : (record: Record<string, unknown>): void => {
+      const line = JSON.stringify(record) + "\n";
+      if (TRACE === "1") process.stderr.write(line);
+      else appendFileSync(TRACE, line);
+    };
+
 let streamed = false;
 session.subscribe((event: any) => {
   const ame = event.assistantMessageEvent;
@@ -146,6 +159,16 @@ session.subscribe((event: any) => {
     process.stdout.write(ame.delta);
   } else if (DEBUG) {
     process.stderr.write(`\n[ev] ${event.type}${ame?.type ? ":" + ame.type : ""}`);
+  }
+  if (!traceLine) return;
+  if (event.type === "tool_execution_start") {
+    traceLine({ event: "tool_call", id: event.toolCallId, tool: event.toolName, args: event.args });
+  } else if (event.type === "tool_execution_end") {
+    const resultChars = JSON.stringify(event.result?.content ?? event.result ?? "").length;
+    traceLine({ event: "tool_result", id: event.toolCallId, tool: event.toolName, isError: event.isError, resultChars });
+  } else if (event.type === "message_end" && event.message?.role === "assistant") {
+    const { usage, stopReason } = event.message;
+    traceLine({ event: "turn", stopReason, usage });
   }
 });
 
