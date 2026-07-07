@@ -1,11 +1,10 @@
-// Mirrors @owner-operator/core (status.ts + sidebar.ts): the daemon's ThreadStatus and
-// TriageInfo, joined into a loudest-first sidebar. The widget NEVER computes state — it renders
-// what the daemon owns. Keep the glyphs/ranks in lockstep with sidebar.ts.
+// Mirrors the gateway's /session-state rows. The widget is only a renderer; the gateway owns
+// state, title precedence, triage enrichment, and ordering fields.
 
 import Foundation
 import SwiftUI
 
-/// Lifecycle state — matches core/status.ts ThreadState. Lenient decode (unknown → idle).
+/// Lifecycle state — matches core/status.ts ThreadState. Lenient decode happens in SessionStateRow.
 enum ThreadState: String, Decodable {
     case needsYou = "needs-you"
     case working
@@ -22,7 +21,7 @@ enum ThreadState: String, Decodable {
         }
     }
 
-    /// Glyphs == the TUI sidebar (harness/src/sidebar.ts GLYPH).
+    /// Glyphs match the core thread-state model.
     var glyph: String {
         switch self {
         case .needsYou: return "◐"
@@ -41,48 +40,6 @@ enum ThreadState: String, Decodable {
     }
 }
 
-/// One polled thread (the subset the sidebar renders). Decodes leniently so an unexpected
-/// field never drops the whole snapshot.
-struct ThreadStatus: Decodable, Identifiable {
-    let id: String
-    let source: String
-    let repo: String
-    let app: String
-    let topic: String
-    /// Owner-set title (rename). Preferred over every generated topic; nil = generated titles show.
-    let ownerTitle: String?
-    let state: ThreadState
-    let lastActive: String
-    let createdAt: String
-    let lastMessageAt: String
-    /// ISO of when the thread entered its current state — for needs-you, when the turn completed.
-    let stateSince: String
-    let diffAdded: Int?
-    let diffDeleted: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case id, source, repo, app, topic, ownerTitle, state, lastActive, createdAt, lastMessageAt, stateSince, diffAdded, diffDeleted
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        source = (try? c.decode(String.self, forKey: .source)) ?? "?"
-        repo = (try? c.decode(String.self, forKey: .repo)) ?? "?"
-        app = (try? c.decode(String.self, forKey: .app)) ?? "?"
-        topic = (try? c.decode(String.self, forKey: .topic)) ?? "(untitled)"
-        ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
-        let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
-        state = ThreadState(rawValue: raw) ?? .idle
-        lastActive = (try? c.decode(String.self, forKey: .lastActive)) ?? ""
-        createdAt = (try? c.decode(String.self, forKey: .createdAt)) ?? ""
-        lastMessageAt = (try? c.decode(String.self, forKey: .lastMessageAt)) ?? ""
-        stateSince = (try? c.decode(String.self, forKey: .stateSince)) ?? ""
-        diffAdded = try? c.decode(Int.self, forKey: .diffAdded)
-        diffDeleted = try? c.decode(Int.self, forKey: .diffDeleted)
-    }
-}
-
 /// Parse an ISO-8601 timestamp, with or without fractional seconds.
 func parseISODate(_ s: String) -> Date? {
     let f = ISO8601DateFormatter()
@@ -92,95 +49,122 @@ func parseISODate(_ s: String) -> Date? {
     return f.date(from: s)
 }
 
-/// The triage enrichment, joined by id == core/sidebar.ts TriageInfo.
-struct TriageInfo: Decodable {
-    let topic: String?
+/// One gateway-owned session-state row. Decodes leniently so an unexpected field never drops
+/// the whole widget payload.
+struct SessionStateRow: Decodable, Identifiable {
+    let id: String
+    let source: String
+    let repo: String
+    let app: String
+    let topic: String
+    let generatedTopic: String?
+    let ownerTitle: String?
     let summary: String?
     let nextSteps: String?
     let priority: Int?
-}
-
-/// A full poll result == core StatusSnapshot.
-struct Snapshot: Decodable {
-    let polledAt: String
-    let threads: [ThreadStatus]
-}
-
-/// A sidebar row: live thread + optional cached triage (the enrichment overlay).
-struct SidebarRow: Identifiable {
-    let thread: ThreadStatus
-    let triage: TriageInfo?
+    let state: ThreadState
+    let stateReason: String?
+    let lastActive: String
+    let lastActiveAt: String
+    let createdAt: String
+    let lastMessageAt: String
+    let stateSince: String
+    let diffAdded: Int?
+    let diffDeleted: Int?
     /// Optimistic owner rename not yet confirmed by the daemon ("" = a pending clear).
     var pendingTitle: String? = nil
-    var id: String { thread.id }
-    /// displayTopic == core: owner rename first, then the triaged title, else the raw scan topic.
-    /// A pending rename previews immediately; a pending clear skips the (stale) owner title.
+
+    enum CodingKeys: String, CodingKey {
+        case id, source, repo, app, topic, generatedTopic, ownerTitle, summary, nextSteps, priority
+        case state, stateReason, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
+        case diffAdded, diffDeleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        source = (try? c.decode(String.self, forKey: .source)) ?? "?"
+        repo = (try? c.decode(String.self, forKey: .repo)) ?? "?"
+        app = (try? c.decode(String.self, forKey: .app)) ?? "?"
+        topic = (try? c.decode(String.self, forKey: .topic)) ?? "(untitled)"
+        generatedTopic = try? c.decode(String.self, forKey: .generatedTopic)
+        ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
+        summary = try? c.decode(String.self, forKey: .summary)
+        nextSteps = try? c.decode(String.self, forKey: .nextSteps)
+        priority = try? c.decode(Int.self, forKey: .priority)
+        let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
+        state = ThreadState(rawValue: raw) ?? .idle
+        stateReason = try? c.decode(String.self, forKey: .stateReason)
+        lastActive = (try? c.decode(String.self, forKey: .lastActive)) ?? ""
+        lastActiveAt = (try? c.decode(String.self, forKey: .lastActiveAt)) ?? ""
+        createdAt = (try? c.decode(String.self, forKey: .createdAt)) ?? ""
+        lastMessageAt = (try? c.decode(String.self, forKey: .lastMessageAt)) ?? ""
+        stateSince = (try? c.decode(String.self, forKey: .stateSince)) ?? ""
+        diffAdded = try? c.decode(Int.self, forKey: .diffAdded)
+        diffDeleted = try? c.decode(Int.self, forKey: .diffDeleted)
+    }
+
+    /// A pending rename previews immediately; a pending clear falls through to the generated title.
     var title: String {
         if let pending = pendingTitle {
-            if !pending.isEmpty { return pending }
-        } else if let t = thread.ownerTitle, !t.isEmpty {
-            return t
+            return pending.isEmpty ? (generatedTopic ?? topic) : pending
         }
-        if let t = triage?.topic, !t.isEmpty { return t }
-        return thread.topic
+        return topic
     }
+
     /// The title is owner-pinned (generated titles keep landing underneath but don't show).
     var isRenamed: Bool {
         if let pending = pendingTitle { return !pending.isEmpty }
-        return !(thread.ownerTitle ?? "").isEmpty
+        return !(ownerTitle ?? "").isEmpty
     }
-    var nextSteps: String? { triage?.nextSteps }
-    var priority: Int? { triage?.priority }
-    var state: ThreadState { thread.state }
 }
 
-/// Rows grouped under one repo == core RepoGroup.
+/// Rows grouped under one repo.
 struct RepoGroup: Identifiable {
     let repo: String
-    let rows: [SidebarRow]
+    let rows: [SessionStateRow]
     var id: String { repo }
 }
 
-/// Join snapshot + triage into the grouped, loudest-first sidebar — the exact ordering of
-/// core/sidebar.ts (groupByRepo + sortByAttention). Counts include done; the sidebar body omits it.
-/// `hidden` are ids marked done locally but not yet confirmed by the daemon — counted as done,
-/// dropped from the body, so the row vanishes the instant you click without lying about state.
-/// `renames` are owner titles POSTed but not yet confirmed — shown immediately, same idea.
-func buildSidebar(snapshot: Snapshot, triage: [String: TriageInfo], hidden: Set<String> = [], renames: [String: String] = [:]) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
-    var counts: [ThreadState: Int] = [.needsYou: 0, .working: 0, .idle: 0, .done: 0]
-    for t in snapshot.threads {
-        if hidden.contains(t.id) { counts[.done, default: 0] += 1; continue }
-        counts[t.state, default: 0] += 1
+/// Group the gateway rows for rendering. State, title precedence, and enrichment are already in
+/// the row payload; this only applies local optimistic hides/renames and repo grouping.
+func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], renames: [String: String] = [:]) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
+    let rows = input.map { row -> SessionStateRow in
+        var r = row
+        r.pendingTitle = renames[row.id]
+        return r
     }
 
-    let rows = snapshot.threads
-        .filter { $0.state != .done && !hidden.contains($0.id) }
-        .map { SidebarRow(thread: $0, triage: triage[$0.id], pendingTitle: renames[$0.id]) }
+    var counts: [ThreadState: Int] = [.needsYou: 0, .working: 0, .idle: 0, .done: 0]
+    for r in rows {
+        if hidden.contains(r.id) { counts[.done, default: 0] += 1; continue }
+        counts[r.state, default: 0] += 1
+    }
 
-    // attention sort: state rank asc, then most-recent message first.
-    func attention(_ a: [SidebarRow]) -> [SidebarRow] {
+    let visible = rows.filter { $0.state != .done && !hidden.contains($0.id) }
+
+    func attention(_ a: [SessionStateRow]) -> [SessionStateRow] {
         a.sorted { l, r in
             l.state.rank != r.state.rank
                 ? l.state.rank < r.state.rank
-                : l.thread.lastMessageAt > r.thread.lastMessageAt
+                : l.lastMessageAt > r.lastMessageAt
         }
     }
 
-    var byRepo: [String: [SidebarRow]] = [:]
-    for r in rows { byRepo[r.thread.repo, default: []].append(r) }
+    var byRepo: [String: [SessionStateRow]] = [:]
+    for r in visible { byRepo[r.repo, default: []].append(r) }
 
     var groups = byRepo.map { RepoGroup(repo: $0.key, rows: attention($0.value)) }
-    // Groups ordered by their loudest row, then recency, then repo name.
     groups.sort { a, b in
         let la = a.rows[0], lb = b.rows[0]
         if la.state.rank != lb.state.rank { return la.state.rank < lb.state.rank }
-        if la.thread.lastMessageAt != lb.thread.lastMessageAt { return la.thread.lastMessageAt > lb.thread.lastMessageAt }
+        if la.lastMessageAt != lb.lastMessageAt { return la.lastMessageAt > lb.lastMessageAt }
         return a.repo < b.repo
     }
     return (groups, counts)
 }
 
-/// "10 minutes ago" → "10m", "just now" → "now" (== sidebar.ts shortAge).
+/// "10 minutes ago" -> "10m", "just now" -> "now".
 func shortAge(_ s: String) -> String {
     if s.lowercased().contains("just now") { return "now" }
     let parts = s.split(separator: " ")
@@ -188,7 +172,7 @@ func shortAge(_ s: String) -> String {
     return s
 }
 
-/// Priority badge color == sidebar.ts prio(): P5 red · P4 yellow · P3 cyan · else dim.
+/// Priority badge color: P5 red · P4 yellow · P3 cyan · else dim.
 func priorityColor(_ p: Int) -> Color {
     p >= 5 ? .red : p == 4 ? .yellow : p == 3 ? .cyan : .secondary
 }

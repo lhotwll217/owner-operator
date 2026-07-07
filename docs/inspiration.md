@@ -6,8 +6,8 @@ anything new; hunt beyond this list when it comes up short; cite the borrow in t
 ## Sources
 
 - **[OpenClaw](https://github.com/openclaw/openclaw)** — [gateway daemon pattern](https://docs.openclaw.ai/gateway):
-  one long-lived process owns all state, every surface a thin client. Ours:
-  `harness/src/gateway/` ([architecture](architecture.md#layout--the-dependency-rule)).
+  one long-lived process owns all state, every surface a thin client, the gateway top-level
+  at root `src/gateway/` ([architecture](architecture.md#layout--the-dependency-rule)).
   Also adopted: [oxlint](https://oxc.rs/docs/guide/usage/linter), pi as pinned npm deps,
   CI gating every PR.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven
@@ -27,10 +27,6 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 
 | pi piece | Where it runs here |
 |---|---|
-| `@earendil-works/pi-coding-agent` `0.78.0` | `harness/src/agent/` — session build, tools, skills, print + RPC modes |
-| `@earendil-works/pi-ai` `0.78.0` | typed model calls + `Type` schemas for the triage tools (`agent/agent.ts`) |
-| `@earendil-works/pi-tui` `0.78.0` | terminal primitives under `harness/src/tui/` |
+| `@earendil-works/pi-coding-agent` `0.78.0` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
+| `@earendil-works/pi-ai` `0.78.0` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) `0.4.1` (extension) | `.pi/settings.json` `packages` — session-level scheduling ([architecture](architecture.md#schedules--triggers)) |
-
-Open assessment: adopt pi `modes/interactive` for the TUI —
-[#7](https://github.com/lhotwll217/owner-operator/issues/7).

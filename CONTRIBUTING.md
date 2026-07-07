@@ -35,4 +35,5 @@ the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
   pre-1.0. The widget builds on system frameworks only.
 - **Vendored code** (`.agents/skills/*/vendor/`) is upstream-owned: re-sync per the
   directory's `UPSTREAM.md` and update the pin there. Lint skips vendor dirs.
-- **Shared types** live in `packages/core` so the harness and every surface speak one language.
+- **Shared contracts** live in `packages/core`; component boundaries live in
+  [docs/architecture.md](docs/architecture.md).

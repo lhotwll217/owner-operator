@@ -9,8 +9,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { configuredSourceOf, loadSessionSources } from './sources.mjs';
 
+function expandHome(p) {
+  return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
 const args = process.argv.slice(2);
-const opts = { limit: 20, before: 1, after: 1, role: 'all', source: 'all', sort: 'newest', json: false, regex: false, roots: [], excludeRe: [], maxChars: 8000 };
+const opts = { limit: 20, before: 1, after: 1, role: 'all', sort: 'newest', json: false, regex: false, roots: [], targetTypes: [], targetRoots: [], excludeRe: [], maxChars: 8000 };
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--query') opts.query = args[++i];
@@ -18,10 +22,12 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--before') { opts.before = Number(args[++i]); opts.beforeSet = true; }
   else if (a === '--after') { opts.after = Number(args[++i]); opts.afterSet = true; }
   else if (a === '--role') opts.role = args[++i];
-  else if (a === '--source') opts.source = args[++i];
+  else if (a === '--target-type') opts.targetTypes.push(args[++i]);
   else if (a === '--since') opts.since = args[++i];
   else if (a === '--sort') opts.sort = args[++i];
   else if (a === '--root') opts.roots.push(args[++i]);
+  else if (a === '--sources-file') opts.sourcesFile = args[++i];
+  else if (a === '--target-root') opts.targetRoots.push(args[++i]);
   else if (a === '--exclude-re') opts.excludeRe.push(args[++i]);
   else if (a === '--max-chars') { opts.maxChars = Number(args[++i]); opts.maxCharsSet = true; }
   else if (a === '--overview') opts.overview = true;
@@ -43,7 +49,7 @@ for (let i = 0; i < args.length; i++) {
 // Loaded from the adapters/ folder next to this script — one file per session
 // format, each exporting {name, detect(file), message(record, opts), fallback?}.
 // Supporting a new JSONL-based tool = dropping one file in that folder (plus a
-// --self-test fixture below). `--source` values and dispatch derive from what's
+// --self-test fixture below). `--target-type` values and dispatch derive from what's
 // loaded. Non-JSONL formats (Cursor's sqlite, opencode's split JSON) also need a
 // reader change here; see SKILL.md "Onboarding" for the format map.
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -71,7 +77,10 @@ if (!Number.isFinite(opts.maxChars) || opts.maxChars < 500) usage(1, '--max-char
 if (!Number.isFinite(opts.before) || opts.before < 0) usage(1, '--before must be >= 0');
 if (!Number.isFinite(opts.after) || opts.after < 0) usage(1, '--after must be >= 0');
 if (!['all', 'user', 'assistant'].includes(opts.role)) usage(1, '--role must be all, user, or assistant');
-if (opts.source !== 'all' && !ADAPTERS[opts.source]) usage(1, `--source must be all or one of: ${Object.keys(ADAPTERS).join(', ')}`);
+const targetTypes = new Set(opts.targetTypes.filter((type) => type !== 'all'));
+for (const type of targetTypes) {
+  if (!ADAPTERS[type]) usage(1, `--target-type must be all or one of: ${Object.keys(ADAPTERS).join(', ')}`);
+}
 if (!['newest', 'oldest', 'file'].includes(opts.sort)) usage(1, '--sort must be newest, oldest, or file');
 const sinceTime = opts.since ? parseSince(opts.since) : null;
 if (opts.since && sinceTime == null) usage(1, '--since must be today, Nd, or YYYY-MM-DD');
@@ -109,8 +118,8 @@ if (opts.any) {
 // the standard per-user homes for each tool; roots that don't exist are skipped, so
 // zero config works out of the box. To search a relocated store or a new tool: add an
 // adapter in adapters/ and a line here (this file is yours to edit — the skill is
-// vendored via `npx skills add`), or point SESSION_GREP_SOURCES_FILE at a JSON array of
-// { type, root }, or pass --root DIR for one call. See SKILL.md "Onboarding".
+// vendored via `npx skills add`), or point --sources-file / SESSION_GREP_SOURCES_FILE at a
+// JSON array of { type, root }, or pass --root DIR for one call. See SKILL.md "Onboarding".
 const DEFAULT_SOURCES = [
   { type: 'claude', root: '~/.claude/projects' },
   { type: 'codex', root: '~/.codex/sessions' },
@@ -118,17 +127,27 @@ const DEFAULT_SOURCES = [
   { type: 'pi', root: '~/.pi/agent/sessions' },
 ];
 const sourceNames = Object.keys(ADAPTERS);
-const sourceMap = loadSessionSources({
+let sourceMap = loadSessionSources({
   knownSources: sourceNames,
   defaultSources: DEFAULT_SOURCES,
   rootOverrides: opts.roots,
+  env: { ...process.env, ...(opts.sourcesFile ? { SESSION_GREP_SOURCES_FILE: opts.sourcesFile } : {}) },
 });
+if (opts.targetRoots.length) {
+  const wanted = new Set(opts.targetRoots.map((root) => path.resolve(expandHome(root))));
+  const filtered = sourceMap.roots.filter((entry) => wanted.has(path.resolve(entry.root)));
+  if (!filtered.length) {
+    usage(1, `--target-root did not match any configured roots. Known roots: ${sourceMap.roots.map((entry) => entry.root).join(', ')}`);
+  }
+  sourceMap = { ...sourceMap, roots: filtered };
+}
 const roots = sourceMap.roots.map((entry) => entry.root).filter((dir) => fs.existsSync(dir));
 // A present-but-broken override silently reverts to defaults; say so on every run so a
 // mistake in SESSION_GREP_SOURCES_FILE never passes as "no override took effect".
 if (sourceMap.configError) {
+  const label = opts.sourcesFile ? '--sources-file' : 'SESSION_GREP_SOURCES_FILE';
   const why = { missing: 'does not exist', unparseable: 'is not valid JSON', 'not-an-array': 'must be a JSON array of { type, root }' }[sourceMap.configError] ?? 'could not be used';
-  console.error(`session-grep: warning: SESSION_GREP_SOURCES_FILE ${sourceMap.configPath} ${why} — using built-in defaults (see --list-roots)`);
+  console.error(`session-grep: warning: ${label} ${sourceMap.configPath} ${why} — using built-in defaults (see --list-roots)`);
 }
 if (opts.listRoots) {
   console.log(`origin=${sourceMap.origin}`);
@@ -137,7 +156,7 @@ if (opts.listRoots) {
   for (const entry of sourceMap.roots) console.log(`${entry.type}\texists=${fs.existsSync(entry.root)}\t${entry.root}`);
   process.exit(0);
 }
-if (!roots.length) usage(1, 'No session roots found to search — edit DEFAULT_SOURCES / set SESSION_GREP_SOURCES_FILE (see SKILL.md "Onboarding") or pass --root DIR');
+if (!roots.length) usage(1, 'No session roots found to search — edit DEFAULT_SOURCES / pass --sources-file / set SESSION_GREP_SOURCES_FILE (see SKILL.md "Onboarding") or pass --root DIR');
 
 // Browse modes answer "which session?" and "what happened in it?" in one call each —
 // whole-thread questions shouldn't cost 20 grep probes. A skim substitutes for many
@@ -210,7 +229,7 @@ let messagesScanned = 0;
 
 for (const file of files) {
   const source = sourceOf(file);
-  if (opts.source !== 'all' && source !== opts.source) continue;
+  if (targetTypes.size && !targetTypes.has(source)) continue;
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
   const messages = parseMessages(raw, source);
@@ -373,7 +392,7 @@ function allSessionFiles() {
 // head/tail preserved and the middle sampled evenly to fit the output budget. Indexes
 // are printed so specifics can be drilled with a targeted --query afterwards.
 function browse() {
-  const files = allSessionFiles().filter((file) => opts.source === 'all' || sourceOf(file) === opts.source);
+  const files = allSessionFiles().filter((file) => !targetTypes.size || targetTypes.has(sourceOf(file)));
   if (opts.skim) {
     const file = files.find((f) => sessionId(f).startsWith(opts.skim));
     if (!file) usage(1, `No session file matching id prefix "${opts.skim}" under: ${roots.join(', ')}`);
@@ -484,7 +503,7 @@ function compileRegex(pattern, caseSensitive) {
 
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: session-grep.mjs --query TEXT [--any] [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--source claude|codex|pi|all] [--since today|Nd|YYYY-MM-DD] [--sort newest|oldest|file] [--root DIR ...] [--exclude-re REGEX ...] [--max-chars N] [--include-tools] [--case-sensitive] [--json] | --overview | --skim ID | --session ID --at INDEX | --list-roots | --self-test');
+  console.error('Usage: session-grep.mjs --query TEXT [--any] [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--target-type claude|codex|pi|all ...] [--since today|Nd|YYYY-MM-DD] [--sort newest|oldest|file] [--root DIR ...] [--sources-file FILE] [--target-root DIR ...] [--exclude-re REGEX ...] [--max-chars N] [--include-tools] [--case-sensitive] [--json] | --overview | --skim ID | --session ID --at INDEX | --list-roots | --self-test');
   process.exit(code);
 }
 
@@ -519,7 +538,7 @@ async function selfTest() {
   fs.writeFileSync(path.join(dir, 'codex', 'rollout-cccc.jsonl'),
     codexLine('assistant', 'zorptastic reply straight from the codex adapter', '2026-06-07T08:00:00Z'));
   // Same Codex format under a root whose path does not reveal the format. This
-  // exercises the SESSION_GREP_SOURCES_FILE override as the source of truth for parsing.
+  // exercises typed source-file overrides as the source of truth for parsing.
   fs.mkdirSync(path.join(dir, 'relocated'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'relocated', 'rollout-dddd.jsonl'),
     codexLine('assistant', 'relocatedsource reply from a configured codex root', '2026-06-08T08:00:00Z'));
@@ -585,8 +604,8 @@ async function selfTest() {
     // overview + spine
     const ov = run(['--overview']);
     check('overview lists both sessions', ov.includes('aaaa1111') && ov.includes('bbbb2222'));
-    const ovCodex = run(['--overview', '--source', 'codex']);
-    check('overview honors --source', ovCodex.includes('rollout-cccc') && !ovCodex.includes('aaaa1111') && !ovCodex.includes('bbbb2222'));
+    const ovCodex = run(['--overview', '--target-type', 'codex']);
+    check('overview honors --target-type', ovCodex.includes('rollout-cccc') && !ovCodex.includes('aaaa1111') && !ovCodex.includes('bbbb2222'));
     const ovRecent = run(['--overview', '--since', '2026-06-06']);
     check('overview honors --since', ovRecent.includes('rollout-cccc') && !ovRecent.includes('aaaa1111') && !ovRecent.includes('bbbb2222'));
     const spine = run(['--skim', 'aaaa1111', '--max-chars', '900']);
@@ -598,17 +617,17 @@ async function selfTest() {
     const role = JSON.parse(run(['--query', 'sidebar', '--role', 'user', '--json']));
     check('role filter', role.matches.every((m) => m.match.role === 'user'));
 
-    // adapter registry: codex format parsed, source detected from path, --source filters
+    // adapter registry: codex format parsed, source detected from path, --target-type filters
     const cx = JSON.parse(run(['--query', 'zorptastic', '--json']));
     check('codex adapter parses', cx.totalMatches === 1 && cx.matches[0].source === 'codex');
-    const cxOnly = JSON.parse(run(['--query', 'zorptastic', '--source', 'claude', '--json']));
-    check('--source filters by adapter', cxOnly.totalMatches === 0);
+    const cxOnly = JSON.parse(run(['--query', 'zorptastic', '--target-type', 'claude', '--json']));
+    check('--target-type filters by adapter', cxOnly.totalMatches === 0);
 
     // pi adapter: format parsed, source detected from path, toolResult gated by --include-tools
     const pi = JSON.parse(run(['--query', 'plumbuscal', '--json']));
     check('pi adapter parses user+assistant', pi.totalMatches === 2 && pi.matches.every((m) => m.source === 'pi'));
-    const piOnly = JSON.parse(run(['--query', 'zorptastic', '--source', 'pi', '--json']));
-    check('--source pi filters by adapter', piOnly.totalMatches === 0);
+    const piOnly = JSON.parse(run(['--query', 'zorptastic', '--target-type', 'pi', '--json']));
+    check('--target-type pi filters by adapter', piOnly.totalMatches === 0);
     const piNoise = JSON.parse(run(['--query', 'PINOISE', '--json']));
     check('pi toolResult excluded by default', piNoise.totalMatches === 0);
     const piTools = JSON.parse(run(['--query', 'PINOISE', '--json', '--include-tools']));
@@ -636,6 +655,12 @@ async function selfTest() {
     ]));
     const configured = JSON.parse(runRaw(['--query', 'relocatedsource', '--json'], { SESSION_GREP_SOURCES_FILE: sourcesFile }));
     check('session_sources type routes codex parser', configured.totalMatches === 1 && configured.matches[0].source === 'codex');
+    const configuredViaFlag = JSON.parse(runRaw(['--query', 'relocatedsource', '--json', '--sources-file', sourcesFile]));
+    check('--sources-file type routes codex parser', configuredViaFlag.totalMatches === 1 && configuredViaFlag.matches[0].source === 'codex');
+    const targetedPi = JSON.parse(runRaw(['--query', 'relocatedpi', '--json', '--sources-file', sourcesFile, '--target-root', path.join(dir, 'relocated-pi')]));
+    check('--target-root narrows to configured root and keeps parser mapping', targetedPi.totalMatches === 1 && targetedPi.matches[0].source === 'pi');
+    const targetedMiss = JSON.parse(runRaw(['--query', 'relocatedsource', '--json', '--sources-file', sourcesFile, '--target-root', path.join(dir, 'relocated-pi')]));
+    check('--target-root excludes other configured roots', targetedMiss.totalMatches === 0);
     const configuredClaude = JSON.parse(runRaw(['--query', 'movedclaude', '--json'], { SESSION_GREP_SOURCES_FILE: sourcesFile }));
     check('session_sources type routes claude parser', configuredClaude.totalMatches === 1 && configuredClaude.matches[0].source === 'claude');
     const configuredPi = JSON.parse(runRaw(['--query', 'relocatedpi', '--json'], { SESSION_GREP_SOURCES_FILE: sourcesFile }));

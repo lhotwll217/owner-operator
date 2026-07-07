@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Owner Operator launcher — TypeScript runtime via tsx (pi SDK is the engine).
+#   ./oo                       → pi's stock interactive mode, our agent config
+#   ./oo "what's ongoing?"     → headless single-turn (prose)
+#   ./oo --continue "more"     → resume the most recent oo thread
+#   ./oo --session <id> "more" → resume a specific oo thread
+#   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
+# Works from the repo and when installed on PATH via `npm link` (resolves the symlink).
+
+# Resolve symlinks so DIR is the real repo dir even when run as a linked global bin.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  D="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [ "${SOURCE#/}" = "$SOURCE" ] && SOURCE="$D/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
+  shift
+fi
+
+if [ "$#" -gt 0 ]; then
+  ENTRY="$DIR/src/cli/oo.ts"
+else
+  ENTRY="$DIR/src/cli/interactive.ts"
+fi
+
+# Prefer the checkout's tsx (workspace-hoisted to repo root); fall back to npx.
+if [ -x "$DIR/node_modules/.bin/tsx" ]; then
+  exec "$DIR/node_modules/.bin/tsx" "$ENTRY" "$@"
+else
+  exec npx tsx "$ENTRY" "$@"
+fi

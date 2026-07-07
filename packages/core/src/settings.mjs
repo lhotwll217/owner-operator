@@ -4,9 +4,9 @@
 // dials. Read from <ooHome>/settings.json; a missing file / invalid JSON / bad value → the
 // documented default (never throws):
 //
-//   { "activeWindow": "36h" }   // how far back "active" looks — the sidebar's inclusion window
+//   { "activeWindow": "36h" }   // how far back "active" looks — session-state inclusion
 //
-// Plain ESM (not TS) so the zero-install scan skill runs the exact code the harness uses
+// Plain ESM (not TS) so the zero-install scan skill runs the exact code the gateway uses
 // (re-exported via @owner-operator/core). Types: settings.d.mts.
 
 import { readFileSync } from "node:fs";

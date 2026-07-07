@@ -14,9 +14,9 @@
 //   }
 //
 // `source` MUST be one of KNOWN_SESSION_SOURCES — parsing each format is code (see
-// get-active-threads.mjs), so config can point at a NEW LOCATION, not teach a new format.
+// scan-active-transcripts.mjs), so config can point at a NEW LOCATION, not teach a new format.
 // To relocate a source, `disable` its default and `add` the new root. Plain ESM (not TS) so
-// the zero-install scan skill runs the exact code the harness uses (re-exported via
+// the zero-install scan skill runs the exact code the gateway uses (re-exported via
 // @owner-operator/core). Types: session-sources.d.mts.
 
 import { readFileSync } from "node:fs";
@@ -25,8 +25,8 @@ import { join } from "node:path";
 
 /**
  * Source kinds the scan knows how to parse — THE source of truth for what's supported.
- * A root is only honored for one of these. Docs that name the sources (README "How sessions
- * are read", the get-active-threads skill) mirror this list; add a source here first.
+ * A root is only honored for one of these. Docs and skill descriptions point here instead
+ * of naming sources; add a source here first.
  */
 export const KNOWN_SESSION_SOURCES = ["claude", "codex", "cursor", "posthog-code", "pi", "opencode", "antigravity", "grok-build"];
 

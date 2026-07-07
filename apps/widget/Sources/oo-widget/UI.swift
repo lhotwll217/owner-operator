@@ -1,5 +1,5 @@
 // The widget's SwiftUI content, hosted inside the floating panel. Collapsed = a small always-on
-// bar (status dot · counts · the loudest needs-you leaf). Expanded in place = the full sidebar,
+// bar (status dot · counts · the loudest needs-you leaf). Expanded in place = the full session state,
 // grouped by repo, loudest-first. Nothing here computes state — it renders the daemon's snapshot.
 
 import SwiftUI
@@ -104,34 +104,34 @@ struct CompactBar: View {
     }
 
     /// The loudest thread overall is groups[0].rows[0]; surface it only when it needs you.
-    private var topNeedsYou: SidebarRow? {
+    private var topNeedsYou: SessionStateRow? {
         guard let r = client.groups.first?.rows.first, r.state == .needsYou else { return nil }
         return r
     }
 
     /// Threads whose turn finished in the last 5 min — what the soft pulse cycles through.
-    private var fresh: [SidebarRow] { client.freshNeedsYou() }
+    private var fresh: [SessionStateRow] { client.freshNeedsYou() }
 }
 
 /// One thread as `mark Project → next step`: the tool's logo (when bundled), the project
-/// tinted light blue, an arrow (the sidebar's `→ next step` pattern), then the next step in
+/// tinted light blue, an arrow (the session state's `→ next step` pattern), then the next step in
 /// full. `Text` (not AttributedString) so the mark rides inline. Shared by the calm line and
 /// the ticker.
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
 
-private func lineText(_ r: SidebarRow) -> Text {
+private func lineText(_ r: SessionStateRow) -> Text {
     var proj = AttributeContainer(); proj.foregroundColor = projectBlue
-    var out = AttributedString(r.thread.repo, attributes: proj)
+    var out = AttributedString(r.repo, attributes: proj)
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
     out.append(AttributedString(r.nextSteps ?? r.title, attributes: step))
-    guard let mark = AppBadge.textMark(for: r.thread.app) else { return Text(out) }
+    guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
 }
 
 /// All fresh items joined into one ticker line, separated by a dim dot.
-private func tickerText(_ rows: [SidebarRow]) -> Text {
+private func tickerText(_ rows: [SessionStateRow]) -> Text {
     var out = Text(verbatim: "")
     for (i, r) in rows.enumerated() {
         if i > 0 {
@@ -148,7 +148,7 @@ private func tickerText(_ rows: [SidebarRow]) -> Text {
 /// sits exactly where the first started, so resetting to 0 is invisible) — then sit again. Only
 /// animates during the scroll; fully idle while sitting. `gen` cancels stale timers if data changes.
 struct FreshTicker: View {
-    let items: [SidebarRow]
+    let items: [SessionStateRow]
 
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
@@ -249,14 +249,14 @@ struct GroupView: View {
 }
 
 /// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
-/// grey next-step, then origin (±diff · app). Matches sidebar.ts's "keep every word".
+/// grey next-step, then origin (±diff · app). Keep every word.
 /// Rename via the pencil that appears on hover (or double-click the title) — your title is
 /// preferred over the AI's (which keeps titling underneath); submit it empty (or use the
 /// context menu) to show AI titles again. STABILITY RULE: hover/edit state may only swap
 /// what's drawn inside space that is always reserved — never insert or remove layout — so
 /// text never re-wraps and neighbors never move.
 struct RowView: View {
-    let row: SidebarRow
+    let row: SessionStateRow
     let onDone: () -> Void
     let onRename: (String) -> Void
     @State private var hovering = false
@@ -278,7 +278,7 @@ struct RowView: View {
                     title
                     titleAffordance
                     Spacer(minLength: 6)
-                    Text(shortAge(row.thread.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
+                    Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
                 if let next = row.nextSteps, !next.isEmpty {
@@ -287,12 +287,12 @@ struct RowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 6) {
-                    if row.thread.diffAdded != nil || row.thread.diffDeleted != nil {
-                        Text("+\(row.thread.diffAdded ?? 0)").foregroundStyle(.green).font(.system(size: 10))
-                        Text("-\(row.thread.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
+                    if row.diffAdded != nil || row.diffDeleted != nil {
+                        Text("+\(row.diffAdded ?? 0)").foregroundStyle(.green).font(.system(size: 10))
+                        Text("-\(row.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
                     }
                     Spacer()
-                    AppBadge(app: row.thread.app)
+                    AppBadge(app: row.app)
                 }
             }
         }

@@ -10,10 +10,6 @@
 //   • sources     → SESSION_GREP_SOURCES_FILE (typed {type,root} roots from loadSessionSources)
 //   • blacklist   → layer 1 (claude project-dir slug) as --exclude-re; layer 2 (session cwd)
 //                   post-filtered on the few hit files (search) or pre-scanned (browse)
-//   • self        → oo's own pi-format threads, routed as `type: pi`, labeled from provenance
-//
-// oo-only surface kept identical to before: --source claude|codex|self|all (self excluded
-// from `all`), --surface to narrow self by oo surface, provenance/repo labels on self hits.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,14 +22,13 @@ import { firstCwdFromFile, resolveRepo } from "../../../packages/core/src/sessio
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TOOL = path.join(here, "vendor", "session-grep.mjs");
 const ooHome = process.env.OO_HOME ?? path.join(os.homedir(), ".owner-operator");
-const selfRoot = path.join(ooHome, "sessions");
 
 // ---------- parse the oo-only flags, pass everything else straight through ----------
 // --limit / --max-chars are also intercepted (search mode only): layer-2 blacklist filtering
 // happens AFTER the primitive applies them, so the wrapper over-fetches and re-applies the
 // caller's real numbers on output — blacklisted hits must not eat the caller's budget.
 const argv = process.argv.slice(2);
-let source = "all", surface = null, userWantsJson = false;
+let targetType = "all", userWantsJson = false;
 let limit = 20, maxChars = 8000, limitSet = false, maxCharsSet = false;
 const passthrough = [];
 // Flags whose presence means a browse/window/list mode: the primitive streams TEXT for
@@ -43,8 +38,7 @@ const BROWSE = new Set(["--overview", "--skim", "--session", "--at", "--list-roo
 let browse = false, listRoots = false;
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a === "--source") source = argv[++i];
-  else if (a === "--surface") surface = argv[++i];
+  if (a === "--target-type") targetType = argv[++i];
   else if (a === "--limit") { limit = Number(argv[++i]); limitSet = true; }
   else if (a === "--max-chars") { maxChars = Number(argv[++i]); maxCharsSet = true; }
   else {
@@ -54,14 +48,8 @@ for (let i = 0; i < argv.length; i++) {
     passthrough.push(a);
   }
 }
-if (!["all", "claude", "codex", "self"].includes(source)) {
-  console.error("--source must be all, claude, codex, or self");
-  process.exit(1);
-}
-// --surface labels come from oo-provenance stamps, which only self threads carry — with any
-// other source every hit would be silently skipped, which can only be a mistake.
-if (surface && source !== "self") {
-  console.error("--surface filters oo's own threads — combine it with --source self");
+if (!["all", "claude", "codex"].includes(targetType)) {
+  console.error("--target-type must be all, claude, or codex");
   process.exit(1);
 }
 // The caller's real output knobs, re-injected verbatim in browse modes so the primitive's
@@ -72,18 +60,16 @@ const knobArgs = [
 ];
 
 // ---------- WHERE to search: typed roots from oo config (fail closed) ----------
-// `self` = oo's own threads (pi format) under <OO_HOME>/sessions, deliberately excluded
-// from `all`. Otherwise the owner's coding sessions — but ONLY sources the vendored
-// primitive can parse AND we can blacklist-resolve (claude, codex). cursor/posthog-code are
-// in oo's config for triage but have no session-grep adapter, so they're dropped here
-// rather than silently mis-parsed: privacy scope is bounded by what we can actually vet.
+// Owner coding sessions only — but ONLY sources the vendored primitive can parse AND we can
+// blacklist-resolve (claude, codex). cursor/posthog-code are in oo's config for triage but
+// have no session-grep adapter, so they're dropped here rather than silently mis-parsed:
+// privacy scope is bounded by what we can actually vet. Owner Operator's own sessions are
+// searched by pointing the vendored primitive directly at <OO_HOME>/sessions as type `pi`.
 const codingRoots = loadSessionSources(ooHome)
   .filter((r) => r.source === "claude" || r.source === "codex")
   .map((r) => ({ type: r.source, root: r.root }));
-const sourcesEntries = source === "self" ? [{ type: "pi", root: selfRoot }] : codingRoots;
-// The primitive's own --source filters among the loaded roots; for `self` we hand it only
-// the pi root, so `all` there means "every self surface".
-const toolSource = source === "self" ? "all" : source;
+const sourcesEntries = codingRoots;
+const targetTypeArgs = targetType === "all" ? [] : ["--target-type", targetType];
 
 const sourcesFile = path.join(os.tmpdir(), `oo-sessions-grep-sources-${process.pid}.json`);
 fs.writeFileSync(sourcesFile, JSON.stringify(sourcesEntries));
@@ -134,13 +120,13 @@ const env = { ...process.env, SESSION_GREP_SOURCES_FILE: sourcesFile };
 
 // ---------- browse/window/list: stream the primitive's output, blacklist already applied ----------
 if (browse) {
-  const r = spawnSync(process.execPath, [TOOL, ...passthrough, ...knobArgs, "--source", toolSource, ...excludeArgs], { stdio: "inherit", env });
+  const r = spawnSync(process.execPath, [TOOL, ...passthrough, ...knobArgs, ...targetTypeArgs, ...excludeArgs], { stdio: "inherit", env });
   cleanup();
   process.exit(r.status ?? 0);
 }
 
-// ---------- search: run the primitive in JSON, then blacklist-filter + self-annotate ----------
-// Force --json so we can drop blacklisted hits (layer 2) and label self hits before output.
+// ---------- search: run the primitive in JSON, then blacklist-filter ----------
+// Force --json so we can drop blacklisted hits (layer 2) before output.
 // Over-fetch limit and budget (the primitive computes every match regardless — the scaled
 // numbers only widen its output window), then trim back to the caller's real numbers after
 // filtering so blacklisted hits don't shortchange --limit.
@@ -157,7 +143,7 @@ const jsonArgs = [
   "--limit", String(limit * FETCH_FACTOR),
   "--max-chars", String(internalMaxChars),
 ];
-const r = spawnSync(process.execPath, [TOOL, ...jsonArgs, "--source", toolSource, ...excludeArgs], { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
+const r = spawnSync(process.execPath, [TOOL, ...jsonArgs, ...targetTypeArgs, ...excludeArgs], { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
 if (r.stderr) process.stderr.write(r.stderr);
 if (r.status !== 0 || !r.stdout.trim()) { cleanup(); process.exit(r.status ?? 1); }
 cleanup();
@@ -169,14 +155,7 @@ const kept = [];
 let blacklistedDropped = 0;
 for (const m of out.matches ?? []) {
   if (fileBlacklisted(m.path)) { blacklistedDropped++; continue; } // layer 2 (search): only hit files are read
-  if (m.source === "pi") {
-    // oo's own thread: label from the latest oo-provenance stamp; --surface narrows here.
-    const prov = piProvenance(m.path);
-    if (surface && prov?.surface !== surface) continue;
-    kept.push({ ...m, source: "self", surface: prov?.surface, repo: prov?.callerRepo, provenance: prov ?? undefined });
-  } else {
-    kept.push(m);
-  }
+  kept.push(m);
 }
 const trimmed = kept.slice(0, limit);
 // Even the over-fetch couldn't backfill what the blacklist dropped — say so rather than
@@ -212,9 +191,9 @@ if (userWantsJson) {
   if (omitted) { out.omittedByBudget = omitted; out.note = budgetNote(omitted); }
   process.stdout.write(JSON.stringify(out) + "\n");
 } else {
-  // Mirror the primitive's text layout, adding oo's self labels (surface/repo).
+  // Mirror the primitive's text layout after privacy filtering.
   const renderHit = (m) => [
-    `${m.source}${m.surface ? ` surface=${m.surface} repo=${m.repo ?? ""}` : ""} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ""}${m.matchedWords ? ` matched=[${m.matchedWords.join(",")}] score=${m.score}` : ""}`,
+    `${m.source} id=${m.id} idx=${m.index} ts=${m.timestamp ?? ""}${m.matchedWords ? ` matched=[${m.matchedWords.join(",")}] score=${m.score}` : ""}`,
     `path=${m.path}`,
     ...(m.before ?? []).map((b) => `  before ${b.role}: ${b.text}`),
     `  MATCH ${m.match.role}: ${m.match.text}`,
@@ -222,7 +201,7 @@ if (userWantsJson) {
   ];
   const emitted = emitWithinBudget((m) => renderHit(m).reduce((t, l) => t + l.length + 1, 6));
   const omitted = trimmed.length - emitted.length;
-  console.log(`query=${JSON.stringify(out.query ?? "")}${out.regex ? " regex=true" : ""}${out.any ? " any=true" : ""} raw_files_with_hits=${out.rawFilesWithHits} total_message_matches=${out.totalMatches} shown=${emitted.length}${source !== "all" ? ` source=${source}` : ""}${blacklistedDropped ? ` blacklisted_dropped=${blacklistedDropped}` : ""}`);
+  console.log(`query=${JSON.stringify(out.query ?? "")}${out.regex ? " regex=true" : ""}${out.any ? " any=true" : ""} raw_files_with_hits=${out.rawFilesWithHits} total_message_matches=${out.totalMatches} shown=${emitted.length}${targetType !== "all" ? ` target_type=${targetType}` : ""}${blacklistedDropped ? ` blacklisted_dropped=${blacklistedDropped}` : ""}`);
   if (out.wordHits) console.log(`word_hits: ${Object.entries(out.wordHits).map(([w, c]) => `${w}=${c}`).join(" ")} (of ${out.messagesScanned} messages in matched files; high-count words are low-signal — prefer the rare ones)`);
   if (out.hint) console.log(`hint: ${out.hint}`);
   emitted.forEach((m, idx) => {
@@ -245,20 +224,4 @@ function walk(dir) {
     else if (e.isFile() && p.endsWith(".jsonl")) out.push(p);
   }
   return out;
-}
-
-// Latest oo-provenance stamp in an oo thread: {type:"custom", customType:"oo-provenance",
-// data:{surface, origin, callerCwd, callerRepo, fromSession?, ppid}}. Every invocation
-// appends one, so the last stamp is the most recent caller.
-function piProvenance(file) {
-  let latest = null;
-  let raw;
-  try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
-    if (obj.type === "custom" && obj.customType === "oo-provenance" && obj.data) latest = obj.data;
-  }
-  return latest;
 }

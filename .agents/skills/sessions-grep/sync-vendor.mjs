@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sync-vendor — enforce vendor/'s "verbatim copy" rule mechanically, not by README.
+// sync-vendor — compare vendor/ against upstream and re-sync when needed.
 //
 //   node sync-vendor.mjs --check        verify vendor/ is byte-identical to the pinned
 //                                       upstream commit (exit 1 on drift, 2 if unreachable)
@@ -9,7 +9,8 @@
 // The upstream URL and pin live in vendor/UPSTREAM.md (single source of truth). The one
 // sanctioned deviation — upstream's SKILL.md stored as SKILL.upstream.md so no skill
 // scanner discovers an unwrapped copy — is applied here, so `--apply` can't forget it and
-// `--check` accounts for it. UPSTREAM.md itself is the only vendor/ file that is ours.
+// `--check` accounts for it. UPSTREAM.md itself is ours; local primitive deltas are tracked
+// there while waiting to upstream.
 // --upstream URL overrides the recorded upstream (tests point this at a local fixture).
 import fs from "node:fs";
 import os from "node:os";
@@ -74,7 +75,7 @@ if (mode === "check") {
   }
   for (const rel of have) if (!wanted.has(rel)) drift.push(`not upstream's: ${rel}`);
   if (drift.length) {
-    fail(1, `vendor/ has drifted from ${url} ${pin[1]} @ ${pin[2]}:\n  ${drift.join("\n  ")}\nRe-sync with --apply, or revert the local edit — vendor/ must stay a verbatim copy.`);
+    fail(1, `vendor/ differs from ${url} ${pin[1]} @ ${pin[2]}:\n  ${drift.join("\n  ")}\nIf this is intentional, document the local delta in vendor/UPSTREAM.md; otherwise re-sync with --apply or revert the edit.`);
   }
   console.log(`ok — vendor/ is verbatim ${url} @ ${sha} (${wanted.size} files)`);
 } else {
@@ -93,7 +94,7 @@ if (mode === "check") {
   console.log(`synced vendor/ from ${url} ${applyRef} @ ${sha} (${wanted.size} files); pin updated`);
   const st = spawnSync(process.execPath, [path.join(vendorDir, "session-grep.mjs"), "--self-test"], { stdio: "inherit" });
   if (st.status !== 0) fail(1, "self-test FAILED on the new vendor copy — do not commit");
-  console.log("now run the wrapper's integration test: npx tsx harness/src/sessions-grep.integration.test.ts");
+  console.log("now run the wrapper's integration test: npx tsx test/sessions-grep.integration.test.ts");
 }
 
 function listFiles(dir) {

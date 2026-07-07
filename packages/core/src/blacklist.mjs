@@ -9,7 +9,7 @@
 // a blacklisted repo that live elsewhere (Superset/Conductor checkouts resolve to the real
 // repo name). Enforced in three layers: the scan (discovery), the store seam (writes), and
 // an open-time purge (history). Plain ESM (not TS) so the zero-install scan skill runs the
-// exact code the harness uses (re-exported via @owner-operator/core). Types: blacklist.d.mts.
+// exact code the gateway uses (re-exported via @owner-operator/core). Types: blacklist.d.mts.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
