@@ -4,7 +4,7 @@
 
 ```
         ┌──────────────────────────────────────────────────────────────┐
-        │  UIs:  terminal (oo)  ·  macOS widget  ·  web (not built)      │
+        │  UIs:  macOS widget  ·  terminal (oo)  ·  web (not built)      │
         └───────────────────────────▲──────────────────────────────────┘
         ┌───────────────────────────┴──────────────────────────────────┐
         │                 GATEWAY  (local, always-on)                   │
@@ -19,42 +19,45 @@
 
 ## What each part does
 
-- **gateway** (`packages/gateway/`) — one local process (`oo daemon`) that owns state: runs
+- **gateway** (`src/gateway/`) — one local process (`oo daemon`) that owns state: runs
   the poll loop (scan → resolve thread state → store), runs schedules/triggers, and serves
-  HTTP + SSE on 127.0.0.1. The UIs are thin clients over the protocol in `packages/core`.
-  The TUI auto-spawns it and falls back to an in-process poller when disabled
-  (`OO_DAEMON=0`).
-- **Harness "PI"** (`harness/`) — the pi-based Operator and terminal surfaces. It reads the
-  gateway through `@owner-operator/gateway/*`; it does not contain the state-owning daemon.
-- **core** (`packages/core/`) — the shared types the harness and UIs agree on (sessions,
-  threads, priority).
-- **workflows** (`packages/workflows/`) — *not built yet.* Deterministic scripts the harness
-  will run (e.g. "summarize today's threads").
+  HTTP + SSE on 127.0.0.1. The widget, terminal, and session-state callers are thin clients over the
+  protocol in `packages/core`.
+- **agent** (`src/agent/`) — the pi-based Operator session config: prompt, tools, skills,
+  model settings, and saved-session provenance. It is a gateway client.
+- **CLI** (`src/cli/`) — terminal entrypoints: pi interactive mode for humans and headless
+  single-turn calls for agents.
+- **core** (`packages/core/`) — the shared types every surface agrees on (sessions, threads,
+  priority, state rows).
+- **workflows** (`packages/workflows/`) — *not built yet.* Deterministic scripts that run
+  against the gateway/skills (e.g. "summarize today's threads").
 - **widget** (`apps/widget/`) — macOS app showing the ranked thread list. Reads from the daemon.
 - **web** (`apps/web/`) — *not built yet.* localhost page to open one session and read it.
 
 ## Layout & the dependency rule
 
-The gateway is its own package. Dependencies point toward state ownership, never back out
-to agent/UI code (see [inspiration.md](inspiration.md)):
+The gateway is a top-level component at root `src/gateway/` — OpenClaw's layout: the root
+package is the product, the gateway is primary, and every surface is a client. Dependencies
+point toward state ownership, never back out to agent/UI code (see
+[inspiration.md](inspiration.md)):
 
 ```text
-core (packages/core) ← gateway (packages/gateway) ← { harness agent/tui/cli, widget, web }
+core (packages/core) ← gateway (src/gateway) ← { src/agent, src/cli, widget, web }
 ```
 
-- `packages/gateway/` — daemon, poller, store, threads-db, and the `Backend` client seam.
+- `src/gateway/` — daemon, poller, store, threads-db, and the `Backend` client seam.
   Model-free and agent-free; [#14](https://github.com/lhotwll217/owner-operator/issues/14)'s
-  arrow. Enforced by `packages/gateway/src/gateway.boundaries.test.ts`, so CI fails on a
-  leak.
-- `agent/` — the pi-based Operator; a client of the gateway like every surface.
-- `tui/` `cli/` — the terminal surfaces and entrypoints.
-- `harness/src/shared/` — harness-only repo-root resolution and card rendering.
+  arrow. Enforced by `src/gateway/gateway.boundaries.test.ts`, so CI fails on a leak.
+- `src/agent/` — the pi-based Operator; a client of the gateway like every surface.
+- `src/cli/` — terminal entrypoints only; no state ownership.
+- `src/prompts/` — Operator prompt text loaded by the agent core.
+- `src/shared/` — root-local utilities shared by the agent and CLI.
 
 ## Rules
 
 1. It runs a fixed set of commands, not an open-ended agent loop.
 2. The UIs show the current state of each thread, not full transcripts.
-3. Dependencies point inward — `packages/gateway/` imports only core and node/runtime APIs.
+3. Dependencies point inward — `src/gateway/` imports only core and node/runtime APIs.
 
 ## Ranking
 
@@ -67,14 +70,14 @@ is TBD; we'll learn it by using it.
 The daemon runs them (shapes in `packages/core/src/protocol.ts`): a schedule is WHEN ×
 ACTION, set by name over HTTP. `interval`/`daily` run from the tick loop; `event: needs-you`
 fires when a thread newly needs you (`OO_NEEDS_YOU=<ids>` in the env). Actions today: `poll`
-and `shell` — so a desktop notification or a piped `oo --json` brief is one shell command.
+and `shell` — so a desktop notification or a piped `oo --session-state` brief is one shell command.
 
 ```sh
 curl -X PUT localhost:47711/schedules/morning-brief \
-  -d '{"when":{"type":"daily","at":"08:00"},"action":{"type":"shell","command":"oo --json \"what needs me\" > ~/brief.json"}}'
+  -d '{"when":{"type":"daily","at":"08:00"},"action":{"type":"shell","command":"oo --session-state > ~/brief.json"}}'
 ```
 
-In the chat surfaces, scheduling is session-level via the
+In the agent surfaces, scheduling is session-level via the
 [pi-schedule-prompt](https://pi.dev/packages/pi-schedule-prompt) package (installed through
 `.pi/settings.json` `packages`): the owner tells the Operator "re-triage every 15 minutes"
 or "remind me at 3pm" and it schedules a prompt to itself with the `schedule_prompt` tool.

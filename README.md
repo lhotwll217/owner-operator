@@ -23,37 +23,37 @@ running:
 cd apps/widget && make run
 ```
 
-## The terminals
-
-Two terminal UIs on the same agent core, both for working across sessions: ask what's going
-on, pull context from several coding sessions at once, then drop into the right one.
+## The terminal
 
 ```bash
-./harness/oo           # chat (default): pi's stock shell, wired to our session cards and slash commands
-./harness/oo --tui     # branded TUI: chat with your session list pinned beside it
+./oo                   # pi's stock interactive mode
+./oo "what's ongoing?" # headless single-turn question, prose on stdout
+./oo --continue "more" # resume the most recent oo thread
+./oo --session-state   # current widget/gateway state, no model call
 ```
 
-Either one starts the background daemon.
+The terminal starts the background daemon when it needs state. The widget is the always-on UI
+surface for the ranked session list.
 
 ## The daemon
 
-`oo daemon` runs the gateway from `packages/gateway`: it watches your sessions, owns the
-state store, and serves both UIs. The terminals start it automatically; run it yourself when
-you only want the widget.
+`oo daemon` runs the local gateway: it watches your sessions, owns the state store, and
+serves the widget, terminal, and session-state callers. The terminal starts it
+automatically; run it yourself when you only want the widget.
 
 ## How it works
 
-Built on the [pi coding agent](https://github.com/earendil-works/pi). `oo` reads session files
-off disk with small scan/grep skills ([.agents/skills](.agents/skills/)) and never loads full
-transcripts into a model. Supported agents live in
-[`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents drive it headless with
-`oo one-shot "question"`: a single read-only turn that prints its session id on stderr, with
-`--continue` / `--session <id>` resuming that thread on the next call. Every oo chat, human or
-agent, is saved under `~/.owner-operator/sessions` (never mixed with your coding sessions),
-labeled with its surface and caller repo; agents pass `--from-session <id>` so the audit trail
+Built on the [pi coding agent](https://github.com/earendil-works/pi). `oo` reads session
+files off disk with small scan/grep skills ([.agents/skills](.agents/skills/)) and never
+loads full transcripts into a model. Supported agents live in
+[`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents drive it headless
+with `oo "question"`: a single turn that prints its session id on stderr, with `--continue`
+/ `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
+saved under `~/.owner-operator/sessions` (never mixed with your coding sessions), labeled
+with its surface and caller repo; agents pass `--from-session <id>` so the audit trail
 records who called.
 
-So far this has only been tested with a Codex subscription as the driver for the pi harness.
+So far this has only been tested with a Codex subscription as the driver for the pi agent.
 Other model backends should work but are unverified.
 
 Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,

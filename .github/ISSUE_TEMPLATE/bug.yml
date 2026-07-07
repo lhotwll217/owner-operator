@@ -14,10 +14,10 @@ body:
     id: repro
     attributes:
       label: Reproduce
-      description: Smallest path to see it. Commands, flags, which surface (widget / oo TUI / oo -i / one-shot).
+      description: Smallest path to see it. Commands, flags, which surface (widget / oo / headless oo).
       placeholder: |
-        1. ./harness/oo
-        2. /done 3
+        1. ./oo "what's ongoing?"
+        2. mark row 3 done
         3. wait for the next poll
     validations:
       required: true
