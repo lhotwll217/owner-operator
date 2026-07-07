@@ -8,13 +8,29 @@ state DB as a locator and `search_sessions` for evidence. Pattern adapted from t
 ## Run
 
 ```sh
-npx promptfoo eval -c eval/promptfooconfig.yaml      # comparative: OO vs baseline
-npx promptfoo eval -c eval/promptfooconfig-oo.yaml   # OO-only: DB-dependent cases
-node eval/compare.mjs                                # paired report + gates
+npm run eval           # both arms over every case (promptfoo)
+npm run eval:compare   # paired report + correctness gate
+```
+
+Cheap first pass — drop the paid arms to haiku (the OO arm's model is fixed by
+`.pi/settings.json`):
+
+```sh
+EVAL_MODEL=claude-haiku-4-5-20251001 EVAL_GRADER_MODEL=haiku npm run eval
 ```
 
 Needs: Claude Code auth (baseline arm + grader run `claude -p`), and `oo`'s configured
 model backend (`.pi/settings.json`). No API keys.
+
+## One chain, not a DB suite
+
+`query_database` is just one of OO's tools, so there is no separate DB eval. Both arms
+attempt every case; the baseline greps the transcripts, OO may shortcut through its state
+DB. The `qtype` breakdown in `compare.mjs` is where the locator payoff shows: on the
+locate-led cases (`state`, `stale`, `audit`, `handoff`) OO should reach parity with fewer
+tool calls. Pure `query_database` correctness (does a SELECT return the right rows) is
+covered deterministically and for free by `src/gateway/query-db.test.ts` — not re-tested
+through a paid LLM run.
 
 ## Layout
 
@@ -25,9 +41,8 @@ model backend (`.pi/settings.json`). No API keys.
 | `providers/oo-agent.mjs` | subject: `oo "question"` against the sandbox home; tool calls + usage parsed from `OO_TRACE` NDJSON |
 | `providers/baseline-agent.mjs` | control: `claude -p` + vendored session-grep over the same transcripts |
 | `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded) |
-| `cases-compare.yaml` | evidence/locator/summary/negative — both arms |
-| `cases-oo.yaml` | state/audit/stale/handoff — need the DB; gate OO absolutely |
-| `compare.mjs` | pairs arms per case; gates: OO ≥ baseline on comparative, 100% on OO-only |
+| `cases.yaml` | every case, tagged by `qtype`; both arms attempt all of them |
+| `compare.mjs` | pairs arms per case; gate: OO correctness ≥ baseline; qtype breakdown for the locator payoff |
 
 Providers reseed the sandbox at load, so every eval run gets fresh activity windows.
 Trajectories land in `results/logs/<run>/` for inspecting HOW each arm searched.

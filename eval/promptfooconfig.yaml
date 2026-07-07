@@ -11,8 +11,11 @@
 # This compares the two PRODUCTS as shipped — models differ by design; the correctness
 # rubric is absolute and the efficiency comparison is what the owner actually pays.
 #
-# Run:   npx promptfoo eval -c eval/promptfooconfig.yaml        comparative cases
-#        npx promptfoo eval -c eval/promptfooconfig-oo.yaml     OO-only (DB) cases
+# One chain, one case set: both arms attempt every case. The DB is one of OO's tools, so
+# there's no separate DB suite — the report breaks down by qtype to show WHERE OO reached
+# for query_database instead of grepping.
+#
+# Run:   npx promptfoo eval -c eval/promptfooconfig.yaml
 # Then:  node eval/compare.mjs                                  paired A/B breakdown
 #
 # The baseline + grader run through the local `claude` CLI (Claude Code auth); the OO
@@ -39,10 +42,10 @@ defaultTest:
       value: file://asserts/efficiency.mjs
       metric: efficiency_telemetry
 
-tests: file://cases-compare.yaml
+tests: file://cases.yaml
 
 # Resolved from the process cwd (repo root), not this file's dir.
-outputPath: eval/results/latest-compare.json
+outputPath: eval/results/latest.json
 
 evaluateOptions:
   maxConcurrency: 2
