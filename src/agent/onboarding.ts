@@ -51,15 +51,11 @@ export async function runOnboarding(ctx: ExtensionContext, { force = false }: { 
   running = true;
   const ui = ctx.ui;
   try {
-    // 1. What it is + the data model, then consent to proceed. Be precise about what a model sees:
-    // the scan is model-free, but I'm an AI agent, so questions + digests do reach the provider.
+    // 1. What it is, then consent. One honest clause on the read — no overclaim, no lecture.
     const go = await ui.confirm(
       "Owner Operator",
-      "I watch the coding-agent sessions already on this Mac and rank them by what needs you. " +
-        "The scan that reads them is model-free — full transcripts never go to a model. " +
-        "But I'm an AI agent: your questions and the short session digests I reason over do go to your " +
-        "model provider. Anything you mark off-limits I never read, so it never reaches the model.\n\n" +
-        "Set up now?",
+      "I watch the coding-agent sessions already on this Mac and rank them by what needs you — " +
+        "read locally, no full transcripts sent to a model.\n\nSet up now?",
     );
     if (!go) {
       ui.notify("No problem — run /onboarding when you're ready.", "info");
