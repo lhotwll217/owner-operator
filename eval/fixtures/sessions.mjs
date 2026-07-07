@@ -1,6 +1,8 @@
-// Synthetic session fixtures — the eval's ground truth. Four sessions, two transcript
-// formats, three fictional repos. Every case in ../cases*.yaml keys off details planted
-// here; if you change a planted fact, update its case.
+// Synthetic session fixtures — the eval's CONTROLLED ground truth. Four sessions, two
+// transcript formats, three fictional repos, all invented (no real/personal data). This is
+// deliberately small and hand-planted so rubrics can be exact; it is NOT a representative
+// corpus. A larger open-source corpus is tracked in issue #32 — this stays the controlled
+// core. Every case in ../cases.yaml keys off details planted here; change a fact, update its case.
 //
 // Timestamps are OFFSETS (minutes before "now"): the seed script materializes them
 // relative to build time so activity windows behave the same on every run.
