@@ -23,8 +23,6 @@
 //     refilled 1000x too slowly and burst traffic saw spurious 429s.
 //   Nothing anywhere discusses GraphQL federation (the negative case).
 
-const MIN = 60 * 1000;
-
 /** Claude-format line factory: {type, message, cwd, sessionId, timestamp}. */
 const claudeMsg = (role, text, offsetMin, stop) => ({
   kind: "claude",
