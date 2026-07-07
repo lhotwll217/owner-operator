@@ -27,6 +27,9 @@ DerivedData/
 .pi/schedule-prompts.json
 .pi/schedule-prompts-settings.json
 
+# Eval outputs (trajectory logs + result JSONs)
+eval/results/
+
 # Logs
 *.log
 npm-debug.log*

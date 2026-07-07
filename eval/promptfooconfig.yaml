@@ -1,0 +1,48 @@
+# Owner Operator vs the sessions-grep-native baseline (issue #31): can OO answer
+# discovery/evidence questions about local sessions at >=parity correctness, ideally
+# for less spend, using its state DB as a locator and search_sessions for evidence?
+#
+# Arms:
+#   owner-operator — `oo "question"` headless, its shipped prompt/tools/model
+#                    (.pi/settings.json), against the seeded fixture OO_HOME
+#   baseline       — Claude Code headless + the vendored session-grep script over the
+#                    same fixture transcripts (the proven session-grep eval pattern)
+#
+# This compares the two PRODUCTS as shipped — models differ by design; the correctness
+# rubric is absolute and the efficiency comparison is what the owner actually pays.
+#
+# Run:   npx promptfoo eval -c eval/promptfooconfig.yaml        comparative cases
+#        npx promptfoo eval -c eval/promptfooconfig-oo.yaml     OO-only (DB) cases
+# Then:  node eval/compare.mjs                                  paired A/B breakdown
+#
+# The baseline + grader run through the local `claude` CLI (Claude Code auth); the OO
+# arm runs through `oo` (its own configured backend). No API keys needed.
+
+description: Owner Operator vs sessions-grep baseline — correctness and spend
+
+prompts:
+  - '{{question}}'
+
+providers:
+  - id: file://providers/oo-agent.mjs
+    label: owner-operator
+    config: { timeoutMs: 600000 }
+  - id: file://providers/baseline-agent.mjs
+    label: baseline-sonnet
+    config: { model: claude-sonnet-5, maxTurns: 25, maxBudgetUsd: 1.0 }
+
+defaultTest:
+  options:
+    provider: file://providers/claude-grader.mjs
+  assert:
+    - type: javascript
+      value: file://asserts/efficiency.mjs
+      metric: efficiency_telemetry
+
+tests: file://cases-compare.yaml
+
+# Resolved from the process cwd (repo root), not this file's dir.
+outputPath: eval/results/latest-compare.json
+
+evaluateOptions:
+  maxConcurrency: 2

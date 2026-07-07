@@ -1,0 +1,77 @@
+# Comparative cases: both arms (Owner Operator and the sessions-grep baseline) can
+# answer these from the fixture transcripts alone. Ground truth is planted in
+# fixtures/sessions.mjs — change a fact there, change its rubric here.
+#
+# qtype: locator   — find WHICH session; evidence — a fact only the transcript holds;
+#        summary   — synthesize one session; negative — must say "not found", not guess.
+
+- vars:
+    id: evidence-flaky-error
+    question: "What was the exact assertion error message in the flaky forecast cache test?"
+  metadata: { qtype: evidence }
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must quote or closely reproduce the assertion error
+        "AssertionError: expected cache hit within 300s TTL" (the words "expected cache
+        hit" and the 300s TTL must both appear). Naming the test
+        (test_forecast_cache_expiry) or the session is a plus but not required.
+
+- vars:
+    id: evidence-flaky-why-fakeclock
+    question: "Why did we choose the FakeClock approach over padding the sleeps in the flaky test fix?"
+  metadata: { qtype: evidence }
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must give the transcript's actual reasons: padded sleeps made the
+        suite materially slower (about 4 minutes) AND still flaked on loaded runners,
+        while the FakeClock is deterministic (controls time explicitly / removes the
+        wall-clock dependency). Both halves of the tradeoff must be present.
+
+- vars:
+    id: evidence-429-root-cause
+    question: "What was the root cause of the spurious 429s in the rate limiter?"
+  metadata: { qtype: evidence }
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must state that RateLimiter.refill() treated the refill_interval_ms
+        config value as seconds (a unit mismatch — no ms conversion), making buckets
+        refill roughly 1000x too slowly. The unit confusion between milliseconds and
+        seconds is the core fact.
+
+- vars:
+    id: locator-dexie-decision
+    question: "Did any session weigh Dexie against raw IndexedDB? Which session, and what was the recommendation?"
+  metadata: { qtype: locator }
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must locate the lumen-notes storage-migration session (id starting
+        fx-lumen-storage) and report the recommendation: Dexie (version 4), with at
+        least one of the transcript's reasons (compound indexes, bulkPut for sync,
+        liveQuery, or transaction ergonomics).
+
+- vars:
+    id: summary-units-session
+    question: "Summarize where the --units flag work stands right now."
+  metadata: { qtype: summary }
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must capture: a --units metric/imperial flag is being added; imperial
+        mode hit a crash (KeyError on wind_gust_kph / missing gust data); and the fix in
+        progress moves unit handling to the API boundary (normalize_observation) instead
+        of per-renderer conversion. All three beats must be present.
+
+- vars:
+    id: negative-graphql
+    question: "Did we ever discuss GraphQL federation in any session?"
+  metadata: { qtype: negative }
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must clearly say no such discussion was found in the sessions. Any
+        fabricated GraphQL federation discussion is an automatic fail. Hedging that it
+        could not be found passes; inventing details fails.
