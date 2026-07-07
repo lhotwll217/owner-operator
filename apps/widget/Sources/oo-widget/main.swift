@@ -1,4 +1,4 @@
-// Entry point. `--once` prints the sidebar and exits (smoke test); otherwise we run a menu-bar-less
+// Entry point. `--once` prints the session state and exits (smoke test); otherwise we run a menu-bar-less
 // AppKit agent whose only window is the always-on-top floating widget.
 
 import AppKit
@@ -8,7 +8,7 @@ if CommandLine.arguments.contains("--help") {
     print("""
     oo-widget — an always-on-top macOS glance over the Owner Operator daemon
       (no args)   show the floating widget (drag to move · click ⌄ to expand · right-click to quit)
-      --once      print the current sidebar to stdout and exit
+      --once      print the current session state to stdout and exit
     """)
     exit(0)
 }

@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // scan-active-transcripts — deterministic, zero-install scan of local CLI agent sessions.
 //
-// Reads the KNOWN_SESSION_SOURCES (claude, codex, cursor, posthog-code, pi, opencode,
-// antigravity, grok-build — the canonical list lives in packages/core/src/session-sources.mjs)
-// session files, finds recently-active threads,
+// Reads KNOWN_SESSION_SOURCES (canonical list in packages/core/src/session-sources.mjs),
+// finds recently-active threads,
 // and prints a COMPACT digest: topic, light metadata (resolved state, origin app, git
 // delta), and a sample of each thread's messages (its opening few + most-recent few) so
 // an agent can triage "what's ongoing" WITHOUT loading full transcripts into a model.
@@ -551,12 +550,12 @@ function parseSession({ file, source, mtime, btime }) {
   const topicMsg = userTurns[0] || convo[0];
   // Worker vs interactive by LAUNCH MODE, not message count (battle-tested: AgentWrapper/
   // agent-orchestrator keys off `codex exec` / `claude --headless|-p` / sdk). A session is a
-  // worker one-shot — hidden unless --all — when:
+  // single-turn worker — hidden unless --all — when:
   //   • no real (non-boilerplate) user turn survived — e.g. a Codex direct/worker preamble; or
   //   • it ran via the SDK (sdk-ts / sdk-cli); or
   //   • it's a single-turn `cli` session — `claude -p` and Task subagents are
   //     indistinguishable from a brand-new terminal session at one turn, so treat <2 turns as
-  //     a one-shot (a real terminal session surfaces on its 2nd turn).
+  //     a single-turn worker (a real terminal session surfaces on its 2nd turn).
   // Interactive entrypoints (codex, claude-desktop, …) show as soon as they have one real turn.
   //
   // EXCEPT when an interactive GUI HOST owns the session: Conductor and Superset drive the agent
@@ -687,7 +686,7 @@ threads = resolveCandidates(threads, persisted, { includeDone: includeDone || !!
 
 if (threadArg) {
   // Single-thread drill-in: match by full or prefix id (or file basename); keep it even
-  // if it's an automated one-shot, and don't apply the limit.
+  // if it's an automated single-turn worker, and don't apply the limit.
   threads = threads.filter((t) => t.id === threadArg || t.id.startsWith(threadArg) || basename(t.file).startsWith(threadArg));
 } else if (!includeAll) {
   threads = threads.filter((t) => !t.automated);

@@ -5,7 +5,7 @@ description: >-
   and a sample of each thread's opening + most-recent messages. Use when you need message
   content: filling in triage summaries, discovering threads, or drilling into one thread.
   Secondary to get-current-session-state, which owns membership.
-allowed-tools: bash present_threads
+allowed-tools: bash
 ---
 
 # scan-active-transcripts
@@ -29,7 +29,7 @@ Flags:
 - `--sample N` — keep the first N + most-recent N messages per thread (default 4; `--bookends`/`--last` are aliases)
 - `--thread <id>` — drill into ONE thread (id prefix ok); pair with a bigger `--sample` to expand just that thread
 - `--limit N` — max threads (default 40)
-- `--all` — include automated/worker one-shots AND done threads (both hidden by default)
+- `--all` — include automated/single-turn worker runs AND done threads (both hidden by default)
 - `--include-done` — include threads the owner marked done (for auditing)
 - `--json` — machine-readable output (use when you want to post-process)
 - `--truncate N` — per-message char cap (default 280)
@@ -47,16 +47,14 @@ audits; `--thread` always answers). A workspace with changes vs its base branch 
 `Diff: +N -N` line. A PostHog Code thread with `environment: cloud` is provisioning/working
 in a remote sandbox — call that out; it's progressing while the owner is away.
 
-## Present via `present_threads` (required)
-
-Call `present_threads` — never write the triage as prose, a list, or a table; the tool call
-is the only way threads reach the owner. Present the merged set (every active
-current-session-state row plus anything new the scan found), highest-priority first.
+## Merge with current state
 
 Reason over each thread's `firstMessages` + `recentMessages` and fill the tool's fields per
 its schema; copy `id`, relative times, and diff numbers from the digest verbatim. Priority
 = how much it needs the owner **now** (5 = waiting on a decision/approval/review; 1 =
-ticking along). Don't resurrect done threads; never paste the raw tail.
+ticking along). Don't resurrect done threads; never paste the raw tail. In normal `oo`
+chat, answer in concise prose; `oo --session-state` is the model-free state snapshot for
+scripts.
 
 If a thread's ends are too vague to summarize, expand just that thread first —
-`--thread <id> --sample 15` — then make `present_threads` the last call.
+`--thread <id> --sample 15` — then merge the result into the current-state rows.

@@ -2,21 +2,37 @@
   "name": "owner-operator",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "Local-first chief of staff over your CLI agent sessions, built on the pi coding agent toolkit.",
   "license": "MIT",
+  "bin": { "oo": "./oo" },
   "workspaces": [
-    "harness",
     "packages/*"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "oo": "tsx src/cli/oo.ts",
+    "interactive": "tsx src/cli/interactive.ts",
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test --workspaces --if-present",
+    "test:unit": "node test/run.mjs unit",
+    "test:integration": "node test/run.mjs integration",
+    "test:e2e": "node test/run.mjs e2e",
+    "test:agent": "tsx src/agent/agent.behavior.ts",
+    "poll:smoke": "tsx src/gateway/poller.smoke.ts",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
     "lint": "oxlint --deny-warnings"
   },
+  "dependencies": {
+    "@owner-operator/core": "*",
+    "@earendil-works/pi-coding-agent": "0.78.0",
+    "@earendil-works/pi-ai": "0.78.0"
+  },
   "devDependencies": {
-    "oxlint": "^1.72.0"
+    "@types/node": "^24",
+    "oxlint": "^1.72.0",
+    "tsx": "^4",
+    "typescript": "^5"
   }
 }

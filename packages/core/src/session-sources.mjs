@@ -16,7 +16,7 @@
 // `source` MUST be one of KNOWN_SESSION_SOURCES — parsing each format is code (see
 // scan-active-transcripts.mjs), so config can point at a NEW LOCATION, not teach a new format.
 // To relocate a source, `disable` its default and `add` the new root. Plain ESM (not TS) so
-// the zero-install scan skill runs the exact code the harness uses (re-exported via
+// the zero-install scan skill runs the exact code the gateway uses (re-exported via
 // @owner-operator/core). Types: session-sources.d.mts.
 
 import { readFileSync } from "node:fs";

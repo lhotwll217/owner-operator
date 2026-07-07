@@ -3,7 +3,7 @@
 
 /** An interactive GUI a session can be launched from, matched by cwd marker and/or source. */
 export interface GuiHost {
-  /** Canonical app name shown in the sidebar (e.g. "Conductor", "Superset App"). */
+  /** Canonical app name shown in session state (e.g. "Conductor", "Superset App"). */
   ui: string;
   /** Substring of the session cwd that identifies the GUI's worktree dir. */
   cwdMarker?: string;

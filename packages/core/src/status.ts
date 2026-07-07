@@ -1,14 +1,14 @@
 // Owner Operator — thread status & state machine.
 //
 // UI-INDEPENDENT and MODEL-FREE: everything here is derived from the cheap deterministic
-// scan (lastRole + freshness), never the LLM. That's the split that lets the sidebar poll
-// fast and for free — the expensive triage (priority/summary, see `Thread`) refreshes
-// slowly and separately. Pure functions only, same contract every surface renders.
+// scan (lastRole + freshness), never the LLM. That's the split that lets session state poll
+// fast and for free — expensive triage enrichment refreshes slowly and separately. Pure
+// functions only, same contract every surface renders.
 
 import { resolveState } from "./resolve.mjs";
 
 // The canonical resolver — raw scan candidates joined with persisted owner state. Every
-// surface (poller, sidebar, tools, the scan skill itself) resolves through these, never its
+// surface (poller, session-state tools, the scan skill itself) resolves through these, never its
 // own rule. Plain ESM in resolve.mjs so the zero-install scan skill runs the same code.
 export {
   IDLE_AFTER_SECONDS,
@@ -54,7 +54,7 @@ export interface ScanRow {
   diffDeleted?: number;
 }
 
-/** One polled thread with continuity across polls — the unit the sidebar renders. */
+/** One polled thread with continuity across polls — the unit session-state projections use. */
 export interface ThreadStatus {
   id: string;
   source: string;
@@ -76,7 +76,7 @@ export interface ThreadStatus {
   /** ISO of when it entered its current `state` (drives "has been waiting 20m"). */
   stateSince: string;
   previousState?: ThreadState;
-  /** Workspace line delta vs the repo's base branch — the sidebar's +N −N badge. */
+  /** Workspace line delta vs the repo's base branch — used for +N −N badges. */
   diffAdded?: number;
   diffDeleted?: number;
 }
@@ -99,9 +99,9 @@ export function cleanTopic(raw: string): string {
   return raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || "(untitled)";
 }
 
-/** Loudest-first ordering for the sidebar: needs-you → working → idle → done, then most recent. */
+/** Loudest-first ordering: needs-you → working → idle → done, then most recent. */
 export const STATE_RANK: Record<ThreadState, number> = { "needs-you": 0, working: 1, idle: 2, done: 3 };
-/** Generic so callers (e.g. SidebarThread) keep their richer type through the sort. */
+/** Generic so callers keep their richer type through the sort. */
 export function sortByAttention<T extends ThreadStatus>(threads: readonly T[]): T[] {
   return [...threads].sort(
     (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || b.lastMessageAt.localeCompare(a.lastMessageAt),
@@ -129,7 +129,7 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
       app: row.app,
       topic: cleanTopic(row.topic),
       state,
-      // Display recency = MESSAGE time (matches the cards and the digest's "Last message");
+      // Display recency = MESSAGE time (matches the digest's "Last message");
       // file-activity time lies when a GUI app keeps appending housekeeping events.
       lastActive: formatRelative(row.secondsSinceLastMessage),
       createdAt: row.createdAt,

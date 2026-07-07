@@ -10,8 +10,8 @@ allowed-tools: get_current_session_state
 # get-current-session-state
 
 Call `get_current_session_state`. It returns the reconciled snapshot the daemon serves to
-every surface (the widget, the TUI sidebar) — membership, order, active/done state, and the
-cached triage enrichment (priority, summary, next step).
+every surface (the widget, terminal, and session-state callers) — membership, order,
+active/done state, and the cached triage enrichment (priority, summary, next step).
 
 - Every active row belongs in a "what's ongoing" triage unless the owner explicitly
   filtered it out.

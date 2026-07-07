@@ -1,12 +1,13 @@
-// Owner Operator — the daemon wire protocol. UI-INDEPENDENT: every surface (TUI today,
-// web/widget tomorrow) speaks these shapes to the ONE process that owns state (the
-// daemon, harness/src/daemon.ts — openclaw's gateway pattern).
+// Owner Operator — the daemon wire protocol. UI-INDEPENDENT: every surface (widget,
+// terminal, web) speaks these shapes to the ONE process that owns state (the
+// gateway daemon in src/gateway — OpenClaw's gateway pattern).
 //
 // Transport: HTTP JSON on 127.0.0.1 + an SSE event stream — both zero-dependency on the
 // node side and native in browsers (fetch/EventSource), so the web surface needs no SDK.
 //
 // Endpoints (strict command set, per docs/architecture.md):
 //   GET  /health                    → { ok, pid, startedAt, polledAt }
+//   GET  /session-state             → SessionStateRow[]
 //   GET  /snapshot                  → StatusSnapshot
 //   GET  /triage                    → Record<threadId, TriageInfo>
 //   GET  /events                    → SSE stream of DaemonEvent
@@ -20,7 +21,7 @@
 //   POST /schedules/:name/run       → { ok, detail? }          (run now, regardless of when)
 
 import type { StatusDiff, StatusSnapshot } from "./status";
-import type { TriageInfo } from "./sidebar";
+import type { TriageInfo } from "./session-state";
 
 /** Default localhost port; override with OO_PORT. Clients discover the real one via daemon.json. */
 export const DEFAULT_DAEMON_PORT = 47711;
@@ -44,7 +45,7 @@ export type ScheduleWhen =
 export type ScheduleAction =
   | { type: "poll" }                       // force a reconcile pass
   // Run a user command (/bin/sh). Event runs get OO_NEEDS_YOU=<comma-separated ids> in the
-  // env — enough for desktop notifications or piping a brief: `oo --json "what needs me"`.
+  // env — enough for desktop notifications or piping a brief: `oo --session-state`.
   | { type: "shell"; command: string };
 
 export interface Schedule {

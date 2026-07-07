@@ -5,7 +5,7 @@
 // Modeled on OpenClaw's state ownership: a single owner of session
 // state, surfaces query it rather than derive their own. Until a gateway process owns this
 // boundary, the shared module is the boundary — plain dependency-free ESM (not TS) so the
-// exact same code runs in the TS harness (re-exported via @owner-operator/core) AND inside
+// exact same code runs in the TS surfaces (re-exported via @owner-operator/core) AND inside
 // the zero-install scan skill. Types live in resolve.d.mts; keep it in lockstep.
 
 /** Quiet at least this long → `idle`, regardless of who spoke last. Lo-fi; tune later. */

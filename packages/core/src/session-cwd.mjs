@@ -3,7 +3,7 @@
 // git worktree) the REAL repo behind a codename cwd. Both the triage scan and the grep
 // wrapper must answer this the same way, or a thread hidden from one surface could leak
 // through the other — so the resolution lives here, once. Plain ESM (not TS) so the
-// zero-install skills run the exact code the harness uses.
+// zero-install skills run the exact code the gateway and wrappers use.
 //
 // NOTE: scan-active-transcripts.mjs still carries an inline `realRepo` (embedded in its
 // parseSession); converging it onto this module is the intended follow-up so there is a

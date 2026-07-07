@@ -1,7 +1,7 @@
 // The widget's seam to the daemon — a THIN CLIENT (OpenClaw gateway pattern): it discovers the
-// live port, GETs /snapshot + /triage, joins them, and subscribes to the SSE /events stream so
-// state changes land instantly. The poll is the heartbeat (covers SSE gaps + offline→online); the
-// SSE frame is just a "refetch now" nudge, so the GET path stays the single source of shape.
+// live port, GETs /session-state, and subscribes to the SSE /events stream so state changes land
+// instantly. The poll is the heartbeat (covers SSE gaps + offline→online); the SSE frame is just
+// a "refetch now" nudge, so the GET path stays the single source of shape.
 
 import Foundation
 import Combine
@@ -15,7 +15,6 @@ final class DaemonClient: ObservableObject {
     @Published var counts: [ThreadState: Int] = [:]
     @Published var online = false
     @Published var port = defaultPort
-    @Published var polledAt = ""
 
     nonisolated static let defaultPort = 47711
 
@@ -25,8 +24,7 @@ final class DaemonClient: ObservableObject {
 
     // The last payload the daemon gave us (the truth we render), plus ids the owner marked done
     // locally but the daemon hasn't confirmed yet — hidden until it does.
-    private var lastSnapshot: Snapshot?
-    private var lastTriage: [String: TriageInfo] = [:]
+    private var lastRows: [SessionStateRow] = []
     private var pendingDone: Set<String> = []
     private var pendingRenames: [String: String] = [:]
 
@@ -36,16 +34,16 @@ final class DaemonClient: ObservableObject {
 
     /// Threads whose turn JUST completed — now needs-you and entered that state within `window`
     /// seconds. Most-recently-finished first. The set the collapsed HUD softly pulses through.
-    func freshNeedsYou(window: TimeInterval = 300) -> [SidebarRow] {
+    func freshNeedsYou(window: TimeInterval = 300) -> [SessionStateRow] {
         let now = Date()
         return groups.flatMap { $0.rows }
             .filter { $0.state == .needsYou }
             .filter {
-                guard let since = parseISODate($0.thread.stateSince) else { return false }
+                guard let since = parseISODate($0.stateSince) else { return false }
                 let age = now.timeIntervalSince(since)
                 return age >= 0 && age <= window
             }
-            .sorted { $0.thread.stateSince > $1.thread.stateSince }
+            .sorted { $0.stateSince > $1.stateSince }
     }
 
     func start() {
@@ -70,10 +68,7 @@ final class DaemonClient: ObservableObject {
     func refresh() async {
         let p = Self.discoverPort()
         do {
-            async let snap = Self.get(Snapshot.self, "/snapshot", port: p)
-            async let tri = Self.get([String: TriageInfo].self, "/triage", port: p)
-            lastSnapshot = try await snap
-            lastTriage = try await tri
+            lastRows = try await Self.get([SessionStateRow].self, "/session-state", port: p)
             port = p
             online = true
             rebuild()
@@ -83,7 +78,7 @@ final class DaemonClient: ObservableObject {
     }
 
     /// Mark a thread done: hide it immediately (optimistic), then tell the daemon. The daemon owns
-    /// the truth — its next snapshot confirms it; a failed POST un-hides it so we never lie.
+    /// the truth — its next state payload confirms it; a failed POST un-hides it so we never lie.
     func markDone(_ id: String) {
         pendingDone.insert(id)
         rebuild()
@@ -122,20 +117,20 @@ final class DaemonClient: ObservableObject {
     }
 
     /// Re-render groups/counts from the last daemon payload, hiding still-pending dones. Pending ids
-    /// the daemon now reports inactive (done/gone) are confirmed → dropped from the pending set.
+    /// the daemon no longer reports active are confirmed → dropped from the pending set.
     private func rebuild() {
-        guard let snap = lastSnapshot else { return }
-        let active = Set(snap.threads.filter { $0.state != .done }.map { $0.id })
+        let active = Set(lastRows.map { $0.id })
         pendingDone.formIntersection(active)
         // A pending rename the daemon now reports back (or a cleared one it reports gone) is
-        // confirmed → dropped, so the snapshot's owner title takes over seamlessly.
-        for t in snap.threads where pendingRenames[t.id] == (t.ownerTitle ?? "") {
-            pendingRenames.removeValue(forKey: t.id)
+        // confirmed → dropped, so the gateway title takes over seamlessly.
+        for r in lastRows {
+            let confirmed = pendingRenames[r.id] == (r.ownerTitle ?? "")
+            let cleared = pendingRenames[r.id] == "" && (r.ownerTitle ?? "").isEmpty
+            if confirmed || cleared { pendingRenames.removeValue(forKey: r.id) }
         }
-        let built = buildSidebar(snapshot: snap, triage: lastTriage, hidden: pendingDone, renames: pendingRenames)
+        let built = buildSessionState(rows: lastRows, hidden: pendingDone, renames: pendingRenames)
         groups = built.groups
         counts = built.counts
-        polledAt = snap.polledAt
     }
 
     /// A short-lived GET against the loopback daemon.

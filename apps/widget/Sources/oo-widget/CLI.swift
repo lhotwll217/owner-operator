@@ -1,6 +1,5 @@
-// `oo-widget --once` — a headless render of the current sidebar to stdout (mirrors `oo --json`'s
-// spirit). The same join + ordering the GUI uses, so it doubles as the widget's smoke test:
-// run it and you see exactly what the menu bar would show.
+// `oo-widget --once` — a headless render of the current session state to stdout. It reads the
+// same /session-state payload as the GUI, so it doubles as the widget's smoke test.
 
 import Foundation
 
@@ -15,8 +14,8 @@ private func glyphColored(_ st: ThreadState) -> String {
     }
 }
 
-func renderText(snapshot: Snapshot, triage: [String: TriageInfo], port: Int) -> String {
-    let (groups, counts) = buildSidebar(snapshot: snapshot, triage: triage)
+func renderText(rows: [SessionStateRow], port: Int) -> String {
+    let (groups, counts) = buildSessionState(rows: rows)
     let total = groups.reduce(0) { $0 + $1.rows.count }
 
     let stats: [String] = [
@@ -33,13 +32,13 @@ func renderText(snapshot: Snapshot, triage: [String: TriageInfo], port: Int) -> 
         lines.append(sgr(36, "▾ \(g.repo)") + sgr(90, "  \(g.rows.count)"))
         for r in g.rows {
             let badge = r.priority.map { sgr(33, "P\($0)") + " " } ?? ""
-            let age = sgr(90, shortAge(r.thread.lastActive))
+            let age = sgr(90, shortAge(r.lastActive))
             lines.append("  \(glyphColored(r.state)) \(badge)\(r.title)  \(age)")
             if let next = r.nextSteps, !next.isEmpty { lines.append(sgr(90, "      → \(next)")) }
         }
     }
     lines.append("")
-    lines.append(sgr(2, "127.0.0.1:\(port) · polled \(snapshot.polledAt)"))
+    lines.append(sgr(2, "127.0.0.1:\(port)"))
     return lines.joined(separator: "\n")
 }
 
@@ -52,9 +51,8 @@ func runOnce() -> Int32 {
     Task {
         defer { sem.signal() }
         do {
-            let snapshot = try await DaemonClient.get(Snapshot.self, "/snapshot", port: port)
-            let triage = try await DaemonClient.get([String: TriageInfo].self, "/triage", port: port)
-            output = renderText(snapshot: snapshot, triage: triage, port: port)
+            let rows = try await DaemonClient.get([SessionStateRow].self, "/session-state", port: port)
+            output = renderText(rows: rows, port: port)
         } catch {
             output = "oo-widget: daemon offline on 127.0.0.1:\(port)\nstart it with:  oo daemon"
             code = 1
