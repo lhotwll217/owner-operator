@@ -14,6 +14,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { isBlacklisted, loadBlacklist, type Blacklist } from "@owner-operator/core";
+import { ooRenderCall } from "../shared/oo-presentation";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type FileToolName = "read" | "grep" | "find" | "ls";
@@ -171,6 +172,10 @@ function wrapFileTool(name: FileToolName, defaultPath: (params: any) => string, 
   const seed = builtIns(process.cwd())[name];
   return {
     ...seed,
+    // Compact the CALL row to a single OO line; keep pi's built-in result renderer, so a
+    // `read` still previews (syntax-highlighted, expandable) — owner-directed file content,
+    // not agent chatter, so we declutter the header without regressing the output.
+    renderCall: ooRenderCall(name, (p) => defaultPath(p)),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
       assertAllowed(defaultPath(params), cwd, opts);
