@@ -5,6 +5,22 @@ prompt/tool composition answers session questions at ≥ baseline correctness, u
 state DB as a locator and `search_sessions` for evidence. Pattern adapted from the
 [session-grep eval harness](https://github.com/lhotwll217/session-grep).
 
+## Controlled — same model, same framework, one variable
+
+Both arms run the **same `oo` binary at the same model** (`.pi/settings.json`, codex
+gpt-5.5) against the same seeded sandbox. They differ by exactly one thing — OO's
+composition:
+
+- **owner-operator** — OO's prompt + full toolset (`query_database`,
+  `get_current_session_state`, `search_sessions`, …).
+- **baseline** — a generic session-search prompt + **only `search_sessions`** (the same
+  grep engine OO wraps), via `OO_EVAL_BASELINE_PROMPT` (see `providers/naive-agent.mjs`).
+
+So the tool-call / token / correctness deltas are attributable to OO's composition, not to
+a model or harness difference. A cross-model version (OO/gpt-5.5 vs Claude Code/haiku) was
+retired as unscientific — and is unrunnable anyway: pi has no Anthropic auth and `claude -p`
+can't run gpt-5.5, so there's no shared model between two different harnesses.
+
 ## Run
 
 ```sh
@@ -12,25 +28,18 @@ npm run eval           # both arms over every case (promptfoo)
 npm run eval:compare   # paired report + correctness gate
 ```
 
-Cheap first pass — drop the paid arms to haiku (the OO arm's model is fixed by
-`.pi/settings.json`):
-
-```sh
-EVAL_MODEL=claude-haiku-4-5-20251001 EVAL_GRADER_MODEL=haiku npm run eval
-```
-
-Needs: Claude Code auth (baseline arm + grader run `claude -p`), and `oo`'s configured
-model backend (`.pi/settings.json`). No API keys.
+Needs: `oo`'s configured model backend (`.pi/settings.json`) for both arms, and Claude Code
+auth for the grader only (any capable judge model works — it is not an arm). No API keys.
 
 ## One chain, not a DB suite
 
 `query_database` is just one of OO's tools, so there is no separate DB eval. Both arms
-attempt every case; the baseline greps the transcripts, OO may shortcut through its state
-DB. The `qtype` breakdown in `compare.mjs` is where the locator payoff shows: on the
-locate-led cases (`state`, `stale`, `audit`, `handoff`) OO should reach parity with fewer
-tool calls. Pure `query_database` correctness (does a SELECT return the right rows) is
-covered deterministically and for free by `src/gateway/query-db.test.ts` — not re-tested
-through a paid LLM run.
+attempt every case; the baseline has only grep, OO may shortcut through its state DB. The
+`qtype` breakdown in `compare.mjs` is where the locator payoff shows: on the locate-led
+cases (`state`, `stale`, `audit`, `handoff`) OO should reach parity with fewer tool calls.
+Pure `query_database` correctness (does a SELECT return the right rows) is covered
+deterministically and for free by `src/gateway/query-db.test.ts` — not re-tested through
+an LLM run.
 
 ## Layout
 
@@ -38,9 +47,11 @@ through a paid LLM run.
 | --- | --- |
 | `fixtures/sessions.mjs` | synthetic sessions (claude + codex formats) — THE ground truth; cases key off facts planted here |
 | `seed/build-fixture-home.mjs` | materializes `$TMPDIR/oo-eval-sandbox`: transcripts + seeded OO_HOME (sources config, threads.db with versioned triage history); timestamps relative to now |
-| `providers/oo-agent.mjs` | subject: `oo "question"` against the sandbox home; tool calls + usage parsed from `OO_TRACE` NDJSON |
-| `providers/baseline-agent.mjs` | control: `claude -p` + vendored session-grep over the same transcripts |
-| `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded) |
+| `providers/pi-agent-core.mjs` | shared runner: seeds the sandbox once, spawns `oo`, parses `OO_TRACE` NDJSON into tool calls + usage |
+| `providers/oo-agent.mjs` | subject arm: OO as shipped (full prompt + toolset) |
+| `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + only `search_sessions` (`OO_EVAL_BASELINE_PROMPT`) |
+| `fixtures/naive-baseline-prompt.md` | the control arm's generic session-search prompt |
+| `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded; judge only, not an arm) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; both arms attempt all of them |
 | `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator arm, opt-in per case) |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |

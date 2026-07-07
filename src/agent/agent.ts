@@ -134,7 +134,13 @@ export async function createOwnerOperatorSession(
   surface: "chat" | "interactive" = "chat",
   opts: OwnerOperatorSessionOptions = {},
 ): Promise<OwnerOperatorSession> {
-  const prompt = ownerOperatorPrompt();
+  // Eval-only: OO_EVAL_BASELINE_PROMPT swaps the Operator for a naive session-search agent
+  // — same binary, same model, same trace — so the eval's controlled arm differs from OO
+  // by exactly its prompt and toolset (no DB/state tools). Product runs never set it.
+  const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
+  const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
+  const customTools = baselinePrompt ? [searchSessionsTool] : ownerOperatorCustomTools;
+  const tools = baselinePrompt ? ["read", "search_sessions"] : ownerOperatorTools;
 
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
@@ -159,8 +165,8 @@ export async function createOwnerOperatorSession(
     sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(repoRoot) : createOoSession(ooProvenance(surface))),
     authStorage,
     modelRegistry,
-    customTools: ownerOperatorCustomTools,
-    tools: ownerOperatorTools,
+    customTools,
+    tools,
   });
 
   // Extensions initialize their state on `session_start`, which pi's own modes emit via
