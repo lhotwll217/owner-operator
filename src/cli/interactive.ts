@@ -22,7 +22,7 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
-import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
+import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./oo` in a real terminal, or `./oo \"question\"` for a headless single turn.");
@@ -79,4 +79,8 @@ process.stdout.write(`${ooTheme.fg("accent", ooMarker(ooVersion))}\n`);
 
 // Silent start: no auto model turn. The owner asks; the widget owns the "what's ongoing" view.
 const interactive = new InteractiveMode(runtime, ooInteractiveOptions());
+// Zero-dump: drop pi's tool-execution rows, strip thinking from assistant messages, and silence
+// startup update notices (no extension hook for any of them). During a turn the only moving part
+// is the single working line driven by ooPresentationExtension.
+quietOoInteractiveMode(interactive);
 await interactive.run();
