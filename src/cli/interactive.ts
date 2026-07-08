@@ -22,7 +22,7 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
-import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, ooStartHint } from "../shared/oo-presentation";
+import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./oo` in a real terminal, or `./oo \"question\"` for a headless single turn.");
@@ -75,10 +75,8 @@ initTheme(runtime.services.settingsManager.getTheme(), true);
 // stays put in the scrollback the way pi's own startup notices do.
 const ooVersion = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version ?? "0.0.0";
 const ooTheme = buildOoTheme(getCapabilities().trueColor ? "truecolor" : "256color");
-process.stdout.write(
-  `${ooTheme.fg("accent", ooMarker(ooVersion))}  ${ooTheme.fg("dim", ooStartHint())}\n`,
-);
+process.stdout.write(`${ooTheme.fg("accent", ooMarker(ooVersion))}\n`);
 
-// Silent start: no auto model turn. The "what's ongoing?" brief is the /ongoing affordance.
+// Silent start: no auto model turn. The owner asks; the widget owns the "what's ongoing" view.
 const interactive = new InteractiveMode(runtime, ooInteractiveOptions());
 await interactive.run();

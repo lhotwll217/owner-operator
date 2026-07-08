@@ -11,7 +11,6 @@ import {
   ooInteractiveOptions,
   ooMarker,
   ooPalette,
-  ooStartHint,
   statusLabelFor,
   type OoTurnEvent,
 } from "./oo-presentation";
@@ -22,7 +21,6 @@ assert.equal(marker, "Owner Operator v1.2.3", "marker is the OO name + version")
 assert.doesNotMatch(marker, /\bpi\b/i, "marker has no 'pi' branding");
 assert.doesNotMatch(marker, /π/, "marker has no pi glyph");
 assert.doesNotMatch(OO_NAME, /\bpi\b/i, "the surface name has no 'pi' branding");
-assert.doesNotMatch(ooStartHint(), /\bpi\b/i, "the start hint has no 'pi' branding");
 assert.match(marker, /^Owner Operator v/, "marker leads with the OO identity");
 
 // 2. The palette exposes the deliberate OO accent + muted greys, and builds a complete theme.

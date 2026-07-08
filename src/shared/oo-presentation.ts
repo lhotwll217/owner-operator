@@ -40,16 +40,6 @@ export function ooMarker(version: string): string {
   return `${OO_NAME} v${version}`;
 }
 
-// The "what's ongoing?" brief is offered, never auto-run (silent start). The owner accepts
-// it with a single command; nothing hits the model until they do.
-export const ONGOING_COMMAND = "ongoing";
-export const ONGOING_PROMPT = "What's ongoing today?";
-
-/** The affordance hint shown next to the marker on start. */
-export function ooStartHint(): string {
-  return `/${ONGOING_COMMAND} for today's brief`;
-}
-
 // ---- Palette & theme -----------------------------------------------------------------
 // A deliberate, minimal OO palette: one accent + muted greys for the chrome. Functional
 // signals (success/error/warning) and syntax highlighting stay legible — decluttering the
@@ -290,17 +280,18 @@ export function withOoRenderers(
 }
 
 // ---- Silent start --------------------------------------------------------------------
-// Decision §5: no auto model turn. The interactive surface opens silently — no
-// `initialMessage`. The brief is a one-command affordance, not a default.
+// Decision §5: no auto model turn. The interactive surface opens fully silent — no
+// `initialMessage`. The owner asks; the ranked thread list lives in the widget (and
+// `oo --session-state`), so there's no canned brief to re-narrate that deterministic state.
 export function ooInteractiveOptions(): InteractiveModeOptions {
   return {};
 }
 
 // ---- The presentation extension ------------------------------------------------------
 // Registered alongside `blacklistAwareFileToolsExtension` in the interactive runtime. It
-// installs the theme + working indicator, drives the single status line from pi's turn/
-// tool events, and registers the one-command "what's ongoing?" affordance. It changes only
-// per-turn rendering and startup — no command wiring, keybindings, or model selection.
+// installs the theme + working indicator and drives the single status line from pi's turn/
+// tool events. It changes only per-turn rendering and startup — no command wiring,
+// keybindings, or model selection.
 export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
   const status = new OoStatusLine();
   const push = (ctx: ExtensionContext) => ctx.ui.setStatus("oo", status.current);
@@ -328,12 +319,5 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.on("agent_end", (_event, ctx) => {
     status.apply({ kind: "idle" });
     push(ctx);
-  });
-
-  pi.registerCommand(ONGOING_COMMAND, {
-    description: "Brief on what's ongoing across your sessions",
-    handler: async (_args, _ctx) => {
-      pi.sendUserMessage(ONGOING_PROMPT);
-    },
   });
 };
