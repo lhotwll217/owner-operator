@@ -23,6 +23,7 @@ import { describeTable, listTables, runQuery } from "../gateway/query-db";
 import { getCurrentSessionStateRows, type CurrentSessionStateRow } from "../gateway/session-state";
 import { repoRoot } from "../shared/repo-root";
 import { blacklistAwareFileToolsExtension } from "./privacy-tools";
+import { withOoRenderers } from "../shared/oo-presentation";
 
 export { repoRoot };
 
@@ -291,11 +292,18 @@ export const queryDatabaseTool = defineTool({
   },
 });
 
+// Each OO tool renders as a single compact line in the interactive surface (renderCall /
+// renderResult are TUI-only — inert for the headless callers that consume ownerOperatorCustomTools).
 export const ownerOperatorCustomTools = [
-  getCurrentSessionStateTool,
-  markThreadDoneTool,
-  queryDatabaseTool,
-  searchSessionsTool,
+  withOoRenderers(getCurrentSessionStateTool, "session state"),
+  withOoRenderers(markThreadDoneTool, "mark done", {
+    summarizeCall: (a) =>
+      [...(a.ids ?? []), ...(a.indexes ?? []), ...(a.queries ?? [])].slice(0, 3).join(", "),
+  }),
+  withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (a) => a.action ?? "" }),
+  withOoRenderers(searchSessionsTool, "search", {
+    summarizeCall: (a) => (a.sessionId ? `#${a.sessionId}` : a.query ? `"${a.query}"` : ""),
+  }),
 ];
 // `read` is a blacklist-aware override registered by blacklistAwareFileToolsExtension —
 // the one general file tool, for owner-directed lookups. Transcript access goes through
