@@ -294,7 +294,10 @@ export class ThreadDb {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_threads_in_snapshot ON threads(in_snapshot)");
       this.db.exec("COMMIT");
     } catch (err) {
-      this.db.exec("ROLLBACK");
+      // Restore FK enforcement even if ROLLBACK itself throws (e.g. SQLite already
+      // auto-rolled-back) — otherwise the pragma below is skipped and the connection
+      // keeps FK off.
+      try { this.db.exec("ROLLBACK"); } catch { /* may have auto-rolled-back */ }
       this.db.exec("PRAGMA foreign_keys = ON");
       throw err;
     }

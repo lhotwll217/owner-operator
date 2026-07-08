@@ -185,7 +185,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
 
       if (route === "POST /details") {
         const body = (await readBody(req)) as { entries?: Record<string, ThreadDetails> };
-        if (!body.entries || typeof body.entries !== "object") return respond(400, { error: "entries required" });
+        if (!body.entries || typeof body.entries !== "object" || Array.isArray(body.entries)) return respond(400, { error: "entries required" });
         saveDetails(new Map(Object.entries(body.entries)));
         broadcast({ type: "details", entries: body.entries });
         return respond(200, { ok: true });
