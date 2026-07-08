@@ -48,7 +48,7 @@ an LLM run.
 | path | what |
 | --- | --- |
 | `fixtures/sessions.mjs` | synthetic sessions (claude + codex formats) — THE ground truth; cases key off facts planted here |
-| `seed/build-fixture-home.mjs` | materializes `$TMPDIR/oo-eval-sandbox`: transcripts + seeded OO_HOME (sources config, threads.db with versioned triage history); timestamps relative to now |
+| `seed/build-fixture-home.mjs` | materializes `$TMPDIR/oo-eval-sandbox`: transcripts + seeded OO_HOME (sources config, threads.db with versioned details history); timestamps relative to now |
 | `providers/pi-agent-core.mjs` | shared runner: seeds the sandbox once, spawns `oo`, parses `OO_TRACE` NDJSON into tool calls + usage |
 | `providers/oo-agent.mjs` | subject arm: OO as shipped (full prompt + toolset) |
 | `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + `search_sessions`/`read`, no DB tools (`OO_EVAL_BASELINE_PROMPT`) |

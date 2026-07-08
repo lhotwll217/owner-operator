@@ -1,6 +1,6 @@
 // Owner Operator — resolve a session's working directory and repo from its transcript.
 // The privacy blacklist keys off {cwd, repo}: which tree a session ran in, and (for a
-// git worktree) the REAL repo behind a codename cwd. Both the triage scan and the grep
+// git worktree) the REAL repo behind a codename cwd. Both the poll scan and the grep
 // wrapper must answer this the same way, or a thread hidden from one surface could leak
 // through the other — so the resolution lives here, once. Plain ESM (not TS) so the
 // zero-install skills run the exact code the gateway and wrappers use.

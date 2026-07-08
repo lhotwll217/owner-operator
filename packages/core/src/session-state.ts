@@ -1,23 +1,24 @@
 // Owner Operator — session-state data model.
 //
 // Session state is LIVE: its membership is the cheap poll's snapshot, minus threads whose status
-// has been marked `done` — so new threads you start show up on the next tick. The model's triage is
-// an ENRICHMENT overlay (title · priority · nextStep) joined by id. Untriaged/new threads still
-// appear (raw digest topic + live status) until a triage enriches them. Pure + UI-independent.
+// has been marked `done` — so new threads you start show up on the next tick. The model's details
+// are an ENRICHMENT overlay (title · priority · nextStep) joined by id. New threads still
+// appear (raw digest topic + live status) until the model has written details for them. Pure +
+// UI-independent.
 
 import { isActiveState, sortByAttention, STATE_RANK, type StatusSnapshot, type ThreadStatus } from "./status";
 
-/** The subset of a model triage we cache and join onto a thread by id (the enrichment). */
-export interface TriageInfo {
+/** The model-authored detail fields we cache and join onto a thread by id (the enrichment). */
+export interface ThreadDetails {
   topic?: string;      // a nicer title than the raw scan topic
-  summary?: string;    // short card summary, when a model triage has produced one
+  summary?: string;    // short card summary, when the model has written one
   nextSteps?: string;  // the concrete next action
   priority?: number;   // 5 (loudest) … 1
 }
 
-/** One live thread plus its optional cached triage enrichment. */
+/** One live thread plus its optional cached model details. */
 export interface SessionStateThread extends ThreadStatus {
-  triagedTopic?: string;
+  generatedTopic?: string;
   summary?: string;
   nextSteps?: string;
   priority?: number;
@@ -27,28 +28,28 @@ export interface SessionStateThread extends ThreadStatus {
   num?: number;
 }
 
-/** Title to show — an owner rename always wins, then the triaged title, else the raw digest topic. */
+/** Title to show — an owner rename always wins, then the generated title, else the raw digest topic. */
 export function displayTitle(t: SessionStateThread): string {
-  return t.ownerTitle || t.triagedTopic || t.topic;
+  return t.ownerTitle || t.generatedTopic || t.topic;
 }
 
 /**
- * Session state = threads in the poll snapshot, each enriched by the cached
- * triage (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
+ * Session state = threads in the poll snapshot, each enriched by the cached model
+ * details (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
  */
 export function toSessionStateThreads(
   snapshot: StatusSnapshot,
-  triage: ReadonlyMap<string, TriageInfo>,
+  details: ReadonlyMap<string, ThreadDetails>,
 ): SessionStateThread[] {
   return snapshot.threads.map((t): SessionStateThread => {
-    const tri = triage.get(t.id);
+    const d = details.get(t.id);
     const active = isActiveState(t.state);
     return {
       ...t,
-      triagedTopic: tri?.topic,
-      summary: tri?.summary,
-      nextSteps: tri?.nextSteps,
-      priority: tri?.priority,
+      generatedTopic: d?.topic,
+      summary: d?.summary,
+      nextSteps: d?.nextSteps,
+      priority: d?.priority,
       active,
     };
   });

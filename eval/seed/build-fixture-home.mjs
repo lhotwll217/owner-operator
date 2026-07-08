@@ -11,7 +11,7 @@
 //   home/                                           OO_HOME for the subject under eval:
 //     session_sources.json                          defaults disabled, fixture roots added
 //     settings.json                                 activeWindow wide enough for the fixtures
-//     threads.db                                    snapshot + versioned triage history
+//     threads.db                                    snapshot + versioned details history
 //
 // Timestamps come from fixtures/sessions.mjs offsets, materialized relative to NOW — so
 // "active today" behaves identically on every run. Run again to re-stamp before an eval.
@@ -76,7 +76,7 @@ writeFileSync(join(HOME, "session_sources.json"), JSON.stringify({
 }, null, 2));
 writeFileSync(join(HOME, "settings.json"), JSON.stringify({ activeWindow: "14d" }, null, 2));
 
-// Triage history first (versions with real created_at spacing), then the snapshot so
+// Details history first (versions with real created_at spacing), then the snapshot so
 // current state matches the newest version — the same order the poller produces.
 let stamp = new Date(now).toISOString();
 const db = new ThreadDb(join(HOME, "threads.db"), { now: () => stamp });
@@ -92,15 +92,15 @@ for (const s of SESSIONS) {
     createdAt: at(created),
     lastActiveAt: at(Math.min(...s.messages.map((m) => m.offsetMin))),
   });
-  for (const t of s.triageHistory) {
+  for (const t of s.detailsHistory) {
     stamp = at(t.offsetMin);
-    db.addTriage(s.id, { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps, source: "model" });
+    db.appendModelDetails(s.id, { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps });
   }
 }
 db.saveSnapshot({
   polledAt: new Date(now).toISOString(),
   threads: SESSIONS.map((s) => {
-    const latest = s.triageHistory[s.triageHistory.length - 1];
+    const latest = s.detailsHistory[s.detailsHistory.length - 1];
     const lastMsg = Math.min(...s.messages.map((m) => m.offsetMin));
     return {
       id: s.id,
@@ -113,7 +113,6 @@ db.saveSnapshot({
       createdAt: at(Math.max(...s.messages.map((m) => m.offsetMin))),
       lastMessageAt: at(lastMsg),
       firstSeen: at(Math.max(...s.messages.map((m) => m.offsetMin))),
-      stateSince: at(s.stateOffsetMin),
     };
   }),
 });

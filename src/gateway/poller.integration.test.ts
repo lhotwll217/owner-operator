@@ -17,7 +17,7 @@ try {
   const first = await poller.poll();
   assert.equal(first?.threads[0].state, "needs-you");
 
-  const marked = markThreadsDone(["abc-123"], { now: "2026-06-09T10:06:00.000Z" });
+  const marked = markThreadsDone(["abc-123"]);
   assert.equal(marked.marked[0].state, "done");
   assert.equal(loadSnapshot()?.threads[0].state, "done");
 

@@ -1,16 +1,16 @@
 // Deterministic test of the session-state data model — pure, no model, no I/O.
-// Session state = the LIVE poll snapshot enriched by the triage cache, joined by id, minus
-// threads whose status is `done` — with stable display-order numbering.
+// Session state = the LIVE poll snapshot enriched by the cached model details, joined by id,
+// minus threads whose status is `done` — with stable display-order numbering.
 
 import assert from "node:assert";
-import { toSessionStateThreads, groupSessionStateByRepo, numberSessionStateRows, displayTitle, type TriageInfo } from "./session-state";
+import { toSessionStateThreads, groupSessionStateByRepo, numberSessionStateRows, displayTitle, type ThreadDetails } from "./session-state";
 import type { StatusSnapshot, ThreadStatus } from "./status";
 
 const NOW = "2026-06-09T12:00:00.000Z";
 
 const st = (id: string, repo: string, state: ThreadStatus["state"], topic: string, createdAt = NOW): ThreadStatus => ({
   id, source: "claude", repo, app: "Claude CLI", topic, state, lastActive: "1m",
-  createdAt, lastMessageAt: NOW, firstSeen: NOW, stateSince: NOW,
+  createdAt, lastMessageAt: NOW, firstSeen: NOW,
 });
 
 // Poll snapshot drives membership — including an old/idle thread that must NOT be filtered out.
@@ -23,34 +23,34 @@ const snap: StatusSnapshot = {
     st("d", "billing", "done", "raw done topic"),
   ],
 };
-// Triage enriches only some (by id); untriaged threads still appear with their raw topic.
-const triage = new Map<string, TriageInfo>([
+// Model details enrich only some (by id); un-enriched threads still appear with their raw topic.
+const details = new Map<string, ThreadDetails>([
   ["n", { topic: "422 contract mismatch", nextSteps: "Paste the drafted reply", priority: 5 }],
 ]);
 
-const rows = toSessionStateThreads(snap, triage);
+const rows = toSessionStateThreads(snap, details);
 
 // --- the session-state projection includes the snapshot; done rows are inactive and unnumbered later ---
 assert.equal(rows.length, 4, "every polled thread appears in the projection");
 assert.deepEqual(rows.map((t) => t.id).sort(), ["d", "n", "o", "old"]);
 assert.equal(rows.find((t) => t.id === "d")!.active, false, "done status → inactive");
 
-// --- triaged thread is enriched; untriaged keeps its raw topic + no badge ---
+// --- enriched thread shows the generated title; un-enriched keeps its raw topic + no badge ---
 const n = rows.find((t) => t.id === "n")!;
-assert.equal(displayTitle(n), "422 contract mismatch", "triaged title wins");
+assert.equal(displayTitle(n), "422 contract mismatch", "generated title wins");
 assert.equal(n.nextSteps, "Paste the drafted reply");
 assert.equal(n.priority, 5);
 assert.equal(n.state, "needs-you", "live state from the poll");
 const o = rows.find((t) => t.id === "o")!;
-assert.equal(displayTitle(o), "raw session topic", "untriaged → raw digest topic");
-assert.equal(o.priority, undefined, "untriaged → no priority badge");
+assert.equal(displayTitle(o), "raw session topic", "un-enriched → raw digest topic");
+assert.equal(o.priority, undefined, "un-enriched → no priority badge");
 
-// --- an owner rename outranks both the triaged title and the raw topic ---
+// --- an owner rename outranks both the generated title and the raw topic ---
 const renamed = toSessionStateThreads(
   { polledAt: NOW, threads: [{ ...st("r", "billing", "idle", "raw topic"), ownerTitle: "Owner's name" }] },
   new Map([["r", { topic: "Model title" }]]),
 )[0];
-assert.equal(displayTitle(renamed), "Owner's name", "owner rename wins over the triaged title");
+assert.equal(displayTitle(renamed), "Owner's name", "owner rename wins over the generated title");
 
 // --- grouping over the live set ---
 assert.deepEqual(groupSessionStateByRepo(rows).map((g) => g.repo), ["billing", "owner-operator"], "needs-you group first");

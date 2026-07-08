@@ -14,7 +14,7 @@ import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
 
-const USAGE = `Owner Operator (oo) — read & triage your local CLI agent sessions.
+const USAGE = `Owner Operator (oo) — track and act on your local CLI agent sessions.
 
   oo                         pi's stock interactive mode
   oo -i | --interactive      alias for the default interactive mode

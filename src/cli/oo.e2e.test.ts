@@ -58,7 +58,7 @@ try {
       id: "e2e-done-1", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
       state: "working", lastActive: "just now",
       createdAt: "2026-07-07T09:00:00.000Z", lastMessageAt: "2026-07-07T09:55:00.000Z",
-      firstSeen: "2026-07-07T09:00:00.000Z", stateSince: "2026-07-07T09:55:00.000Z",
+      firstSeen: "2026-07-07T09:00:00.000Z",
     }],
   });
   const noIds = spawnSync(ooBin, ["--done"], opts);
@@ -66,8 +66,8 @@ try {
   assert.match(noIds.stderr, /--done needs one or more thread ids/, "bare --done names the missing ids");
   const done = spawnSync(ooBin, ["--done", "e2e-done-1", "ghost-id"], { ...opts, env: { ...opts.env, OO_DAEMON: "0" } });
   assert.equal(done.status, 1, `--done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);
-  const doneOut = JSON.parse(done.stdout) as { marked: Array<{ id: string; previousState: string }>; missingIds: string[] };
-  assert.deepEqual(doneOut.marked.map((m) => [m.id, m.previousState]), [["e2e-done-1", "working"]], "seeded thread marked done with its state edge");
+  const doneOut = JSON.parse(done.stdout) as { marked: Array<{ id: string; state: string }>; missingIds: string[] };
+  assert.deepEqual(doneOut.marked.map((m) => [m.id, m.state]), [["e2e-done-1", "done"]], "seeded thread marked done (prior state lives in the details ledger)");
   assert.deepEqual(doneOut.missingIds, ["ghost-id"], "unknown id reported, not silently dropped");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });

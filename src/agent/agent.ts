@@ -173,7 +173,7 @@ export async function createOwnerOperatorSession(
   // Extensions initialize their state on `session_start`, which pi's own modes emit via
   // bindExtensions — a raw createAgentSession never does. Without this, package tools
   // (schedule_prompt) execute against uninitialized state and crash. Ephemeral sessions
-  // stay unbound so a triage/test session never runs a second scheduler against the same
+  // stay unbound so an ephemeral/test session never runs a second scheduler against the same
   // job store. Pair with shutdownSessionExtensions before dispose.
   if (!opts.ephemeral) await session.bindExtensions({});
 

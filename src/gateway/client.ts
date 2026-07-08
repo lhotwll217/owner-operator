@@ -10,15 +10,15 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DaemonEvent, DaemonInfo, StatusSnapshot, TriageInfo } from "@owner-operator/core";
+import type { DaemonEvent, DaemonInfo, StatusSnapshot, ThreadDetails } from "@owner-operator/core";
 import {
   DAEMON_FILE,
   STORE_DIR,
   loadSnapshot,
-  loadTriage,
+  loadDetails,
   loadSessionState,
   markThreadsDone,
-  saveTriage,
+  saveDetails,
   type MarkThreadsDoneResult,
 } from "./store";
 import type { SessionStateRow } from "./threads-db";
@@ -29,10 +29,10 @@ import { repoRoot } from "./repo-root";
 export interface Backend {
   kind: "daemon" | "store";
   loadSnapshot(): Promise<StatusSnapshot | null>;
-  loadTriage(): Promise<Map<string, TriageInfo>>;
+  loadDetails(): Promise<Map<string, ThreadDetails>>;
   loadSessionState(): Promise<SessionStateRow[]>;
   markThreadsDone(ids: readonly string[]): Promise<MarkThreadsDoneResult>;
-  saveTriage(triage: ReadonlyMap<string, TriageInfo>): Promise<void>;
+  saveDetails(details: ReadonlyMap<string, ThreadDetails>): Promise<void>;
   /** Force a reconcile pass now. Store mode: no-op — the caller owns its poller. */
   forcePoll(): Promise<void>;
   /** Daemon push (SSE, auto-reconnect). Absent on the store backend. */
@@ -73,8 +73,8 @@ export async function connectDaemon(): Promise<Backend | null> {
       const snap = (await json("/snapshot")) as StatusSnapshot;
       return snap.polledAt ? snap : null;
     },
-    async loadTriage() {
-      return new Map(Object.entries((await json("/triage")) as Record<string, TriageInfo>));
+    async loadDetails() {
+      return new Map(Object.entries((await json("/details")) as Record<string, ThreadDetails>));
     },
     async loadSessionState() {
       try {
@@ -87,8 +87,8 @@ export async function connectDaemon(): Promise<Backend | null> {
     async markThreadsDone(ids) {
       return (await post("/done", { ids })) as MarkThreadsDoneResult;
     },
-    async saveTriage(triage) {
-      await post("/triage", { entries: Object.fromEntries(triage) });
+    async saveDetails(details) {
+      await post("/details", { entries: Object.fromEntries(details) });
     },
     async forcePoll() {
       await post("/poll", {});
@@ -148,10 +148,10 @@ function storeBackend(): Backend {
   return {
     kind: "store",
     loadSnapshot: async () => loadSnapshot(),
-    loadTriage: async () => loadTriage(),
+    loadDetails: async () => loadDetails(),
     loadSessionState: async () => loadSessionState(),
     markThreadsDone: async (ids) => markThreadsDone(ids),
-    saveTriage: async (triage) => { saveTriage(triage); },
+    saveDetails: async (details) => { saveDetails(details); },
     forcePoll: async () => { /* embedded surfaces own their poller */ },
     close: () => { /* nothing held */ },
   };

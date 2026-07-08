@@ -43,8 +43,7 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/aurora-weather",
     slug: "-home-dev-projects-aurora-weather",
     state: "needs-you",
-    stateOffsetMin: 30,
-    triageHistory: [
+    detailsHistory: [
       { offsetMin: 200, priority: 2, topic: "Flaky forecast cache test", summary: "Investigating an intermittently failing cache test.", nextSteps: "Reproduce the flake locally." },
       { offsetMin: 120, priority: 3, topic: "Flaky forecast cache test", summary: "Flake reproduced; CI failed twice more on unrelated PRs.", nextSteps: "Pick a deflaking strategy." },
       { offsetMin: 30, priority: 4, topic: "Flaky forecast cache test", summary: "Fix ready with FakeClock; PR #42 opened.", nextSteps: "Review and merge PR #42." },
@@ -69,8 +68,7 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/aurora-weather",
     slug: "-home-dev-projects-aurora-weather",
     state: "working",
-    stateOffsetMin: 5,
-    triageHistory: [
+    detailsHistory: [
       { offsetMin: 90, priority: 3, topic: "Add --units flag", summary: "Adding metric/imperial output units to the CLI.", nextSteps: "Wire the flag through the renderers." },
       { offsetMin: 5, priority: 3, topic: "Add --units flag", summary: "Imperial conversion crashed on gust data; normalizing at the API boundary.", nextSteps: "Agent is mid-refactor of normalize_observation()." },
     ],
@@ -88,8 +86,7 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/lumen-notes",
     slug: "-home-dev-projects-lumen-notes",
     state: "idle",
-    stateOffsetMin: 6 * 24 * 60,
-    triageHistory: [
+    detailsHistory: [
       { offsetMin: 7 * 24 * 60, priority: 2, topic: "Storage migration to IndexedDB", summary: "Planning the move off localStorage for large notebooks.", nextSteps: "Choose Dexie vs raw IndexedDB." },
       { offsetMin: 6 * 24 * 60, priority: 2, topic: "Storage migration to IndexedDB", summary: "Agent recommended Dexie 4; awaiting the owner's call.", nextSteps: "Owner to decide Dexie 4 vs raw IDB." },
     ],
@@ -105,8 +102,7 @@ export const SESSIONS = [
     repo: "quasar-api",
     cwd: "/home/dev/projects/quasar-api",
     state: "idle",
-    stateOffsetMin: 26 * 60,
-    triageHistory: [
+    detailsHistory: [
       { offsetMin: 27 * 60, priority: 4, topic: "Spurious 429s from the rate limiter", summary: "Clients report 429s far below their quota.", nextSteps: "Find why buckets exhaust early." },
       { offsetMin: 26 * 60, priority: 1, topic: "Spurious 429s from the rate limiter", summary: "Root cause fixed: refill interval unit bug in RateLimiter.refill().", nextSteps: "Ship it in the next deploy." },
     ],

@@ -108,7 +108,7 @@
 - vars:
     id: audit-thread-escalation
     question: "How did the flaky forecast cache test thread progress to the point of needing me? Walk me through how it escalated."
-  # Dual-path (triage history in the DB, or the transcript narrative) — observed, not gated.
+  # Dual-path (details history in the DB, or the transcript narrative) — observed, not gated.
   metadata: { qtype: audit }
   assert:
     - type: llm-rubric

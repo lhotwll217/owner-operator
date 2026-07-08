@@ -28,7 +28,7 @@ export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } 
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.
 export * from "./status";
 
-// Session-state data model: digest metadata + live status (+ cached triage), with the
+// Session-state data model: digest metadata + live status (+ cached model details), with the
 // default-visible filter and grouping all surfaces share. See session-state.ts.
 export * from "./session-state";
 
