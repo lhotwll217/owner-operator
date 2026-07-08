@@ -48,7 +48,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
       extensionFactories: [
         blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
-        ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner, /ongoing brief
+        ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner
       ],
     },
   });
