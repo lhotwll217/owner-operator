@@ -1,4 +1,4 @@
-// Behavioral test — runs the REAL agent and asserts it can answer a triage question in prose.
+// Behavioral test — runs the REAL agent and asserts it can answer a session-state question in prose.
 //   npm run test:agent      (needs model auth; makes a real model call)
 
 import assert from "node:assert";
@@ -16,5 +16,5 @@ try { session.dispose(); } catch { /* ignore */ }
 
 process.stdout.write(`assistant text chars: ${text.length}\n`);
 assert.ok(text.trim().length > 0, "agent must answer in prose");
-process.stdout.write("\nok — agent answered triage prompt in prose\n");
+process.stdout.write("\nok — agent answered session-state prompt in prose\n");
 process.exit(0);

@@ -26,10 +26,10 @@ import {
   type ScheduleWhen,
   type StatusDiff,
   type StatusSnapshot,
-  type TriageInfo,
+  type ThreadDetails,
 } from "@owner-operator/core";
 import { StatusPoller, type PollerOptions } from "./poller";
-import { DAEMON_FILE, loadSessionState, loadTriage, markThreadsDone, renameThread, saveTriage, storeDb } from "./store";
+import { DAEMON_FILE, loadSessionState, loadDetails, markThreadsDone, renameThread, saveDetails, storeDb } from "./store";
 
 export interface DaemonOptions {
   /** 0 = ephemeral (tests). Default: OO_PORT or 47711. */
@@ -152,7 +152,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
         return respond(200, { ok: true, pid: process.pid, startedAt, polledAt: poller.current?.polledAt ?? null });
       }
       if (route === "GET /snapshot") return respond(200, poller.current ?? { polledAt: "", threads: [] });
-      if (route === "GET /triage") return respond(200, Object.fromEntries(loadTriage()));
+      if (route === "GET /details") return respond(200, Object.fromEntries(loadDetails()));
       if (route === "GET /session-state") return respond(200, loadSessionState());
       if (route === "POST /poll") return respond(200, (await poller.poll()) ?? { polledAt: "", threads: [] });
 
@@ -183,11 +183,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
         return respond(200, { ok: true });
       }
 
-      if (route === "POST /triage") {
-        const body = (await readBody(req)) as { entries?: Record<string, TriageInfo> };
+      if (route === "POST /details") {
+        const body = (await readBody(req)) as { entries?: Record<string, ThreadDetails> };
         if (!body.entries || typeof body.entries !== "object") return respond(400, { error: "entries required" });
-        saveTriage(new Map(Object.entries(body.entries)));
-        broadcast({ type: "triage", entries: body.entries });
+        saveDetails(new Map(Object.entries(body.entries)));
+        broadcast({ type: "details", entries: body.entries });
         return respond(200, { ok: true });
       }
 

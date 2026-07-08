@@ -9,19 +9,19 @@
 //   GET  /health                    → { ok, pid, startedAt, polledAt }
 //   GET  /session-state             → SessionStateRow[]
 //   GET  /snapshot                  → StatusSnapshot
-//   GET  /triage                    → Record<threadId, TriageInfo>
+//   GET  /details                   → Record<threadId, ThreadDetails>
 //   GET  /events                    → SSE stream of DaemonEvent
 //   POST /poll                      → StatusSnapshot           (force a reconcile pass)
 //   POST /done      { ids }         → MarkThreadsDone result
 //   POST /rename    { id, title }   → { ok }                   (owner title; "" clears → generated titles show again)
-//   POST /triage    { entries }     → { ok }                   (upsert triage cache)
+//   POST /details   { entries }     → { ok }                   (append model details to the ledger)
 //   GET  /schedules                 → Schedule[]
 //   PUT  /schedules/:name           → Schedule                 (upsert by name)
 //   DELETE /schedules/:name         → { ok }
 //   POST /schedules/:name/run       → { ok, detail? }          (run now, regardless of when)
 
 import type { StatusDiff, StatusSnapshot } from "./status";
-import type { TriageInfo } from "./session-state";
+import type { ThreadDetails } from "./session-state";
 
 /** Default localhost port; override with OO_PORT. Clients discover the real one via daemon.json. */
 export const DEFAULT_DAEMON_PORT = 47711;
@@ -61,5 +61,5 @@ export interface Schedule {
 
 export type DaemonEvent =
   | { type: "snapshot"; snapshot: StatusSnapshot; diff: StatusDiff }
-  | { type: "triage"; entries: Record<string, TriageInfo> }
+  | { type: "details"; entries: Record<string, ThreadDetails> }
   | { type: "schedule_run"; name: string; ok: boolean; detail?: string };

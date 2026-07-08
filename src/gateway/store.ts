@@ -4,7 +4,7 @@
 // files are a DERIVED, read-only export (and a one-time legacy seed).
 //
 // MULTI-CONSUMER WRITING — the contract for any new consumer (widget, web, scripts):
-//   • Read anywhere: loadSnapshot()/loadTriage() here; status.json for zero-dependency
+//   • Read anywhere: loadSnapshot()/loadDetails() here; status.json for zero-dependency
 //     readers (the scan skill's resolver join); or the db read-only.
 //   • WRITE ONLY THROUGH THIS SEAM (or ThreadDb directly). Never write status.json — it
 //     is regenerated after every commit here, so a direct write is silently lost.
@@ -26,16 +26,16 @@ import {
   parseWindowMs,
   type Blacklist,
   type StatusSnapshot,
+  type ThreadDetails,
   type ThreadStatus,
-  type TriageInfo,
 } from "@owner-operator/core";
 import { ThreadDb, type SessionStateRow } from "./threads-db";
 
 export const STORE_DIR = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 /** The derived snapshot export — read-only for consumers; regenerated after every write. */
 export const STATUS_FILE = join(STORE_DIR, "status.json");
-/** Legacy triage cache — seed input only; no longer written (triage lives in the db). */
-export const TRIAGE_FILE = join(STORE_DIR, "triage.json");
+/** Legacy model-details cache — seed input only; no longer written (details live in the db). */
+export const LEGACY_DETAILS_FILE = join(STORE_DIR, "triage.json");
 /** Daemon discovery file ({ port, pid, startedAt }) — written by the daemon, read by clients. */
 export const DAEMON_FILE = join(STORE_DIR, "daemon.json");
 
@@ -67,7 +67,7 @@ function applyBlacklist(target: ThreadDb): void {
 }
 
 // One-time migration: a box that ran the JSON-only store has state worth keeping (owner
-// dones, triage titles). Seed the empty db from the legacy files; from then on the db is
+// dones, generated titles). Seed the empty db from the legacy files; from then on the db is
 // truth and status.json is output-only.
 function seedLegacyJson(target: ThreadDb): void {
   if (!target.isEmpty()) return;
@@ -76,9 +76,9 @@ function seedLegacyJson(target: ThreadDb): void {
     if (Array.isArray(snap?.threads)) target.saveSnapshot(snap);
   } catch { /* no legacy snapshot */ }
   try {
-    const obj = JSON.parse(readFileSync(TRIAGE_FILE, "utf8")) as Record<string, TriageInfo>;
-    for (const [id, info] of Object.entries(obj)) target.upsertTriage(id, info, "model");
-  } catch { /* no legacy triage */ }
+    const obj = JSON.parse(readFileSync(LEGACY_DETAILS_FILE, "utf8")) as Record<string, ThreadDetails>;
+    for (const [id, info] of Object.entries(obj)) target.appendModelDetails(id, info);
+  } catch { /* no legacy details cache */ }
 }
 
 /** The daemon's privileged handle (schedules, direct queries). Surfaces stay on the seam. */
@@ -122,10 +122,10 @@ export function saveSnapshot(snapshot: StatusSnapshot): StatusSnapshot {
   return stored;
 }
 
-/** Cached triage enrichment keyed by thread id — joined onto the live poll set at render. */
-export function loadTriage(): Map<string, TriageInfo> {
+/** Cached model details keyed by thread id — joined onto the live poll set at render. */
+export function loadDetails(): Map<string, ThreadDetails> {
   try {
-    return getDb().getTriageMap();
+    return getDb().latestDetailsMap();
   } catch {
     return new Map();
   }
@@ -142,12 +142,13 @@ export function loadSessionState(): SessionStateRow[] {
 }
 
 /**
- * Persist the triage cache (written on each full/targeted triage). Append-only versions
- * under the hood; unchanged entries are skipped, so re-saving the whole map stays cheap.
+ * Persist model details (written on each full/targeted refresh). Append-only
+ * thread_details versions under the hood; unchanged entries are skipped, so re-saving
+ * the whole map stays version-stable.
  */
-export function saveTriage(triage: ReadonlyMap<string, TriageInfo>): void {
+export function saveDetails(details: ReadonlyMap<string, ThreadDetails>): void {
   const d = getDb();
-  for (const [id, info] of triage) d.upsertTriage(id, info, "model");
+  for (const [id, info] of details) d.appendModelDetails(id, info);
 }
 
 /**
@@ -172,13 +173,13 @@ export interface MarkThreadsDoneResult {
  * Mark threads done in the persisted snapshot — one transaction in the db (no
  * read-modify-write window for another consumer to clobber), then refresh the export.
  */
-export function markThreadsDone(ids: readonly string[], opts: { now?: string } = {}): MarkThreadsDoneResult {
+export function markThreadsDone(ids: readonly string[]): MarkThreadsDoneResult {
   const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
   const snapshot = loadSnapshot();
   if (!snapshot) return { snapshot: null, marked: [], missingIds: uniqueIds };
   if (!uniqueIds.length) return { snapshot, marked: [], missingIds: [] };
 
-  const result = getDb().markThreadsDone(uniqueIds, opts.now ?? new Date().toISOString());
+  const result = getDb().markThreadsDone(uniqueIds);
   if (result.snapshot) writeAtomic(STATUS_FILE, result.snapshot);
   return result;
 }

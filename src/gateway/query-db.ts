@@ -10,10 +10,13 @@
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { defaultDbPath } from "./threads-db";
+import { tableDoc } from "./schema-docs";
 
 export interface TableInfo {
   name: string;
   rows: number;
+  /** From schema-docs.ts (a git-tracked prompt surface), never the db file. */
+  description: string;
 }
 
 export interface ColumnInfo {
@@ -21,6 +24,8 @@ export interface ColumnInfo {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  /** From schema-docs.ts; "(undocumented)" flags drift between code and db. */
+  description: string;
 }
 
 export interface QueryResult {
@@ -50,6 +55,11 @@ function withDb<T>(dbPath: string, fn: (db: DatabaseSync) => T): T {
   }
 }
 
+// Table/column EXISTENCE and row counts come live from the db; DESCRIPTIONS come from
+// schema-docs.ts. Deliberately decoupled: sqlite_master's stored CREATE text is frozen
+// at whatever ran first on this machine's db file, while the code doc is git-tracked
+// and versioned with the writers — it's a prompt surface, not db state.
+
 export function listTables(dbPath: string = defaultDbPath()): TableInfo[] {
   return withDb(dbPath, (db) => {
     const names = db
@@ -57,17 +67,19 @@ export function listTables(dbPath: string = defaultDbPath()): TableInfo[] {
       .all() as Array<{ name: string }>;
     return names.map(({ name }) => {
       const { n } = db.prepare(`SELECT COUNT(*) AS n FROM "${name.replaceAll('"', '""')}"`).get() as { n: number };
-      return { name, rows: n };
+      return { name, rows: n, description: tableDoc(name)?.description ?? "(undocumented)" };
     });
   });
 }
 
-export function describeTable(table: string, dbPath: string = defaultDbPath()): { columns: ColumnInfo[]; createSql: string | null } {
+export function describeTable(table: string, dbPath: string = defaultDbPath()): { description: string; columns: ColumnInfo[] } {
   return withDb(dbPath, (db) => {
-    const master = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
-      .get(table) as { sql: string | null } | undefined;
-    if (!master) throw new Error(`no such table: ${table}`);
+    const exists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table);
+    if (!exists) throw new Error(`no such table: ${table}`);
+    const doc = tableDoc(table);
+    const colDocs = new Map((doc?.columns ?? []).map((c) => [c.name, c.description]));
     const cols = db.prepare(`PRAGMA table_info("${table.replaceAll('"', '""')}")`).all() as Array<{
       name: string;
       type: string;
@@ -75,8 +87,14 @@ export function describeTable(table: string, dbPath: string = defaultDbPath()): 
       pk: number;
     }>;
     return {
-      createSql: master.sql,
-      columns: cols.map((c) => ({ name: c.name, type: c.type, notNull: c.notnull !== 0, primaryKey: c.pk !== 0 })),
+      description: doc?.description ?? "(undocumented)",
+      columns: cols.map((c) => ({
+        name: c.name,
+        type: c.type,
+        notNull: c.notnull !== 0,
+        primaryKey: c.pk !== 0,
+        description: colDocs.get(c.name) ?? "(undocumented)",
+      })),
     };
   });
 }

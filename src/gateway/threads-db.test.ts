@@ -1,8 +1,9 @@
 // Deterministic test of the THREAD DB only (no model, no poller).
 //   npm run test:unit
 // Drives ThreadDb through the write APIs with an injected clock and asserts the
-// invariants: upsert semantics, state-edge events, triage versioning, the session-state
-// projection, and durability across reopen.
+// invariants: upsert semantics, state-edge events, the dense append-only details
+// ledger, the session-state projection, durability across reopen, and the one-time
+// legacy migration.
 
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -41,7 +42,7 @@ try {
   // --- omitted identity fields keep their stored value ---
   let row = db.listSessionState().find((r) => r.id === "abc-123")!;
   assert.equal(row.repo, "billing", "repo survives a partial observation");
-  assert.equal(row.topic, "fix 422s", "raw_topic shows until triage lands");
+  assert.equal(row.topic, "fix 422s", "raw_topic shows until model details land");
 
   // --- state flip: working → needs-you edge ---
   const r3 = db.recordScan({ id: "abc-123", state: "needs-you", stateReason: "agent asked a question" });
@@ -61,15 +62,23 @@ try {
   assert.equal(row.stateReason, null, "state change overwrites the reason");
   db.recordScan({ id: "abc-123", state: "needs-you", stateReason: "agent asked a question" });
 
-  // --- triage: versions are per-thread, monotonic; latest wins in the projection ---
-  const v1 = db.addTriage("abc-123", { priority: 3, topic: "Billing 422 contract mismatch", nextSteps: "paste the drafted reply", source: "startup" });
-  const v2 = db.addTriage("abc-123", { priority: 5, topic: "Billing 422 contract mismatch", nextSteps: "review and push", source: "targeted_refresh" });
-  assert.equal(v1, 1);
-  assert.equal(v2, 2);
-  assert.deepEqual(events.at(-1), { type: "triage_updated", threadId: "abc-123", version: 2 });
-  assert.equal(db.getLatestTriage("abc-123")!.nextSteps, "review and push");
+  // --- model enrichment: appends ledger versions; latest wins in the projection ---
+  // State edges already wrote versions (working→needs-you→working→needs-you = v1..v4),
+  // so the model's appends continue the same per-thread ledger.
+  const v5 = db.appendModelDetails("abc-123", { priority: 3, topic: "Billing 422 contract mismatch", nextSteps: "paste the drafted reply" });
+  const v6 = db.appendModelDetails("abc-123", { priority: 5, topic: "Billing 422 contract mismatch", nextSteps: "review and push" });
+  assert.equal(v5, 5);
+  assert.equal(v6, 6);
+  assert.deepEqual(events.at(-1), { type: "details_updated", threadId: "abc-123", version: 6 });
+  assert.equal(db.latestDetails("abc-123")!.nextSteps, "review and push");
+  assert.equal(db.latestDetails("abc-123")!.writtenBy, "model");
+  // Dense carry-forward: the model didn't claim state — it rides along from v4.
+  assert.equal(db.latestDetails("abc-123")!.state, "needs-you", "state carries forward through a model append");
+  assert.equal(db.latestDetails("abc-123")!.stateReason, "agent asked a question", "reason carries too");
+  // Identical claim → no version churn.
+  assert.equal(db.appendModelDetails("abc-123", { priority: 5, topic: "Billing 422 contract mismatch", nextSteps: "review and push" }), null, "unchanged enrichment appends nothing");
 
-  // --- session-state projection: triaged topic overrides raw, state + priority present ---
+  // --- session-state projection: generated topic overrides raw, state + priority present ---
   row = db.listSessionState().find((r) => r.id === "abc-123")!;
   assert.equal(row.topic, "Billing 422 contract mismatch");
   assert.equal(row.priority, 5);
@@ -90,7 +99,9 @@ try {
 
   // --- guards ---
   assert.throws(() => db.recordScan({ id: "x", state: "banana" as never }), /invalid thread state/);
-  assert.throws(() => db.addTriage("no-such-thread", { source: "manual" }), /FOREIGN KEY/i, "triage requires an existing thread");
+  // Enrichment for a thread the poll hasn't seen: stub row so the FK holds, state defaults idle.
+  assert.equal(db.appendModelDetails("pre-poll", { topic: "early bird" }), 1, "pre-poll enrichment lands as v1 on a stub");
+  assert.equal(db.latestDetails("pre-poll")!.state, "idle");
 
   // --- unsubscribe stops delivery ---
   unsubscribe();
@@ -100,10 +111,13 @@ try {
 
   db.close();
 
-  // --- durability: reopen and the state is all still there ---
+  // --- durability: reopen and the ledger is all still there ---
   const reopened = new ThreadDb(dbPath, { now });
   assert.equal(reopened.listSessionState().some((r) => r.id === "abc-123"), false, "done rows leave current session state");
-  assert.equal(reopened.getLatestTriage("abc-123")!.version, 2);
+  const final = reopened.latestDetails("abc-123")!;
+  assert.equal(final.version, 7, "full ledger survives reopen (4 state edges + 2 model + done)");
+  assert.equal(final.state, "done");
+  assert.equal(final.topic, "Billing 422 contract mismatch", "enrichment carried through the done edge");
   reopened.close();
 
   // --- privacy purge: path tree (lower-level repos too), repo name, slug, CASCADE ---
@@ -112,7 +126,7 @@ try {
     id, source: "claude", repo, ...(project ? { project } : {}), app: "Claude CLI",
     topic: "t", state: "idle" as const, lastActive: "just now",
     createdAt: "2026-06-09T10:00:00Z", lastMessageAt: "2026-06-09T11:00:00Z",
-    firstSeen: "2026-06-09T10:00:00Z", stateSince: "2026-06-09T10:00:00Z",
+    firstSeen: "2026-06-09T10:00:00Z",
   });
   pdb.saveSnapshot({
     polledAt: "2026-06-09T13:00:00Z",
@@ -124,14 +138,14 @@ try {
       status("priv-wt", "personal", "/u/.superset/worktrees/x/branch"),      // worktree → repo name
     ],
   });
-  pdb.upsertTriage("priv-deep", { topic: "private" }, "model");
+  pdb.appendModelDetails("priv-deep", { topic: "private" });
   // A historical row with NO project value — only its transcript path identifies it.
   pdb.recordScan({ id: "priv-legacy", state: "idle", transcriptPath: "/u/.claude/projects/-u-Documents-Personal-Career/x.jsonl" });
 
   const bl = { paths: ["/u/Documents/Personal"], repos: ["Personal"] };
   assert.equal(pdb.purgeBlacklisted(bl), 4, "root + lower-level + worktree-by-name + legacy-by-slug purged");
   assert.deepEqual(pdb.loadSnapshot()!.threads.map((t) => t.id).sort(), ["keep-1", "keep-2"], "survivors intact");
-  assert.equal(pdb.getLatestTriage("priv-deep"), undefined, "purged thread's triage cascaded");
+  assert.equal(pdb.latestDetails("priv-deep"), undefined, "purged thread's ledger cascaded");
   assert.equal(pdb.purgeBlacklisted({ paths: [], repos: [] }), 0, "empty blacklist deletes nothing");
   pdb.close();
 
@@ -143,7 +157,7 @@ try {
   const mk = (id: string, state: "needs-you" | "idle" | "working") => ({
     id, source: "claude", repo: "billing", app: "Claude CLI", topic: id, state, lastActive: "1 hour ago",
     createdAt: "2026-06-09T10:00:00Z", lastMessageAt: "2026-06-09T11:00:00Z",
-    firstSeen: "2026-06-09T10:00:00Z", stateSince: "2026-06-09T10:30:00Z",
+    firstSeen: "2026-06-09T10:00:00Z",
   });
   sdb.saveSnapshot({ polledAt: "2026-06-09T12:00:00Z", threads: [mk("waiting", "needs-you"), mk("quiet", "idle")] });
   assert.deepEqual(sdb.loadSnapshot()!.threads.map((t) => t.id).sort(), ["quiet", "waiting"], "both present in the window");
@@ -153,15 +167,15 @@ try {
   assert.deepEqual(survived, ["other", "waiting"], "needs-you survives aging out; the idle thread drops");
   sdb.close();
 
-  // --- owner rename: preferred at display; model triage keeps versioning underneath (audit trail) ---
+  // --- owner rename: preferred at display; model details keep versioning underneath (audit trail) ---
   const rdb = new ThreadDb(join(dir, "rename.db"), { now });
   rdb.recordScan({ id: "r-1", repo: "billing", app: "Claude CLI", rawTopic: "raw scan topic", state: "working" });
-  rdb.upsertTriage("r-1", { topic: "Model title", nextSteps: "n1", priority: 3 }, "model");
+  rdb.appendModelDetails("r-1", { topic: "Model title", nextSteps: "n1", priority: 3 });
   assert.equal(rdb.setOwnerTitle("nope", "x"), false, "unknown thread → false");
   assert.equal(rdb.setOwnerTitle("r-1", "  My rename  "), true);
   assert.equal(rdb.listSessionState()[0].topic, "My rename", "owner title wins the projection (trimmed)");
-  rdb.upsertTriage("r-1", { topic: "Model retitle", nextSteps: "n2", priority: 4 }, "model");
-  assert.equal(rdb.getLatestTriage("r-1")!.topic, "Model retitle", "model triage still records its topic (audit trail)");
+  rdb.appendModelDetails("r-1", { topic: "Model retitle", nextSteps: "n2", priority: 4 });
+  assert.equal(rdb.latestDetails("r-1")!.topic, "Model retitle", "model enrichment still records its topic (audit trail)");
   assert.equal(rdb.listSessionState()[0].topic, "My rename", "…but the owner title still shows");
   // The snapshot carries the rename, and a poll snapshot (which never has one) can't clear it.
   rdb.saveSnapshot({ polledAt: "2026-06-09T14:00:00Z", threads: [status("r-1", "billing")] });
@@ -170,6 +184,73 @@ try {
   assert.equal(rdb.loadSnapshot()!.threads[0].ownerTitle, undefined, "cleared pin leaves the snapshot");
   assert.equal(rdb.listSessionState()[0].topic, "Model retitle", "cleared → the latest generated title shows again");
   rdb.close();
+
+  // --- legacy migration: pre-ledger db (mutable state on threads + thread_triage) ---
+  // Seeds each thread's details v1 from current truth, rebuilds threads without the
+  // moved/dead columns, and leaves thread_triage in place read-only.
+  const legacyPath = join(dir, "legacy.db");
+  {
+    const { DatabaseSync } = await import("node:sqlite");
+    const raw = new DatabaseSync(legacyPath);
+    raw.exec(`
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY, repo TEXT, project TEXT, app TEXT, source TEXT,
+        transcript_path TEXT, created_at TEXT, last_active_at TEXT,
+        first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, raw_topic TEXT,
+        owner_title TEXT,
+        state TEXT NOT NULL DEFAULT 'idle', state_reason TEXT,
+        last_assistant_at TEXT, last_user_at TEXT, last_checked_at TEXT,
+        last_message_at TEXT, last_active_rel TEXT, state_since TEXT,
+        previous_state TEXT, in_snapshot INTEGER NOT NULL DEFAULT 0,
+        diff_added INTEGER, diff_deleted INTEGER
+      );
+      CREATE TABLE thread_triage (
+        thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL, priority INTEGER, topic TEXT, summary TEXT,
+        next_steps TEXT, source TEXT NOT NULL, model TEXT, prompt_version TEXT,
+        input_hash TEXT, created_at TEXT NOT NULL, PRIMARY KEY (thread_id, version)
+      );
+      INSERT INTO threads (id, repo, state, state_reason, first_seen_at, last_seen_at, last_message_at, in_snapshot, owner_title)
+        VALUES ('old-1', 'billing', 'needs-you', 'question pending', '2026-06-01T00:00:00Z', '2026-06-02T00:00:00Z', '2026-06-02T00:00:00Z', 1, 'Pinned name');
+      INSERT INTO threads (id, repo, state, first_seen_at, last_seen_at)
+        VALUES ('old-2', 'demo', 'idle', '2026-06-01T00:00:00Z', '2026-06-02T00:00:00Z');
+      INSERT INTO thread_triage (thread_id, version, priority, topic, summary, next_steps, source, created_at)
+        VALUES ('old-1', 1, 2, 'Old title', 's1', 'n1', 'model', '2026-06-01T01:00:00Z'),
+               ('old-1', 2, 4, 'New title', 's2', 'n2', 'model', '2026-06-01T02:00:00Z');
+    `);
+    raw.close();
+  }
+  const migrated = new ThreadDb(legacyPath, { now });
+  const m1 = migrated.latestDetails("old-1")!;
+  assert.deepEqual(
+    [m1.version, m1.writtenBy, m1.state, m1.stateReason, m1.priority, m1.topic, m1.summary, m1.nextSteps],
+    [1, "migration", "needs-you", "question pending", 4, "New title", "s2", "n2"],
+    "v1 = current truth: threads state + LATEST triage",
+  );
+  assert.deepEqual(
+    [migrated.latestDetails("old-2")!.state, migrated.latestDetails("old-2")!.topic],
+    ["idle", null],
+    "thread without triage seeds from state alone",
+  );
+  const row1 = migrated.listSessionState().find((r) => r.id === "old-1")!;
+  assert.equal(row1.topic, "Pinned name", "owner title survives the rebuild");
+  // A steady-state write after migration dedups against the seeded v1.
+  migrated.recordScan({ id: "old-2", state: "idle" });
+  assert.equal(migrated.latestDetails("old-2")!.version, 1, "steady state after migration appends nothing");
+  migrated.close();
+  {
+    const { DatabaseSync } = await import("node:sqlite");
+    const check = new DatabaseSync(legacyPath, { readOnly: true });
+    const cols = (check.prepare("PRAGMA table_info(threads)").all() as Array<{ name: string }>).map((c) => c.name);
+    assert.ok(!cols.includes("state") && !cols.includes("state_since") && !cols.includes("last_active_rel"), "moved/dead columns dropped from threads");
+    const { n } = check.prepare("SELECT COUNT(*) AS n FROM thread_triage").get() as { n: number };
+    assert.equal(n, 2, "legacy triage history kept read-only");
+    check.close();
+  }
+  // Idempotent: reopening the migrated db must not re-seed or throw.
+  const again = new ThreadDb(legacyPath, { now });
+  assert.equal(again.latestDetails("old-1")!.version, 1, "second open is a no-op");
+  again.close();
 
   process.stdout.write("ok — thread db passed\n");
 } finally {

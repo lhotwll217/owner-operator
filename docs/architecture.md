@@ -83,6 +83,6 @@ curl -X PUT localhost:47711/schedules/morning-brief \
 
 In the agent surfaces, scheduling is session-level via the
 [pi-schedule-prompt](https://pi.dev/packages/pi-schedule-prompt) package (installed through
-`.pi/settings.json` `packages`): the owner tells the Operator "re-triage every 15 minutes"
+`.pi/settings.json` `packages`): the owner tells the Operator "refresh every 15 minutes"
 or "remind me at 3pm" and it schedules a prompt to itself with the `schedule_prompt` tool.
 Jobs only fire while a session is open — the daemon's schedules are the always-on layer.

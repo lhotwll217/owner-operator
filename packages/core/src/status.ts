@@ -2,7 +2,7 @@
 //
 // UI-INDEPENDENT and MODEL-FREE: everything here is derived from the cheap deterministic
 // scan (lastRole + freshness), never the LLM. That's the split that lets session state poll
-// fast and for free — expensive triage enrichment refreshes slowly and separately. Pure
+// fast and for free — expensive model enrichment refreshes slowly and separately. Pure
 // functions only, same contract every surface renders.
 
 import { resolveState } from "./resolve.mjs";
@@ -64,7 +64,7 @@ export interface ThreadStatus {
   app: string;
   topic: string;
   /** Owner-set title (widget rename). Preferred over every generated topic at display;
-   *  triage keeps generating topics underneath (the audit trail). Absent = generated titles show. */
+   *  the model keeps generating topics underneath (the audit trail). Absent = generated titles show. */
   ownerTitle?: string;
   state: ThreadState;
   /** Relative freshness for display, e.g. "7 minutes ago". */
@@ -73,9 +73,6 @@ export interface ThreadStatus {
   lastMessageAt: string;      // ISO
   /** ISO of the first poll that saw this thread. */
   firstSeen: string;
-  /** ISO of when it entered its current `state` (drives "has been waiting 20m"). */
-  stateSince: string;
-  previousState?: ThreadState;
   /** Workspace line delta vs the repo's base branch — used for +N −N badges. */
   diffAdded?: number;
   diffDeleted?: number;
@@ -110,8 +107,8 @@ export function sortByAttention<T extends ThreadStatus>(threads: readonly T[]): 
 
 /**
  * Join a fresh scan against the previous snapshot to produce the next one — the heart of
- * the state machine's continuity. Carries `firstSeen`, and resets `stateSince` /
- * `previousState` only on an actual state change. Pure: same inputs → same snapshot.
+ * the state machine's continuity. Carries `firstSeen` across polls. Pure: same inputs →
+ * same snapshot. (State history lives in the db's `thread_details` ledger, not here.)
  */
 export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[], nowIso: string): StatusSnapshot {
   const byId = new Map((prev?.threads ?? []).map((t) => [t.id, t]));
@@ -120,7 +117,6 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
     // The canonical resolver decides: owner-set `done` holds until a newer message
     // lands, then the scan-derived state wakes the thread again.
     const state = resolveState(was, row);
-    const changed = !was || was.state !== state;
     return {
       id: row.id,
       source: row.source,
@@ -135,8 +131,6 @@ export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[],
       createdAt: row.createdAt,
       lastMessageAt: row.lastMessageAt,
       firstSeen: was?.firstSeen ?? nowIso,
-      stateSince: changed ? nowIso : was!.stateSince,
-      previousState: changed ? was?.state : was!.previousState,
       diffAdded: row.diffAdded,
       diffDeleted: row.diffDeleted,
     };

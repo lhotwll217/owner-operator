@@ -85,10 +85,10 @@ try {
   await waitFor(() => existsSync(needsFile), 4_000, "needs-you trigger");
   assert.equal(readFileSync(needsFile, "utf8"), "abc-123", "trigger received the thread ids");
 
-  // --- triage roundtrip + push ---
-  await send("POST", "/triage", { entries: { "abc-123": { topic: "Daemon wiring", priority: 5 } } });
-  assert.equal((await get("/triage")).body["abc-123"].topic, "Daemon wiring");
-  await waitFor(() => events.some((e) => e.type === "triage"), 2_000, "triage push");
+  // --- details roundtrip + push ---
+  await send("POST", "/details", { entries: { "abc-123": { topic: "Daemon wiring", priority: 5 } } });
+  assert.equal((await get("/details")).body["abc-123"].topic, "Daemon wiring");
+  await waitFor(() => events.some((e) => e.type === "details"), 2_000, "details push");
 
   // --- owner rename: pinned through the daemon's own reconcile; empty clears it ---
   assert.equal((await send("POST", "/rename", { id: "abc-123" })).status, 400, "title required");
@@ -96,8 +96,8 @@ try {
   assert.equal((await send("POST", "/rename", { id: "abc-123", title: "  Billing hotfix  " })).body.ok, true);
   await send("POST", "/poll"); // the rename is owner state — a reconcile pass can't clear it
   assert.equal((await get("/snapshot")).body.threads[0].ownerTitle, "Billing hotfix", "rename survives the reconcile (trimmed)");
-  await send("POST", "/triage", { entries: { "abc-123": { topic: "Model retitle" } } });
-  assert.equal((await get("/triage")).body["abc-123"].topic, "Model retitle", "model triage keeps recording titles (audit trail); display prefers the rename");
+  await send("POST", "/details", { entries: { "abc-123": { topic: "Model retitle" } } });
+  assert.equal((await get("/details")).body["abc-123"].topic, "Model retitle", "model keeps recording titles (audit trail); display prefers the rename");
   await send("POST", "/rename", { id: "abc-123", title: "" });
   await send("POST", "/poll");
   assert.equal((await get("/snapshot")).body.threads[0].ownerTitle, undefined, "empty title clears — model titles resume");

@@ -1,6 +1,8 @@
 // Deterministic test of the state machine — pure functions, no model, no I/O.
 //   npm test   (from packages/core/)
-// Covers state derivation, continuity (firstSeen/stateSince), diff, and attention sort.
+// Covers state derivation, continuity (firstSeen), diff, and attention sort.
+// (State history — stateSince/previousState — now lives in the db's thread_details
+// ledger, not on the in-memory ThreadStatus; see src/gateway/threads-db.ts.)
 
 import assert from "node:assert";
 import {
@@ -29,26 +31,21 @@ assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60, w
 assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS, working: false }), "idle", "message-quiet → idle (file mtime noise must not keep threads alive)");
 assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS, working: true }), "working", "a long-running turn outranks message-quiet idle");
 
-// --- reconcile: first poll stamps firstSeen + stateSince to now ---
+// --- reconcile: first poll stamps firstSeen to now ---
 const T0 = "2026-06-09T10:06:00.000Z";
 const snap0 = reconcile(null, [row({ id: "a", lastRole: "user" })], T0);
 assert.equal(snap0.threads[0].state, "working");
 assert.equal(snap0.threads[0].firstSeen, T0, "firstSeen = now on first sight");
-assert.equal(snap0.threads[0].stateSince, T0, "stateSince = now on first sight");
-assert.equal(snap0.threads[0].previousState, undefined);
 
-// --- reconcile: unchanged state keeps stateSince; firstSeen persists ---
+// --- reconcile: firstSeen persists across polls ---
 const T1 = "2026-06-09T10:07:00.000Z";
 const snap1 = reconcile(snap0, [row({ id: "a", lastRole: "user" })], T1);
-assert.equal(snap1.threads[0].stateSince, T0, "stateSince unchanged while state holds");
 assert.equal(snap1.threads[0].firstSeen, T0, "firstSeen persists");
 
-// --- reconcile: a real transition resets stateSince + records previousState ---
+// --- reconcile: a real transition flips state ---
 const T2 = "2026-06-09T10:08:00.000Z";
 const snap2 = reconcile(snap1, [row({ id: "a", lastRole: "assistant" })], T2);
 assert.equal(snap2.threads[0].state, "needs-you", "user→assistant flips working→needs-you");
-assert.equal(snap2.threads[0].stateSince, T2, "stateSince resets on transition");
-assert.equal(snap2.threads[0].previousState, "working", "previousState recorded");
 
 // --- becameNeedsYou: the working→needs-you transition is the only refresh trigger ---
 assert.deepEqual(becameNeedsYou(diffSnapshots(snap1, snap2)).map((t) => t.id), ["a"], "working→needs-you fires");
@@ -65,7 +62,7 @@ assert.deepEqual(diffSnapshots(withB, gone).resolved.map((t) => t.id), ["a"], "a
 // --- manual done persists until a newer message arrives ---
 const markedDone: StatusSnapshot = {
   polledAt: snap2.polledAt,
-  threads: [{ ...snap2.threads[0], state: "done", stateSince: "2026-06-09T10:09:00.000Z", previousState: "needs-you" }],
+  threads: [{ ...snap2.threads[0], state: "done" }],
 };
 const stillDone = reconcile(markedDone, [row({ id: "a", lastRole: "assistant", lastMessageAt: snap2.threads[0].lastMessageAt })], "2026-06-09T10:10:00.000Z");
 assert.equal(stillDone.threads[0].state, "done", "done survives polls with no newer message");
