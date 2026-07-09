@@ -29,7 +29,7 @@ the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
 
 ## Standards
 
-- **Prior art first** — canonical rule and pattern sources: [AGENTS.md](AGENTS.md),
+- **Don't reinvent** — canonical rule and pattern sources: [AGENTS.md](AGENTS.md),
   [docs/inspiration.md](docs/inspiration.md).
 - **Dependencies.** pi (`@earendil-works/pi-*`) is consumed as npm deps, pinned exact while
   pre-1.0. The widget builds on system frameworks only.

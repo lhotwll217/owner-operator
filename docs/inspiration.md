@@ -1,7 +1,7 @@
 # Inspiration
 
-Borrow battle-tested, maintained patterns. Check here for prior art before designing
-anything new; hunt beyond this list when it comes up short; cite the borrow in the issue/PR.
+Borrow battle-tested, maintained patterns. Check here before designing anything new; hunt
+beyond this list when it comes up short; cite the borrow in the issue/PR.
 
 ## Sources
 
@@ -30,3 +30,7 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `@earendil-works/pi-coding-agent` `0.78.0` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
 | `@earendil-works/pi-ai` `0.78.0` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) `0.4.1` (extension) | `.pi/settings.json` `packages` — session-level scheduling ([architecture](architecture.md#schedules--triggers)) |
+
+For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
+npm/GitHub before building local behavior; cite the adopted package or rejection reason in
+the issue/PR.
