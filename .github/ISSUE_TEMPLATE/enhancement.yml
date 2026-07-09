@@ -18,9 +18,20 @@ body:
     validations:
       required: true
   - type: textarea
+    id: examples
+    attributes:
+      label: Code examples — chain of custody
+      description: >-
+        Code you borrowed, cited to exact lines at a commit SHA (…/blob/<SHA>/path#L10-L40) —
+        not a repo or branch. Find examples with the gh-search skill; see docs/inspiration.md.
+      placeholder: |
+        - <what you kept>: <source> — https://github.com/owner/repo/blob/<sha>/path/to/file.ts#L51-L65
+    validations:
+      required: false
+  - type: textarea
     id: notes
     attributes:
       label: Notes / out of scope
-      description: Constraints, guardrails, prior art to borrow (docs/inspiration.md), related issues.
+      description: Constraints, guardrails, ordering, related issues.
     validations:
       required: false
