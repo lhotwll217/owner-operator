@@ -4,7 +4,7 @@
 
 import assert from "node:assert";
 import { toSessionStateThreads, groupSessionStateByRepo, numberSessionStateRows, displayTitle, type ThreadDetails } from "./session-state";
-import type { StatusSnapshot, ThreadStatus } from "./status";
+import type { ThreadStatus } from "./status";
 
 const NOW = "2026-06-09T12:00:00.000Z";
 
@@ -14,21 +14,18 @@ const st = (id: string, repo: string, state: ThreadStatus["state"], topic: strin
 });
 
 // Poll snapshot drives membership — including an old/idle thread that must NOT be filtered out.
-const snap: StatusSnapshot = {
-  polledAt: NOW,
-  threads: [
+const threads: ThreadStatus[] = [
     st("n", "billing", "needs-you", "raw 422 topic"),
     st("o", "owner-operator", "working", "raw session topic"),
     st("old", "billing", "idle", "raw roadmap topic", "2026-06-01T00:00:00.000Z"),
     st("d", "billing", "done", "raw done topic"),
-  ],
-};
+];
 // Model details enrich only some (by id); un-enriched threads still appear with their raw topic.
 const details = new Map<string, ThreadDetails>([
   ["n", { topic: "422 contract mismatch", nextSteps: "Paste the drafted reply", priority: 5 }],
 ]);
 
-const rows = toSessionStateThreads(snap, details);
+const rows = toSessionStateThreads(threads, details);
 
 // --- the session-state projection includes the snapshot; done rows are inactive and unnumbered later ---
 assert.equal(rows.length, 4, "every polled thread appears in the projection");
@@ -47,7 +44,7 @@ assert.equal(o.priority, undefined, "un-enriched → no priority badge");
 
 // --- an owner rename outranks both the generated title and the raw topic ---
 const renamed = toSessionStateThreads(
-  { polledAt: NOW, threads: [{ ...st("r", "billing", "idle", "raw topic"), ownerTitle: "Owner's name" }] },
+  [{ ...st("r", "billing", "idle", "raw topic"), ownerTitle: "Owner's name" }],
   new Map([["r", { topic: "Model title" }]]),
 )[0];
 assert.equal(displayTitle(renamed), "Owner's name", "owner rename wins over the generated title");

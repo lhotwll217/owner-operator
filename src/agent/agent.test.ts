@@ -9,12 +9,12 @@ import {
 // through the session tools: general search/list tools are out (search_sessions and
 // query_database cover them), so no-raw-transcript-reads is structural, not instructed.
 for (const forbidden of ["bash", "edit", "write", "grep", "find", "ls"]) {
-  assert.ok(!ownerOperatorTools.includes(forbidden), `owner tools must NOT include ${forbidden}`);
+  assert.ok(!ownerOperatorTools.some((tool) => tool === forbidden), `owner tools must NOT include ${forbidden}`);
 }
 
 // The tools it needs are present.
 for (const t of ["read", "get_current_session_state", "mark_thread_done", "query_database", "search_sessions", "schedule_prompt"]) {
-  assert.ok(ownerOperatorTools.includes(t), `owner tools must include ${t}`);
+  assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 
 // Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).

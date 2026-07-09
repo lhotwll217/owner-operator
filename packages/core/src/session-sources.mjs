@@ -1,4 +1,4 @@
-// Owner Operator — where local agent sessions live. The scan and the poller both need the
+// Owner Operator — where local agent sessions live. The scan and session monitor both need the
 // same list of (source, root) dirs; this is the single source of truth so they can't drift.
 //
 // Built-in defaults cover the tools we parse. An owner whose sessions live elsewhere (a
@@ -52,7 +52,7 @@ const expand = (p) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
 /**
  * The (source, root) dirs to scan/watch: built-in defaults minus `disable`, plus `add`.
  * Missing or invalid config → defaults only (never throws). ooHome defaults to
- * $OO_HOME or ~/.owner-operator so callers that don't track it (the poller) can omit it.
+ * $OO_HOME or ~/.owner-operator so callers that don't track it (the monitor) can omit it.
  */
 export function loadSessionSources(ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator")) {
   let cfg = {};

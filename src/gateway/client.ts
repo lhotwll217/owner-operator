@@ -1,180 +1,118 @@
-// Owner Operator — daemon client + the Backend seam surfaces program against.
-//
-// resolveBackend() is how a surface gets at state without caring who owns it:
-//   • daemon running (discovered via daemon.json + /health) → thin HTTP/SSE client; the
-//     daemon is the ONLY writer and pushes snapshots, so the surface runs no poller.
-//   • no daemon → the store seam directly (embedded mode); the caller runs its own
-//     poller, and the store's write-boundary done-hold keeps that mode safe too.
-// OO_DAEMON=0 forces embedded mode (escape hatch).
-
-import { spawn } from "node:child_process";
-import { mkdirSync, openSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { DaemonEvent, DaemonInfo, StatusSnapshot, ThreadDetails } from "@owner-operator/core";
+import { readFileSync } from "node:fs";
 import {
-  DAEMON_FILE,
-  STORE_DIR,
-  loadSnapshot,
-  loadDetails,
-  loadSessionState,
-  markThreadsDone,
-  saveDetails,
+  type DaemonHealth,
+  type DaemonInfo,
+  type DaemonReady,
+  type DatabaseQueryRequest,
+  type DatabaseQueryResponse,
+  type GatewayApi,
+  type GatewayEvent,
   type MarkThreadsDoneResult,
-} from "./store";
-import type { SessionStateRow } from "./threads-db";
+  type ScheduleCreateInput,
+  type ScheduleDefinition,
+  type ScheduleRun,
+  type SessionStateRow,
+} from "@owner-operator/core";
+import { daemonInfoPath } from "../shared/paths";
 
-import { repoRoot } from "./repo-root";
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** What a surface needs from state, daemon- or store-backed. All ops async to keep one shape. */
-export interface Backend {
-  kind: "daemon" | "store";
-  loadSnapshot(): Promise<StatusSnapshot | null>;
-  loadDetails(): Promise<Map<string, ThreadDetails>>;
-  loadSessionState(): Promise<SessionStateRow[]>;
-  markThreadsDone(ids: readonly string[]): Promise<MarkThreadsDoneResult>;
-  saveDetails(details: ReadonlyMap<string, ThreadDetails>): Promise<void>;
-  /** Force a reconcile pass now. Store mode: no-op — the caller owns its poller. */
-  forcePoll(): Promise<void>;
-  /** Daemon push (SSE, auto-reconnect). Absent on the store backend. */
-  subscribe?(fn: (e: DaemonEvent) => void): () => void;
-  close(): void;
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-/** Probe the discovery file + /health. Null = no live daemon (stale file included). */
-export async function connectDaemon(): Promise<Backend | null> {
+/** Connect only to a ready daemon whose discovery file and health response agree. */
+export async function connectGateway(): Promise<GatewayApi | null> {
   let info: DaemonInfo;
-  try {
-    info = JSON.parse(readFileSync(DAEMON_FILE, "utf8")) as DaemonInfo;
-  } catch {
-    return null;
-  }
+  try { info = JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
   const base = `http://127.0.0.1:${info.port}`;
+
+  const json = async <T>(path: string, init?: RequestInit): Promise<T> => {
+    const response = await fetch(base + path, { ...init, signal: init?.signal ?? AbortSignal.timeout(2_000) });
+    if (!response.ok) throw new Error(`gateway ${path}: ${response.status}`);
+    return await response.json() as T;
+  };
   try {
-    const health = await fetch(`${base}/health`, { signal: AbortSignal.timeout(500) });
-    if (!health.ok) return null;
+    const health = await json<DaemonHealth>("/health");
+    const ready = await json<DaemonReady>("/ready");
+    if (health.pid !== info.pid || health.fingerprint !== info.fingerprint || !ready.ready) return null;
   } catch {
     return null;
   }
 
-  const json = async (path: string, init?: RequestInit): Promise<any> => {
-    const res = await fetch(base + path, init);
-    if (!res.ok) throw new Error(`daemon ${path}: ${res.status}`);
-    return res.json();
-  };
-  const post = (path: string, body: unknown): Promise<any> =>
-    json(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const post = <T>(path: string, body: unknown): Promise<T> => json<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const subscriptions = new Set<() => void>();
 
-  const stops = new Set<() => void>();
   return {
-    kind: "daemon",
-    async loadSnapshot() {
-      const snap = (await json("/snapshot")) as StatusSnapshot;
-      return snap.polledAt ? snap : null;
+    health: () => json<DaemonHealth>("/health"),
+    ready: () => json<DaemonReady>("/ready"),
+    sessionState: () => json<SessionStateRow[]>("/session-state"),
+    markDone: (ids) => post<MarkThreadsDoneResult>("/done", { ids }),
+    renameThread: async (id, title) => { await post("/rename", { id, title }); },
+    poll: async () => { await post("/poll", {}); },
+    listSchedules: () => json<ScheduleDefinition[]>("/schedules"),
+    createSchedule: (input: ScheduleCreateInput) => post<ScheduleDefinition>("/schedules", input),
+    updateSchedule: (id: string, input: ScheduleCreateInput) => json<ScheduleDefinition>(
+      `/schedules/${encodeURIComponent(id)}`,
+      { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
+    ),
+    deleteSchedule: async (id: string) => {
+      await json(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
-    async loadDetails() {
-      return new Map(Object.entries((await json("/details")) as Record<string, ThreadDetails>));
-    },
-    async loadSessionState() {
-      try {
-        return (await json("/session-state")) as SessionStateRow[];
-      } catch (e: any) {
-        if (String(e?.message ?? e).includes("daemon /session-state: 404")) return loadSessionState();
-        throw e;
-      }
-    },
-    async markThreadsDone(ids) {
-      return (await post("/done", { ids })) as MarkThreadsDoneResult;
-    },
-    async saveDetails(details) {
-      await post("/details", { entries: Object.fromEntries(details) });
-    },
-    async forcePoll() {
-      await post("/poll", {});
-    },
-    subscribe(fn) {
-      // One SSE connection per subscription; parse `data:` frames; reconnect until stopped.
+    runSchedule: (id: string) => post<ScheduleRun>(`/schedules/${encodeURIComponent(id)}/run`, {}),
+    queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>("/query-database", request),
+    subscribe(listener: (event: GatewayEvent) => void) {
       let stopped = false;
-      const ctrl = new AbortController();
+      const controller = new AbortController();
       void (async () => {
         while (!stopped) {
           try {
-            const res = await fetch(`${base}/events`, { signal: ctrl.signal });
-            const reader = res.body!.getReader();
-            const dec = new TextDecoder();
-            let buf = "";
+            const response = await fetch(`${base}/events`, { signal: controller.signal });
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error("gateway event stream has no body");
+            const decoder = new TextDecoder();
+            let buffer = "";
             for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buf += dec.decode(value, { stream: true });
-              let i: number;
-              while ((i = buf.indexOf("\n\n")) !== -1) {
-                const frame = buf.slice(0, i);
-                buf = buf.slice(i + 2);
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              buffer += decoder.decode(chunk.value, { stream: true });
+              let boundary = buffer.indexOf("\n\n");
+              while (boundary !== -1) {
+                const frame = buffer.slice(0, boundary);
+                buffer = buffer.slice(boundary + 2);
                 for (const line of frame.split("\n")) {
                   if (!line.startsWith("data: ")) continue;
-                  try { fn(JSON.parse(line.slice(6)) as DaemonEvent); } catch { /* skip bad frame */ }
+                  try { listener(JSON.parse(line.slice(6)) as GatewayEvent); } catch { /* malformed frame */ }
                 }
+                boundary = buffer.indexOf("\n\n");
               }
             }
-          } catch { /* connection dropped */ }
+          } catch {
+            // The daemon may be replacing itself; reconnect until this client closes.
+          }
           if (!stopped) await sleep(1_000);
         }
       })();
-      const stop = (): void => { stopped = true; ctrl.abort(); stops.delete(stop); };
-      stops.add(stop);
+      const stop = (): void => { stopped = true; controller.abort(); subscriptions.delete(stop); };
+      subscriptions.add(stop);
       return stop;
     },
     close() {
-      for (const stop of stops) stop(); // Set iteration tolerates stop() deleting itself
+      for (const stop of subscriptions) stop();
     },
   };
 }
 
-// Detached spawn of `oo daemon` via the launcher (works from the repo and an npm-linked
-// install); output lands in ~/.owner-operator/daemon.log. The daemon outlives this process.
-function spawnDaemon(): void {
-  mkdirSync(STORE_DIR, { recursive: true });
-  const log = openSync(join(STORE_DIR, "daemon.log"), "a");
-  const child = spawn(join(repoRoot, "oo"), ["daemon"], {
-    detached: true,
-    stdio: ["ignore", log, log],
+let memo: Promise<GatewayApi> | null = null;
+
+/** Production surfaces require the daemon; there is deliberately no embedded-store mode. */
+export function resolveBackend(): Promise<GatewayApi> {
+  memo ??= connectGateway().then((gateway) => {
+    if (!gateway) throw new Error("Owner Operator daemon is not ready");
+    return gateway;
+  }).catch((error) => {
+    memo = null;
+    throw error;
   });
-  child.unref();
-}
-
-function storeBackend(): Backend {
-  return {
-    kind: "store",
-    loadSnapshot: async () => loadSnapshot(),
-    loadDetails: async () => loadDetails(),
-    loadSessionState: async () => loadSessionState(),
-    markThreadsDone: async (ids) => markThreadsDone(ids),
-    saveDetails: async (details) => { saveDetails(details); },
-    forcePoll: async () => { /* embedded surfaces own their poller */ },
-    close: () => { /* nothing held */ },
-  };
-}
-
-let memo: Promise<Backend> | null = null;
-
-/**
- * The one entry point surfaces use. Memoized per process — the first caller may spawn the
- * daemon; agent tools reuse whatever it found.
- */
-export function resolveBackend(opts: { spawnDaemon?: boolean } = {}): Promise<Backend> {
-  memo ??= (async (): Promise<Backend> => {
-    if (process.env.OO_DAEMON === "0") return storeBackend();
-    let daemon = await connectDaemon();
-    if (!daemon && opts.spawnDaemon) {
-      try { spawnDaemon(); } catch { /* launcher missing → embedded */ }
-      for (let i = 0; !daemon && i < 8; i++) {
-        await sleep(250);
-        daemon = await connectDaemon();
-      }
-    }
-    return daemon ?? storeBackend();
-  })();
   return memo;
 }

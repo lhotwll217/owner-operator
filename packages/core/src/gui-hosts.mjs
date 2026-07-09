@@ -33,7 +33,7 @@ const BUILTIN_GUI_HOSTS = [
  * The interactive GUI hosts: built-ins plus owner `add`s from <ooHome>/gui_hosts.json. Each
  * `add` needs a `ui` name and at least one matcher (`cwdMarker` or `source`); anything else is
  * dead config and dropped. Missing/invalid file → built-ins only (never throws). ooHome
- * defaults to $OO_HOME or ~/.owner-operator so callers that don't track it (the poller) omit it.
+ * defaults to $OO_HOME or ~/.owner-operator so callers that don't track it (the monitor) omit it.
  */
 export function loadGuiHosts(ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator")) {
   let cfg = {};

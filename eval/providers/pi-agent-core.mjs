@@ -107,7 +107,7 @@ function runOo(prompt, traceFile, timeoutMs, extraEnv) {
   return new Promise((resolve) => {
     const child = spawn(path.join(repoRoot, 'oo'), [prompt], {
       cwd: repoRoot,
-      env: { ...process.env, ...extraEnv, OO_HOME, OO_TRACE: traceFile, OO_DAEMON: '0' },
+      env: { ...process.env, ...extraEnv, OO_HOME, OO_TRACE: traceFile },
     });
     let stdout = '';
     let stderr = '';

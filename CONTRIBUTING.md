@@ -33,7 +33,7 @@ the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
   [docs/inspiration.md](docs/inspiration.md).
 - **Dependencies.** pi (`@earendil-works/pi-*`) is consumed as npm deps, pinned exact while
   pre-1.0. The widget builds on system frameworks only.
-- **Vendored code** (`.agents/skills/*/vendor/`) is upstream-owned: re-sync per the
+- **Vendored code** (`vendor/session-grep/`) is upstream-owned: re-sync per the
   directory's `UPSTREAM.md` and update the pin there. Lint skips vendor dirs.
 - **Shared contracts** live in `packages/core`; component boundaries live in
   [docs/architecture.md](docs/architecture.md).

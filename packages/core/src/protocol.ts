@@ -1,65 +1,91 @@
-// Owner Operator — the daemon wire protocol. UI-INDEPENDENT: every surface (widget,
-// terminal, web) speaks these shapes to the ONE process that owns state (the
-// gateway daemon in src/gateway — OpenClaw's gateway pattern).
-//
-// Transport: HTTP JSON on 127.0.0.1 + an SSE event stream — both zero-dependency on the
-// node side and native in browsers (fetch/EventSource), so the web surface needs no SDK.
-//
-// Endpoints (strict command set, per docs/architecture.md):
-//   GET  /health                    → { ok, pid, startedAt, polledAt }
-//   GET  /session-state             → SessionStateRow[]
-//   GET  /snapshot                  → StatusSnapshot
-//   GET  /details                   → Record<threadId, ThreadDetails>
-//   GET  /events                    → SSE stream of DaemonEvent
-//   POST /poll                      → StatusSnapshot           (force a reconcile pass)
-//   POST /done      { ids }         → MarkThreadsDone result
-//   POST /rename    { id, title }   → { ok }                   (owner title; "" clears → generated titles show again)
-//   POST /details   { entries }     → { ok }                   (append model details to the ledger)
-//   GET  /schedules                 → Schedule[]
-//   PUT  /schedules/:name           → Schedule                 (upsert by name)
-//   DELETE /schedules/:name         → { ok }
-//   POST /schedules/:name/run       → { ok, detail? }          (run now, regardless of when)
+import type { GatewayEvent } from "./events";
+import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
+import type { ThreadState } from "./status";
 
-import type { StatusDiff, StatusSnapshot } from "./status";
-import type { ThreadDetails } from "./session-state";
-
-/** Default localhost port; override with OO_PORT. Clients discover the real one via daemon.json. */
 export const DEFAULT_DAEMON_PORT = 47711;
 
-/** Written next to the store (daemon.json) so clients find the live daemon; removed on exit. */
 export interface DaemonInfo {
   port: number;
   pid: number;
-  startedAt: string; // ISO
+  startedAt: string;
+  fingerprint: string;
 }
 
-// ---- schedules & triggers ------------------------------------------------------------
-// A schedule is WHEN × ACTION, upserted by name. Time-based schedules run from the
-// daemon's tick loop; event schedules fire on state edges from the poll.
-
-export type ScheduleWhen =
-  | { type: "interval"; ms: number }       // every N ms (min 5s)
-  | { type: "daily"; at: string }          // local "HH:MM" — e.g. the 08:00 morning brief
-  | { type: "event"; event: "needs-you" }; // a thread newly needs the owner
-
-export type ScheduleAction =
-  | { type: "poll" }                       // force a reconcile pass
-  // Run a user command (/bin/sh). Event runs get OO_NEEDS_YOU=<comma-separated ids> in the
-  // env — enough for desktop notifications or piping a brief: `oo --session-state`.
-  | { type: "shell"; command: string };
-
-export interface Schedule {
-  name: string;                            // the id — upsert key
-  when: ScheduleWhen;
-  action: ScheduleAction;
-  enabled: boolean;
-  lastRunAt?: string;                      // ISO
-  lastResult?: { ok: boolean; detail?: string; at: string };
+export interface DaemonHealth extends DaemonInfo {
+  ok: true;
+  stale: boolean;
 }
 
-// ---- push events (the /events SSE stream) ---------------------------------------------
+export interface DaemonReady {
+  ready: boolean;
+  modules: {
+    state: boolean;
+    sessionMonitor: boolean;
+    scheduler: boolean;
+    gateway: boolean;
+  };
+}
 
-export type DaemonEvent =
-  | { type: "snapshot"; snapshot: StatusSnapshot; diff: StatusDiff }
-  | { type: "details"; entries: Record<string, ThreadDetails> }
-  | { type: "schedule_run"; name: string; ok: boolean; detail?: string };
+/** Stable client projection. SQLite-specific fields stay behind the state seam. */
+export interface SessionStateRow {
+  id: string;
+  source: string;
+  repo: string;
+  app: string;
+  topic: string;
+  generatedTopic: string;
+  ownerTitle: string | null;
+  summary: string | null;
+  nextSteps: string | null;
+  priority: number | null;
+  state: ThreadState;
+  stateReason: string | null;
+  stateSince: string;
+  lastActive: string;
+  lastActiveAt: string | null;
+  createdAt: string | null;
+  lastMessageAt: string | null;
+  diffAdded: number | null;
+  diffDeleted: number | null;
+}
+
+export interface EnrichmentCandidate extends SessionStateRow {
+  enrichedThroughMessageAt: string | null;
+}
+
+export interface MarkThreadsDoneResult {
+  marked: SessionStateRow[];
+  missingIds: string[];
+}
+
+export enum DatabaseQueryAction {
+  ListTables = "list_tables",
+  DescribeTable = "describe_table",
+  Query = "query",
+}
+
+export type DatabaseQueryRequest =
+  | { action: DatabaseQueryAction.ListTables }
+  | { action: DatabaseQueryAction.DescribeTable; table: string }
+  | { action: DatabaseQueryAction.Query; sql: string };
+
+export type DatabaseQueryResponse = unknown;
+
+export interface GatewayApi {
+  health(): Promise<DaemonHealth>;
+  ready(): Promise<DaemonReady>;
+  sessionState(): Promise<SessionStateRow[]>;
+  markDone(ids: readonly string[]): Promise<MarkThreadsDoneResult>;
+  renameThread(id: string, title: string): Promise<void>;
+  poll(): Promise<void>;
+  listSchedules(): Promise<ScheduleDefinition[]>;
+  createSchedule(input: ScheduleCreateInput): Promise<ScheduleDefinition>;
+  updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;
+  deleteSchedule(id: string): Promise<void>;
+  runSchedule(id: string): Promise<ScheduleRun>;
+  queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
+  subscribe(listener: (event: GatewayEvent) => void): () => void;
+  close(): void;
+}
+
+export type { GatewayEvent } from "./events";

@@ -16,8 +16,8 @@ if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status !== 0) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const GREP = join(here, "..", ".agents/skills/sessions-grep/sessions-grep.mjs");
-const VENDOR_GREP = join(here, "..", ".agents/skills/sessions-grep/vendor/session-grep.mjs");
+const GREP = join(here, "..", "src/session-search/sessions-grep.mjs");
+const VENDOR_GREP = join(here, "..", "vendor/session-grep/session-grep.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "oo-grep-home-"));
 const ooHome = mkdtempSync(join(tmpdir(), "oo-grep-oohome-"));

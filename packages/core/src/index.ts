@@ -9,7 +9,7 @@
 export { loadBlacklist, isBlacklisted, pathSlugs } from "./blacklist.mjs";
 export type { Blacklist } from "./blacklist.mjs";
 
-// Where local agent sessions live — the (source, root) dirs the scan and poller share, with
+// Where local agent sessions live — the (source, root) dirs the scan and monitor share, with
 // owner overrides from session_sources.json. One source of truth so they can't drift.
 export { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
 export type { SessionSource, SessionRoot } from "./session-sources.mjs";
@@ -31,6 +31,10 @@ export * from "./status";
 // Session-state data model: digest metadata + live status (+ cached model details), with the
 // default-visible filter and grouping all surfaces share. See session-state.ts.
 export * from "./session-state";
+
+// Typed schedules, payloads, tool ids, and durable run outcomes.
+export * from "./scheduling";
+export * from "./events";
 
 // The daemon wire protocol: endpoints, schedules/triggers, and push events — the contract
 // every surface speaks to the one state-owning process. See protocol.ts.

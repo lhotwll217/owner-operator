@@ -1,6 +1,5 @@
-# gateway
+# Gateway
 
-State-owning local gateway for Owner Operator. It owns the poll loop, durable store, HTTP
-API, SSE stream, and schedules. Runtime surfaces are clients.
-
-See [../../docs/architecture.md](../../docs/architecture.md#layout--the-dependency-rule).
+Loopback HTTP/SSE transport and its client SDK. The server translates requests into injected
+state/monitor/scheduler calls. It owns no SQLite connection, model call, scan, timer, or child
+process. See [architecture](../../docs/architecture.md).

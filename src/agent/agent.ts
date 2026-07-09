@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   createAgentSession,
@@ -18,9 +18,19 @@ import {
   ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
+import {
+  AgentToolId,
+  DatabaseQueryAction,
+  ScheduleKind,
+  ScheduledPayloadKind,
+  type ScheduleTrigger,
+  type ScheduleExecutionResult,
+  type ScheduleTriggerContext,
+  type ScheduledPromptPayload,
+  type ScheduleDefinition,
+} from "@owner-operator/core";
 import { resolveBackend } from "../gateway/client";
-import { describeTable, listTables, runQuery } from "../gateway/query-db";
-import { getCurrentSessionStateRows, type CurrentSessionStateRow } from "../gateway/session-state";
+import { getCurrentSessionStateRows, type CurrentSessionStateRow } from "../state/session-state";
 import { repoRoot } from "../shared/repo-root";
 import { blacklistAwareFileToolsExtension } from "./privacy-tools";
 import { withOoRenderers } from "../shared/oo-presentation";
@@ -96,7 +106,7 @@ export const markThreadDoneTool = defineTool({
         matches: r.matches.map((t) => ({ index: t.index, id: t.id, repo: t.repo, topic: t.topic })),
       }));
 
-    const result = await (await resolveBackend()).markThreadsDone(ids);
+    const result = await (await resolveBackend()).markDone(ids);
 
     const marked = result.marked.map((t) => rows.find((row) => row.id === t.id) ?? {
       index: null,
@@ -122,6 +132,8 @@ export interface OwnerOperatorSession {
 export interface OwnerOperatorSessionOptions {
   ephemeral?: boolean;
   sessionManager?: SessionManager;
+  cwd?: string;
+  toolsAllow?: readonly AgentToolId[];
 }
 
 // The opinionated agent config, shared by every frontend so they can't drift: one prompt,
@@ -132,7 +144,7 @@ export const ownerOperatorPrompt = (): string =>
 // Every owner chat is saved (and labeled with its surface) like any other oo thread;
 // `ephemeral` is the opt-out for tests that shouldn't leave files in OO_HOME.
 export async function createOwnerOperatorSession(
-  surface: "chat" | "interactive" = "chat",
+  surface: "chat" | "interactive" | "schedule" = "chat",
   opts: OwnerOperatorSessionOptions = {},
 ): Promise<OwnerOperatorSession> {
   // Eval-only: OO_EVAL_BASELINE_PROMPT swaps the Operator for a naive session-search agent
@@ -141,47 +153,45 @@ export async function createOwnerOperatorSession(
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
   const customTools = baselinePrompt ? [searchSessionsTool] : ownerOperatorCustomTools;
-  const tools = baselinePrompt ? ["read", "search_sessions"] : ownerOperatorTools;
+  const tools = baselinePrompt
+    ? ["read", "search_sessions"]
+    : opts.toolsAllow ? [...opts.toolsAllow] : [...ownerOperatorTools];
+  const cwd = opts.cwd ?? repoRoot;
 
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json
 
   const loader = new DefaultResourceLoader({
-    cwd: repoRoot,
+    cwd,
     agentDir: getAgentDir(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
-    // The repo's .agents/skills are script docs for headless callers and the poller; the
-    // Operator's interface to those scripts is its typed tools, so none inject here.
+    // Runtime transcript access is exposed through typed tools, so no skills inject here.
     skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
     extensionFactories: [blacklistAwareFileToolsExtension],
   });
   await loader.reload();
 
   const { session } = await createAgentSession({
-    cwd: repoRoot,
+    cwd,
     resourceLoader: loader,
     settingsManager,
-    sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(repoRoot) : createOoSession(ooProvenance(surface))),
+    sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(cwd) : createOoSession(ooProvenance(surface))),
     authStorage,
     modelRegistry,
     customTools,
     tools,
   });
 
-  // Extensions initialize their state on `session_start`, which pi's own modes emit via
-  // bindExtensions — a raw createAgentSession never does. Without this, package tools
-  // (schedule_prompt) execute against uninitialized state and crash. Ephemeral sessions
-  // stay unbound so an ephemeral/test session never runs a second scheduler against the same
-  // job store. Pair with shutdownSessionExtensions before dispose.
+  // A raw createAgentSession does not emit the extension lifecycle. Bind non-test sessions
+  // so the privacy-aware file-tool overrides are active, then pair with shutdown before dispose.
   if (!opts.ephemeral) await session.bindExtensions({});
 
   return { session, modelLabel: readModelLabel() };
 }
 
-/** Extension teardown (session_shutdown: cron auto-cleanup, timer stops) — pi's modes emit
- * this on quit; surfaces holding a raw session must emit it themselves before dispose(). */
+/** Pi modes emit extension teardown on quit; raw-session surfaces must do it before dispose. */
 export async function shutdownSessionExtensions(session: OwnerOperatorSession["session"]): Promise<void> {
   try {
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
@@ -206,7 +216,9 @@ function readModelLabel(): string {
 // privacy blacklist) instead of exposing a general shell. Fixed script path + typed args passed
 // through execFile (no shell) = no arbitrary commands.
 const execFileAsync = promisify(execFile);
-const skillScript = (dir: string, file: string): string => join(repoRoot, ".agents", "skills", dir, file);
+const scanScript = (): string => join(repoRoot, "src", "session-monitor", "scan-active-transcripts.mjs");
+const searchScript = (): string => join(repoRoot, "src", "session-search", "sessions-grep.mjs");
+const vendorSearchScript = (): string => join(repoRoot, "vendor", "session-grep", "session-grep.mjs");
 
 export const searchSessionsTool = defineTool({
   name: "search_sessions",
@@ -234,7 +246,7 @@ export const searchSessionsTool = defineTool({
 
     if (p.sessionId) {
       const args = ["--thread", p.sessionId, "--sample", String(p.sample ?? 4), "--since", p.since || "7d"];
-      const { stdout } = await execFileAsync(process.execPath, [skillScript("scan-active-transcripts", "scan-active-transcripts.mjs"), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
+      const { stdout } = await execFileAsync(process.execPath, [scanScript(), ...args], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 });
       return { content: [{ type: "text" as const, text: stdout.trim() || "(no session matched that id in the window)" }], details: undefined };
     }
 
@@ -243,7 +255,7 @@ export const searchSessionsTool = defineTool({
     if (p.since) args.push("--since", p.since);
     if (p.targetRoot) args.push("--target-root", p.targetRoot);
     args.push("--limit", String(p.limit ?? 20), "--before", String(p.before ?? 1), "--after", String(p.after ?? 1));
-    let script = skillScript("sessions-grep", "sessions-grep.mjs");
+    let script = searchScript();
     if (p.ownerOperator) {
       const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
       const sourceFile = join(ooHome, "session-grep-sources.json");
@@ -252,7 +264,7 @@ export const searchSessionsTool = defineTool({
         mkdirSync(ooHome, { recursive: true });
         writeFileSync(sourceFile, JSON.stringify([{ type: "pi", root: ownerOperatorRoot }], null, 2) + "\n");
       }
-      script = skillScript("sessions-grep", "vendor/session-grep.mjs");
+      script = vendorSearchScript();
       args.push("--sources-file", sourceFile, "--target-root", ownerOperatorRoot);
     } else if (p.targetType) {
       args.push("--target-type", p.targetType);
@@ -282,13 +294,79 @@ export const queryDatabaseTool = defineTool({
       content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
       details: undefined,
     });
-    if (p.action === "list_tables") return asText(listTables());
+    const gateway = await resolveBackend();
+    if (p.action === "list_tables") {
+      return asText(await gateway.queryDatabase({ action: DatabaseQueryAction.ListTables }));
+    }
     if (p.action === "describe_table") {
       if (!p.table) throw new Error("describe_table needs a table name");
-      return asText(describeTable(p.table));
+      return asText(await gateway.queryDatabase({ action: DatabaseQueryAction.DescribeTable, table: p.table }));
     }
     if (!p.sql) throw new Error("query needs a sql SELECT statement");
-    return asText(runQuery(p.sql));
+    return asText(await gateway.queryDatabase({ action: DatabaseQueryAction.Query, sql: p.sql }));
+  },
+});
+
+const AgentToolIdSchema = Type.Union(Object.values(AgentToolId).map((tool) => Type.Literal(tool)));
+const ScheduleTriggerSchema = Type.Union([
+  Type.Object({ kind: Type.Literal(ScheduleKind.At), at: Type.String({ description: "Absolute ISO timestamp." }) }),
+  Type.Object({
+    kind: Type.Literal(ScheduleKind.Every),
+    everyMs: Type.Integer({ minimum: 1_000 }),
+    anchorMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  }),
+  Type.Object({
+    kind: Type.Literal(ScheduleKind.Cron),
+    expression: Type.String(),
+    timeZone: Type.String({ description: "IANA time zone, for example Europe/Helsinki." }),
+  }),
+  Type.Object({ kind: Type.Literal(ScheduleKind.NeedsYou) }),
+]);
+
+export const schedulePromptTool = defineTool({
+  name: "schedule_prompt",
+  label: "Schedule prompt",
+  description:
+    "Create a durable Owner Operator prompt job. Each run uses a fresh isolated session; " +
+    "use query_database on schedules and schedule_runs to inspect status or failures.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Short human-readable job name." }),
+    schedule: ScheduleTriggerSchema,
+    prompt: Type.String({ description: "Prompt executed in each fresh isolated run." }),
+    toolsAllow: Type.Optional(Type.Array(AgentToolIdSchema, {
+      description: "Concrete typed tool ids available to the scheduled agent. No buckets or profiles.",
+    })),
+    cwd: Type.Optional(Type.String({ description: "Absolute working directory. Defaults to the caller's cwd." })),
+    timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 86_400, description: "Default 1800." })),
+  }),
+  async execute(_id, params) {
+    const cwd = params.cwd ? (isAbsolute(params.cwd) ? params.cwd : resolve(params.cwd)) : process.cwd();
+    let trigger: ScheduleTrigger;
+    if (params.schedule.kind === ScheduleKind.Every) {
+      trigger = {
+        kind: ScheduleKind.Every,
+        everyMs: params.schedule.everyMs,
+        anchorMs: params.schedule.anchorMs ?? Date.now(),
+      };
+    } else {
+      trigger = params.schedule as ScheduleTrigger;
+    }
+    const schedule = await (await resolveBackend()).createSchedule({
+      name: params.name,
+      enabled: true,
+      trigger,
+      payload: {
+        kind: ScheduledPayloadKind.Prompt,
+        prompt: params.prompt,
+        ...(params.toolsAllow ? { toolsAllow: params.toolsAllow as AgentToolId[] } : {}),
+      },
+      cwd,
+      timeoutSeconds: params.timeoutSeconds ?? 1_800,
+    });
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(schedule, null, 2) }],
+      details: schedule,
+    };
   },
 });
 
@@ -301,6 +379,7 @@ export const ownerOperatorCustomTools = [
       [...(a.ids ?? []), ...(a.indexes ?? []), ...(a.queries ?? [])].slice(0, 3).join(", "),
   }),
   withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (a) => a.action ?? "" }),
+  withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (a) => a.name ?? "" }),
   withOoRenderers(searchSessionsTool, "search", {
     summarizeCall: (a) => (a.sessionId ? `#${a.sessionId}` : a.query ? `"${a.query}"` : ""),
   }),
@@ -308,23 +387,22 @@ export const ownerOperatorCustomTools = [
 // `read` is a blacklist-aware override registered by blacklistAwareFileToolsExtension —
 // the one general file tool, for owner-directed lookups. Transcript access goes through
 // search_sessions/query_database only (no grep/find/ls), so the no-raw-transcript-reads
-// policy is structural. schedule_prompt comes from pi-schedule-prompt (.pi/settings.json
-// "packages").
-export const ownerOperatorTools = [
-  "read",
-  "get_current_session_state",
-  "mark_thread_done",
-  "query_database",
-  "search_sessions",
-  "schedule_prompt",
+// policy is structural. Scheduling is our typed durable tool, not a second extension timer.
+export const ownerOperatorTools: readonly AgentToolId[] = [
+  AgentToolId.Read,
+  AgentToolId.GetCurrentSessionState,
+  AgentToolId.MarkThreadDone,
+  AgentToolId.QueryDatabase,
+  AgentToolId.SearchSessions,
+  AgentToolId.SchedulePrompt,
 ];
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
 // EVERY oo session persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
-// so the poller never scans oo's chatter as if it were one of the owner's coding sessions.
+// so the session monitor never scans oo's chatter as if it were one of the owner's coding sessions.
 // This module owns that policy: callers build managers through the helpers below, which bake
 // the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
-// manager isn't given one). Same OO_HOME base as the durable store (store.ts). All oo threads
+// manager isn't given one). Same OO_HOME base as the durable state database. All oo threads
 // run with cwd = repoRoot, so continueRecent/list scope to them correctly within one dir.
 //
 // Every invocation stamps an `oo-provenance` custom entry (never sent to the LLM): WHICH
@@ -335,14 +413,20 @@ export const ownerOperatorTools = [
 const ooHome = (): string => process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 export const ooSessionsDir = (): string => join(ooHome(), "sessions");
 
-export type OoSurface = "chat" | "interactive";
+export type OoSurface = "chat" | "interactive" | "schedule";
 export interface OoProvenance {
   surface: OoSurface;
-  origin: "owner" | "agent";
+  origin: "owner" | "agent" | "scheduler";
   callerCwd: string; // where the process was invoked from (the launcher doesn't cd)
   callerRepo: string; // basename of the caller's git repo, or of the cwd outside one
   fromSession?: string; // audit: the coding session that called us, when it says so
   ppid: number; // best-effort process audit (an agent shelling out shows as its shell)
+  schedule?: {
+    jobId: string;
+    runId: string;
+    jobName: string;
+    trigger: string;
+  };
 }
 
 export function ooProvenance(surface: OoSurface, fromSession?: string): OoProvenance {
@@ -392,4 +476,55 @@ export function lastAssistantText(session: OwnerOperatorSession["session"]): str
   if (typeof c === "string") return c;
   if (Array.isArray(c)) return c.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("");
   return m?.text ?? "";
+}
+
+export interface ScheduledPromptRunRequest {
+  payload: ScheduledPromptPayload;
+  cwd: string;
+  schedule: ScheduleDefinition;
+  runId: string;
+  signal: AbortSignal;
+  triggerContext?: ScheduleTriggerContext;
+}
+
+/** Fresh persisted session per scheduled run; never attaches to an active Pi conversation. */
+export async function runScheduledPrompt(request: ScheduledPromptRunRequest): Promise<ScheduleExecutionResult> {
+  const sessionManager = SessionManager.create(request.cwd, ooSessionsDir());
+  const provenance: OoProvenance = {
+    surface: "schedule",
+    origin: "scheduler",
+    callerCwd: request.cwd,
+    callerRepo: basename(request.cwd),
+    ppid: process.ppid,
+    schedule: {
+      jobId: request.schedule.id,
+      runId: request.runId,
+      jobName: request.schedule.name,
+      trigger: request.schedule.trigger.kind,
+    },
+  };
+  stampProvenance(sessionManager, provenance);
+  const { session } = await createOwnerOperatorSession("schedule", {
+    cwd: request.cwd,
+    sessionManager,
+    toolsAllow: request.payload.toolsAllow,
+  });
+  const abort = (): void => { void session.abort(); };
+  request.signal.addEventListener("abort", abort, { once: true });
+  try {
+    const prompt = request.triggerContext === undefined
+      ? request.payload.prompt
+      : `${request.payload.prompt}\n\nTrigger context:\n${JSON.stringify(request.triggerContext, null, 2)}`;
+    await session.prompt(prompt);
+    return {
+      exitCode: 0,
+      stdout: lastAssistantText(session),
+      stderr: "",
+      transcriptId: sessionManager.getSessionId(),
+    };
+  } finally {
+    request.signal.removeEventListener("abort", abort);
+    await shutdownSessionExtensions(session);
+    session.dispose();
+  }
 }

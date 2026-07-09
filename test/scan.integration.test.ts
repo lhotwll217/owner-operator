@@ -1,8 +1,7 @@
 // Integration test of the scan skill — the REAL scan-active-transcripts script against fake
 // session files (Claude + Cursor + PostHog Code + pi + opencode + Antigravity + Grok Build),
-// a real throwaway git repo, and a fake status store. Proves: the canonical-resolver contract
-// at the skill surface (done excluded by default, --include-done audits, drill-in answers,
-// newer message wakes), each source's finder (Cursor slug → cwd reconstruction, PostHog Code
+// and a real throwaway git repo. Proves: the transcript-fact contract at the scanner surface,
+// drill-in answers, each source's finder (Cursor slug → cwd reconstruction, PostHog Code
 // ACP log → thread, opencode info + message/part join, Antigravity brain transcript, pi
 // header + entries, Grok Build best-effort), origin-app detection, launch-mode classification
 // (a Conductor SDK session surfaces; a non-GUI SDK worker stays hidden), and the git ± delta.
@@ -10,13 +9,13 @@
 
 import assert from "node:assert";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCAN = join(here, "..", ".agents/skills/scan-active-transcripts/scan-active-transcripts.mjs");
+const SCAN = join(here, "..", "src/session-monitor/scan-active-transcripts.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "oo-scan-home-"));
 const ooHome = mkdtempSync(join(tmpdir(), "oo-scan-store-"));
@@ -377,7 +376,7 @@ try {
   assert.equal(byId(fresh, workerId), undefined, "non-GUI sdk-ts worker hidden by default");
   assert.ok(byId(run("--all"), workerId), "…but --all still audits the worker");
 
-  // --sample 0 is the poller's metadata-only mode: NO message bodies may leak through
+  // --sample 0 is the monitor's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
   const meta = byId(run("--sample", "0"), sid)!;
   assert.deepEqual(
@@ -386,23 +385,8 @@ try {
     "--sample 0 carries metadata only",
   );
 
-  // Operator marks the claude thread done (status.json is the store the resolver joins).
-  writeFileSync(join(ooHome, "status.json"), JSON.stringify({
-    polledAt: at(5),
-    threads: [{ id: sid, state: "done", lastMessageAt: claude.lastMessageAt }],
-  }));
-
-  const afterDone = run();
-  assert.deepEqual([afterDone.count, byId(afterDone, sid)], [10, undefined], "done thread excluded by default; others unaffected");
-  const audit = run("--include-done");
-  assert.deepEqual([audit.count, byId(audit, sid)?.state], [11, "done"], "--include-done audits it, resolved done");
-  const drill = run("--thread", sid);
-  assert.deepEqual([drill.count, drill.threads[0].state], [1, "done"], "--thread drill-in always answers");
-
-  // A newer message lands → the same scan wakes the thread (no owner action needed).
-  appendFileSync(sessionFile, msg("assistant", "One more thing came up — see the failing CI run.", at(1)));
-  const woken = run();
-  assert.deepEqual([woken.count, byId(woken, sid)?.state], [11, "needs-you"], "newer message wakes a done thread");
+  // Durable owner state is deliberately absent here; the State seam owns done-hold and reopening.
+  assert.equal(byId(run("--thread", sid), sid)?.state, "needs-you", "scanner reports transcript-derived state");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");

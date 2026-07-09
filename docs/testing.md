@@ -1,7 +1,7 @@
 # Testing
 
-Guards the read path: scan session files off disk → resolve thread state → serve the
-widget/gateway state. Model-free and deterministic, so it's tested for real, no model.
+Guards the four public seams: state, session monitor, scheduler, and Gateway/daemon end to end.
+Default tests are model-free and deterministic.
 
 ## Tiers
 
@@ -25,13 +25,15 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | File | Tier | Covers |
 |------|------|--------|
 | `packages/core/src/*.test.ts` | unit | resolve, status, session-state, blacklist, session-sources, gui-hosts, settings |
-| `src/gateway/store.test.ts`, `threads-db.test.ts` | unit | store seams, injected clock |
-| `src/gateway/gateway.boundaries.test.ts` | unit | dependency rule: gateway imports no pi, no agent/CLI |
-| `src/gateway/poller.integration.test.ts` | integration | real poller + store; done-status regression |
-| `src/gateway/poller.scan.integration.test.ts` | integration | real scan path → `ScanRow` mapping |
+| `src/state/state.test.ts`, `event-bus.test.ts` | unit | sole writer, watermarks, post-commit wake-ups |
+| `src/state/query.test.ts` | unit | State-owned read-only progressive SQL surface |
+| `src/scheduler/*.test.ts` | unit | calendar math, job lifecycle, durable outcomes |
+| `src/scheduler/*.integration.test.ts` | integration | needs-you batching and durable dedupe |
+| `src/session-monitor/*.integration.test.ts` | integration | scan reconciliation and async enrichment |
+| `src/gateway/gateway.boundaries.test.ts` | unit | transport owns no process/model runtime; no app code in skills |
 | `test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
-| `src/gateway/daemon.e2e.test.ts` | e2e | in-process daemon, ephemeral port, SSE, schedules, triggers (fake scan seam) |
-| `src/gateway/poller.smoke.ts` | smoke | "today" digest against the live machine |
+| `src/daemon/runtime.e2e.test.ts` | e2e | daemon composition, readiness, Gateway, SSE, schedules, query routing |
+| `src/session-monitor/monitor.smoke.ts` | smoke | "today" digest against the live machine |
 | `src/agent/agent.behavior.ts` | live | real agent; asserts it returns prose |
 
 ## Layout
@@ -43,7 +45,7 @@ test/
   sessions-grep.integration.test.ts
 
 src/gateway/test/
-  helpers/index.ts           tempOoHome, fakeScanRow, waitFor
+  helpers/index.ts           cross-seam tempOoHome, fakeScanRow, waitFor
 ```
 
 Tests stay colocated with their source; root `test/` holds cross-cutting integration tests.

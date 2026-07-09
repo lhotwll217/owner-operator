@@ -37,15 +37,15 @@ surface for the ranked session list.
 
 ## The daemon
 
-`oo daemon` runs the local gateway: it watches your sessions, owns the state store, and
-serves the widget, terminal, and session-state callers. The terminal starts it
-automatically; run it yourself when you only want the widget.
+`oo daemon` is the long-lived local process hosting the state, session monitor, scheduler,
+and loopback Gateway. Terminal clients ensure the current daemon is ready. The widget installer
+installs daemon + widget LaunchAgents together; the widget itself never spawns processes.
 
 ## How it works
 
 Built on the [pi coding agent](https://github.com/earendil-works/pi). `oo` reads session
-files off disk with small scan/grep skills ([.agents/skills](.agents/skills/)) and never
-loads full transcripts into a model. Supported agents live in
+files through application-owned scan/search modules and only sends bounded transcript samples to
+the model. Supported agents live in
 [`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents drive it headless
 with `oo "question"`: a single turn that prints its session id on stderr, with `--continue`
 / `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
@@ -58,6 +58,10 @@ rows as JSON, and `oo --done <id...>` marks threads done (ids come from `--sessi
 explicit only — no environment guessing, so parallel agents in one repo can't mark each
 other). A coding harness that knows its own session id (e.g. a session-end hook) can
 self-mark with `oo --done <that id>`.
+
+Durable prompt schedules use the typed `schedule_prompt` tool. Each run gets a fresh isolated
+Owner Operator transcript; failures and output are inspectable through `query_database` over
+`schedules` and `schedule_runs`.
 
 So far this has only been tested with a Codex subscription as the driver for the pi agent.
 Other model backends should work but are unverified.

@@ -16,12 +16,12 @@ UI (layout, controls, animation) lives in [`Sources/oo-widget/UI.swift`](Sources
 
 ## Build · run · test
 
-Needs `oo daemon` + a GUI session. SwiftPM — no Xcode project, no signing.
+Needs the loopback daemon + a GUI session. SwiftPM — no Xcode project, no signing.
 
 ```sh
 make run       # launch
 make once      # print the session state and exit — headless smoke test
-make install   # LaunchAgent (survives reboot); make uninstall removes
+make install   # installs widget + daemon LaunchAgents; make uninstall removes both
 swift test     # unit tests — session state grouping, decode, fresh-window
 ```
 

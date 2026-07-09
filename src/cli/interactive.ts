@@ -43,8 +43,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     resourceLoaderOptions: {
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
-      // The repo's .agents/skills are script docs for headless callers and the poller; the
-      // Operator's interface to those scripts is its typed tools, so none inject here.
+      // Transcript runtime is exposed through typed tools, so no skills inject here.
       skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
       extensionFactories: [
         blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
@@ -56,7 +55,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     services,
     sessionManager,
     sessionStartEvent,
-    tools: ownerOperatorTools,
+    tools: [...ownerOperatorTools],
     customTools: ownerOperatorCustomTools,
   });
   return { ...created, services, diagnostics: services.diagnostics };
