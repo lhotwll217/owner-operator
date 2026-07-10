@@ -27,6 +27,30 @@ try {
   );
   assert.deepEqual(state.listEnrichmentCandidates(), [], "worker advances the enrichment watermark");
 
+  const backgroundErrors: string[] = [];
+  const failingMonitor = new SessionMonitor(state, {
+    intervalMs: 10,
+    scan: async () => { throw new Error("temporary scan failure"); },
+    logger: (record) => { backgroundErrors.push(record.error); },
+  });
+  failingMonitor.start();
+  await waitFor(() => backgroundErrors.length > 0, 1_000, "contained background poll error");
+  failingMonitor.stop();
+  assert.match(backgroundErrors[0], /temporary scan failure/, "background poll errors reach the monitor logger");
+
+  const enrichmentErrors: string[] = [];
+  const failingEnrichmentMonitor = new SessionMonitor(state, {
+    scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:06:00.000Z" })],
+    enrich: async () => { throw new Error("temporary enrichment failure"); },
+    logger: (record) => {
+      if (String(record.event) === "enrichment-failed") enrichmentErrors.push(record.error);
+    },
+  });
+  await failingEnrichmentMonitor.poll();
+  await waitFor(() => enrichmentErrors.length > 0, 1_000, "contained enrichment error");
+  failingEnrichmentMonitor.stop();
+  assert.match(enrichmentErrors[0], /temporary enrichment failure/, "enrichment errors reach the monitor logger");
+
   process.stdout.write("ok — public session-monitor seam\n");
 } finally {
   monitor.stop();

@@ -33,6 +33,7 @@ export interface CommandExecutionRequest {
 export enum SchedulerLogEvent {
   RunFinished = "run-finished",
   StartupInterrupted = "startup-interrupted",
+  LoopFailed = "loop-failed",
 }
 
 export type SchedulerLogRecord =
@@ -46,6 +47,11 @@ export type SchedulerLogRecord =
   | {
       event: SchedulerLogEvent.StartupInterrupted;
       count: number;
+    }
+  | {
+      event: SchedulerLogEvent.LoopFailed;
+      source: "tick" | "needs-you" | "manual";
+      error: string;
     };
 
 export interface SchedulerOptions {
@@ -211,8 +217,8 @@ export class Scheduler {
       this.pendingNeedsYou.set(change.threadId, change.lastMessageAt);
     }
     this.scheduleEventFlush();
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), this.tickMs);
+    this.runInBackground("tick", () => this.tick());
+    this.timer = setInterval(() => this.runInBackground("tick", () => this.tick()), this.tickMs);
     this.timer.unref?.();
   }
 
@@ -262,7 +268,25 @@ export class Scheduler {
     const schedule = this.state.scheduleById(id);
     if (!schedule) throw new Error(`no such schedule: ${id}`);
     if (this.running.has(id)) throw new Error(`schedule already running: ${id}`);
-    return await this.enqueue(() => this.execute(schedule, ScheduleRunTrigger.Manual, null));
+    this.running.add(id);
+    let run: ScheduleRun;
+    try {
+      run = this.state.createScheduleRun(schedule, ScheduleRunTrigger.Manual, null);
+    } catch (error) {
+      this.running.delete(id);
+      throw error;
+    }
+    this.runInBackground("manual", async () => {
+      await this.enqueue(() => this.execute(
+        schedule,
+        ScheduleRunTrigger.Manual,
+        null,
+        undefined,
+        run,
+        true,
+      ));
+    });
+    return run;
   }
 
   private async execute(
@@ -271,9 +295,12 @@ export class Scheduler {
     scheduledFor: string | null,
     triggerContext?: ScheduleTriggerContext,
     existingRun?: ScheduleRun,
+    preclaimed = false,
   ): Promise<ScheduleRun> {
-    if (this.running.has(schedule.id)) throw new Error(`schedule already running: ${schedule.id}`);
-    this.running.add(schedule.id);
+    if (!preclaimed) {
+      if (this.running.has(schedule.id)) throw new Error(`schedule already running: ${schedule.id}`);
+      this.running.add(schedule.id);
+    }
     const run = existingRun ?? this.state.createScheduleRun(schedule, trigger, scheduledFor, triggerContext);
     if (this.stopping) {
       this.running.delete(schedule.id);
@@ -365,7 +392,7 @@ export class Scheduler {
     if (this.eventFlush) return;
     this.eventFlush = setImmediate(() => {
       this.eventFlush = null;
-      void this.flushNeedsYou();
+      this.runInBackground("needs-you", () => this.flushNeedsYou());
     });
     this.eventFlush.unref?.();
   }
@@ -388,5 +415,15 @@ export class Scheduler {
         claimed.run,
       ));
     }
+  }
+
+  private runInBackground(source: "tick" | "needs-you" | "manual", work: () => Promise<void>): void {
+    void work().catch((error) => {
+      this.logger({
+        event: SchedulerLogEvent.LoopFailed,
+        source,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 }

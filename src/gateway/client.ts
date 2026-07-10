@@ -16,38 +16,85 @@ import {
 import { daemonInfoPath } from "../shared/paths";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const FAST_REQUEST_MS = 2_000;
+const MUTATION_REQUEST_MS = 10_000;
+const LONG_OPERATION_MS = 60_000;
+let memo: Promise<GatewayApi> | null = null;
 
-/** Connect only to a ready daemon whose discovery file and health response agree. */
-export async function connectGateway(): Promise<GatewayApi | null> {
-  let info: DaemonInfo;
-  try { info = JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
-  const base = `http://127.0.0.1:${info.port}`;
-  if (!info.authToken) return null;
+export interface GatewayProbe {
+  info: DaemonInfo;
+  health: DaemonHealth;
+  ready: DaemonReady;
+}
 
-  const json = async <T>(path: string, init?: RequestInit): Promise<T> => {
-    const headers = new Headers(init?.headers);
-    headers.set("authorization", `Bearer ${info.authToken}`);
-    const response = await fetch(base + path, {
-      ...init,
-      headers,
-      signal: init?.signal ?? AbortSignal.timeout(2_000),
-    });
-    if (!response.ok) throw new Error(`gateway ${path}: ${response.status}`);
-    return await response.json() as T;
-  };
+function readDaemonInfo(): DaemonInfo | null {
+  try { return JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
+}
+
+interface GatewayJsonOptions {
+  init?: RequestInit;
+  timeoutMs?: number;
+  acceptStatuses?: readonly number[];
+  onUnavailable?: () => void;
+}
+
+async function gatewayJson<T>(
+  info: DaemonInfo,
+  path: string,
+  options: GatewayJsonOptions = {},
+): Promise<T> {
+  const headers = new Headers(options.init?.headers);
+  headers.set("authorization", `Bearer ${info.authToken}`);
+  let response: Response;
   try {
-    const health = await json<DaemonHealth>("/health");
-    const ready = await json<DaemonReady>("/ready");
-    if (health.pid !== info.pid || health.fingerprint !== info.fingerprint || !ready.ready) return null;
+    response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
+      ...options.init,
+      headers,
+      signal: options.init?.signal ?? AbortSignal.timeout(options.timeoutMs ?? FAST_REQUEST_MS),
+    });
+  } catch (error) {
+    options.onUnavailable?.();
+    throw error;
+  }
+  if (!response.ok && !options.acceptStatuses?.includes(response.status)) {
+    if (response.status === 401) options.onUnavailable?.();
+    throw new Error(`gateway ${path}: ${response.status}`);
+  }
+  return await response.json() as T;
+}
+
+/** Authenticated identity probe, including a daemon that is alive but not ready. */
+export async function probeGateway(): Promise<GatewayProbe | null> {
+  const info = readDaemonInfo();
+  if (!info?.authToken) return null;
+  try {
+    const health = await gatewayJson<DaemonHealth>(info, "/health");
+    const ready = await gatewayJson<DaemonReady>(info, "/ready", { acceptStatuses: [503] });
+    if (health.pid !== info.pid || health.fingerprint !== info.fingerprint) return null;
+    return { info, health, ready };
   } catch {
     return null;
   }
+}
 
-  const post = <T>(path: string, body: unknown): Promise<T> => json<T>(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/** Connect only to a ready daemon whose discovery file and health response agree. */
+export async function connectGateway(onUnavailable: () => void = () => undefined): Promise<GatewayApi | null> {
+  const probe = await probeGateway();
+  if (!probe?.ready.ready) return null;
+  const { info } = probe;
+
+  const json = <T>(path: string, init?: RequestInit, timeoutMs = FAST_REQUEST_MS): Promise<T> =>
+    gatewayJson<T>(info, path, { init, timeoutMs, onUnavailable });
+  const post = <T>(path: string, body: unknown, timeoutMs = MUTATION_REQUEST_MS): Promise<T> =>
+    gatewayJson<T>(info, path, {
+      timeoutMs,
+      onUnavailable,
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    });
   const subscriptions = new Set<() => void>();
 
   return {
@@ -56,7 +103,7 @@ export async function connectGateway(): Promise<GatewayApi | null> {
     sessionState: () => json<SessionStateRow[]>("/session-state"),
     markDone: (ids) => post<MarkThreadsDoneResult>("/done", { ids }),
     renameThread: async (id, title) => { await post("/rename", { id, title }); },
-    poll: async () => { await post("/poll", {}); },
+    poll: async () => { await post("/poll", {}, LONG_OPERATION_MS); },
     listSchedules: () => json<ScheduleDefinition[]>("/schedules"),
     createSchedule: (input: ScheduleCreateInput) => post<ScheduleDefinition>("/schedules", input),
     updateSchedule: (id: string, input: ScheduleCreateInput) => json<ScheduleDefinition>(
@@ -67,17 +114,27 @@ export async function connectGateway(): Promise<GatewayApi | null> {
       await json(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     runSchedule: (id: string) => post<ScheduleRun>(`/schedules/${encodeURIComponent(id)}/run`, {}),
-    queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>("/query-database", request),
+    queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>(
+      "/query-database",
+      request,
+      LONG_OPERATION_MS,
+    ),
     subscribe(listener: (event: GatewayEvent) => void) {
       let stopped = false;
       const controller = new AbortController();
       void (async () => {
         while (!stopped) {
           try {
-            const response = await fetch(`${base}/events`, {
-              headers: { authorization: `Bearer ${info.authToken}` },
+            const eventInfo = readDaemonInfo();
+            if (!eventInfo?.authToken) throw new Error("gateway discovery is unavailable");
+            const response = await fetch(`http://127.0.0.1:${eventInfo.port}/events`, {
+              headers: { authorization: `Bearer ${eventInfo.authToken}` },
               signal: controller.signal,
             });
+            if (!response.ok) {
+              if (response.status === 401) onUnavailable();
+              throw new Error(`gateway /events: ${response.status}`);
+            }
             const reader = response.body?.getReader();
             if (!reader) throw new Error("gateway event stream has no body");
             const decoder = new TextDecoder();
@@ -113,16 +170,19 @@ export async function connectGateway(): Promise<GatewayApi | null> {
   };
 }
 
-let memo: Promise<GatewayApi> | null = null;
-
 /** Production surfaces require the daemon; there is deliberately no embedded-store mode. */
 export function resolveBackend(): Promise<GatewayApi> {
-  memo ??= connectGateway().then((gateway) => {
+  if (memo) return memo;
+  let candidate: Promise<GatewayApi>;
+  candidate = connectGateway(() => {
+    if (memo === candidate) memo = null;
+  }).then((gateway) => {
     if (!gateway) throw new Error("Owner Operator daemon is not ready");
     return gateway;
   }).catch((error) => {
-    memo = null;
+    if (memo === candidate) memo = null;
     throw error;
   });
-  return memo;
+  memo = candidate;
+  return candidate;
 }

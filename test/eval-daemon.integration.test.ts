@@ -18,10 +18,16 @@ const child = spawn(process.execPath, ["--import", "tsx", "eval/providers/eval-d
   stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = "";
+let stdout = "";
+child.stdout.on("data", (chunk) => { stdout += String(chunk); });
 child.stderr.on("data", (chunk) => { stderr += String(chunk); });
 
 try {
-  await waitFor(() => existsSync(discovery), 2_000, `eval daemon readiness (${stderr})`);
+  await waitFor(
+    () => existsSync(discovery) && stdout.includes("[oo-eval-daemon] ready"),
+    2_000,
+    `eval daemon readiness (${stderr})`,
+  );
   child.kill("SIGTERM");
   const exit = await new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
   assert.equal(exit, 0, `managed eval daemon exits cleanly: ${stderr}`);

@@ -387,22 +387,27 @@ export class ThreadDb {
     });
   }
 
-  markDone(ids: readonly string[]): { markedIds: string[]; missingIds: string[] } {
+  markDone(ids: readonly string[]): { markedIds: string[]; alreadyDoneIds: string[]; missingIds: string[] } {
     const unique = [...new Set(ids)];
     const markedIds: string[] = [];
+    const alreadyDoneIds: string[] = [];
+    const missingIds: string[] = [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const id of unique) {
-        if (!this.db.prepare("SELECT 1 FROM threads WHERE id = ?").get(id)) continue;
-        this.appendDetailsInTx(id, { state: "done" }, "owner");
-        markedIds.push(id);
+        if (!this.db.prepare("SELECT 1 FROM threads WHERE id = ?").get(id)) {
+          missingIds.push(id);
+          continue;
+        }
+        if (this.appendDetailsInTx(id, { state: "done" }, "owner")) markedIds.push(id);
+        else alreadyDoneIds.push(id);
       }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
-    return { markedIds, missingIds: unique.filter((id) => !markedIds.includes(id)) };
+    return { markedIds, alreadyDoneIds, missingIds };
   }
 
   setOwnerTitle(threadId: string, title: string): boolean {

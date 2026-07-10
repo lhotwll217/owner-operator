@@ -8,7 +8,7 @@ import {
   type EnrichmentCandidate,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
-import { scanActiveTranscripts } from "./scan-active-transcripts.mjs";
+import { runTranscriptScan } from "./scan";
 
 export interface SessionMonitorOptions {
   since?: string;
@@ -17,12 +17,23 @@ export interface SessionMonitorOptions {
   debounceMs?: number;
   scan?: (since: string, limit: number) => Promise<ScanRow[]>;
   enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadDetails>;
+  logger?: (record: SessionMonitorLogRecord) => void;
+}
+
+export enum SessionMonitorLogEvent {
+  PollFailed = "poll-failed",
+  EnrichmentFailed = "enrichment-failed",
+}
+
+export interface SessionMonitorLogRecord {
+  event: SessionMonitorLogEvent;
+  error: string;
 }
 
 const SESSION_ROOTS = loadSessionSources().map((source) => source.root);
 
 async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]> {
-  const parsed = scanActiveTranscripts([
+  const parsed = await runTranscriptScan([
     "--since", since, "--limit", String(limit), "--sample", "0",
   ]);
   return parsed.threads.map((thread): ScanRow => ({
@@ -51,9 +62,12 @@ export class SessionMonitor {
   private watchers: FSWatcher[] = [];
   private polling = false;
   private enriching = false;
+  private readonly logger: (record: SessionMonitorLogRecord) => void;
   current: SessionStateRow[] = [];
 
-  constructor(private readonly state: State, private readonly options: SessionMonitorOptions = {}) {}
+  constructor(private readonly state: State, private readonly options: SessionMonitorOptions = {}) {
+    this.logger = options.logger ?? (() => undefined);
+  }
 
   async poll(): Promise<SessionStateRow[]> {
     if (this.polling) return this.current;
@@ -74,8 +88,8 @@ export class SessionMonitor {
 
   start(): void {
     if (this.timer) return;
-    void this.poll();
-    this.timer = setInterval(() => void this.poll(), this.options.intervalMs ?? 15_000);
+    this.pollInBackground();
+    this.timer = setInterval(() => this.pollInBackground(), this.options.intervalMs ?? 15_000);
     this.timer.unref?.();
   }
 
@@ -98,9 +112,13 @@ export class SessionMonitor {
     if (this.debounce) clearTimeout(this.debounce);
     this.debounce = setTimeout(() => {
       this.debounce = null;
-      void this.poll();
+      this.pollInBackground();
     }, this.options.debounceMs ?? 600);
     this.debounce.unref?.();
+  }
+
+  private pollInBackground(): void {
+    this.runInBackground(SessionMonitorLogEvent.PollFailed, () => this.poll());
   }
 
   stop(): void {
@@ -115,7 +133,20 @@ export class SessionMonitor {
   private scheduleEnrichment(): void {
     if (!this.options.enrich || this.enriching) return;
     this.enriching = true;
-    queueMicrotask(() => void this.drainEnrichment());
+    queueMicrotask(() => this.runEnrichmentInBackground());
+  }
+
+  private runEnrichmentInBackground(): void {
+    this.runInBackground(SessionMonitorLogEvent.EnrichmentFailed, () => this.drainEnrichment());
+  }
+
+  private runInBackground(event: SessionMonitorLogEvent, work: () => Promise<unknown>): void {
+    void work().catch((error) => {
+      this.logger({
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   private async drainEnrichment(): Promise<void> {
@@ -123,12 +154,8 @@ export class SessionMonitor {
       for (;;) {
         const candidate = this.state.listEnrichmentCandidates()[0];
         if (!candidate?.lastMessageAt || !this.options.enrich) return;
-        try {
-          const details = await this.options.enrich(candidate);
-          this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt);
-        } catch {
-          return; // leave the watermark stale; a later poll/restart reconciles it
-        }
+        const details = await this.options.enrich(candidate);
+        this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt);
       }
     } finally {
       this.enriching = false;

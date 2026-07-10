@@ -99,6 +99,12 @@ try {
 
   assert.deepEqual(state.markThreadsDone(["thread-1", "missing"]).missingIds, ["missing"]);
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "done leaves the active projection");
+  const eventsAfterDone = events.length;
+  const alreadyDone = state.markThreadsDone(["thread-1"]);
+  assert.deepEqual(alreadyDone.marked, [], "an idempotent done request reports no new transition");
+  assert.deepEqual(alreadyDone.alreadyDoneIds, ["thread-1"], "an idempotent done request is explicit");
+  assert.deepEqual(alreadyDone.missingIds, [], "an existing done thread is not reported missing");
+  assert.equal(events.length, eventsAfterDone, "an idempotent done request emits no false state change");
   state.recordObservation(row("2026-07-09T10:01:00.000Z"));
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "same message cannot resurrect owner-set done");
   state.recordObservation(row("2026-07-09T10:02:00.000Z"));

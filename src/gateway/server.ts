@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   DatabaseQueryAction,
   DEFAULT_DAEMON_PORT,
@@ -68,6 +69,11 @@ const invalidationFor = (kind: DomainEventKind): GatewayEvent => {
   return { kind: GatewayEventKind.StateChanged };
 };
 
+function hasValidAuthorization(header: string | undefined, authToken: string): boolean {
+  const digest = (value: string): Buffer => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(header ?? ""), digest(`Bearer ${authToken}`));
+}
+
 /** Loopback transport only: all behavior is delegated through injected public seams. */
 export async function startGateway(options: GatewayOptions): Promise<RunningGateway> {
   const streams = new Set<ServerResponse>();
@@ -83,7 +89,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       response.end(JSON.stringify(body));
     };
     try {
-      if (request.headers.authorization !== `Bearer ${options.authToken}`) {
+      if (!hasValidAuthorization(request.headers.authorization, options.authToken)) {
         response.setHeader("www-authenticate", "Bearer");
         return respond(401, { error: "unauthorized" });
       }
@@ -140,7 +146,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(options.scheduler.deleteSchedule(scheduleId) ? 200 : 404, { ok: true });
       }
       if (scheduleId && request.method === "POST" && url.pathname === `/schedules/${scheduleId}/run`) {
-        return respond(200, await options.scheduler.runNow(scheduleId));
+        return respond(202, await options.scheduler.runNow(scheduleId));
       }
 
       if (route === "POST /query-database") {

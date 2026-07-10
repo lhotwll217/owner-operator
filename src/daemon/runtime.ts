@@ -8,6 +8,7 @@ import {
 } from "@owner-operator/core";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
+import { sampleTranscript } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
@@ -49,9 +50,13 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   modules.state = true;
   const monitor = new SessionMonitor(state, {
     ...options.monitor,
+    logger: options.monitor?.logger ?? ((record) => {
+      process.stderr.write(`${JSON.stringify({ component: "session-monitor", ...record })}\n`);
+    }),
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
-      : { enrich: options.monitor?.enrich ?? (async (candidate) => (await import("../agent/enrichment")).enrichThread(candidate)) }),
+      : { enrich: options.monitor?.enrich ?? (async (candidate) =>
+          (await import("../agent/enrichment")).enrichThread(await sampleTranscript(candidate.id))) }),
   });
   modules.sessionMonitor = true;
   const scheduler = new Scheduler(state, {

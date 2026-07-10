@@ -12,6 +12,8 @@ import {
   createGrepToolDefinition,
   createLsToolDefinition,
   createReadToolDefinition,
+  createEditToolDefinition,
+  createWriteToolDefinition,
   defineTool,
   type ExtensionAPI,
   type ExtensionFactory,
@@ -22,7 +24,7 @@ import { isBlacklisted, loadBlacklist, type Blacklist } from "@owner-operator/co
 import { ooRenderCall } from "../shared/oo-presentation";
 
 type AnyTool = ToolDefinition<any, any, any>;
-type FileToolName = "read" | "grep" | "find" | "ls";
+type FileToolName = "read" | "grep" | "find" | "ls" | "edit" | "write";
 
 const ooHome = (): string => process.env.OO_HOME ?? path.join(homedir(), ".owner-operator");
 const execFileAsync = promisify(execFile);
@@ -44,6 +46,8 @@ function builtIns(cwd: string): Record<FileToolName, AnyTool> {
       grep: createGrepToolDefinition(cwd),
       find: createFindToolDefinition(cwd),
       ls: createLsToolDefinition(cwd),
+      edit: createEditToolDefinition(cwd),
+      write: createWriteToolDefinition(cwd),
     };
     cache.set(cwd, tools);
   }
@@ -108,11 +112,16 @@ function repoName(abs: string): string | null {
   return path.basename(root) || null;
 }
 
-function realPathIfPresent(abs: string): string | null {
+function resolvedPathCandidate(abs: string): string | null {
   try {
     return realpathSync.native(abs);
   } catch {
-    return null;
+    const ancestor = existingAncestor(abs);
+    try {
+      return path.resolve(realpathSync.native(ancestor), path.relative(ancestor, abs));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -133,7 +142,7 @@ function sameOrDescendant(parent: string, child: string): boolean {
 
 function blacklistWithRealPaths(bl: Blacklist): Blacklist {
   return {
-    paths: [...new Set(bl.paths.flatMap((p) => [p, realPathIfPresent(p)].filter((v): v is string => !!v)))],
+    paths: [...new Set(bl.paths.flatMap((p) => [p, resolvedPathCandidate(p)].filter((v): v is string => !!v)))],
     repos: bl.repos,
   };
 }
@@ -146,7 +155,7 @@ export function blacklistedPathVerdict(rawPath: string, cwd: string, bl: Blackli
   | { blacklisted: false; path: string }
   | { blacklisted: true; path: string } {
   const lexical = normalizeInputPath(rawPath, cwd);
-  const candidates = [lexical, realPathIfPresent(lexical)].filter((p): p is string => !!p);
+  const candidates = [lexical, resolvedPathCandidate(lexical)].filter((p): p is string => !!p);
   for (const candidate of candidates) {
     if (isBlacklisted(bl, { cwd: candidate, repo: repoName(candidate) })) {
       return { blacklisted: true, path: candidate };
@@ -159,8 +168,8 @@ function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: Blacklis
   | { blacklisted: false }
   | { blacklisted: true; path: string; root: string } {
   const lexical = normalizeInputPath(rawPath, cwd);
-  const roots = [lexical, realPathIfPresent(lexical)].filter((p): p is string => !!p);
-  const blocked = [...new Set(bl.paths.flatMap((p) => [p, realPathIfPresent(p)].filter((v): v is string => !!v)))];
+  const roots = [lexical, resolvedPathCandidate(lexical)].filter((p): p is string => !!p);
+  const blocked = [...new Set(bl.paths.flatMap((p) => [p, resolvedPathCandidate(p)].filter((v): v is string => !!v)))];
   for (const root of roots) {
     for (const blockedPath of blocked) {
       if (sameOrDescendant(root, blockedPath)) return { blacklisted: true, path: blockedPath, root };
@@ -204,6 +213,8 @@ export function createBlacklistAwareFileTools(): AnyTool[] {
     wrapFileTool("grep", (p) => p.path ?? ".", { mayTraverse: true }),
     wrapFileTool("find", (p) => p.path ?? ".", { mayTraverse: true }),
     wrapFileTool("ls", (p) => p.path ?? ".", { mayTraverse: true }),
+    wrapFileTool("edit", (p) => p.path),
+    wrapFileTool("write", (p) => p.path),
   ];
 }
 

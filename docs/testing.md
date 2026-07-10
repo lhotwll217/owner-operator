@@ -33,10 +33,13 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | `src/scheduler/*.integration.test.ts` | integration | needs-you batching and durable dedupe |
 | `src/session-monitor/*.integration.test.ts` | integration | scan reconciliation and async enrichment |
 | `src/gateway/gateway.boundaries.test.ts` | unit | transport owns no process/model runtime; no app code in skills |
+| `src/gateway/client.integration.test.ts` | integration | long operations and daemon replacement/reconnect behavior |
 | `src/agent/skills.integration.test.ts` | integration | product skill discovery from the Agent directory |
+| `src/agent/privacy-tools.integration.test.ts` | integration | blacklist enforcement across Pi file primitives |
 | `src/daemon/fingerprint.integration.test.ts` | integration | runtime fingerprint changes with source/settings content |
 | `test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
 | `src/daemon/runtime.e2e.test.ts` | e2e | daemon composition, readiness, Gateway, SSE, schedules, query routing |
+| `src/daemon/ensure.e2e.test.ts` | e2e | stale-daemon replacement through the installed process supervisor |
 | `src/session-monitor/monitor.smoke.ts` | smoke | "today" digest against the live machine |
 | `src/agent/agent.behavior.ts` | live | real agent; asserts it returns prose |
 

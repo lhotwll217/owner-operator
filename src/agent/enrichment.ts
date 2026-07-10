@@ -1,8 +1,7 @@
 import { complete, type Context } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { EnrichmentCandidate, ThreadDetails } from "@owner-operator/core";
+import type { ThreadDetails } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
-import { scanActiveTranscripts } from "../session-monitor/scan-active-transcripts.mjs";
 
 function parseDetails(text: string): ThreadDetails {
   const object = /\{[\s\S]*\}/.exec(text)?.[0];
@@ -25,11 +24,7 @@ function parseDetails(text: string): ThreadDetails {
 }
 
 /** One typed completion for a needs-you message; no tools and no agent loop. */
-export async function enrichThread(candidate: EnrichmentCandidate): Promise<ThreadDetails> {
-  const sample = JSON.stringify(scanActiveTranscripts([
-    "--thread", candidate.id, "--sample", "8", "--since", "30d",
-  ]), null, 2);
-
+export async function enrichThread(sample: string): Promise<ThreadDetails> {
   const settings = SettingsManager.create(repoRoot);
   const provider = settings.getDefaultProvider();
   const modelId = settings.getDefaultModel();

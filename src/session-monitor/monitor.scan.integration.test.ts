@@ -8,12 +8,13 @@
 //   npm run test:integration   (from the repo root)
 
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { tempOoHome } from "../gateway/test/helpers";
 
 const realHome = process.env.HOME;
+const realPath = process.env.PATH;
 const home = mkdtempSync(join(tmpdir(), "oo-monitor-scan-home-"));
 process.env.HOME = home; // the real scan reads $HOME/.claude/projects, …
 const { dir, cleanup } = tempOoHome("oo-monitor-scan"); // isolated OO_HOME: state + scan overrides
@@ -29,6 +30,15 @@ const msg = (type: "user" | "assistant", content: string, ts: string) =>
   }) + "\n";
 
 mkdirSync(dirname(sessionFile), { recursive: true });
+const binDir = join(home, "bin");
+const slowGit = join(binDir, "git");
+mkdirSync(binDir, { recursive: true });
+writeFileSync(
+  slowGit,
+  "#!/usr/bin/env node\nconst until = Date.now() + 250; while (Date.now() < until) {} process.exit(1);\n",
+);
+chmodSync(slowGit, 0o755);
+process.env.PATH = `${binDir}:${realPath ?? ""}`;
 // A real interactive terminal session has ≥2 user turns. The scan hides a single-turn bare
 // `claude` session as an indistinguishable `claude -p` single-turn worker (launch-mode rule in
 // scan-active-transcripts.mjs), so a one-turn fixture would never surface.
@@ -47,7 +57,14 @@ try {
   // No `scan` seam → SessionMonitor imports the real scan-active-transcripts runtime.
   const state = new State(join(dir, "state.db"));
   const monitor = new SessionMonitor(state, { since: "7d", limit: 50 });
-  const current = await monitor.poll();
+  const timer = new Promise<"timer">((resolve) => setTimeout(() => resolve("timer"), 20));
+  const polling = monitor.poll();
+  assert.equal(
+    await Promise.race([timer, polling.then(() => "poll" as const)]),
+    "timer",
+    "the real transcript scan does not block the daemon event loop",
+  );
+  const current = await polling;
   monitor.stop();
   state.close();
 
@@ -64,4 +81,6 @@ try {
   rmSync(home, { recursive: true, force: true });
   if (realHome === undefined) delete process.env.HOME;
   else process.env.HOME = realHome;
+  if (realPath === undefined) delete process.env.PATH;
+  else process.env.PATH = realPath;
 }

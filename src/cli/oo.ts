@@ -95,7 +95,11 @@ if (cli.done) {
   const backend = await resolveBackend();
   const result = await backend.markDone(cli.done);
   backend.close();
-  process.stdout.write(JSON.stringify({ marked: result.marked, missingIds: result.missingIds }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({
+    marked: result.marked,
+    alreadyDoneIds: result.alreadyDoneIds,
+    missingIds: result.missingIds,
+  }, null, 2) + "\n");
   process.exit(result.missingIds.length > 0 ? 1 : 0);
 }
 

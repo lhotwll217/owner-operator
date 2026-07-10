@@ -60,6 +60,7 @@ export interface EnrichmentCandidate extends SessionStateRow {
 
 export interface MarkThreadsDoneResult {
   marked: SessionStateRow[];
+  alreadyDoneIds: string[];
   missingIds: string[];
 }
 

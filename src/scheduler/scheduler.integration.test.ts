@@ -10,6 +10,7 @@ import {
   type ScheduleExecutionResult,
 } from "@owner-operator/core";
 import { State } from "../state/state";
+import { waitFor } from "../gateway/test/helpers";
 import { Scheduler, SchedulerLogEvent, type SchedulerLogRecord } from "./scheduler";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-scheduler-"));
@@ -63,7 +64,12 @@ try {
   );
 
   const manual = await scheduler.runNow(job.id);
-  assert.equal(manual.status, ScheduleRunStatus.Completed);
+  assert.equal(manual.status, ScheduleRunStatus.Running, "manual trigger returns its durable claim immediately");
+  await waitFor(
+    () => state.listScheduleRuns(job.id)[0]?.status === ScheduleRunStatus.Completed,
+    1_000,
+    "manual run completion",
+  );
   assert.equal(state.listScheduleRuns(job.id).length, 2, "manual run creates history instead of mutating the prior run");
 
   const edited = scheduler.updateSchedule(job.id, {
@@ -128,14 +134,20 @@ try {
     cwd: dir,
     timeoutSeconds: 1,
   });
-  const timedOutRun = timeoutScheduler.runNow(timeoutJob.id);
+  const timedOutRun = await timeoutScheduler.runNow(timeoutJob.id);
+  assert.equal(timedOutRun.status, ScheduleRunStatus.Running);
   await new Promise((resolve) => setTimeout(resolve, 1_100));
   await assert.rejects(
     () => timeoutScheduler.runNow(timeoutJob.id),
     /already running/,
     "a timed-out child retains the non-overlap slot until it has exited",
   );
-  const timedOut = await timedOutRun;
+  await waitFor(
+    () => state.listScheduleRuns(timeoutJob.id)[0]?.status === ScheduleRunStatus.Failed,
+    2_000,
+    "timed-out run outcome",
+  );
+  const timedOut = state.listScheduleRuns(timeoutJob.id)[0];
   assert.equal(timedOut.status, ScheduleRunStatus.Failed);
   assert.match(timedOut.error ?? "", /timed out/);
   timeoutScheduler.deleteSchedule(timeoutJob.id);
@@ -160,11 +172,31 @@ try {
     cwd: dir,
     timeoutSeconds: 600,
   });
-  const activeAtShutdown = shutdownScheduler.runNow(shutdownJob.id);
+  const activeAtShutdown = await shutdownScheduler.runNow(shutdownJob.id);
+  assert.equal(activeAtShutdown.status, ScheduleRunStatus.Running);
   await shutdownRunStarted;
   await shutdownScheduler.stop();
   assert.equal(shutdownSignal?.aborted, true, "stop aborts active execution");
-  assert.equal((await activeAtShutdown).status, ScheduleRunStatus.Interrupted, "shutdown records an interrupted run");
+  assert.equal(
+    state.listScheduleRuns(shutdownJob.id)[0].status,
+    ScheduleRunStatus.Interrupted,
+    "shutdown records an interrupted run",
+  );
+
+  const errorState = new State(join(dir, "scheduler-errors.db"));
+  const backgroundLogs: SchedulerLogRecord[] = [];
+  const errorScheduler = new Scheduler(errorState, {
+    tickMs: 10,
+    logger: (record) => backgroundLogs.push(record),
+  });
+  errorScheduler.start();
+  errorState.close();
+  await waitFor(
+    () => backgroundLogs.some((record) => record.event === SchedulerLogEvent.LoopFailed),
+    1_000,
+    "contained scheduler loop error",
+  );
+  await errorScheduler.stop();
 
   process.stdout.write("ok — public scheduler seam\n");
 } finally {

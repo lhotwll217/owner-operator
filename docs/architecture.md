@@ -41,7 +41,8 @@ process/model runtime and that application code never loads from development-ski
 ## Agent capabilities
 
 - **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`; same-name
-  safety overrides for Pi file/bash primitives live at the Agent boundary.
+  safety overrides for Pi file/bash primitives live at the Agent boundary. Explicitly enabled
+  `edit` and `write` tools enforce the same blacklist, including symlinked parent directories.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
@@ -64,6 +65,10 @@ invalidations—state, schedule, or schedule-run changed—and clients refetch S
 Enrichment is eligible when the current state is `needs-you` and `last_message_at` differs from
 `enriched_through_message_at`. This catches first discovery, a new assistant message without a state
 transition, and daemon restart. The monitor never awaits the model in its scan hot path.
+The synchronous transcript parser and git inspection run in a child process, so reconciliation
+cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried
+at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use
+the same logged background seam and leave the durable watermark eligible for a later retry.
 
 ## Scheduler
 
@@ -93,6 +98,7 @@ Scheduler policy:
 - Global concurrency starts at one; the same job never overlaps.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
 - Timer occurrences advance and create their running row in one transaction before external work starts.
+- Manual triggers return their durable `running` row immediately; clients inspect run completion through `schedule_runs`.
 - A daemon crash marks running rows `interrupted`; no automatic job retry occurs.
 - Commands and prompt runs have bounded timeouts and bounded stdout/stderr tails.
 - Shutdown aborts active runs, terminates command process groups, and drains the queue before State closes.
@@ -115,6 +121,16 @@ uncommitted changes. A mismatch marks the daemon stale and exits it gracefully; 
 terminal ensure path starts the current runtime. This adapts OpenClaw's installed service-version
 stamp ([source](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/daemon/service-env.ts#L430-L446))
 to a development checkout where source content—not package version—is authoritative.
+
+When the daemon LaunchAgent is installed, launchd is the only process supervisor and terminal
+clients request replacement through `launchctl kickstart`. Without the LaunchAgent, terminal clients
+may start one detached daemon directly. Before replacement, the client authenticates the stale or
+unready daemon identity and waits for it to release the Gateway; it never signals an unverified PID.
+LaunchAgent ownership is verified against `launchctl print`; if an authenticated detached daemon
+predates installation, the client stops it and waits for the port before handing ownership to launchd.
+An ambiguous launchctl result fails closed and never authorizes direct signaling.
+Long-lived Node clients invalidate cached discovery after authentication or connection failure, and
+their SSE subscriptions reread `daemon.json` before reconnecting.
 
 The widget installer installs both LaunchAgents. The widget itself remains a pure Gateway client
 and never spawns a process. Showing Owner Operator's own scheduled sessions in the widget is a

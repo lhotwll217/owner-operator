@@ -8,7 +8,7 @@ export const queryDatabaseTool = defineTool({
   label: "Query session database",
   description:
     "Run read-only SQL over the session state database (SQLite). Actions: list_tables " +
-    "(table names + row counts), describe_table (columns + CREATE statement), query " +
+    "(table names + row counts), describe_table (documented table purpose + columns), query " +
     "(execute a SELECT; results capped at 200 rows). The connection is read-only; write statements fail.",
   parameters: Type.Object({
     action: Type.Union([

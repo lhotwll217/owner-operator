@@ -89,9 +89,21 @@ export const markThreadDoneTool = defineTool({
     return {
       content: [{
         type: "text" as const,
-        text: JSON.stringify({ marked, missingIds: result.missingIds, missingIndexes, unresolvedQueries }, null, 2),
+        text: JSON.stringify({
+          marked,
+          alreadyDoneIds: result.alreadyDoneIds,
+          missingIds: result.missingIds,
+          missingIndexes,
+          unresolvedQueries,
+        }, null, 2),
       }],
-      details: { marked, missingIds: result.missingIds, missingIndexes, unresolvedQueries },
+      details: {
+        marked,
+        alreadyDoneIds: result.alreadyDoneIds,
+        missingIds: result.missingIds,
+        missingIndexes,
+        unresolvedQueries,
+      },
     };
   },
 });

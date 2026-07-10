@@ -136,6 +136,7 @@ export class State {
     }
     return {
       marked: result.markedIds.flatMap((id) => before.get(id) ? [{ ...before.get(id)!, state: "done" as const }] : []),
+      alreadyDoneIds: result.alreadyDoneIds,
       missingIds: result.missingIds,
     };
   }
