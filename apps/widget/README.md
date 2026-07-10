@@ -1,8 +1,8 @@
 # apps/widget — macOS floating HUD
 
 Always-on-top SwiftUI panel (borderless `NSPanel`, all Spaces). Collapses to a bar, expands to the
-current session state. Read-only over your sessions; owner state (mark done, rename a title) goes through
-the daemon. v1.
+current session state. Read-only over coding transcripts; owner state (mark done, rename a title)
+goes through the daemon.
 
 ## Thin client over the daemon
 

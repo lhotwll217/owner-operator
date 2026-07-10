@@ -4,8 +4,9 @@ You run coding agents in parallel across several tools and lose track of what ea
 doing. Owner Operator pulls every session onto one surface, ranked by what needs you, so you
 can see them all at once and drop into the right one.
 
-Today it's for reading: one place to see the state of all your coding-agent sessions without
-opening each one.
+Today the widget is for live triage: read every coding-agent session in one place, rename a
+thread, or mark it done without opening its harness. The Owner Operator agent can inspect durable
+history and create prompt schedules that run in fresh isolated sessions.
 
 ## Install
 

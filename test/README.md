@@ -1,21 +1,16 @@
 # test
 
-Shared test infra and cross-cutting e2e. Module-bound tests stay colocated with their source
-(`*.test.ts` next to the file). See [docs/testing.md](../docs/testing.md) for the tier
-taxonomy and the hermetic rule.
+Cross-cutting tests live here; module-bound tests stay colocated under `src`. See
+[docs/testing.md](../docs/testing.md) for the tier taxonomy and hermetic rule.
 
-- **`fixtures/<source>/`** — committed, **sanitized** session corpus (no personal
-  paths/repos/names), one dir per source: `claude/` · `codex/` · `cursor/` · `posthog-code/`.
-  Scaffolded and ready; empty today since we build fixtures inline. Promote one into its
-  source dir once it's reused or too bulky to inline. Conductor/Superset are *hosts*, not
-  sources — tested as a cwd-marker variant inside a source's fixture, never their own dir.
-- **`helpers/index.ts`** — shared test helpers, imported from a colocated test as `../../test/helpers`:
-  `tempOoHome` (throwaway `$OO_HOME` + cleanup), `fakeScanRow`, `waitFor`. Promote a helper
-  here only once a second test needs it.
-- **`e2e/`** — full-stack tests not bound to one module (e.g. launch the real `oo` CLI and
-  assert a `--session-state` snapshot).
-- **`run.mjs`** — the tier runner. `node test/run.mjs <unit|integration|e2e>` globs the
-  matching `*.test.ts` under `src/agent`, `src/cli`, and `test/`, then runs each via tsx,
+- **`run.mjs`** discovers the selected `*.test.ts`, `*.integration.test.ts`, or
+  `*.e2e.test.ts` tier anywhere under `src/` and `test/`, then runs each file through tsx,
   fail-fast.
+- **`eval-daemon.integration.test.ts`** covers the managed eval daemon lifecycle.
+- **`scan.integration.test.ts`** covers the real transcript scanner across session files and git.
+- **`sessions-grep.integration.test.ts`** covers the vendored session-search primitive and privacy
+  boundaries.
 
-Empty dirs are held by `.gitkeep` until populated.
+Shared cross-seam helpers currently live at
+[`src/gateway/test/helpers`](../src/gateway/test/helpers/index.ts). Promote sanitized fixtures only
+when reuse makes inline test data unwieldy.

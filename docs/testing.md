@@ -37,7 +37,9 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | `src/agent/skills.integration.test.ts` | integration | product skill discovery from the Agent directory |
 | `src/agent/privacy-tools.integration.test.ts` | integration | blacklist enforcement across Pi file primitives |
 | `src/daemon/fingerprint.integration.test.ts` | integration | runtime fingerprint changes with source/settings content |
+| `test/eval-daemon.integration.test.ts` | integration | managed eval daemon readiness and shutdown cleanup |
 | `test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
+| `test/sessions-grep.integration.test.ts` | integration | vendored session search, privacy filtering, and Owner Operator transcript targeting |
 | `src/daemon/runtime.e2e.test.ts` | e2e | daemon composition, readiness, Gateway, SSE, schedules, query routing |
 | `src/daemon/ensure.e2e.test.ts` | e2e | stale-daemon replacement through the installed process supervisor |
 | `src/session-monitor/monitor.smoke.ts` | smoke | "today" digest against the live machine |
@@ -48,6 +50,7 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 ```
 test/
   run.mjs                    root src tier runner
+  eval-daemon.integration.test.ts
   scan.integration.test.ts   real scan subprocess over session files + git
   sessions-grep.integration.test.ts
 
