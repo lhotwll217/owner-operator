@@ -40,7 +40,7 @@ if (cli.help) {
 
 // `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
 if (cli.daemon) {
-  const { daemonMain } = await import("../gateway/daemon");
+  const { daemonMain } = await import("../daemon/runtime");
   await daemonMain();
   process.exit(0);
 }
@@ -70,11 +70,13 @@ if (cli.interactive) {
     process.stderr.write("oo: -i/--interactive is only valid by itself; use bare `oo` for interactive mode\n");
     process.exit(2);
   }
+  await (await import("../daemon/ensure")).ensureDaemon();
   await import("./interactive");
   process.exit(0);
 }
 
 if (cli.sessionState) {
+  await (await import("../daemon/ensure")).ensureDaemon();
   const { getCurrentSessionStateRows } = await import("../gateway/session-state");
   process.stdout.write(JSON.stringify(await getCurrentSessionStateRows(), null, 2) + "\n");
   process.exit(0);
@@ -88,11 +90,16 @@ if (cli.done) {
     process.stderr.write("--done needs one or more thread ids (see oo --session-state)\n" + USAGE + "\n");
     process.exit(2);
   }
+  await (await import("../daemon/ensure")).ensureDaemon();
   const { resolveBackend } = await import("../gateway/client");
   const backend = await resolveBackend();
-  const result = await backend.markThreadsDone(cli.done);
+  const result = await backend.markDone(cli.done);
   backend.close();
-  process.stdout.write(JSON.stringify({ marked: result.marked, missingIds: result.missingIds }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({
+    marked: result.marked,
+    alreadyDoneIds: result.alreadyDoneIds,
+    missingIds: result.missingIds,
+  }, null, 2) + "\n");
   process.exit(result.missingIds.length > 0 ? 1 : 0);
 }
 
@@ -132,6 +139,7 @@ async function resolveSessionManager(): Promise<SessionManager> {
 }
 
 const sessionManager = await resolveSessionManager();
+await (await import("../daemon/ensure")).ensureDaemon();
 const { session, modelLabel } = await createOwnerOperatorSession("chat", { sessionManager });
 console.error(`[oo] ${modelLabel} · tools: ${ownerOperatorTools.join(", ")}\n`);
 
@@ -204,6 +212,6 @@ try {
     rl.close();
   }
 } finally {
-  await shutdownSessionExtensions(session); // cron auto-cleanup etc. — dispose alone never emits it
+  await shutdownSessionExtensions(session); // dispose alone never emits the extension lifecycle
   session.dispose();
 }

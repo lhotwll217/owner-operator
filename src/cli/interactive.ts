@@ -22,6 +22,7 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
+import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
@@ -41,11 +42,9 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     authStorage,
     settingsManager: SettingsManager.create(cwd), // model from .pi/settings.json (codex gpt-5.5)
     resourceLoaderOptions: {
+      ...ownerOperatorResourceLoaderOptions(),
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
-      // The repo's .agents/skills are script docs for headless callers and the poller; the
-      // Operator's interface to those scripts is its typed tools, so none inject here.
-      skillsOverride: ({ diagnostics }) => ({ skills: [], diagnostics }),
       extensionFactories: [
         blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
         ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner
@@ -56,7 +55,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     services,
     sessionManager,
     sessionStartEvent,
-    tools: ownerOperatorTools,
+    tools: [...ownerOperatorTools],
     customTools: ownerOperatorCustomTools,
   });
   return { ...created, services, diagnostics: services.diagnostics };

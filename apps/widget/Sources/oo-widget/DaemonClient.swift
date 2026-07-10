@@ -56,20 +56,31 @@ final class DaemonClient: ObservableObject {
         startSSE()
     }
 
-    /// ~/.owner-operator/daemon.json → the live port (clients discover it; falls back to default).
-    nonisolated static func discoverPort() -> Int {
+    nonisolated struct Discovery {
+        let port: Int
+        let authToken: String
+    }
+
+    /// ~/.owner-operator/daemon.json → the authenticated local Gateway discovery record.
+    nonisolated static func discoverGateway() -> Discovery? {
         let path = (NSHomeDirectory() as NSString).appendingPathComponent(".owner-operator/daemon.json")
         guard let data = FileManager.default.contents(atPath: path),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let p = obj["port"] as? Int else { return defaultPort }
-        return p
+              let port = obj["port"] as? Int,
+              let authToken = obj["authToken"] as? String,
+              !authToken.isEmpty else { return nil }
+        return Discovery(port: port, authToken: authToken)
+    }
+
+    nonisolated static func discoverPort() -> Int {
+        discoverGateway()?.port ?? defaultPort
     }
 
     func refresh() async {
-        let p = Self.discoverPort()
+        guard let discovery = Self.discoverGateway() else { online = false; return }
         do {
-            lastRows = try await Self.get([SessionStateRow].self, "/session-state", port: p)
-            port = p
+            lastRows = try await Self.get([SessionStateRow].self, "/session-state", discovery: discovery)
+            port = discovery.port
             online = true
             rebuild()
         } catch {
@@ -86,9 +97,9 @@ final class DaemonClient: ObservableObject {
     }
 
     private func postDone(_ id: String) async {
-        let p = Self.discoverPort()
+        guard let discovery = Self.discoverGateway() else { pendingDone.remove(id); rebuild(); return }
         do {
-            try await Self.postJSON("/done", port: p, body: ["ids": [id]])
+            try await Self.postJSON("/done", discovery: discovery, body: ["ids": [id]])
             await refresh()
         } catch {
             pendingDone.remove(id)
@@ -106,9 +117,13 @@ final class DaemonClient: ObservableObject {
     }
 
     private func postRename(_ id: String, to title: String) async {
-        let p = Self.discoverPort()
+        guard let discovery = Self.discoverGateway() else {
+            if pendingRenames[id] == title { pendingRenames.removeValue(forKey: id) }
+            rebuild()
+            return
+        }
         do {
-            try await Self.postJSON("/rename", port: p, body: ["id": id, "title": title])
+            try await Self.postJSON("/rename", discovery: discovery, body: ["id": id, "title": title])
             await refresh()
         } catch {
             if pendingRenames[id] == title { pendingRenames.removeValue(forKey: id) }
@@ -134,22 +149,24 @@ final class DaemonClient: ObservableObject {
     }
 
     /// A short-lived GET against the loopback daemon.
-    nonisolated static func get<T: Decodable>(_ type: T.Type, _ path: String, port: Int) async throws -> T {
-        let url = URL(string: "http://127.0.0.1:\(port)\(path)")!
+    nonisolated static func get<T: Decodable>(_ type: T.Type, _ path: String, discovery: Discovery) async throws -> T {
+        let url = URL(string: "http://127.0.0.1:\(discovery.port)\(path)")!
         var req = URLRequest(url: url)
         req.timeoutInterval = 4
+        req.setValue("Bearer \(discovery.authToken)", forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         return try JSONDecoder().decode(T.self, from: data)
     }
 
     /// A short-lived POST of a JSON body against the loopback daemon.
-    nonisolated static func postJSON(_ path: String, port: Int, body: [String: Any]) async throws {
-        let url = URL(string: "http://127.0.0.1:\(port)\(path)")!
+    nonisolated static func postJSON(_ path: String, discovery: Discovery, body: [String: Any]) async throws {
+        let url = URL(string: "http://127.0.0.1:\(discovery.port)\(path)")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 4
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(discovery.authToken)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (_, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -164,10 +181,14 @@ final class DaemonClient: ObservableObject {
             let session = URLSession(configuration: cfg)
             while !Task.isCancelled {
                 guard let self else { return }
-                let p = DaemonClient.discoverPort()
-                let url = URL(string: "http://127.0.0.1:\(p)/events")!
+                guard let discovery = DaemonClient.discoverGateway() else {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
+                }
+                let url = URL(string: "http://127.0.0.1:\(discovery.port)/events")!
                 var req = URLRequest(url: url)
                 req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                req.setValue("Bearer \(discovery.authToken)", forHTTPHeaderField: "Authorization")
                 do {
                     let (bytes, resp) = try await session.bytes(for: req)
                     guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }

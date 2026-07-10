@@ -1,7 +1,7 @@
 // e2e: regular `oo` owns the headless/resume contract. Failure paths exit before any
 // model session is built, so this stays hermetic and fast.
 import assert from "node:assert";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,18 @@ const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
 process.env.OO_HOME = ooHome; // in-process store seam (the --done seed) targets the same hermetic home
 const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: { ...process.env, OO_HOME: ooHome } } as const;
+let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
+
+const runOo = async (args: readonly string[]): Promise<{ status: number | null; stdout: string; stderr: string }> =>
+  await new Promise((resolve, reject) => {
+    const child = spawn(ooBin, args, { cwd: repoRoot, env: { ...process.env, OO_HOME: ooHome } });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
+  });
 
 try {
   const help = spawnSync(ooBin, ["--help"], opts);
@@ -48,28 +60,31 @@ try {
   assert.match(missingSession.stderr, /no oo session matching "nope123"/, "names the unmatched session ref");
   assert.equal(missingSession.stdout, "", "nothing on stdout for a bad session ref");
 
-  // --done: model-free write twin of --session-state. Seed a snapshot through the store
-  // seam (this OO_HOME is hermetic; marks only touch in-snapshot threads), mark via the
-  // CLI, and confirm the state edge landed.
-  const { saveSnapshot } = await import("../gateway/store");
-  saveSnapshot({
-    polledAt: "2026-07-07T10:00:00.000Z",
-    threads: [{
-      id: "e2e-done-1", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
-      state: "working", lastActive: "just now",
-      createdAt: "2026-07-07T09:00:00.000Z", lastMessageAt: "2026-07-07T09:55:00.000Z",
-      firstSeen: "2026-07-07T09:00:00.000Z",
-    }],
+  // --done crosses the real client → gateway → state seam; no embedded state fallback.
+  const { startDaemon } = await import("../daemon/runtime");
+  daemon = await startDaemon({
+    port: 0,
+    dbPath: join(ooHome, "state.db"),
+    watch: false,
+    enableEnrichment: false,
+    monitor: { scan: async () => [], intervalMs: 60_000 },
+    scheduler: { tickMs: 60_000 },
+  });
+  daemon.state.recordObservation({
+    id: "e2e-done-1", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
+    lastRole: "user", working: false, secondsSinceLastMessage: 30, secondsSinceActivity: 30,
+    createdAt: "2026-07-07T09:00:00.000Z", lastMessageAt: "2026-07-07T09:55:00.000Z",
   });
   const noIds = spawnSync(ooBin, ["--done"], opts);
   assert.equal(noIds.status, 2, `bare --done exits 2 (got ${noIds.status}; stderr: ${noIds.stderr})`);
   assert.match(noIds.stderr, /--done needs one or more thread ids/, "bare --done names the missing ids");
-  const done = spawnSync(ooBin, ["--done", "e2e-done-1", "ghost-id"], { ...opts, env: { ...opts.env, OO_DAEMON: "0" } });
+  const done = await runOo(["--done", "e2e-done-1", "ghost-id"]);
   assert.equal(done.status, 1, `--done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);
   const doneOut = JSON.parse(done.stdout) as { marked: Array<{ id: string; state: string }>; missingIds: string[] };
   assert.deepEqual(doneOut.marked.map((m) => [m.id, m.state]), [["e2e-done-1", "done"]], "seeded thread marked done (prior state lives in the details ledger)");
   assert.deepEqual(doneOut.missingIds, ["ghost-id"], "unknown id reported, not silently dropped");
 } finally {
+  await daemon?.close();
   rmSync(ooHome, { recursive: true, force: true });
 }
 

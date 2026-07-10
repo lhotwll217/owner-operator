@@ -11,7 +11,7 @@
 //   home/                                           OO_HOME for the subject under eval:
 //     session_sources.json                          defaults disabled, fixture roots added
 //     settings.json                                 activeWindow wide enough for the fixtures
-//     threads.db                                    snapshot + versioned details history
+//     state.db                                      versioned state + details history
 //
 // Timestamps come from fixtures/sessions.mjs offsets, materialized relative to NOW — so
 // "active today" behaves identically on every run. Run again to re-stamp before an eval.
@@ -20,7 +20,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SESSIONS } from "../fixtures/sessions.mjs";
-import { ThreadDb } from "../../src/gateway/threads-db.ts";
+import { ThreadDb } from "../../src/state/database.ts";
 
 const MIN = 60 * 1000;
 const now = Date.now();
@@ -76,12 +76,13 @@ writeFileSync(join(HOME, "session_sources.json"), JSON.stringify({
 }, null, 2));
 writeFileSync(join(HOME, "settings.json"), JSON.stringify({ activeWindow: "14d" }, null, 2));
 
-// Details history first (versions with real created_at spacing), then the snapshot so
-// current state matches the newest version — the same order the poller produces.
+// Details history first (versions with real created_at spacing), then the final transcript
+// observation so current state matches the fixture.
 let stamp = new Date(now).toISOString();
-const db = new ThreadDb(join(HOME, "threads.db"), { now: () => stamp });
+const db = new ThreadDb(join(HOME, "state.db"), { now: () => stamp });
 for (const s of SESSIONS) {
   const created = Math.max(...s.messages.map((m) => m.offsetMin));
+  const lastMsg = Math.min(...s.messages.map((m) => m.offsetMin));
   stamp = at(created);
   db.recordScan({
     id: s.id,
@@ -91,31 +92,28 @@ for (const s of SESSIONS) {
     state: "working",
     createdAt: at(created),
     lastActiveAt: at(Math.min(...s.messages.map((m) => m.offsetMin))),
+    lastMessageAt: at(Math.min(...s.messages.map((m) => m.offsetMin))),
   });
   for (const t of s.detailsHistory) {
     stamp = at(t.offsetMin);
-    db.appendModelDetails(s.id, { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps });
+    db.appendModelDetails(
+      s.id,
+      { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps },
+      at(lastMsg),
+    );
   }
+  stamp = at(lastMsg);
+  db.recordScan({
+    id: s.id,
+    repo: s.repo,
+    app: s.source === "claude" ? "Claude CLI" : "Codex CLI",
+    source: s.source,
+    state: s.state,
+    createdAt: at(created),
+    lastActiveAt: at(lastMsg),
+    lastMessageAt: at(lastMsg),
+  });
 }
-db.saveSnapshot({
-  polledAt: new Date(now).toISOString(),
-  threads: SESSIONS.map((s) => {
-    const latest = s.detailsHistory[s.detailsHistory.length - 1];
-    const lastMsg = Math.min(...s.messages.map((m) => m.offsetMin));
-    return {
-      id: s.id,
-      source: s.source,
-      repo: s.repo,
-      app: s.source === "claude" ? "Claude CLI" : "Codex CLI",
-      topic: latest.topic,
-      state: s.state,
-      lastActive: "recently",
-      createdAt: at(Math.max(...s.messages.map((m) => m.offsetMin))),
-      lastMessageAt: at(lastMsg),
-      firstSeen: at(Math.max(...s.messages.map((m) => m.offsetMin))),
-    };
-  }),
-});
 db.close();
 
 console.log(SANDBOX);

@@ -1,12 +1,12 @@
 // Owner Operator — session-state data model.
 //
-// Session state is LIVE: its membership is the cheap poll's snapshot, minus threads whose status
+// Session state is LIVE: its membership is the monitor's active view, minus threads whose status
 // has been marked `done` — so new threads you start show up on the next tick. The model's details
 // are an ENRICHMENT overlay (title · priority · nextStep) joined by id. New threads still
 // appear (raw digest topic + live status) until the model has written details for them. Pure +
 // UI-independent.
 
-import { isActiveState, sortByAttention, STATE_RANK, type StatusSnapshot, type ThreadStatus } from "./status";
+import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus } from "./status";
 
 /** The model-authored detail fields we cache and join onto a thread by id (the enrichment). */
 export interface ThreadDetails {
@@ -34,14 +34,14 @@ export function displayTitle(t: SessionStateThread): string {
 }
 
 /**
- * Session state = threads in the poll snapshot, each enriched by the cached model
+ * Session state = current threads, each enriched by the cached model
  * details (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
  */
 export function toSessionStateThreads(
-  snapshot: StatusSnapshot,
+  threads: readonly ThreadStatus[],
   details: ReadonlyMap<string, ThreadDetails>,
 ): SessionStateThread[] {
-  return snapshot.threads.map((t): SessionStateThread => {
+  return threads.map((t): SessionStateThread => {
     const d = details.get(t.id);
     const active = isActiveState(t.state);
     return {

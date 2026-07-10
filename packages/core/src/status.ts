@@ -5,10 +5,8 @@
 // fast and for free — expensive model enrichment refreshes slowly and separately. Pure
 // functions only, same contract every surface renders.
 
-import { resolveState } from "./resolve.mjs";
-
 // The canonical resolver — raw scan candidates joined with persisted owner state. Every
-// surface (poller, session-state tools, the scan skill itself) resolves through these, never its
+// surface (monitor, session-state tools, the scanner itself) resolves through these, never its
 // own rule. Plain ESM in resolve.mjs so the zero-install scan skill runs the same code.
 export {
   IDLE_AFTER_SECONDS,
@@ -78,19 +76,6 @@ export interface ThreadStatus {
   diffDeleted?: number;
 }
 
-/** A full poll result. Persisted to the store; surfaces read this. */
-export interface StatusSnapshot {
-  polledAt: string;           // ISO
-  threads: ThreadStatus[];
-}
-
-/** What changed between two polls — the substrate for proactive nudges. */
-export interface StatusDiff {
-  appeared: ThreadStatus[];   // new since last poll
-  transitioned: ThreadStatus[]; // same thread, state changed
-  resolved: ThreadStatus[];   // present last poll, gone now
-}
-
 /** Normalize a raw scan topic for display: strip slash-command/caveat markup, collapse space. */
 export function cleanTopic(raw: string): string {
   return raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || "(untitled)";
@@ -103,59 +88,6 @@ export function sortByAttention<T extends ThreadStatus>(threads: readonly T[]): 
   return [...threads].sort(
     (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || b.lastMessageAt.localeCompare(a.lastMessageAt),
   );
-}
-
-/**
- * Join a fresh scan against the previous snapshot to produce the next one — the heart of
- * the state machine's continuity. Carries `firstSeen` across polls. Pure: same inputs →
- * same snapshot. (State history lives in the db's `thread_details` ledger, not here.)
- */
-export function reconcile(prev: StatusSnapshot | null, rows: readonly ScanRow[], nowIso: string): StatusSnapshot {
-  const byId = new Map((prev?.threads ?? []).map((t) => [t.id, t]));
-  const threads = rows.map((row): ThreadStatus => {
-    const was = byId.get(row.id);
-    // The canonical resolver decides: owner-set `done` holds until a newer message
-    // lands, then the scan-derived state wakes the thread again.
-    const state = resolveState(was, row);
-    return {
-      id: row.id,
-      source: row.source,
-      repo: row.repo,
-      ...(row.project ? { project: row.project } : {}),
-      app: row.app,
-      topic: cleanTopic(row.topic),
-      state,
-      // Display recency = MESSAGE time (matches the digest's "Last message");
-      // file-activity time lies when a GUI app keeps appending housekeeping events.
-      lastActive: formatRelative(row.secondsSinceLastMessage),
-      createdAt: row.createdAt,
-      lastMessageAt: row.lastMessageAt,
-      firstSeen: was?.firstSeen ?? nowIso,
-      diffAdded: row.diffAdded,
-      diffDeleted: row.diffDeleted,
-    };
-  });
-  return { polledAt: nowIso, threads };
-}
-
-/**
- * Threads that just ENTERED `needs-you` (a new assistant response landed → now waiting on the
- * owner). These are the only threads worth a targeted LLM nextStep refresh — everything else
- * the cheap poll handles with status/recency alone. Event-driven, not every-poll.
- */
-export function becameNeedsYou(diff: StatusDiff): ThreadStatus[] {
-  return diff.transitioned.filter((t) => t.state === "needs-you");
-}
-
-/** Diff two snapshots by thread id. `null` prev → everything appeared. */
-export function diffSnapshots(prev: StatusSnapshot | null, next: StatusSnapshot): StatusDiff {
-  const prevById = new Map((prev?.threads ?? []).map((t) => [t.id, t]));
-  const nextById = new Map(next.threads.map((t) => [t.id, t]));
-  return {
-    appeared: next.threads.filter((t) => !prevById.has(t.id)),
-    transitioned: next.threads.filter((t) => prevById.get(t.id)?.state && prevById.get(t.id)!.state !== t.state),
-    resolved: (prev?.threads ?? []).filter((t) => !nextById.has(t.id)),
-  };
 }
 
 /** Lo-fi relative-time formatter (the scan's JSON gives seconds, not a string). */

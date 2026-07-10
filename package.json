@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Local-first chief of staff over your CLI agent sessions, built on the pi coding agent toolkit.",
   "license": "MIT",
-  "bin": { "oo": "./oo" },
+  "bin": {
+    "oo": "./oo"
+  },
   "workspaces": [
     "packages/*"
   ],
@@ -22,15 +24,16 @@
     "test:agent": "tsx src/agent/agent.behavior.ts",
     "eval": "promptfoo eval -c eval/promptfooconfig.yaml --no-cache",
     "eval:compare": "node eval/compare.mjs",
-    "poll:smoke": "tsx src/gateway/poller.smoke.ts",
+    "poll:smoke": "tsx src/session-monitor/monitor.smoke.ts",
     "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
     "lint": "oxlint --deny-warnings"
   },
   "dependencies": {
-    "@owner-operator/core": "*",
-    "@earendil-works/pi-coding-agent": "0.78.0",
     "@earendil-works/pi-ai": "0.78.0",
-    "@earendil-works/pi-tui": "0.78.0"
+    "@earendil-works/pi-coding-agent": "0.78.0",
+    "@earendil-works/pi-tui": "0.78.0",
+    "@owner-operator/core": "*",
+    "croner": "10.0.1"
   },
   "devDependencies": {
     "@types/node": "^24",

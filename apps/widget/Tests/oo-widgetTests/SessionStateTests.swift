@@ -45,6 +45,19 @@ struct SessionStateTests {
         return f.string(from: Date().addingTimeInterval(offset))
     }
 
+    @Test func gatewayPayloadContract() throws {
+        let payload = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/session-state.gateway.json"))
+        let decoded = try JSONDecoder().decode([SessionStateRow].self, from: payload)
+        #expect(decoded[0].id == "thread-1")
+        #expect(decoded[0].title == "Daemon foundation")
+        #expect(decoded[0].nextSteps == "Implement the state seam")
+        #expect(decoded[0].priority == 4)
+        #expect(decoded[0].state == .needsYou)
+    }
+
     @Test func loudestFirstWithinGroup() throws {
         let input = try rows([
             row(id: "i", state: "idle"),

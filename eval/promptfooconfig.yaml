@@ -5,9 +5,9 @@
 # CONTROLLED: both arms run the SAME `oo` binary at the SAME model (.pi/settings.json,
 # codex gpt-5.5) against the SAME seeded fixture sandbox. They differ by exactly one thing:
 #   owner-operator — OO's shipped prompt + full toolset (query_database,
-#                    get_current_session_state, search_sessions, …)
-#   baseline       — a generic session-search prompt + ONLY search_sessions (the same grep
-#                    engine OO wraps). Set via OO_EVAL_BASELINE_PROMPT; see naive-agent.mjs.
+#                    get_current_session_state, read, bash, …)
+#   baseline       — a generic session-search prompt + read/bash and the same session-search
+#                    skill. Set via OO_EVAL_BASELINE_PROMPT; see naive-agent.mjs.
 # Same framework + same model means the tool-call/token/correctness deltas are attributable
 # to OO's composition, not to a model or harness difference. (An earlier version compared
 # OO/gpt-5.5 against Claude Code/haiku — two variables at once; retired as unscientific,

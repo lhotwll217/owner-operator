@@ -1,7 +1,7 @@
 {
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
-  "packages": ["npm:pi-schedule-prompt@0.4.1"],
+  "packages": [],
   "quietStartup": true,
   "hideThinkingBlock": true
 }

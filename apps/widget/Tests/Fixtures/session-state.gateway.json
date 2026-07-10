@@ -1,0 +1,23 @@
+[
+  {
+    "id": "thread-1",
+    "source": "codex",
+    "repo": "owner-operator",
+    "app": "Codex",
+    "topic": "Daemon foundation",
+    "generatedTopic": "Daemon foundation",
+    "ownerTitle": null,
+    "summary": null,
+    "nextSteps": "Implement the state seam",
+    "priority": 4,
+    "state": "needs-you",
+    "stateReason": null,
+    "stateSince": "2026-07-09T10:00:00.000Z",
+    "lastActive": "1 minute ago",
+    "lastActiveAt": "2026-07-09T09:59:00.000Z",
+    "createdAt": "2026-07-09T09:00:00.000Z",
+    "lastMessageAt": "2026-07-09T09:59:00.000Z",
+    "diffAdded": null,
+    "diffDeleted": null
+  }
+]
