@@ -5,13 +5,13 @@
 #
 # qtype tags where the DB earns its keep: state/stale/audit/handoff cases are the ones OO
 # should locate via query_database before (if needed) reading transcripts with
-# search_sessions. locator/evidence/summary/negative lean on search.
+# the session-search skill. locator/evidence/summary/negative lean on search.
 
 # ── search-led: a fact only the transcript holds ────────────────────────────────────
 - vars:
     id: evidence-flaky-error
     question: "What was the exact assertion error message in the flaky forecast cache test?"
-  metadata: { qtype: evidence, expectToolAny: [search_sessions] }
+  metadata: { qtype: evidence, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-
@@ -23,7 +23,7 @@
 - vars:
     id: evidence-flaky-why-fakeclock
     question: "Why did we choose the FakeClock approach over padding the sleeps in the flaky test fix?"
-  metadata: { qtype: evidence, expectToolAny: [search_sessions] }
+  metadata: { qtype: evidence, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-
@@ -35,7 +35,7 @@
 - vars:
     id: evidence-429-root-cause
     question: "What was the root cause of the spurious 429s in the rate limiter?"
-  metadata: { qtype: evidence, expectToolAny: [search_sessions] }
+  metadata: { qtype: evidence, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-
@@ -47,7 +47,7 @@
 - vars:
     id: locator-dexie-decision
     question: "Did any session weigh Dexie against raw IndexedDB? Which session, and what was the recommendation?"
-  metadata: { qtype: locator, expectToolAny: [search_sessions] }
+  metadata: { qtype: locator, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-
@@ -59,7 +59,7 @@
 - vars:
     id: summary-units-session
     question: "Summarize where the --units flag work stands right now."
-  metadata: { qtype: summary, expectToolAny: [search_sessions] }
+  metadata: { qtype: summary, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-
@@ -71,7 +71,7 @@
 - vars:
     id: negative-graphql
     question: "Did we ever discuss GraphQL federation in any session?"
-  metadata: { qtype: negative, expectToolAny: [search_sessions] }
+  metadata: { qtype: negative, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-
@@ -123,8 +123,8 @@
     id: handoff-needs-me-evidence
     question: "For the thread that needs me: what exactly did the agent say it changed, and how do you know?"
   # The #31 regression gate: OO must reach transcripts for the evidence, not answer from the
-  # state summary alone. search_sessions REQUIRED even though the DB locates the thread.
-  metadata: { qtype: handoff, expectToolAny: [search_sessions] }
+  # state summary alone. Skill execution through bash is REQUIRED even though the DB locates the thread.
+  metadata: { qtype: handoff, expectToolAny: [bash] }
   assert:
     - type: llm-rubric
       value: >-

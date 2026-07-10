@@ -16,8 +16,7 @@ if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status !== 0) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const GREP = join(here, "..", "src/session-search/sessions-grep.mjs");
-const VENDOR_GREP = join(here, "..", "vendor/session-grep/session-grep.mjs");
+const GREP = join(here, "..", "src/agent/skills/session-search/scripts/session-search.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "oo-grep-home-"));
 const ooHome = mkdtempSync(join(tmpdir(), "oo-grep-oohome-"));
@@ -70,13 +69,8 @@ try {
     });
     return JSON.parse(out).matches;
   };
-  const ownerOperatorSources = join(ooHome, "owner-operator-sources.json");
-  writeFileSync(ownerOperatorSources, JSON.stringify([
-    { type: "claude", root: join(home, ".claude", "projects") },
-    { type: "pi", root: ownerOperatorDir },
-  ]));
   const runOwnerOperator = (): { id: string; source?: string }[] => {
-    const out = execFileSync(process.execPath, [VENDOR_GREP, "--query", NEEDLE, "--json", "--sources-file", ownerOperatorSources, "--target-root", ownerOperatorDir], {
+    const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--json", "--owner-operator"], {
       env: { ...process.env, HOME: home, OO_HOME: ooHome },
       encoding: "utf8",
     });
@@ -94,7 +88,7 @@ try {
   assert.deepEqual(
     idsOf(ownerOperatorMatches).sort(),
     [ownerOperatorId, otherOwnerOperatorId].sort(),
-    "typed source file plus target-root points the primitive at Owner Operator sessions",
+    "the skill policy points the primitive at Owner Operator sessions",
   );
   assert.ok(ownerOperatorMatches.every((m) => m.source === "pi"), "Owner Operator sessions are just pi-format sessions to the primitive");
   process.stdout.write("ok — sessions-grep: blacklist layers hold; Owner Operator sessions use typed sources + target-root\n");

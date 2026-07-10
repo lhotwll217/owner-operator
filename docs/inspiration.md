@@ -19,7 +19,8 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
   reference terminal-agent codebase.
 - **[session-grep](https://github.com/lhotwll217/session-grep)** — the search primitive we
   vendor ([#20](https://github.com/lhotwll217/owner-operator/issues/20)); house vendoring
-  model: wrapper owns local policy (sources, blacklist), upstream drops into `vendor/` untouched.
+  model: the skill wrapper owns local policy (sources, blacklist), and its private `vendor/`
+  receives the pinned upstream primitive untouched.
 
 ## pi — the toolkit we build on
 
@@ -31,6 +32,11 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `@earendil-works/pi-coding-agent` `0.78.0` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
 | `@earendil-works/pi-ai` `0.78.0` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`croner`](https://github.com/Hexagon/croner) `10.0.1` | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
+
+[`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) was considered and rejected
+for daemon scheduling: it is a Pi-session timer, while Owner Operator needs SQLite-owned job
+intent/history and a fresh isolated Pi session per prompt run. The local scheduler is deliberately
+limited to time evaluation, durable claims through `State`, and execution lifecycle.
 
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in

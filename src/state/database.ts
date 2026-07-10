@@ -146,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_schedule_runs_job_created
 
 CREATE TABLE IF NOT EXISTS schedule_event_watermarks (
   schedule_id TEXT NOT NULL REFERENCES schedules(id),
-  thread_id TEXT NOT NULL REFERENCES threads(id),
+  thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   last_message_at TEXT NOT NULL,
   PRIMARY KEY (schedule_id, thread_id)
 );
@@ -419,7 +419,19 @@ export class ThreadDb {
       params.push(path, path);
     }
     if (!conditions.length) return 0;
-    return Number(this.db.prepare(`DELETE FROM threads WHERE ${conditions.join(" OR ")}`).run(...params).changes);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const where = conditions.join(" OR ");
+      this.db.prepare(
+        `DELETE FROM schedule_event_watermarks WHERE thread_id IN (SELECT id FROM threads WHERE ${where})`,
+      ).run(...params);
+      const deleted = Number(this.db.prepare(`DELETE FROM threads WHERE ${where}`).run(...params).changes);
+      this.db.exec("COMMIT");
+      return deleted;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   saveSchedule(schedule: ScheduleDefinition): void {
@@ -490,6 +502,47 @@ export class ThreadDb {
     ).run(nextRunAt, enabled ? 1 : 0, this.now(), id, expectedRevision).changes) > 0;
   }
 
+  claimScheduledRun(params: {
+    id: string;
+    schedule: ScheduleDefinition;
+    scheduledFor: string;
+    nextRunAt: string | null;
+    enabled: boolean;
+    triggerContext: ScheduleTriggerContext;
+  }): ScheduleRun | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const claimed = Number(this.db.prepare(
+        `UPDATE schedules SET next_run_at = ?, enabled = ?, updated_at = ?, revision = revision + 1
+         WHERE id = ? AND deleted_at IS NULL AND enabled = 1 AND revision = ? AND next_run_at = ?`,
+      ).run(
+        params.nextRunAt,
+        params.enabled ? 1 : 0,
+        this.now(),
+        params.schedule.id,
+        params.schedule.revision,
+        params.scheduledFor,
+      ).changes) > 0;
+      if (!claimed) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const run = this.insertScheduleRun({
+        id: params.id,
+        schedule: params.schedule,
+        trigger: ScheduleRunTrigger.Scheduled,
+        scheduledFor: params.scheduledFor,
+        triggerContext: params.triggerContext,
+        createdAt: this.now(),
+      });
+      this.db.exec("COMMIT");
+      return run;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   createScheduleRun(params: {
     id: string; schedule: ScheduleDefinition; trigger: ScheduleRunTrigger;
     scheduledFor: string | null; triggerContext?: ScheduleTriggerContext;
@@ -520,7 +573,7 @@ export class ThreadDb {
   }
 
   finishScheduleRun(id: string, outcome: {
-    status: ScheduleRunStatus.Completed | ScheduleRunStatus.Failed;
+    status: ScheduleRunStatus.Completed | ScheduleRunStatus.Failed | ScheduleRunStatus.Interrupted;
     exitCode: number | null; stdoutTail: string | null; stderrTail: string | null;
     error: string | null; transcriptId: string | null;
   }): ScheduleRun {

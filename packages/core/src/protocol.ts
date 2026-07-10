@@ -9,10 +9,15 @@ export interface DaemonInfo {
   pid: number;
   startedAt: string;
   fingerprint: string;
+  authToken: string;
 }
 
-export interface DaemonHealth extends DaemonInfo {
+export interface DaemonHealth {
   ok: true;
+  port: number;
+  pid: number;
+  startedAt: string;
+  fingerprint: string;
   stale: boolean;
 }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Vendored session-grep — literal/regex grep across AI coding-session transcripts (Claude Code,
+// session-grep — literal/regex grep across AI coding-session transcripts (Claude Code,
 // Codex, Pi) returning bounded MESSAGE context around each hit, not raw JSONL lines.
-// Ported from owner-operator's sessions-grep skill; standalone here so it can be shared
-// and continuously eval-tuned (see eval/).
+// Extracted from owner-operator's sessions-grep skill; standalone here so it can be
+// shared, vendored back into wrappers, and continuously eval-tuned (see eval/).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--after') { opts.after = Number(args[++i]); opts.afterSet = true; }
   else if (a === '--role') opts.role = args[++i];
   else if (a === '--target-type') opts.targetTypes.push(args[++i]);
+  else if (a === '--source') opts.targetTypes.push(args[++i]);
   else if (a === '--since') opts.since = args[++i];
   else if (a === '--sort') opts.sort = args[++i];
   else if (a === '--root') opts.roots.push(args[++i]);
@@ -72,6 +73,7 @@ if (opts.selfTest) {
 }
 if (opts.at != null && !opts.session) usage(1, '--at requires --session ID_PREFIX');
 if (!opts.query && !opts.overview && !opts.skim && !opts.listRoots && !(opts.session && opts.at != null)) usage(1, 'Missing --query (or use --overview / --skim ID / --session ID --at INDEX)');
+if (opts.roots.length && opts.sourcesFile) usage(1, '--root and --sources-file cannot be combined: --root is an untyped one-off override; use --target-root with --sources-file to narrow configured typed roots');
 if (!Number.isFinite(opts.limit) || opts.limit < 1) usage(1, '--limit must be >= 1');
 if (!Number.isFinite(opts.maxChars) || opts.maxChars < 500) usage(1, '--max-chars must be >= 500');
 if (!Number.isFinite(opts.before) || opts.before < 0) usage(1, '--before must be >= 0');
@@ -133,6 +135,14 @@ let sourceMap = loadSessionSources({
   rootOverrides: opts.roots,
   env: { ...process.env, ...(opts.sourcesFile ? { SESSION_GREP_SOURCES_FILE: opts.sourcesFile } : {}) },
 });
+const configErrorReason = (error) => ({ missing: 'does not exist', unparseable: 'is not valid JSON', 'not-an-array': 'must be a JSON array of { type, root }' }[error] ?? 'could not be used');
+// Ambient env config falls back with a warning for compatibility; an explicit
+// --sources-file is a per-call contract and must fail closed.
+if (sourceMap.configError) {
+  const why = configErrorReason(sourceMap.configError);
+  if (opts.sourcesFile) usage(1, `--sources-file ${sourceMap.configPath} ${why}`);
+  console.error(`session-grep: warning: SESSION_GREP_SOURCES_FILE ${sourceMap.configPath} ${why} — using built-in defaults (see --list-roots)`);
+}
 if (opts.targetRoots.length) {
   const wanted = new Set(opts.targetRoots.map((root) => path.resolve(expandHome(root))));
   const filtered = sourceMap.roots.filter((entry) => wanted.has(path.resolve(entry.root)));
@@ -142,13 +152,6 @@ if (opts.targetRoots.length) {
   sourceMap = { ...sourceMap, roots: filtered };
 }
 const roots = sourceMap.roots.map((entry) => entry.root).filter((dir) => fs.existsSync(dir));
-// A present-but-broken override silently reverts to defaults; say so on every run so a
-// mistake in SESSION_GREP_SOURCES_FILE never passes as "no override took effect".
-if (sourceMap.configError) {
-  const label = opts.sourcesFile ? '--sources-file' : 'SESSION_GREP_SOURCES_FILE';
-  const why = { missing: 'does not exist', unparseable: 'is not valid JSON', 'not-an-array': 'must be a JSON array of { type, root }' }[sourceMap.configError] ?? 'could not be used';
-  console.error(`session-grep: warning: ${label} ${sourceMap.configPath} ${why} — using built-in defaults (see --list-roots)`);
-}
 if (opts.listRoots) {
   console.log(`origin=${sourceMap.origin}`);
   console.log(`config=${sourceMap.configPath ?? '(none)'}`);
@@ -503,7 +506,7 @@ function compileRegex(pattern, caseSensitive) {
 
 function usage(code, msg) {
   if (msg) console.error(msg);
-  console.error('Usage: session-grep.mjs --query TEXT [--any] [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--target-type claude|codex|pi|all ...] [--since today|Nd|YYYY-MM-DD] [--sort newest|oldest|file] [--root DIR ...] [--sources-file FILE] [--target-root DIR ...] [--exclude-re REGEX ...] [--max-chars N] [--include-tools] [--case-sensitive] [--json] | --overview | --skim ID | --session ID --at INDEX | --list-roots | --self-test');
+  console.error('Usage: session-grep.mjs --query TEXT [--any] [--regex] [--limit N] [--before N] [--after N] [--role user|assistant|all] [--target-type claude|codex|pi|all ...] [--source claude|codex|pi|all] [--since today|Nd|YYYY-MM-DD] [--sort newest|oldest|file] [--root DIR ...] [--sources-file FILE] [--target-root DIR ...] [--exclude-re REGEX ...] [--max-chars N] [--include-tools] [--case-sensitive] [--json] | --overview | --skim ID | --session ID --at INDEX | --list-roots | --self-test');
   process.exit(code);
 }
 
@@ -622,6 +625,8 @@ async function selfTest() {
     check('codex adapter parses', cx.totalMatches === 1 && cx.matches[0].source === 'codex');
     const cxOnly = JSON.parse(run(['--query', 'zorptastic', '--target-type', 'claude', '--json']));
     check('--target-type filters by adapter', cxOnly.totalMatches === 0);
+    const cxLegacy = JSON.parse(run(['--query', 'zorptastic', '--source', 'claude', '--json']));
+    check('--source remains a compatibility alias for --target-type', cxLegacy.totalMatches === 0);
 
     // pi adapter: format parsed, source detected from path, toolResult gated by --include-tools
     const pi = JSON.parse(run(['--query', 'plumbuscal', '--json']));
@@ -657,17 +662,25 @@ async function selfTest() {
     check('session_sources type routes codex parser', configured.totalMatches === 1 && configured.matches[0].source === 'codex');
     const configuredViaFlag = JSON.parse(runRaw(['--query', 'relocatedsource', '--json', '--sources-file', sourcesFile]));
     check('--sources-file type routes codex parser', configuredViaFlag.totalMatches === 1 && configuredViaFlag.matches[0].source === 'codex');
+    const envOnlySourcesFile = path.join(dir, 'env_only_sources.json');
+    fs.writeFileSync(envOnlySourcesFile, JSON.stringify([{ type: 'claude', root: path.join(dir, 'moved') }]));
+    const flagWins = JSON.parse(runRaw(['--query', 'relocatedsource', '--json', '--sources-file', sourcesFile], { SESSION_GREP_SOURCES_FILE: envOnlySourcesFile }));
+    check('--sources-file wins over SESSION_GREP_SOURCES_FILE', flagWins.totalMatches === 1 && flagWins.matches[0].source === 'codex');
     const targetedPi = JSON.parse(runRaw(['--query', 'relocatedpi', '--json', '--sources-file', sourcesFile, '--target-root', path.join(dir, 'relocated-pi')]));
     check('--target-root narrows to configured root and keeps parser mapping', targetedPi.totalMatches === 1 && targetedPi.matches[0].source === 'pi');
     const targetedMiss = JSON.parse(runRaw(['--query', 'relocatedsource', '--json', '--sources-file', sourcesFile, '--target-root', path.join(dir, 'relocated-pi')]));
     check('--target-root excludes other configured roots', targetedMiss.totalMatches === 0);
+    const missingExplicit = spawnSync(process.execPath, [self, '--list-roots', '--sources-file', path.join(dir, 'missing_sources.json')], { encoding: 'utf8' });
+    check('missing explicit --sources-file fails closed', missingExplicit.status === 1 && missingExplicit.stderr.includes('--sources-file') && !missingExplicit.stdout.includes('origin='));
+    const rootAndSources = spawnSync(process.execPath, [self, '--query', 'x', '--root', dir, '--sources-file', sourcesFile], { encoding: 'utf8' });
+    check('--root and --sources-file cannot be combined silently', rootAndSources.status === 1 && rootAndSources.stderr.includes('cannot be combined'));
     const configuredClaude = JSON.parse(runRaw(['--query', 'movedclaude', '--json'], { SESSION_GREP_SOURCES_FILE: sourcesFile }));
     check('session_sources type routes claude parser', configuredClaude.totalMatches === 1 && configuredClaude.matches[0].source === 'claude');
     const configuredPi = JSON.parse(runRaw(['--query', 'relocatedpi', '--json'], { SESSION_GREP_SOURCES_FILE: sourcesFile }));
     check('session_sources type routes pi parser', configuredPi.totalMatches === 1 && configuredPi.matches[0].source === 'pi');
     const listed = runRaw(['--list-roots'], { SESSION_GREP_SOURCES_FILE: sourcesFile });
     check('--list-roots shows configured root', listed.includes(`config=${sourcesFile}`) && listed.includes(path.join(dir, 'relocated')));
-    // A malformed local config must be flagged, not silently swapped for the defaults.
+    // A malformed env config falls back for compatibility, but must be flagged.
     const badFile = path.join(dir, 'bad_sources.json');
     fs.writeFileSync(badFile, '{ "disable": ["codex"], not-valid ]');
     const bad = spawnSync(process.execPath, [self, '--list-roots'], { encoding: 'utf8', env: { ...process.env, SESSION_GREP_SOURCES_FILE: badFile } });

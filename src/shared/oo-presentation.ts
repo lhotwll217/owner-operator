@@ -175,10 +175,10 @@ export function statusLabelFor(toolName: string): string {
       return "updating threads…";
     case "query_database":
       return "querying the session database…";
-    case "search_sessions":
-      return "searching sessions…";
     case "schedule_prompt":
       return "scheduling…";
+    case "bash":
+      return "running a command…";
     case "read":
       return "reading…";
     case "grep":

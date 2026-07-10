@@ -18,9 +18,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
 const SANDBOX = path.join(os.tmpdir(), 'oo-eval-sandbox');
 const OO_HOME = path.join(SANDBOX, 'home');
+const DISCOVERY = path.join(OO_HOME, 'daemon.json');
 
+await stopRecordedEvalDaemon();
 const seed = spawnSync('npx', ['tsx', path.join(repoRoot, 'eval', 'seed', 'build-fixture-home.mjs')], { cwd: repoRoot, encoding: 'utf8' });
 if (seed.status !== 0) throw new Error(`fixture seed failed: ${seed.stderr}`);
+const evalDaemon = await startManagedEvalDaemon();
+process.once('exit', () => {
+  if (evalDaemon.exitCode === null) evalDaemon.kill('SIGTERM');
+});
 
 const runStamp = process.env.OO_EVAL_RUN_ID ?? new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
@@ -142,4 +148,75 @@ function compactInput(input) {
 
 function slug(s) {
   return String(s).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 60);
+}
+
+async function stopRecordedEvalDaemon() {
+  let info;
+  try { info = JSON.parse(fs.readFileSync(DISCOVERY, 'utf8')); } catch { return; }
+  if (!await daemonIdentityMatches(info)) {
+    fs.rmSync(DISCOVERY, { force: true });
+    return;
+  }
+  try { process.kill(info.pid, 'SIGTERM'); } catch { return; }
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if (!await daemonIdentityMatches(info)) return;
+    await delay(50);
+  }
+  throw new Error(`prior eval daemon ${info.pid} did not stop`);
+}
+
+async function startManagedEvalDaemon() {
+  const logPath = path.join(SANDBOX, 'daemon.log');
+  const log = fs.openSync(logPath, 'a');
+  const child = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'eval-daemon.mjs')], {
+    cwd: repoRoot,
+    env: { ...process.env, OO_HOME },
+    stdio: ['ignore', log, log],
+  });
+  fs.closeSync(log);
+  child.unref();
+
+  for (let attempt = 0; attempt < 80; attempt++) {
+    if (child.exitCode !== null) {
+      throw new Error(`eval daemon exited before readiness; inspect ${logPath}`);
+    }
+    let info;
+    try { info = JSON.parse(fs.readFileSync(DISCOVERY, 'utf8')); } catch { /* still starting */ }
+    if (info && await daemonReady(info)) return child;
+    await delay(50);
+  }
+  child.kill('SIGTERM');
+  throw new Error(`eval daemon did not become ready; inspect ${logPath}`);
+}
+
+async function daemonIdentityMatches(info) {
+  if (!info || !Number.isInteger(info.port) || !Number.isInteger(info.pid) || !info.authToken) return false;
+  try {
+    const healthResponse = await fetch(`http://127.0.0.1:${info.port}/health`, {
+      headers: { authorization: `Bearer ${info.authToken}` },
+      signal: AbortSignal.timeout(250),
+    });
+    if (!healthResponse.ok) return false;
+    return (await healthResponse.json()).pid === info.pid;
+  } catch {
+    return false;
+  }
+}
+
+async function daemonReady(info) {
+  if (!await daemonIdentityMatches(info)) return false;
+  try {
+    const readyResponse = await fetch(`http://127.0.0.1:${info.port}/ready`, {
+      headers: { authorization: `Bearer ${info.authToken}` },
+      signal: AbortSignal.timeout(250),
+    });
+    if (!readyResponse.ok) return false;
+    return (await readyResponse.json()).ready === true;
+  } catch {
+    return false;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

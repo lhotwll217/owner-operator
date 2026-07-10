@@ -16,6 +16,7 @@ const dir = mkdtempSync(join(tmpdir(), "oo-scheduler-"));
 let nowMs = Date.parse("2026-07-09T10:00:00.000Z");
 const state = new State(join(dir, "state.db"), { now: () => new Date(nowMs).toISOString() });
 const executions: string[][] = [];
+const claimedNextRuns: Array<string | null | undefined> = [];
 const logs: SchedulerLogRecord[] = [];
 let signalSlowStarted: () => void = () => undefined;
 let releaseSlow: () => void = () => undefined;
@@ -26,6 +27,9 @@ const scheduler = new Scheduler(state, {
   now: () => nowMs,
   commandRunner: async ({ argv }): Promise<ScheduleExecutionResult> => {
     executions.push([...argv]);
+    if (argv[1] === "health.mjs") {
+      claimedNextRuns.push(state.listSchedules().find((schedule) => schedule.name === "health check")?.nextRunAt);
+    }
     if (argv[1] === "slow.mjs") {
       signalSlowStarted();
       await slowReleased;
@@ -49,6 +53,7 @@ try {
   nowMs += 60_000;
   await scheduler.tick();
   assert.deepEqual(executions, [["node", "health.mjs"]]);
+  assert.deepEqual(claimedNextRuns, ["2026-07-09T10:02:00.000Z"], "timer occurrence is advanced before work starts");
   const completed = state.listScheduleRuns(job.id)[0];
   assert.equal(completed.status, ScheduleRunStatus.Completed);
   assert.equal(completed.stdoutTail, "ok\n");
@@ -134,11 +139,36 @@ try {
   assert.equal(timedOut.status, ScheduleRunStatus.Failed);
   assert.match(timedOut.error ?? "", /timed out/);
   timeoutScheduler.deleteSchedule(timeoutJob.id);
-  timeoutScheduler.stop();
+  await timeoutScheduler.stop();
+
+  let shutdownStarted: () => void = () => undefined;
+  const shutdownRunStarted = new Promise<void>((resolve) => { shutdownStarted = resolve; });
+  let shutdownSignal: AbortSignal | undefined;
+  const shutdownScheduler = new Scheduler(state, {
+    commandRunner: async ({ signal }): Promise<ScheduleExecutionResult> => {
+      shutdownSignal = signal;
+      shutdownStarted();
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      return { exitCode: 1, stdout: "", stderr: "stopped" };
+    },
+  });
+  const shutdownJob = shutdownScheduler.createSchedule({
+    name: "shutdown drain",
+    enabled: false,
+    trigger: { kind: ScheduleKind.NeedsYou },
+    payload: { kind: ScheduledPayloadKind.Command, argv: ["node", "wait.mjs"] },
+    cwd: dir,
+    timeoutSeconds: 600,
+  });
+  const activeAtShutdown = shutdownScheduler.runNow(shutdownJob.id);
+  await shutdownRunStarted;
+  await shutdownScheduler.stop();
+  assert.equal(shutdownSignal?.aborted, true, "stop aborts active execution");
+  assert.equal((await activeAtShutdown).status, ScheduleRunStatus.Interrupted, "shutdown records an interrupted run");
 
   process.stdout.write("ok — public scheduler seam\n");
 } finally {
-  scheduler.stop();
+  await scheduler.stop();
   state.close();
   rmSync(dir, { recursive: true, force: true });
 }

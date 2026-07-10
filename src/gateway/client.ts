@@ -22,9 +22,16 @@ export async function connectGateway(): Promise<GatewayApi | null> {
   let info: DaemonInfo;
   try { info = JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
   const base = `http://127.0.0.1:${info.port}`;
+  if (!info.authToken) return null;
 
   const json = async <T>(path: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(base + path, { ...init, signal: init?.signal ?? AbortSignal.timeout(2_000) });
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", `Bearer ${info.authToken}`);
+    const response = await fetch(base + path, {
+      ...init,
+      headers,
+      signal: init?.signal ?? AbortSignal.timeout(2_000),
+    });
     if (!response.ok) throw new Error(`gateway ${path}: ${response.status}`);
     return await response.json() as T;
   };
@@ -67,7 +74,10 @@ export async function connectGateway(): Promise<GatewayApi | null> {
       void (async () => {
         while (!stopped) {
           try {
-            const response = await fetch(`${base}/events`, { signal: controller.signal });
+            const response = await fetch(`${base}/events`, {
+              headers: { authorization: `Bearer ${info.authToken}` },
+              signal: controller.signal,
+            });
             const reader = response.body?.getReader();
             if (!reader) throw new Error("gateway event stream has no body");
             const decoder = new TextDecoder();

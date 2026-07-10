@@ -1,12 +1,8 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { join } from "node:path";
 import { complete, type Context } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { EnrichmentCandidate, ThreadDetails } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
-
-const execFileAsync = promisify(execFile);
+import { scanActiveTranscripts } from "../session-monitor/scan-active-transcripts.mjs";
 
 function parseDetails(text: string): ThreadDetails {
   const object = /\{[\s\S]*\}/.exec(text)?.[0];
@@ -30,12 +26,9 @@ function parseDetails(text: string): ThreadDetails {
 
 /** One typed completion for a needs-you message; no tools and no agent loop. */
 export async function enrichThread(candidate: EnrichmentCandidate): Promise<ThreadDetails> {
-  const scan = join(repoRoot, "src", "session-monitor", "scan-active-transcripts.mjs");
-  const { stdout: sample } = await execFileAsync(
-    process.execPath,
-    [scan, "--thread", candidate.id, "--sample", "8", "--since", "30d", "--json"],
-    { cwd: repoRoot, maxBuffer: 8 * 1024 * 1024 },
-  );
+  const sample = JSON.stringify(scanActiveTranscripts([
+    "--thread", candidate.id, "--sample", "8", "--since", "30d",
+  ]), null, 2);
 
   const settings = SettingsManager.create(repoRoot);
   const provider = settings.getDefaultProvider();

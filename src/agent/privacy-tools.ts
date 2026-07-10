@@ -2,17 +2,22 @@
 // blacklist; these wrappers close the raw pi file-tool gap at the tool boundary.
 
 import { existsSync, realpathSync, statSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   createFindToolDefinition,
   createGrepToolDefinition,
   createLsToolDefinition,
   createReadToolDefinition,
+  defineTool,
   type ExtensionAPI,
   type ExtensionFactory,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
 import { isBlacklisted, loadBlacklist, type Blacklist } from "@owner-operator/core";
 import { ooRenderCall } from "../shared/oo-presentation";
 
@@ -20,6 +25,15 @@ type AnyTool = ToolDefinition<any, any, any>;
 type FileToolName = "read" | "grep" | "find" | "ls";
 
 const ooHome = (): string => process.env.OO_HOME ?? path.join(homedir(), ".owner-operator");
+const execFileAsync = promisify(execFile);
+const sessionSearchScript = (): string => path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "skills", "session-search", "scripts", "session-search.mjs",
+);
+
+export enum OwnerOperatorBashCommand {
+  SessionSearch = "session-search",
+}
 const cache = new Map<string, Record<FileToolName, AnyTool>>();
 
 function builtIns(cwd: string): Record<FileToolName, AnyTool> {
@@ -193,8 +207,44 @@ export function createBlacklistAwareFileTools(): AnyTool[] {
   ];
 }
 
+/** Same-name Pi override: skills keep the standard bash tool name, but product policy
+ * narrows it to one exact argv-based helper. No shell ever interprets model input. */
+export function createOwnerOperatorBashTool(): AnyTool {
+  return defineTool({
+    name: "bash",
+    label: "Run session search",
+    description: "Run the bundled session-search skill helper with an explicit argument array. No other command is available.",
+    parameters: Type.Object({
+      command: Type.Literal(OwnerOperatorBashCommand.SessionSearch),
+      args: Type.Array(Type.String(), { description: "Arguments passed verbatim to session-search.mjs." }),
+      timeout: Type.Optional(Type.Number({ minimum: 1, maximum: 120, description: "Timeout in seconds. Default 30." })),
+    }),
+    async execute(_id, params, signal) {
+      if (params.command !== OwnerOperatorBashCommand.SessionSearch) {
+        throw new Error("Owner Operator bash only runs the session-search skill helper");
+      }
+      const { stdout, stderr } = await execFileAsync(
+        process.execPath,
+        [sessionSearchScript(), ...params.args],
+        {
+          cwd: path.dirname(sessionSearchScript()),
+          encoding: "utf8",
+          maxBuffer: 64 * 1024 * 1024,
+          signal,
+          timeout: (params.timeout ?? 30) * 1_000,
+        },
+      );
+      return {
+        content: [{ type: "text" as const, text: `${stdout}${stderr}`.trim() || "(no output)" }],
+        details: undefined,
+      };
+    },
+  });
+}
+
 export function registerBlacklistAwareFileTools(pi: ExtensionAPI): void {
   for (const tool of createBlacklistAwareFileTools()) pi.registerTool(tool);
+  pi.registerTool(createOwnerOperatorBashTool());
 }
 
 export const blacklistAwareFileToolsExtension: ExtensionFactory = (pi) => {

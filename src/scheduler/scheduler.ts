@@ -16,6 +16,7 @@ import {
   type ScheduleTriggerContext,
   type ScheduledCommandPayload,
   type ScheduledPromptPayload,
+  type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
 import { computeNextRunAt, countMissedOccurrences } from "./schedule";
@@ -27,15 +28,6 @@ export interface CommandExecutionRequest {
   argv: readonly [string, ...string[]];
   cwd: string;
   signal: AbortSignal;
-}
-
-export interface PromptExecutionRequest {
-  payload: ScheduledPromptPayload;
-  cwd: string;
-  schedule: ScheduleDefinition;
-  runId: string;
-  signal: AbortSignal;
-  triggerContext?: ScheduleTriggerContext;
 }
 
 export enum SchedulerLogEvent {
@@ -60,7 +52,7 @@ export interface SchedulerOptions {
   now?: () => number;
   tickMs?: number;
   commandRunner?: (request: CommandExecutionRequest) => Promise<ScheduleExecutionResult>;
-  promptRunner?: (request: PromptExecutionRequest) => Promise<ScheduleExecutionResult>;
+  promptRunner?: (request: ScheduledPromptRunRequest) => Promise<ScheduleExecutionResult>;
   logger?: (record: SchedulerLogRecord) => void;
 }
 
@@ -70,10 +62,18 @@ const tail = (value: string): string => {
   return `[truncated to last ${OUTPUT_TAIL_BYTES} bytes]\n${bytes.subarray(bytes.length - OUTPUT_TAIL_BYTES).toString()}`;
 };
 
+function initialNextRunAt(input: ScheduleCreateInput, nowMs: number): string | null {
+  if (!input.enabled) return null;
+  return input.trigger.kind === ScheduleKind.At
+    ? new Date(Date.parse(input.trigger.at)).toISOString()
+    : computeNextRunAt(input.trigger, nowMs);
+}
+
 async function runCommand({ argv, cwd, signal }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
+      detached: process.platform !== "win32",
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -87,12 +87,22 @@ async function runCommand({ argv, cwd, signal }: CommandExecutionRequest): Promi
       if (forceKill) clearTimeout(forceKill);
       resolve({ exitCode: code ?? (killedBy ? 1 : 0), stdout, stderr });
     });
+    const terminate = (signalName: NodeJS.Signals): void => {
+      if (!child.pid) return;
+      try {
+        if (process.platform === "win32") child.kill(signalName);
+        else process.kill(-child.pid, signalName);
+      } catch {
+        try { child.kill(signalName); } catch { /* already exited */ }
+      }
+    };
     const abort = (): void => {
-      child.kill("SIGTERM");
-      forceKill = setTimeout(() => child.kill("SIGKILL"), TERMINATION_GRACE_MS);
+      terminate("SIGTERM");
+      forceKill = setTimeout(() => terminate("SIGKILL"), TERMINATION_GRACE_MS);
       forceKill.unref?.();
     };
-    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
     child.once("close", () => signal.removeEventListener("abort", abort));
   });
 }
@@ -109,7 +119,9 @@ export class Scheduler {
   private unsubscribe: (() => void) | null = null;
   private eventFlush: NodeJS.Immediate | null = null;
   private readonly pendingNeedsYou = new Map<string, string>();
+  private readonly activeControllers = new Set<AbortController>();
   private executionQueue: Promise<void> = Promise.resolve();
+  private stopping = false;
 
   constructor(private readonly state: State, options: SchedulerOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -123,11 +135,7 @@ export class Scheduler {
     this.validateSchedule(input);
     const nowMs = this.now();
     const now = new Date(nowMs).toISOString();
-    const nextRunAt = input.enabled
-      ? input.trigger.kind === ScheduleKind.At
-        ? new Date(Date.parse(input.trigger.at)).toISOString()
-        : computeNextRunAt(input.trigger, nowMs)
-      : null;
+    const nextRunAt = initialNextRunAt(input, nowMs);
     const schedule: ScheduleDefinition = {
       id: randomUUID(), ...input, name: input.name.trim(), revision: 1,
       createdAt: now, updatedAt: now, nextRunAt,
@@ -147,11 +155,7 @@ export class Scheduler {
       revision: existing.revision + 1,
       createdAt: existing.createdAt,
       updatedAt: new Date(nowMs).toISOString(),
-      nextRunAt: input.enabled
-        ? input.trigger.kind === ScheduleKind.At
-          ? new Date(Date.parse(input.trigger.at)).toISOString()
-          : computeNextRunAt(input.trigger, nowMs)
-        : null,
+      nextRunAt: initialNextRunAt(input, nowMs),
     };
     return this.state.saveSchedule(schedule);
   }
@@ -192,6 +196,7 @@ export class Scheduler {
 
   start(): void {
     if (this.timer) return;
+    if (this.stopping) throw new Error("scheduler has been stopped");
     const interrupted = this.state.markRunningScheduleRunsInterrupted("daemon restarted during execution");
     if (interrupted) this.logger({ event: SchedulerLogEvent.StartupInterrupted, count: interrupted });
     this.unsubscribe = this.state.bus.subscribe((event) => {
@@ -211,16 +216,26 @@ export class Scheduler {
     this.timer.unref?.();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    if (this.stopping) {
+      await this.executionQueue;
+      return;
+    }
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     if (this.eventFlush) clearImmediate(this.eventFlush);
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.eventFlush = null;
     this.timer = null;
+    for (const controller of this.activeControllers) {
+      controller.abort(new Error("scheduler stopped"));
+    }
+    await this.executionQueue;
   }
 
   async tick(): Promise<void> {
+    if (this.stopping) return;
     const due = this.state.listDueSchedules(new Date(this.now()).toISOString());
     for (const schedule of due) {
       if (this.running.has(schedule.id)) continue;
@@ -232,16 +247,18 @@ export class Scheduler {
         startedAfterMs: Math.max(0, nowMs - scheduledMs),
         missedOccurrences,
       };
-      await this.enqueue(() => this.execute(
-        schedule, ScheduleRunTrigger.Scheduled, schedule.nextRunAt, context,
-      ));
       const next = computeNextRunAt(schedule.trigger, this.now());
       const enabled = schedule.trigger.kind !== ScheduleKind.At && schedule.enabled;
-      this.state.updateScheduleNextRun(schedule.id, next, enabled, schedule.revision);
+      const run = this.state.claimScheduledRun(schedule, schedule.nextRunAt!, next, enabled, context);
+      if (!run) continue;
+      await this.enqueue(() => this.execute(
+        schedule, ScheduleRunTrigger.Scheduled, schedule.nextRunAt, context, run,
+      ));
     }
   }
 
   async runNow(id: string): Promise<ScheduleRun> {
+    if (this.stopping) throw new Error("scheduler has been stopped");
     const schedule = this.state.scheduleById(id);
     if (!schedule) throw new Error(`no such schedule: ${id}`);
     if (this.running.has(id)) throw new Error(`schedule already running: ${id}`);
@@ -258,7 +275,21 @@ export class Scheduler {
     if (this.running.has(schedule.id)) throw new Error(`schedule already running: ${schedule.id}`);
     this.running.add(schedule.id);
     const run = existingRun ?? this.state.createScheduleRun(schedule, trigger, scheduledFor, triggerContext);
+    if (this.stopping) {
+      this.running.delete(schedule.id);
+      const interrupted = this.state.finishScheduleRun(run.id, schedule.id, {
+        status: ScheduleRunStatus.Interrupted,
+        exitCode: null,
+        stdoutTail: null,
+        stderrTail: null,
+        error: "scheduler stopped before execution",
+        transcriptId: null,
+      });
+      this.logRun(interrupted);
+      return interrupted;
+    }
     const controller = new AbortController();
+    this.activeControllers.add(controller);
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -272,6 +303,7 @@ export class Scheduler {
         : this.runPrompt(schedule.payload, schedule, run.id, controller.signal, triggerContext);
       const result = await work;
       if (timedOut) throw controller.signal.reason ?? new Error("schedule timed out");
+      if (controller.signal.aborted) throw controller.signal.reason ?? new Error("schedule aborted");
       const status = result.exitCode === 0 ? ScheduleRunStatus.Completed : ScheduleRunStatus.Failed;
       const finished = this.state.finishScheduleRun(run.id, schedule.id, {
         status,
@@ -285,7 +317,7 @@ export class Scheduler {
       return finished;
     } catch (error) {
       const finished = this.state.finishScheduleRun(run.id, schedule.id, {
-        status: ScheduleRunStatus.Failed,
+        status: this.stopping ? ScheduleRunStatus.Interrupted : ScheduleRunStatus.Failed,
         exitCode: null,
         stdoutTail: null,
         stderrTail: null,
@@ -296,6 +328,7 @@ export class Scheduler {
       return finished;
     } finally {
       clearTimeout(timeout);
+      this.activeControllers.delete(controller);
       this.running.delete(schedule.id);
     }
   }
@@ -322,6 +355,7 @@ export class Scheduler {
   }
 
   private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    if (this.stopping) return Promise.reject(new Error("scheduler has been stopped"));
     const result = this.executionQueue.then(work, work);
     this.executionQueue = result.then(() => undefined, () => undefined);
     return result;
@@ -337,6 +371,7 @@ export class Scheduler {
   }
 
   private async flushNeedsYou(): Promise<void> {
+    if (this.stopping) return;
     const changes = [...this.pendingNeedsYou].map(([threadId, lastMessageAt]) => ({ threadId, lastMessageAt }));
     this.pendingNeedsYou.clear();
     if (!changes.length) return;

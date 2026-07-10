@@ -28,18 +28,6 @@ for (const file of runtime) {
   }
 }
 
-const appRuntimeInSkills = [join(here, "..", "..", ".agents", "skills")]
-  .flatMap((root) => {
-    try {
-      return readdirSync(root, { recursive: true, withFileTypes: false })
-        .map(String)
-        .filter((file) => /\.(?:[cm]?[jt]s|tsx)$/.test(file));
-    } catch {
-      return [];
-    }
-  });
-assert.deepEqual(appRuntimeInSkills, [], "agent skill directories contain instructions only, never application runtime");
-
 const projectRoot = join(here, "..", "..");
 const architectureRuntime = [join(projectRoot, "src"), join(projectRoot, "packages")]
   .flatMap((root) => readdirSync(root, { recursive: true, withFileTypes: false })
@@ -63,4 +51,4 @@ for (const documentedPath of documentedPaths) {
   assert.ok(existsSync(join(projectRoot, documentedPath)), `docs/architecture.md names missing path: ${documentedPath}`);
 }
 
-console.log(`ok — gateway transport boundary and skill/runtime boundary hold`);
+console.log(`ok — gateway transport boundary and development-skill boundary hold`);

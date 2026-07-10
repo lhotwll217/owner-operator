@@ -44,14 +44,16 @@ func renderText(rows: [SessionStateRow], port: Int) -> String {
 
 /// Fetch + render once, synchronously (blocks on a semaphore so `main` can exit cleanly).
 func runOnce() -> Int32 {
-    let port = DaemonClient.discoverPort()
+    let discovery = DaemonClient.discoverGateway()
+    let port = discovery?.port ?? DaemonClient.defaultPort
     let sem = DispatchSemaphore(value: 0)
     var output = ""
     var code: Int32 = 0
     Task {
         defer { sem.signal() }
         do {
-            let rows = try await DaemonClient.get([SessionStateRow].self, "/session-state", port: port)
+            guard let discovery else { throw URLError(.cannotConnectToHost) }
+            let rows = try await DaemonClient.get([SessionStateRow].self, "/session-state", discovery: discovery)
             output = renderText(rows: rows, port: port)
         } catch {
             output = "oo-widget: daemon offline on 127.0.0.1:\(port)\nstart it with:  oo daemon"

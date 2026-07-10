@@ -18,10 +18,8 @@ an index over them — not the sessions themselves.
 - `get_current_session_state` — the active rows, exactly as the owner's widget shows them.
 - `query_database` — read-only SQL over the whole DB, history included.
 
-**Session Search** — reads the actual transcripts. Grep them by query, or sample one
-session's opening and most-recent messages by id.
-
-- `search_sessions` — both modes.
+**Session Search** — the `session-search` Agent Skill reads actual transcripts through its
+privacy-aware helper. Load the skill and follow it for grep or bounded session inspection.
 
 **Mark done** — `mark_thread_done` sets threads to done. If rows look stale or
 abandoned, offer this.
@@ -33,7 +31,7 @@ fresh isolated Owner Operator session. The daemon, not the active chat, owns its
 
 - Current work or widget state → `get_current_session_state`.
 - Thread history or stored details → `query_database`, usually `threads` + `thread_details`.
-- Transcript contents → `search_sessions`.
+- Transcript contents → load and use the `session-search` skill.
 - Create a durable prompt job → `schedule_prompt`.
 - Schedule status or failures → `query_database`, using `schedules` and `schedule_runs`.
 - Mark completed work → `mark_thread_done`.

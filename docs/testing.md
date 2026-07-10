@@ -25,12 +25,16 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | File | Tier | Covers |
 |------|------|--------|
 | `packages/core/src/*.test.ts` | unit | resolve, status, session-state, blacklist, session-sources, gui-hosts, settings |
-| `src/state/state.test.ts`, `event-bus.test.ts` | unit | sole writer, watermarks, post-commit wake-ups |
-| `src/state/query.test.ts` | unit | State-owned read-only progressive SQL surface |
-| `src/scheduler/*.test.ts` | unit | calendar math, job lifecycle, durable outcomes |
+| `src/state/event-bus.test.ts` | unit | fail-isolated in-memory post-commit wake-ups |
+| `src/state/state.integration.test.ts` | integration | SQLite sole writer, projections, and watermarks |
+| `src/state/query.integration.test.ts` | integration | State-owned read-only progressive SQL surface |
+| `src/scheduler/schedule.test.ts` | unit | calendar math |
+| `src/scheduler/scheduler.integration.test.ts` | integration | job lifecycle and durable outcomes |
 | `src/scheduler/*.integration.test.ts` | integration | needs-you batching and durable dedupe |
 | `src/session-monitor/*.integration.test.ts` | integration | scan reconciliation and async enrichment |
 | `src/gateway/gateway.boundaries.test.ts` | unit | transport owns no process/model runtime; no app code in skills |
+| `src/agent/skills.integration.test.ts` | integration | product skill discovery from the Agent directory |
+| `src/daemon/fingerprint.integration.test.ts` | integration | runtime fingerprint changes with source/settings content |
 | `test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
 | `src/daemon/runtime.e2e.test.ts` | e2e | daemon composition, readiness, Gateway, SSE, schedules, query routing |
 | `src/session-monitor/monitor.smoke.ts` | smoke | "today" digest against the live machine |

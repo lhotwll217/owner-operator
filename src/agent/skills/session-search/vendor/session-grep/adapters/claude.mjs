@@ -1,4 +1,4 @@
-// Vendored Claude Code adapter: ~/.claude/projects/<project-slug>/<session-id>.jsonl,
+// Claude Code sessions: ~/.claude/projects/<project-slug>/<session-id>.jsonl,
 // one JSON record per line; messages under .message.content as typed blocks.
 import { contentToText } from './_shared.mjs';
 

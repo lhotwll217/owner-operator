@@ -1,8 +1,15 @@
 import assert from "node:assert";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DomainEventKind, type DomainEvent, type ScanRow } from "@owner-operator/core";
+import {
+  DomainEventKind,
+  ScheduleKind,
+  ScheduledPayloadKind,
+  type DomainEvent,
+  type ScanRow,
+  type ScheduleDefinition,
+} from "@owner-operator/core";
 import { InMemoryEventBus } from "./event-bus";
 import { State } from "./state";
 
@@ -27,6 +34,8 @@ const row = (lastMessageAt: string): ScanRow => ({
 });
 
 try {
+  process.env.OO_HOME = dir;
+  writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: ["private-repo"] }));
   const state = new State(join(dir, "state.db"), {
     bus,
     now: () => "2026-07-09T10:00:00.000Z",
@@ -34,6 +43,12 @@ try {
   });
 
   state.recordObservation(row("2026-07-09T09:59:00.000Z"));
+  state.recordObservation({
+    ...row("2026-07-09T09:59:30.000Z"),
+    id: "private-thread",
+    repo: "private-repo",
+  });
+  assert.ok(!state.listSessionState().some((item) => item.id === "private-thread"), "State rejects blacklisted writes");
   state.recordObservation({
     ...row("2026-07-07T09:59:00.000Z"),
     id: "thread-old-working",
@@ -89,8 +104,34 @@ try {
   state.recordObservation(row("2026-07-09T10:02:00.000Z"));
   assert.equal(state.listSessionState()[0].state, "needs-you", "new transcript activity reopens done");
 
+  const needsYouSchedule: ScheduleDefinition = {
+    id: "needs-you-job",
+    name: "Needs you job",
+    enabled: true,
+    trigger: { kind: ScheduleKind.NeedsYou },
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt: "Summarize it" },
+    cwd: dir,
+    timeoutSeconds: 60,
+    revision: 1,
+    createdAt: "2026-07-09T10:00:00.000Z",
+    updatedAt: "2026-07-09T10:00:00.000Z",
+    nextRunAt: null,
+  };
+  state.saveSchedule(needsYouSchedule);
+  assert.ok(state.claimNeedsYouScheduleRun(needsYouSchedule, [
+    { threadId: "thread-1", lastMessageAt: "2026-07-09T10:02:00.000Z" },
+  ]));
   state.close();
+
+  writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: ["owner-operator"] }));
+  const reopened = new State(join(dir, "state.db"), {
+    now: () => "2026-07-09T10:03:00.000Z",
+    activeWindow: "1d",
+  });
+  assert.deepEqual(reopened.listSessionState(), [], "open-time purge removes newly blacklisted durable rows");
+  reopened.close();
   process.stdout.write("ok — public state seam\n");
 } finally {
+  delete process.env.OO_HOME;
   rmSync(dir, { recursive: true, force: true });
 }

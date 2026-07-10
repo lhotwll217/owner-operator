@@ -1,4 +1,4 @@
-// Vendored shared helpers for adapters. Files starting with _ are not loaded as adapters.
+// Shared helpers for adapters. Files starting with _ are not loaded as adapters.
 
 // Flatten a message's content blocks to text. opts.includeTools: when false (the
 // default), tool_result blocks are excluded — they are file/command echoes, ~45% of

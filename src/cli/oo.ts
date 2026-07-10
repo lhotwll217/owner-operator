@@ -77,7 +77,7 @@ if (cli.interactive) {
 
 if (cli.sessionState) {
   await (await import("../daemon/ensure")).ensureDaemon();
-  const { getCurrentSessionStateRows } = await import("../state/session-state");
+  const { getCurrentSessionStateRows } = await import("../gateway/session-state");
   process.stdout.write(JSON.stringify(await getCurrentSessionStateRows(), null, 2) + "\n");
   process.exit(0);
 }

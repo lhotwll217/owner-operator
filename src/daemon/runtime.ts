@@ -1,4 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
 import {
   type DaemonHealth,
@@ -37,6 +38,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   const dbPath = options.dbPath ?? stateDatabasePath();
   const startedAt = new Date().toISOString();
   const fingerprint = runtimeFingerprint();
+  const authToken = randomBytes(32).toString("base64url");
   let stale = false;
   let closed = false;
   const modules: DaemonReady["modules"] = {
@@ -72,6 +74,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
 
   let gateway: RunningGateway = { port: 0, close: async () => undefined };
   gateway = await startGateway({
+    authToken,
     state,
     monitor,
     scheduler,
@@ -86,9 +89,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   });
   modules.gateway = true;
 
-  const info: DaemonInfo = { port: gateway.port, pid: process.pid, startedAt, fingerprint };
+  const info: DaemonInfo = { port: gateway.port, pid: process.pid, startedAt, fingerprint, authToken };
   mkdirSync(dirname(daemonInfoPath()), { recursive: true });
-  writeFileSync(daemonInfoPath(), JSON.stringify(info, null, 2));
+  writeFileSync(daemonInfoPath(), JSON.stringify(info, null, 2), { mode: 0o600 });
+  chmodSync(daemonInfoPath(), 0o600);
 
   scheduler.start();
   monitor.start();
@@ -113,7 +117,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       closed = true;
       clearInterval(fingerprintTimer);
       monitor.stop();
-      scheduler.stop();
+      await scheduler.stop();
       await gateway.close();
       state.close();
       try { rmSync(daemonInfoPath(), { force: true }); } catch { /* best effort */ }

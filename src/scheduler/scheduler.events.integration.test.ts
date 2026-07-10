@@ -7,17 +7,18 @@ import {
   ScheduledPayloadKind,
   type ScanRow,
   type ScheduleExecutionResult,
+  type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
 import { waitFor } from "../gateway/test/helpers";
 import { State } from "../state/state";
-import { Scheduler, type PromptExecutionRequest } from "./scheduler";
+import { Scheduler } from "./scheduler";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-scheduler-events-"));
 const state = new State(join(dir, "state.db"));
 const contexts: unknown[] = [];
 const scheduler = new Scheduler(state, {
   tickMs: 60_000,
-  promptRunner: async (request: PromptExecutionRequest): Promise<ScheduleExecutionResult> => {
+  promptRunner: async (request: ScheduledPromptRunRequest): Promise<ScheduleExecutionResult> => {
     contexts.push(request.triggerContext);
     return { exitCode: 0, stdout: "handled", stderr: "", transcriptId: `transcript-${contexts.length}` };
   },
@@ -64,7 +65,7 @@ try {
 
   process.stdout.write("ok — needs-you event batching and durable dedupe\n");
 } finally {
-  scheduler.stop();
+  await scheduler.stop();
   state.close();
   rmSync(dir, { recursive: true, force: true });
 }

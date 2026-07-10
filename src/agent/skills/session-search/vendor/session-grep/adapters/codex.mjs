@@ -1,4 +1,4 @@
-// Vendored Codex CLI adapter: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl, one
+// Codex CLI sessions: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl, one
 // {type, payload} record per line; messages are response_item/message payloads.
 // Boilerplate records (AGENTS.md preamble, IDE context, aborted turns) are skipped.
 import { contentToText } from './_shared.mjs';

@@ -19,15 +19,13 @@ widget · oo agent/tools · Pi extension · oo CLI
 
 | Module | Owns | Does not own |
 |---|---|---|
-| `packages/core` | Shared enums, types, pure state rules, wire contract | I/O, timers, processes |
+| `packages/core` | Shared enums, types, pure state rules, wire contract, dependency-light filesystem config readers | SQLite, network, timers, processes, model calls |
 | `src/state` | SQLite schema, transactions, projections, post-commit events, read-only query docs | Polling, HTTP, model calls |
 | `src/session-monitor` | Transcript scan/watch and its private async enrichment worker | HTTP, scheduling |
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/gateway` | Loopback HTTP/SSE translation and client SDK | SQLite, child processes, polling, model calls |
 | `src/daemon` | Composition, process lifecycle, readiness, discovery, source fingerprint | Domain decisions |
-| `src/agent` | Pi session factory, typed tools, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
-| `src/session-search` | Privacy-aware transcript search wrapper | Durable state |
-| `vendor/session-grep` | Pinned upstream search primitive | Owner Operator policy |
+| `src/agent` | Pi session factory, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
 
 Dependencies point toward the owning seam:
 
@@ -38,13 +36,26 @@ core ← gateway client ← { agent, CLI, widget }
 
 The Gateway server receives module interfaces from the daemon. It does not import the monitor or
 scheduler implementations. `src/gateway/gateway.boundaries.test.ts` enforces that transport owns no
-process/model runtime and that skill directories contain no application code.
+process/model runtime and that application code never loads from development-skill directories.
+
+## Agent capabilities
+
+- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`; same-name
+  safety overrides for Pi file/bash primitives live at the Agent boundary.
+- **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
+  scripts and private vendored dependencies needed to follow its workflow.
+- `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
+  the pinned upstream `session-grep` CLI. The wrapper—not application runtime code—owns the local
+  source mapping and blacklist policy.
+- `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
 
 ## State and events
 
 SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its only production
 writer. The active `/session-state` response is a projection over `threads` and the latest dense
 `thread_details` version; there is no stored snapshot or embedded client store.
+This pre-release V0 intentionally starts `state.db` clean; the retired `threads.db` prototype is
+not a supported upgrade source.
 
 After a transaction commits, `State` publishes a rich typed event on a fail-isolated in-memory bus.
 The bus is a wake-up mechanism, never a queue. The Gateway maps domain events to three typed SSE
@@ -56,8 +67,9 @@ transition, and daemon restart. The monitor never awaits the model in its scan h
 
 ## Scheduler
 
-One daemon scheduler replaces the former Gateway shell runner and the independent
-`pi-schedule-prompt` timer. The typed vocabulary is:
+The daemon composes one scheduler. Schedule definitions, next-run timestamps, execution
+history, and needs-you watermarks persist through `State`; the scheduler owns calendar
+evaluation, wakeups, and execution. The typed vocabulary is:
 
 - Trigger: `at`, `every`, `cron` with an explicit IANA time zone, or `needs-you`.
 - Payload: `prompt` or direct `argv` command.
@@ -73,15 +85,17 @@ without copying its product-specific delivery system.
 Prompt runs create a fresh Pi `SessionManager` and transcript under
 `~/.owner-operator/sessions`; `oo-provenance` records job/run identity. This follows OpenClaw's
 isolated-job rule: [a new transcript/session id per run](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/docs/automation/cron-jobs.md#L203-L220).
-Commands execute exact `argv` without a shell unless an explicitly migrated caller supplies
+Commands execute exact `argv` without a shell unless a caller deliberately supplies
 `["/bin/sh", "-lc", command]`.
 
 Scheduler policy:
 
 - Global concurrency starts at one; the same job never overlaps.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
+- Timer occurrences advance and create their running row in one transaction before external work starts.
 - A daemon crash marks running rows `interrupted`; no automatic job retry occurs.
 - Commands and prompt runs have bounded timeouts and bounded stdout/stderr tails.
+- Shutdown aborts active runs, terminates command process groups, and drains the queue before State closes.
 - Disabling/deleting prevents future triggers but does not cancel an active run.
 - A monotonic schedule revision prevents an active run from overwriting a concurrent edit.
 - Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit atomically.
@@ -91,9 +105,10 @@ The table intent and columns live once in `src/state/schema-docs.ts`.
 
 ## Daemon and clients
 
-The daemon binds only `127.0.0.1`. `/health` reports PID, start time, fingerprint, and staleness;
-`/ready` reports module initialization. Clients require readiness. Production clients never open
-SQLite and there is no `OO_DAEMON=0` mode.
+The daemon binds only `127.0.0.1`. Its mode-`0600` discovery file carries a fresh bearer token;
+every HTTP/SSE request authenticates with it. `/health` reports PID, start time, fingerprint, and
+staleness; `/ready` reports module initialization. Clients require readiness. Production clients
+never open SQLite and there is no `OO_DAEMON=0` mode.
 
 The runtime fingerprint hashes `src`, `packages/core`, package metadata, and Pi settings, including
 uncommitted changes. A mismatch marks the daemon stale and exits it gracefully; launchd or the
@@ -105,9 +120,3 @@ The widget installer installs both LaunchAgents. The widget itself remains a pur
 and never spawns a process. Showing Owner Operator's own scheduled sessions in the widget is a
 separate feature; those transcripts are searchable now but excluded from external coding-session
 monitoring, preventing automation loops.
-
-## V0 cutover
-
-There are no downstream consumers. The old `threads.db`, JSON snapshot, embedded fallback,
-Gateway-owned poll/scheduler, skill runtime, shell schedule shape, and compatibility migrations are
-intentionally not carried forward. V0 starts with `state.db` and one canonical runtime.

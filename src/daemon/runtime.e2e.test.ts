@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import {
   DatabaseQueryAction,
@@ -27,6 +28,9 @@ const daemon = await startDaemon({
 
 try {
   await waitFor(() => daemon.state.listSessionState().length === 1, 1_000, "initial monitor poll");
+  const unauthenticated = await fetch(`http://127.0.0.1:${daemon.port}/health`);
+  assert.equal(unauthenticated.status, 401, "every Gateway route requires the discovery credential");
+  assert.equal(statSync(join(dir, "daemon.json")).mode & 0o777, 0o600, "discovery credential is owner-readable only");
   const gateway = await connectGateway();
   assert.ok(gateway, "ready daemon is discoverable");
   assert.equal((await gateway!.health()).fingerprint, daemon.fingerprint);

@@ -2,7 +2,7 @@
 
 Proves [#31](https://github.com/lhotwll217/owner-operator/issues/31): the Operator's
 prompt/tool composition answers session questions at ≥ baseline correctness, using the
-state DB as a locator and `search_sessions` for evidence. Pattern adapted from the
+state DB as a locator and the `session-search` skill for evidence. Pattern adapted from the
 [session-grep eval harness](https://github.com/lhotwll217/session-grep).
 
 ## Controlled — same model, same framework, one variable
@@ -12,10 +12,10 @@ gpt-5.5) against the same seeded sandbox. They differ by exactly one thing — O
 composition:
 
 - **owner-operator** — OO's prompt + full toolset (`query_database`,
-  `get_current_session_state`, `search_sessions`, …).
-- **baseline** — a generic session-search prompt + `search_sessions` (the same grep engine
-  OO wraps) and `read`, but **no DB/state tools**, via `OO_EVAL_BASELINE_PROMPT` (see
-  `providers/naive-agent.mjs`). Both arms hold `read`, so the single variable is OO's
+  `get_current_session_state`, `read`, `bash`, …).
+- **baseline** — a generic prompt plus `read`, `bash`, and the same `session-search` skill,
+  but **no DB/state tools**, via `OO_EVAL_BASELINE_PROMPT` (see
+  `providers/naive-agent.mjs`). Both arms hold the skill, so the single variable is OO's
   DB tools + prompt.
 
 So the tool-call / token / correctness deltas are attributable to OO's composition, not to
@@ -51,7 +51,7 @@ an LLM run.
 | `seed/build-fixture-home.mjs` | materializes `$TMPDIR/oo-eval-sandbox`: transcripts + seeded OO_HOME (sources config, state.db with versioned details history); timestamps relative to now |
 | `providers/pi-agent-core.mjs` | shared runner: seeds the sandbox once, spawns `oo`, parses `OO_TRACE` NDJSON into tool calls + usage |
 | `providers/oo-agent.mjs` | subject arm: OO as shipped (full prompt + toolset) |
-| `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + `search_sessions`/`read`, no DB tools (`OO_EVAL_BASELINE_PROMPT`) |
+| `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + session-search skill, no DB tools (`OO_EVAL_BASELINE_PROMPT`) |
 | `fixtures/naive-baseline-prompt.md` | the control arm's generic session-search prompt |
 | `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded; judge only, not an arm) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; both arms attempt all of them |

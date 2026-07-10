@@ -35,7 +35,6 @@ export enum AgentToolId {
   GetCurrentSessionState = "get_current_session_state",
   MarkThreadDone = "mark_thread_done",
   QueryDatabase = "query_database",
-  SearchSessions = "search_sessions",
   SchedulePrompt = "schedule_prompt",
 }
 
@@ -84,6 +83,16 @@ export interface ScheduleExecutionResult {
   stdout: string;
   stderr: string;
   transcriptId?: string;
+}
+
+/** Runtime request passed from the scheduler to the isolated Pi prompt harness. */
+export interface ScheduledPromptRunRequest {
+  payload: ScheduledPromptPayload;
+  cwd: string;
+  schedule: ScheduleDefinition;
+  runId: string;
+  signal: AbortSignal;
+  triggerContext?: ScheduleTriggerContext;
 }
 
 export interface NeedsYouTriggerContext {

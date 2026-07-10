@@ -57,8 +57,8 @@ for (const word of OO_CYCLE_WORDS) {
 //    it replaces, never accumulates.
 // A running tool overrides the cycling word with the tool's label…
 assert.equal(
-  foldWorkingLine([{ kind: "resume" }, { kind: "tool_start", toolName: "search_sessions" }]),
-  statusLabelFor("search_sessions"),
+  foldWorkingLine([{ kind: "resume" }, { kind: "tool_start", toolName: "bash" }]),
+  statusLabelFor("bash"),
   "a running tool names itself on the one line",
 );
 // …and the label is a single line, not a wall.
@@ -67,7 +67,7 @@ assert.ok(toolLine && !toolLine.includes("\n"), "the working line is a single li
 // Two tools in a row: only the latest shows — nothing lingers past a replacement.
 assert.equal(
   foldWorkingLine([
-    { kind: "tool_start", toolName: "search_sessions" },
+    { kind: "tool_start", toolName: "bash" },
     { kind: "tool_end" },
     { kind: "tool_start", toolName: "query_database" },
   ]),
@@ -78,7 +78,7 @@ assert.equal(
 // resume begins on the first cycling word; idle clears the line entirely.
 assert.equal(foldWorkingLine([{ kind: "resume" }]), OO_CYCLE_WORDS[0], "resume → first cycle word");
 assert.equal(
-  foldWorkingLine([{ kind: "tool_start", toolName: "search_sessions" }, { kind: "idle" }]),
+  foldWorkingLine([{ kind: "tool_start", toolName: "bash" }, { kind: "idle" }]),
   undefined,
   "idle clears the working line",
 );
@@ -125,7 +125,7 @@ assert.equal(line.apply({ kind: "tool_start", toolName: "read" }), statusLabelFo
 assert.equal(line.apply({ kind: "idle" }), undefined, "idle clears it");
 
 // Labels are human, compact, and single-line.
-for (const name of ["search_sessions", "query_database", "read", "mark_thread_done", "unknown_tool"]) {
+for (const name of ["bash", "query_database", "read", "mark_thread_done", "unknown_tool"]) {
   const label = statusLabelFor(name);
   assert.ok(label.length > 0 && !label.includes("\n"), `${name} → a compact one-line label`);
 }

@@ -1,7 +1,9 @@
 import {
   DomainEventKind,
   ScheduleRunStatus,
+  isBlacklisted,
   loadActiveWindow,
+  loadBlacklist,
   parseWindowMs,
   resolveState,
   type DomainEvent,
@@ -12,20 +14,18 @@ import {
   type EnrichmentCandidate,
   type ScheduleTriggerContext,
   type ThreadDetails,
+  type Blacklist,
+  type MarkThreadsDoneResult,
 } from "@owner-operator/core";
 import { randomUUID } from "node:crypto";
 import { ThreadDb, type SessionStateRow } from "./database";
 import { InMemoryEventBus } from "./event-bus";
+import { ownerOperatorHome } from "../shared/paths";
 
 export interface StateOptions {
   bus?: InMemoryEventBus;
   now?: () => string;
   activeWindow?: string;
-}
-
-export interface MarkThreadsDoneResult {
-  marked: SessionStateRow[];
-  missingIds: string[];
 }
 
 /** The daemon's sole durable-state seam. All writes commit before events are published. */
@@ -34,15 +34,19 @@ export class State {
   private readonly db: ThreadDb;
   private readonly now: () => string;
   private readonly activeWindow: string;
+  private readonly blacklist: () => Blacklist;
 
   constructor(dbPath?: string, options: StateOptions = {}) {
     this.bus = options.bus ?? new InMemoryEventBus();
     this.now = options.now ?? (() => new Date().toISOString());
-    this.activeWindow = options.activeWindow ?? loadActiveWindow();
+    this.activeWindow = options.activeWindow ?? loadActiveWindow(ownerOperatorHome());
+    this.blacklist = () => loadBlacklist(ownerOperatorHome());
     this.db = new ThreadDb(dbPath, { now: this.now });
+    this.db.purgeBlacklisted(this.blacklist());
   }
 
   recordObservation(row: ScanRow): void {
+    if (isBlacklisted(this.blacklist(), { cwd: row.project, repo: row.repo })) return;
     const previous = this.db.resolutionRow(row.id);
     const state = resolveState(
       previous?.lastMessageAt
@@ -79,6 +83,7 @@ export class State {
   }
 
   recordPoll(rows: readonly ScanRow[]): void {
+    this.db.purgeBlacklisted(this.blacklist());
     for (const row of rows) this.recordObservation(row);
   }
 
@@ -186,6 +191,27 @@ export class State {
     return changed;
   }
 
+  claimScheduledRun(
+    schedule: ScheduleDefinition,
+    scheduledFor: string,
+    nextRunAt: string | null,
+    enabled: boolean,
+    triggerContext: ScheduleTriggerContext,
+  ): ScheduleRun | null {
+    const run = this.db.claimScheduledRun({
+      id: randomUUID(), schedule, scheduledFor, nextRunAt, enabled, triggerContext,
+    });
+    if (!run) return null;
+    this.publish({ kind: DomainEventKind.ScheduleChanged, scheduleId: schedule.id });
+    this.publish({
+      kind: DomainEventKind.ScheduleRunChanged,
+      scheduleId: schedule.id,
+      runId: run.id,
+      status: run.status,
+    });
+    return run;
+  }
+
   createScheduleRun(
     schedule: ScheduleDefinition,
     trigger: ScheduleRunTrigger,
@@ -205,7 +231,7 @@ export class State {
   }
 
   finishScheduleRun(id: string, scheduleId: string, outcome: {
-    status: ScheduleRunStatus.Completed | ScheduleRunStatus.Failed;
+    status: ScheduleRunStatus.Completed | ScheduleRunStatus.Failed | ScheduleRunStatus.Interrupted;
     exitCode: number | null;
     stdoutTail: string | null;
     stderrTail: string | null;

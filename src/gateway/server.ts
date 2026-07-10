@@ -33,6 +33,7 @@ export interface GatewayQueryService {
 }
 
 export interface GatewayOptions {
+  authToken: string;
   state: State;
   monitor: GatewayMonitor;
   scheduler: GatewayScheduler;
@@ -82,6 +83,10 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       response.end(JSON.stringify(body));
     };
     try {
+      if (request.headers.authorization !== `Bearer ${options.authToken}`) {
+        response.setHeader("www-authenticate", "Bearer");
+        return respond(401, { error: "unauthorized" });
+      }
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       const route = `${request.method} ${url.pathname}`;
       const scheduleId = /^\/schedules\/([^/]+)/.exec(url.pathname)?.[1];

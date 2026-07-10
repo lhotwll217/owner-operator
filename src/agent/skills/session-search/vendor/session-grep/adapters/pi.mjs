@@ -1,4 +1,4 @@
-// Vendored Pi coding-agent adapter (badlogic/pi-mono): ~/.pi/agent/sessions/<cwd-slug>/
+// Pi coding-agent sessions (badlogic/pi-mono): ~/.pi/agent/sessions/<cwd-slug>/
 // <timestamp>_<uuid>.jsonl. Entries are {type, id, parentId, timestamp, message};
 // conversation lives in type:"message" entries whose message.role is user/assistant.
 // Tool output is its own message (role "toolResult") rather than a content block, so

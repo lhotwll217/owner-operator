@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBlacklistAwareFileTools } from "./privacy-tools";
+import { createBlacklistAwareFileTools, createOwnerOperatorBashTool } from "./privacy-tools";
 
 const root = mkdtempSync(join(tmpdir(), "oo-privacy-tools-"));
 const ooHome = join(root, "oo-home");
@@ -28,6 +28,18 @@ try {
 
   const tools = new Map(createBlacklistAwareFileTools().map((tool) => [tool.name, tool]));
   const ctx = { cwd: publicDir } as any;
+
+  await assert.rejects(
+    () => createOwnerOperatorBashTool().execute(
+      "bash-1",
+      { command: "cat", args: [privateFile] },
+      undefined,
+      undefined,
+      ctx,
+    ),
+    /only runs the session-search skill helper/,
+    "bash cannot execute arbitrary commands or read paths directly",
+  );
 
   await assert.rejects(
     () => tools.get("read")!.execute("read-1", { path: privateFile }, undefined, undefined, ctx),

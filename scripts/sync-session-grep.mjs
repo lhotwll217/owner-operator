@@ -1,17 +1,16 @@
 #!/usr/bin/env node
-// sync-session-grep — compare vendor/session-grep against upstream and re-sync when needed.
+// sync-session-grep — compare session-search's private vendor against upstream.
 //
 //   node scripts/sync-session-grep.mjs --check
-//                                       verify vendor/ is byte-identical to the pinned
+//                                       verify the private vendor is byte-identical to the pinned
 //                                       upstream commit (exit 1 on drift, 2 if unreachable)
 //   node scripts/sync-session-grep.mjs --apply REF
-//                                       re-sync vendor/ from upstream REF, update the pin
+//                                       re-sync the private vendor from upstream REF, update the pin
 //                                       in UPSTREAM.md, and run the primitive's self-test
 //
-// The upstream URL and pin live in vendor/UPSTREAM.md (single source of truth). The one
-// sanctioned deviation — upstream's SKILL.md stored as SKILL.upstream.md so no skill
-// scanner discovers an unwrapped copy — is applied here, so `--apply` can't forget it and
-// `--check` accounts for it. UPSTREAM.md itself is ours; local primitive deltas are tracked
+// The upstream URL and pin live beside the private vendor in UPSTREAM.md. Upstream's
+// agent-facing SKILL.md is deliberately omitted: this directory is a dependency, while
+// Owner Operator exposes its own opinionated skill. UPSTREAM.md itself is ours; local deltas are tracked
 // there while waiting to upstream.
 // --upstream URL overrides the recorded upstream (tests point this at a local fixture).
 import fs from "node:fs";
@@ -21,11 +20,13 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const vendorDir = path.join(here, "..", "vendor", "session-grep");
+const vendorDir = path.join(
+  here, "..", "src", "agent", "skills", "session-search", "vendor", "session-grep",
+);
 const upstreamFile = path.join(vendorDir, "UPSTREAM.md");
 const SKILL_DIR = "skills/session-grep"; // where the primitive lives in the upstream repo
 const OURS = new Set(["UPSTREAM.md"]);
-const RENAME = { "SKILL.md": "SKILL.upstream.md" };
+const OMIT = new Set(["SKILL.md"]);
 
 const args = process.argv.slice(2);
 let mode = null, applyRef = null, upstreamOverride = null;
@@ -43,8 +44,8 @@ if (!mode || (mode === "apply" && !applyRef)) {
 const upstreamMd = fs.readFileSync(upstreamFile, "utf8");
 const url = upstreamOverride ?? /\*\*Upstream:\*\*\s*(\S+)/.exec(upstreamMd)?.[1];
 const pin = /\*\*Synced from:\*\*\s*`([^`]+)`\s*@\s*`([0-9a-f]{7,40})`/.exec(upstreamMd);
-if (!url) fail(1, "vendor/UPSTREAM.md: no **Upstream:** URL found");
-if (mode === "check" && !pin) fail(1, "vendor/UPSTREAM.md: no **Synced from:** `ref` @ `sha` pin found");
+if (!url) fail(1, "UPSTREAM.md: no **Upstream:** URL found");
+if (mode === "check" && !pin) fail(1, "UPSTREAM.md: no **Synced from:** `ref` @ `sha` pin found");
 
 // Fetch the wanted commit into a throwaway clone. Fetching by SHA works against GitHub
 // (allowReachableSHA1InWant); a ref name works everywhere.
@@ -63,9 +64,11 @@ const sha = git("rev-parse", "FETCH_HEAD").stdout.trim();
 const srcDir = path.join(tmp, SKILL_DIR);
 if (!fs.existsSync(srcDir)) fail(2, `Upstream commit ${sha} has no ${SKILL_DIR}/ directory`);
 
-// Upstream files, with the SKILL.md rename applied — this is exactly what vendor/ must hold.
+// Upstream runtime files only — the upstream skill itself is not active in Owner Operator.
 const wanted = new Map(); // vendor-relative name -> upstream absolute path
-for (const rel of listFiles(srcDir)) wanted.set(RENAME[rel] ?? rel, path.join(srcDir, rel));
+for (const rel of listFiles(srcDir)) {
+  if (!OMIT.has(rel)) wanted.set(rel, path.join(srcDir, rel));
+}
 
 if (mode === "check") {
   const have = listFiles(vendorDir).filter((rel) => !OURS.has(rel));
@@ -77,9 +80,9 @@ if (mode === "check") {
   }
   for (const rel of have) if (!wanted.has(rel)) drift.push(`not upstream's: ${rel}`);
   if (drift.length) {
-    fail(1, `vendor/ differs from ${url} ${pin[1]} @ ${pin[2]}:\n  ${drift.join("\n  ")}\nIf this is intentional, document the local delta in vendor/UPSTREAM.md; otherwise re-sync with --apply or revert the edit.`);
+    fail(1, `private vendor differs from ${url} ${pin[1]} @ ${pin[2]}:\n  ${drift.join("\n  ")}\nIf this is intentional, document the local delta in UPSTREAM.md; otherwise re-sync with --apply or revert the edit.`);
   }
-  console.log(`ok — vendor/ is verbatim ${url} @ ${sha} (${wanted.size} files)`);
+  console.log(`ok — private vendor is verbatim ${url} @ ${sha} (${wanted.size} files)`);
 } else {
   for (const rel of listFiles(vendorDir)) {
     if (!OURS.has(rel)) fs.rmSync(path.join(vendorDir, rel));
@@ -93,7 +96,7 @@ if (mode === "check") {
     upstreamFile,
     upstreamMd.replace(/(\*\*Synced from:\*\*\s*)`[^`]*`\s*@\s*`[0-9a-f]{7,40}`/, `$1\`${applyRef}\` @ \`${sha}\``),
   );
-  console.log(`synced vendor/ from ${url} ${applyRef} @ ${sha} (${wanted.size} files); pin updated`);
+  console.log(`synced private vendor from ${url} ${applyRef} @ ${sha} (${wanted.size} files); pin updated`);
   const st = spawnSync(process.execPath, [path.join(vendorDir, "session-grep.mjs"), "--self-test"], { stdio: "inherit" });
   if (st.status !== 0) fail(1, "self-test FAILED on the new vendor copy — do not commit");
   console.log("now run the wrapper's integration test: npx tsx test/sessions-grep.integration.test.ts");

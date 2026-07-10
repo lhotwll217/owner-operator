@@ -82,6 +82,7 @@ let stamp = new Date(now).toISOString();
 const db = new ThreadDb(join(HOME, "state.db"), { now: () => stamp });
 for (const s of SESSIONS) {
   const created = Math.max(...s.messages.map((m) => m.offsetMin));
+  const lastMsg = Math.min(...s.messages.map((m) => m.offsetMin));
   stamp = at(created);
   db.recordScan({
     id: s.id,
@@ -95,9 +96,12 @@ for (const s of SESSIONS) {
   });
   for (const t of s.detailsHistory) {
     stamp = at(t.offsetMin);
-    db.appendModelDetails(s.id, { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps });
+    db.appendModelDetails(
+      s.id,
+      { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps },
+      at(lastMsg),
+    );
   }
-  const lastMsg = Math.min(...s.messages.map((m) => m.offsetMin));
   stamp = at(lastMsg);
   db.recordScan({
     id: s.id,
