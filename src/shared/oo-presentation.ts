@@ -103,6 +103,7 @@ const OO_FG_COLORS: Record<ThemeColor, string> = {
   thinkingMedium: "#81a2be",
   thinkingHigh: "#b294bb",
   thinkingXhigh: "#d183e8",
+  thinkingMax: "#ef9aeb",
   bashMode: ooPalette.accent,
 };
 

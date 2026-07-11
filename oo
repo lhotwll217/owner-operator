@@ -4,7 +4,7 @@
 #   ./oo "what's ongoing?"     → headless single-turn (prose)
 #   ./oo --continue "more"     → resume the most recent oo thread
 #   ./oo --session <id> "more" → resume a specific oo thread
-#   OO_MODEL / .pi/settings.json      → model (default: codex gpt-5.5)
+#   OO_MODEL / .pi/settings.json      → configured model
 # Works from the repo and when installed on PATH via `npm link` (resolves the symlink).
 
 # Resolve symlinks so DIR is the real repo dir even when run as a linked global bin.

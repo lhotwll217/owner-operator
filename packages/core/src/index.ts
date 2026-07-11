@@ -14,6 +14,10 @@ export type { Blacklist } from "./blacklist.mjs";
 export { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
 export type { SessionSource, SessionRoot } from "./session-sources.mjs";
 
+// Transcript transport context must not become a visible topic. Shared by the scanner and
+// durable state projection so legacy rows follow the current classification too.
+export { isSessionBoilerplate } from "./session-text.mjs";
+
 // Interactive GUI hosts (Conductor/Superset drive the SDK, PostHog Code ACP) — the single
 // source of truth that keeps a deliberately-launched session from being hidden as an SDK
 // worker. Read by the scan's launch-mode classifier and app detection. See gui-hosts.mjs.

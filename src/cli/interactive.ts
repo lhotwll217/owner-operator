@@ -40,7 +40,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     cwd,
     agentDir,
     authStorage,
-    settingsManager: SettingsManager.create(cwd), // model from .pi/settings.json (codex gpt-5.5)
+    settingsManager: SettingsManager.create(cwd), // model from .pi/settings.json
     resourceLoaderOptions: {
       ...ownerOperatorResourceLoaderOptions(),
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim

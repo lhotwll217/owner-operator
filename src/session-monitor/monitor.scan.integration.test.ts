@@ -67,6 +67,11 @@ try {
   const current = await polling;
   monitor.stop();
   state.close();
+  const { runQuery } = await import("../state/query");
+  const stored = runQuery(
+    `SELECT transcript_path FROM threads WHERE id = '${sid}'`,
+    join(dir, "state.db"),
+  );
 
   assert.equal(current.length, 1, "the real scan found exactly the seeded session");
   const t = current[0];
@@ -74,6 +79,11 @@ try {
   assert.equal(t.app, "Claude CLI", "runScan maps the scan's `ui` field to `app`");
   assert.equal(t.state, "needs-you", "assistant yielded (end_turn) → needs-you");
   assert.ok(t.topic.includes("tighten the poll loop"), "topic carried from the first user turn");
+  assert.equal(
+    stored.rows[0]?.transcript_path,
+    sessionFile,
+    "the real scan persists its transcript path through monitor and State",
+  );
 
   process.stdout.write("ok — monitor real scan path: scan-active-transcripts → current state\n");
 } finally {

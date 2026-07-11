@@ -1,4 +1,4 @@
-import { complete, type Context } from "@earendil-works/pi-ai";
+import { complete, type Context } from "@earendil-works/pi-ai/compat";
 import { AuthStorage, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ThreadDetails } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";

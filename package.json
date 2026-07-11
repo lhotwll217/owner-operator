@@ -22,22 +22,24 @@
     "test:integration": "node test/run.mjs integration",
     "test:e2e": "node test/run.mjs e2e",
     "test:agent": "tsx src/agent/agent.behavior.ts",
-    "eval": "promptfoo eval -c eval/promptfooconfig.yaml --no-cache",
-    "eval:compare": "node eval/compare.mjs",
+    "eval": "node eval/loop.mjs --full",
+    "eval:loop": "node eval/loop.mjs",
+    "eval:compare": "node eval/compare.mjs --gate",
     "poll:smoke": "tsx src/session-monitor/monitor.smoke.ts",
     "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
     "lint": "oxlint --deny-warnings"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.78.0",
-    "@earendil-works/pi-coding-agent": "0.78.0",
-    "@earendil-works/pi-tui": "0.78.0",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
     "@owner-operator/core": "*",
     "croner": "10.0.1"
   },
   "devDependencies": {
     "@types/node": "^24",
     "oxlint": "^1.72.0",
+    "promptfoo": "0.121.18",
     "tsx": "^4",
     "typescript": "^5"
   }

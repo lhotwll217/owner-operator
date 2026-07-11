@@ -30,8 +30,8 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 
 | pi piece | Where it runs here |
 |---|---|
-| `@earendil-works/pi-coding-agent` `0.78.0` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
-| `@earendil-works/pi-ai` `0.78.0` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
+| `@earendil-works/pi-coding-agent` (pinned in `package.json`) | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
+| `@earendil-works/pi-ai` (pinned in `package.json`) | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`croner`](https://github.com/Hexagon/croner) `10.0.1` | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
 
 [`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) was considered and rejected

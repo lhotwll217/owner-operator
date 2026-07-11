@@ -41,6 +41,7 @@ async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]>
     source: String(thread.source ?? ""),
     repo: String(thread.repo ?? ""),
     ...(typeof thread.project === "string" ? { project: thread.project } : {}),
+    ...(typeof thread.file === "string" ? { transcriptPath: thread.file } : {}),
     app: String(thread.ui ?? ""),
     topic: String(thread.topic ?? ""),
     lastRole: String(thread.lastRole ?? ""),

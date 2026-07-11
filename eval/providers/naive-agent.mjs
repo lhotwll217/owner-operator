@@ -1,7 +1,7 @@
 // The controlled baseline arm: same `oo` binary + same model as the OO arm, but
-// OO_EVAL_BASELINE_PROMPT swaps in a generic session-search prompt and restricts the
-// toolset to read/bash plus the session-search skill (no DB/state tools). So this arm differs from
-// owner-operator by exactly its prompt + toolset — the ablation of OO's composition.
+// OO_EVAL_BASELINE_PROMPT swaps in a generic session-search composition while withholding OO's
+// state/index capabilities. The agent factory owns the concrete roster; this provider owns only
+// the controlled arm selection.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makePiAgentProvider } from './pi-agent-core.mjs';

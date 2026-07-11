@@ -7,31 +7,44 @@ state DB as a locator and the `session-search` skill for evidence. Pattern adapt
 
 ## Controlled — same model, same framework, one variable
 
-Both arms run the **same `oo` binary at the same model** (`.pi/settings.json`, codex
-gpt-5.5) against the same seeded sandbox. They differ by exactly one thing — OO's
-composition:
-
-- **owner-operator** — OO's prompt + full toolset (`query_database`,
-  `get_current_session_state`, `read`, `bash`, …).
-- **baseline** — a generic prompt plus `read`, `bash`, and the same `session-search` skill,
-  but **no DB/state tools**, via `OO_EVAL_BASELINE_PROMPT` (see
-  `providers/naive-agent.mjs`). Both arms hold the skill, so the single variable is OO's
-  DB tools + prompt.
+Both arms run the **same `oo` binary at the same configured model**
+(`.pi/settings.json`, falling back to the committed `.pi/settings.example.json`) against the
+same seeded sandbox, with mutation tools removed. The owner-operator arm uses the shipped
+read-only composition; the baseline uses
+the same runner and session-search capability but withholds OO's state/index composition through
+`OO_EVAL_BASELINE_PROMPT`. The agent factory is the tool-roster source of truth.
 
 So the tool-call / token / correctness deltas are attributable to OO's composition, not to
-a model or harness difference. A cross-model version (OO/gpt-5.5 vs Claude Code/haiku) was
-retired as unscientific — and is unrunnable anyway: pi has no Anthropic auth and `claude -p`
-can't run gpt-5.5, so there's no shared model between two different harnesses.
+a model or harness difference. The harness pins SSE transport symmetrically for both arms so
+long campaigns do not depend on WebSocket connection lifetime; the manifest records that pin.
+A cross-model version was retired because it changed the harness and model at once.
 
 ## Run
 
 ```sh
-npm run eval           # both arms over every case (promptfoo)
+npm run eval:loop -- --help  # causal one-case → probe → core → holdout loop
+npm run eval -- --label "<campaign>" --notes "<claim>" --repeat 1  # ledgered full suite
 npm run eval:compare   # paired report + correctness gate
 ```
 
-Needs: `oo`'s configured model backend (`.pi/settings.json`) for both arms, and Claude Code
-auth for the grader only (any capable judge model works — it is not an arm). No API keys.
+Iteration policy lives in [`AUTORESEARCH.md`](AUTORESEARCH.md); campaign-specific claims
+live under [`hypotheses/`](hypotheses/).
+
+Needs: `oo`'s configured model backend for both arms (copy `.pi/settings.example.json` to the
+ignored `.pi/settings.json` only to customize it), and Claude Code auth for the grader only
+(any capable judge model works — it is not an arm). No API keys.
+
+## PR comparison contract
+
+The base branch carries earlier full-suite entries in `eval_stat_log.json`. Running the complete
+suite writes a detailed `global_results.json` under that run's ignored result folder and prepends
+a compact entry with branch, commit, eval folder, model/grader, repeat, pass rates, and distribution
+statistics for calls, tokens, and cost. Dirty runs also retain a worktree content hash that includes
+non-ignored untracked files. Distinct full runs on the same PR remain visible; rerunning
+stats generation for the same eval folder refreshes that entry without duplicating it. Select the
+accepted current-PR entry and the intended previous-PR entry by branch/commit for comparison.
+Targeted development runs stay in `history.jsonl` and cannot publish here. When the suite changes,
+compare shared case IDs from the raw results and report added/removed cases separately.
 
 ## One chain, not a DB suite
 
@@ -48,16 +61,21 @@ an LLM run.
 | path | what |
 | --- | --- |
 | `fixtures/sessions.mjs` | synthetic sessions (claude + codex formats) — THE ground truth; cases key off facts planted here |
-| `seed/build-fixture-home.mjs` | materializes `$TMPDIR/oo-eval-sandbox`: transcripts + seeded OO_HOME (sources config, state.db with versioned details history); timestamps relative to now |
-| `providers/pi-agent-core.mjs` | shared runner: seeds the sandbox once, spawns `oo`, parses `OO_TRACE` NDJSON into tool calls + usage |
-| `providers/oo-agent.mjs` | subject arm: OO as shipped (full prompt + toolset) |
-| `providers/naive-agent.mjs` | control arm: same `oo`/model, generic prompt + session-search skill, no DB tools (`OO_EVAL_BASELINE_PROMPT`) |
+| `seed/build-fixture-home.mjs` | materializes a run-scoped `$TMPDIR/oo-eval-sandbox/<run-id>`: transcripts + seeded OO_HOME (sources config, state.db with versioned details history); timestamps relative to now; answer-key paths blacklisted |
+| `providers/pi-agent-core.mjs` | shared runner: seeds once, spawns `oo`, records a hashed run manifest plus full session/tool trajectories and usage |
+| `providers/oo-agent.mjs` | subject arm: OO's shipped read-only composition |
+| `providers/naive-agent.mjs` | controlled ablation: same runner/model/search capability without OO's state/index composition |
 | `fixtures/naive-baseline-prompt.md` | the control arm's generic session-search prompt |
 | `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded; judge only, not an arm) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; both arms attempt all of them |
 | `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator arm, opt-in per case) |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |
 | `compare.mjs` | pairs arms per case; gate: OO correctness ≥ baseline; qtype breakdown for the locator payoff |
+| `loop.mjs` | attested one-case/probe/core/holdout runner; writes every run to history and per-run detail |
+| `history.jsonl` | local append-only experiment ledger for targeted, probe, core, and full runs |
+| `results/logs/<run>/global_results.json` | ignored full-run detail: metadata, pass rates, distributions, and per-case results |
+| `eval_stat_log.json` | committed newest-first compact summaries of valid complete full runs, with eval folder + Git identity |
+| `hypotheses/` | campaign-specific claims and expected trajectory changes |
 
 ## How this maps to promptfoo's documented practice
 
@@ -66,11 +84,20 @@ Grounded in promptfoo's agent-eval docs, not improvised:
 - **Provider** — a [custom JS provider](https://www.promptfoo.dev/docs/providers/custom-api/) that spawns the CLI and returns `{ output, tokenUsage, cost, metadata }`. (The simpler `exec:` provider returns stdout text only — no token/cost/metadata — so it can't carry our efficiency data.)
 - **A/B** — two labeled providers over one `tests` set is promptfoo's native [matrix comparison](https://www.promptfoo.dev/docs/configuration/test-cases/).
 - **Correctness** — native `llm-rubric` per case, graded by a pinned provider.
-- **Tool behavior** — a `javascript` assertion over the provider's `metadata` ([custom-api docs](https://www.promptfoo.dev/docs/providers/custom-api/); attested pattern: `ooneko/ai-agent-prompts`). We gate on exactly one behavior — the #31 soundness rule that evidence answers come from a transcript, not a summary row — and only on cases that opt in. Locator/efficiency choices are *observed* (per-qtype tool-call counts), never gated, so the neutral-prompt bet is measured, not enforced. The canonical alternative, [`trajectory:tool-used`](https://www.promptfoo.dev/docs/tracing/), needs the agent to emit **OTLP spans** — `oo`/pi don't, so that's the deferred upgrade path (it would add ordering/arg assertions). `tool-call-f1` is native but scores the *exact* tool set, which can't express "must include X, extras fine" — hence the metadata assert.
+- **Tool behavior** — a `javascript` assertion over the provider's ordered `OO_TRACE`
+  metadata ([custom-api docs](https://www.promptfoo.dev/docs/providers/custom-api/)). Cases
+  can require a successful `session-search`, require a DB/state locator before it, and
+  reject direct transcript reads. Mutation tools are structurally absent from both controlled
+  arms; the assertion's mutation-name denylist is defense in depth, not a scored safety canary.
+  Native OTLP trajectory assertions are not used
+  because `oo`/pi does not emit OTLP spans.
 - **Cross-arm ratio gate** — promptfoo has **no native** per-case arm pairing or ratio gate; the documented practice is to emit `outputPath` JSON and post-process. That's what `compare.mjs` is.
 
 Providers reseed the sandbox at load, so every eval run gets fresh activity windows.
-Trajectories land in `results/logs/<run>/` for inspecting HOW each arm searched.
+Manifests, daemon logs, complete Pi sessions, and tool traces land in
+`results/logs/<run>/`; `eval:compare` fails closed on incomplete arms, provider/grader
+errors, missing trajectories, stale artifacts, or correctness regressions. A fatal model turn
+opens a run-wide circuit breaker so later cases fail cheaply instead of consuming judge tokens.
 
 ## Reading results
 

@@ -27,7 +27,7 @@ const USAGE = `Owner Operator (oo) — track and act on your local CLI agent ses
   oo daemon                  run the state-owning daemon
   oo --help | -h             this help
 
-Model: OO_MODEL or .pi/settings.json (default: codex gpt-5.5)`;
+Model: OO_MODEL or .pi/settings.json`;
 
 const cli = parseOoArgs(process.argv.slice(2));
 
@@ -107,6 +107,7 @@ const {
   continueOoSession,
   createOoSession,
   createOwnerOperatorSession,
+  lastAssistantError,
   lastAssistantText,
   listOoSessions,
   ooProvenance,
@@ -140,7 +141,10 @@ async function resolveSessionManager(): Promise<SessionManager> {
 
 const sessionManager = await resolveSessionManager();
 await (await import("../daemon/ensure")).ensureDaemon();
-const { session, modelLabel } = await createOwnerOperatorSession("chat", { sessionManager });
+const { session, modelLabel } = await createOwnerOperatorSession("chat", {
+  sessionManager,
+  callerSessionId: provenance.fromSession,
+});
 console.error(`[oo] ${modelLabel} · tools: ${ownerOperatorTools.join(", ")}\n`);
 
 const headlessPrompt = cli.prompt;
@@ -175,8 +179,8 @@ session.subscribe((event: any) => {
     const resultChars = JSON.stringify(event.result?.content ?? event.result ?? "").length;
     traceLine({ event: "tool_result", id: event.toolCallId, tool: event.toolName, isError: event.isError, resultChars });
   } else if (event.type === "message_end" && event.message?.role === "assistant") {
-    const { usage, stopReason } = event.message;
-    traceLine({ event: "turn", stopReason, usage });
+    const { usage, stopReason, errorMessage } = event.message;
+    traceLine({ event: "turn", stopReason, usage, ...(errorMessage ? { errorMessage } : {}) });
   }
 });
 
@@ -184,21 +188,28 @@ function emitTurn(): void {
   if (!streamed) process.stdout.write(lastAssistantText(session) || "[oo] (no assistant text)");
 }
 
-async function runTurn(q: string): Promise<void> {
+async function runTurn(q: string): Promise<boolean> {
   streamed = false;
   try {
     await session.prompt(q);
   } catch (e: any) {
     process.stderr.write(`\n[oo] error: ${e?.stack ?? e?.message ?? e}\n`);
-    return;
+    return false;
+  }
+  const error = lastAssistantError(session);
+  if (error) {
+    process.stderr.write(`\n[oo] error: ${error}\n`);
+    return false;
   }
   emitTurn();
+  return true;
 }
 try {
   if (headlessPrompt) {
-    await runTurn(headlessPrompt);
+    const ok = await runTurn(headlessPrompt);
     process.stderr.write(`[oo] session ${sessionManager.getSessionId()}\n`);
     process.stdout.write("\n");
+    if (!ok) process.exitCode = 1;
   } else {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     console.log("Owner Operator — ask what's ongoing. /exit to quit.\n");
