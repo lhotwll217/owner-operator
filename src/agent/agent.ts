@@ -21,7 +21,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
-import { blacklistAwareFileToolsExtension } from "./privacy-tools";
+import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { ownerOperatorCustomTools, ownerOperatorTools } from "./tools";
 
@@ -44,7 +44,30 @@ export interface OwnerOperatorSessionOptions {
   ephemeral?: boolean;
   sessionManager?: SessionManager;
   cwd?: string;
+  callerSessionId?: string;
   toolsAllow?: readonly AgentToolId[];
+}
+
+export function evalSettingsOverrides(
+  env: NodeJS.ProcessEnv,
+): Parameters<SettingsManager["applyOverrides"]>[0] {
+  const transport = env.OO_EVAL_TRANSPORT?.trim();
+  const defaultProvider = env.OO_EVAL_DEFAULT_PROVIDER?.trim();
+  const defaultModel = env.OO_EVAL_DEFAULT_MODEL?.trim();
+  if (!transport && !defaultProvider && !defaultModel) return {};
+  if (env.OO_EVAL_READ_ONLY !== "1") {
+    throw new Error("OO_EVAL settings overrides are restricted to the read-only eval harness");
+  }
+  if (transport && transport !== "sse") {
+    throw new Error(`Unsupported eval transport: ${transport}; expected sse`);
+  }
+  if (Boolean(defaultProvider) !== Boolean(defaultModel)) {
+    throw new Error("OO_EVAL_DEFAULT_PROVIDER and OO_EVAL_DEFAULT_MODEL must be set together");
+  }
+  return {
+    ...(transport ? { transport: "sse" as const } : {}),
+    ...(defaultProvider && defaultModel ? { defaultProvider, defaultModel } : {}),
+  };
 }
 
 // The opinionated agent config, shared by every frontend so they can't drift: one prompt,
@@ -62,16 +85,35 @@ export async function createOwnerOperatorSession(
   // — same binary, same model, same trace — so the eval's controlled arm differs from OO
   // by exactly its prompt and toolset (no DB/state tools). Product runs never set it.
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
+  const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
-  const customTools = baselinePrompt ? [] : ownerOperatorCustomTools;
+  const readOnlyCustomToolNames = new Set<string>([
+    AgentToolId.GetCurrentSessionState,
+    AgentToolId.QueryDatabase,
+  ]);
+  const customTools = baselinePrompt
+    ? []
+    : evalReadOnly
+      ? ownerOperatorCustomTools.filter((tool) => readOnlyCustomToolNames.has(tool.name))
+      : ownerOperatorCustomTools;
   const tools = baselinePrompt
     ? ["read", "bash"]
-    : opts.toolsAllow ? [...opts.toolsAllow] : [...ownerOperatorTools];
-  const cwd = opts.cwd ?? repoRoot;
+    : opts.toolsAllow
+      ? [...opts.toolsAllow]
+      : evalReadOnly
+        ? [
+            AgentToolId.Bash,
+            AgentToolId.Read,
+            AgentToolId.GetCurrentSessionState,
+            AgentToolId.QueryDatabase,
+          ]
+        : [...ownerOperatorTools];
+  const cwd = opts.cwd ?? runtimeCwd();
 
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json
+  settingsManager.applyOverrides(evalSettingsOverrides(process.env));
 
   const loader = new DefaultResourceLoader({
     cwd,
@@ -79,7 +121,7 @@ export async function createOwnerOperatorSession(
     ...ownerOperatorResourceLoaderOptions(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
-    extensionFactories: [blacklistAwareFileToolsExtension],
+    extensionFactories: [createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId })],
   });
   await loader.reload();
 
@@ -98,7 +140,13 @@ export async function createOwnerOperatorSession(
   // so the privacy-aware file-tool overrides are active, then pair with shutdown before dispose.
   if (!opts.ephemeral) await session.bindExtensions({});
 
-  return { session, modelLabel: readModelLabel() };
+  const configuredModel = [settingsManager.getDefaultProvider(), settingsManager.getDefaultModel()]
+    .filter(Boolean)
+    .join("/");
+  const modelLabel = session.model
+    ? `${session.model.provider}/${session.model.id}`
+    : configuredModel || "model unavailable";
+  return { session, modelLabel };
 }
 
 /** Pi modes emit extension teardown on quit; raw-session surfaces must do it before dispose. */
@@ -110,24 +158,13 @@ export async function shutdownSessionExtensions(session: OwnerOperatorSession["s
   }
 }
 
-function readModelLabel(): string {
-  let modelLabel = "model from .pi/settings.json";
-  try {
-    const s = JSON.parse(readFileSync(join(repoRoot, ".pi", "settings.json"), "utf8"));
-    if (s.defaultModel) modelLabel = [s.defaultProvider, s.defaultModel].filter(Boolean).join("/");
-  } catch {
-    // no project settings — fall back to pi defaults
-  }
-  return modelLabel;
-}
-
 // ---- Where oo's own threads live, and how they're labeled ----------------------
 // EVERY oo session persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
 // so the session monitor never scans oo's chatter as if it were one of the owner's coding sessions.
 // This module owns that policy: callers build managers through the helpers below, which bake
 // the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
-// manager isn't given one). Same OO_HOME base as the durable state database. All oo threads
-// run with cwd = repoRoot, so continueRecent/list scope to them correctly within one dir.
+// manager isn't given one). Same OO_HOME base as the durable state database. Product threads
+// use repoRoot; isolated eval threads use their sandbox cwd consistently for create/list/resume.
 //
 // Every invocation stamps an `oo-provenance` custom entry (never sent to the LLM): WHICH
 // surface, owner vs agent origin, the caller's cwd + repo, and — the audit trail — the
@@ -156,7 +193,8 @@ export interface OoProvenance {
 export function ooProvenance(surface: OoSurface, fromSession?: string): OoProvenance {
   const cwd = process.cwd();
   const git = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
-  const callerSession = fromSession ?? process.env.OO_FROM_SESSION ?? undefined;
+  const callerSession = [fromSession, process.env.OO_FROM_SESSION, process.env.CODEX_THREAD_ID]
+    .find((value) => typeof value === "string" && value.trim())?.trim();
   return {
     surface,
     origin: callerSession ? "agent" : "owner",
@@ -174,18 +212,23 @@ export function stampProvenance(sm: SessionManager, p: OoProvenance): void {
 
 /** A fresh oo thread, stamped with its surface + caller provenance. */
 export function createOoSession(provenance: OoProvenance): SessionManager {
-  const sm = SessionManager.create(repoRoot, ooSessionsDir());
+  const sm = SessionManager.create(runtimeCwd(), ooSessionsDir());
   stampProvenance(sm, provenance);
   return sm;
 }
+
+/** Eval subjects run outside the checkout so answer-key files are not their ambient cwd. */
+function runtimeCwd(): string {
+  return process.env.OO_EVAL_CWD || repoRoot;
+}
 /** Resume the most recent oo thread (or a fresh one if none); each resume re-stamps. */
 export function continueOoSession(provenance: OoProvenance): SessionManager {
-  const sm = SessionManager.continueRecent(repoRoot, ooSessionsDir());
+  const sm = SessionManager.continueRecent(runtimeCwd(), ooSessionsDir());
   stampProvenance(sm, provenance);
   return sm;
 }
 /** List oo threads — for resolving a `--session <id>` reference. */
-export const listOoSessions = () => SessionManager.list(repoRoot, ooSessionsDir());
+export const listOoSessions = () => SessionManager.list(runtimeCwd(), ooSessionsDir());
 /** Open a specific oo thread file (re-stamped by the caller), keeping oo's dir for /new or /fork. */
 export function openOoSession(path: string, provenance: OoProvenance): SessionManager {
   const sm = SessionManager.open(path, ooSessionsDir());
@@ -200,6 +243,15 @@ export function lastAssistantText(session: OwnerOperatorSession["session"]): str
   if (typeof c === "string") return c;
   if (Array.isArray(c)) return c.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("");
   return m?.text ?? "";
+}
+
+export function lastAssistantError(session: OwnerOperatorSession["session"]): string | null {
+  const msgs: any[] = (session as any).state?.messages ?? [];
+  const message = [...msgs].reverse().find((item) => item.role === "assistant");
+  if (message?.stopReason !== "error") return null;
+  return typeof message.errorMessage === "string" && message.errorMessage.trim()
+    ? message.errorMessage.trim()
+    : "model turn stopped with an error";
 }
 
 /** Fresh persisted session per scheduled run; never attaches to an active Pi conversation. */
@@ -231,10 +283,11 @@ export async function runScheduledPrompt(request: ScheduledPromptRunRequest): Pr
       ? request.payload.prompt
       : `${request.payload.prompt}\n\nTrigger context:\n${JSON.stringify(request.triggerContext, null, 2)}`;
     await session.prompt(prompt);
+    const error = lastAssistantError(session);
     return {
-      exitCode: 0,
+      exitCode: error ? 1 : 0,
       stdout: lastAssistantText(session),
-      stderr: "",
+      stderr: error ?? "",
       transcriptId: sessionManager.getSessionId(),
     };
   } finally {

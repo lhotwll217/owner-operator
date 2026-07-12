@@ -1,7 +1,0 @@
-{
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
-  "packages": [],
-  "quietStartup": true,
-  "hideThinkingBlock": true
-}

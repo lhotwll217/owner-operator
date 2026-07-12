@@ -10,7 +10,7 @@ import { ensureDaemon } from "./ensure";
 
 const root = mkdtempSync(join(tmpdir(), "oo-ensure-daemon-"));
 const home = join(root, "home");
-const ooHome = join(root, "oo-home");
+const ooHome = join(home, ".owner-operator");
 const bin = join(root, "bin");
 const launchLog = join(root, "launchctl.log");
 const daemonLog = join(root, "spawned-daemon.log");
@@ -47,7 +47,7 @@ if (!existsSync(process.env.OO_TEST_KICKSTART_MARKER)) {
   process.exit(113);
 }
 try {
-  const info = JSON.parse(readFileSync(join(process.env.OO_HOME, "daemon.json"), "utf8"));
+  const info = JSON.parse(readFileSync(join(process.env.OO_TEST_OO_HOME, "daemon.json"), "utf8"));
   process.kill(info.pid, "SIGTERM");
   appendFileSync(process.env.OO_TEST_LAUNCH_LOG, "supervisor-stop " + info.pid + "\\n");
 } catch {}
@@ -71,6 +71,7 @@ process.env.OO_TEST_BIN = join(repoRoot, "oo");
 process.env.OO_TEST_REPO = repoRoot;
 process.env.OO_TEST_LAUNCH_LOG = launchLog;
 process.env.OO_TEST_DAEMON_LOG = daemonLog;
+process.env.OO_TEST_OO_HOME = ooHome;
 process.env.OO_TEST_KICKSTART_MARKER = join(root, "kickstart.marker");
 process.env.OO_TEST_PRINT_VERIFIED_MARKER = join(root, "print-verified.marker");
 
@@ -159,6 +160,7 @@ try {
   delete process.env.OO_TEST_REPO;
   delete process.env.OO_TEST_LAUNCH_LOG;
   delete process.env.OO_TEST_DAEMON_LOG;
+  delete process.env.OO_TEST_OO_HOME;
   delete process.env.OO_TEST_KICKSTART_MARKER;
   delete process.env.OO_TEST_PRINT_VERIFIED_MARKER;
   rmSync(root, { recursive: true, force: true });

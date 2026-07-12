@@ -2,7 +2,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { connectGateway, probeGateway } from "../gateway/client";
 import { daemonLogPath, ownerOperatorHome } from "../shared/paths";
@@ -15,6 +15,10 @@ const DAEMON_LABEL = "com.owner-operator.daemon";
 const LAUNCHCTL_NOT_LOADED_CODES = new Set<string | number>([3, 113]);
 const daemonLaunchAgentPath = (): string =>
   join(homedir(), "Library", "LaunchAgents", `${DAEMON_LABEL}.plist`);
+// launchd owns only the default per-user home. An explicitly spelled default is still the
+// installed job's home; true sandboxes/custom homes must manage their own daemon.
+const launchdCanManageCurrentHome = (): boolean =>
+  resolve(ownerOperatorHome()) === resolve(join(homedir(), ".owner-operator"));
 
 enum LaunchdPidOwnership {
   Owned = "owned",
@@ -53,7 +57,7 @@ async function launchdPidOwnership(pid: number): Promise<LaunchdPidOwnership> {
 
 async function startDaemonProcess(): Promise<void> {
   const launchAgent = daemonLaunchAgentPath();
-  if (existsSync(launchAgent)) {
+  if (launchdCanManageCurrentHome() && existsSync(launchAgent)) {
     const uid = process.getuid?.();
     if (uid === undefined) throw new Error("installed daemon LaunchAgent requires a Unix user id");
     const domain = `gui/${uid}`;
@@ -85,7 +89,7 @@ async function startDaemonProcess(): Promise<void> {
 export async function ensureDaemon(): Promise<void> {
   const expected = runtimeFingerprint();
   const existing = await probeGateway();
-  const launchdOwnsDaemon = existsSync(daemonLaunchAgentPath());
+  const launchdOwnsDaemon = launchdCanManageCurrentHome() && existsSync(daemonLaunchAgentPath());
   let startRequested = false;
   if (existing) {
     if (existing.health.fingerprint === expected && !existing.health.stale && existing.ready.ready) return;

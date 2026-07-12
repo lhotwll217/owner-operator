@@ -28,6 +28,7 @@ import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src
 import { loadSessionSources } from "../../packages/core/src/session-sources.mjs";
 import { loadGuiHosts, guiHostForCwd, interactiveHost } from "../../packages/core/src/gui-hosts.mjs";
 import { loadActiveWindow, parseWindowMs } from "../../packages/core/src/settings.mjs";
+import { isSessionBoilerplate } from "../../packages/core/src/session-text.mjs";
 
 export function scanActiveTranscripts(args = process.argv.slice(2), emit = false) {
 const val = (name, def) => {
@@ -120,15 +121,6 @@ const clip = (s, n = truncate) => {
   s = String(s ?? "").replace(/\s+/g, " ").trim();
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 };
-// Injected/boilerplate turns that aren't real user-facing conversation.
-const NOISE = [
-  /^Respond directly to the user'?s prompt/i, /^<system_instruction>/i, /^<environment_context>/i,
-  /^<user_instructions>/i, /^<user_action>/i, /^<turn_aborted>/i, /^# AGENTS\.md/i,
-  /Use the [\w-]+ worker role/i, /^Review the current code changes/i, /^Remember this token/i,
-  /^\(Empty session\)/i, /A session-scoped Stop hook is now active/i,
-];
-const isBoiler = (t) => !t || !t.trim() || NOISE.some((re) => re.test(t.trim()));
-
 function claudeText(content) {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.filter((c) => c && c.type === "text").map((c) => c.text).join(" ");
@@ -533,7 +525,7 @@ function parseSession({ file, source, mtime, btime }) {
     : project === "(unknown)" ? "(unknown)" : realRepo(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
-  const convo = msgs.filter((m) => !isBoiler(m.text));
+  const convo = msgs.filter((m) => !isSessionBoilerplate(m.text));
   if (convo.length === 0) {
     // A launched PostHog Code task that hasn't streamed a turn yet — typically a cloud run
     // still provisioning its sandbox (only _posthog/* telemetry so far). Surface it as a

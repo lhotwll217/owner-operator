@@ -61,6 +61,7 @@ export class State {
       repo: row.repo,
       project: row.project,
       app: row.app,
+      transcriptPath: row.transcriptPath,
       createdAt: row.createdAt,
       lastActiveAt: row.lastMessageAt,
       lastMessageAt: row.lastMessageAt,

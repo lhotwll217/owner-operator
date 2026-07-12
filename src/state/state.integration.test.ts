@@ -54,8 +54,34 @@ try {
     id: "thread-old-working",
     working: true,
   });
+  state.recordObservation({
+    ...row("2026-07-09T09:58:00.000Z"),
+    id: "legacy-plugin-noise",
+    topic: "<recommended_plugins>injected connector catalog</recommended_plugins>",
+  });
+  state.recordObservation({
+    ...row("2026-07-09T09:58:30.000Z"),
+    id: "generated-review-topic",
+    topic: "Review the current code changes",
+  });
+  assert.equal(
+    state.appendEnrichment(
+      "generated-review-topic",
+      { topic: "Review the current code changes for billing" },
+      "2026-07-09T09:58:30.000Z",
+    ),
+    true,
+  );
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.listSessionState()[0].state, "needs-you");
+  assert.ok(
+    !state.listSessionState().some((item) => item.id === "legacy-plugin-noise"),
+    "legacy injected topics remain durable but do not surface in current state",
+  );
+  assert.ok(
+    state.listSessionState().some((item) => item.id === "generated-review-topic"),
+    "a generated title that resembles transport boilerplate remains visible",
+  );
   assert.ok(state.listSessionState().some((item) => item.id === "thread-old-working"), "history is retained");
   assert.ok(
     !state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),

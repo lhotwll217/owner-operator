@@ -36,6 +36,9 @@ const sessionSearchScript = (): string => path.join(
 export enum OwnerOperatorBashCommand {
   SessionSearch = "session-search",
 }
+export interface OwnerOperatorBashToolOptions {
+  callerSessionId?: string;
+}
 const cache = new Map<string, Record<FileToolName, AnyTool>>();
 
 function builtIns(cwd: string): Record<FileToolName, AnyTool> {
@@ -220,7 +223,7 @@ export function createBlacklistAwareFileTools(): AnyTool[] {
 
 /** Same-name Pi override: skills keep the standard bash tool name, but product policy
  * narrows it to one exact argv-based helper. No shell ever interprets model input. */
-export function createOwnerOperatorBashTool(): AnyTool {
+export function createOwnerOperatorBashTool(opts: OwnerOperatorBashToolOptions = {}): AnyTool {
   return defineTool({
     name: "bash",
     label: "Run session search",
@@ -240,6 +243,10 @@ export function createOwnerOperatorBashTool(): AnyTool {
         {
           cwd: path.dirname(sessionSearchScript()),
           encoding: "utf8",
+          env: {
+            ...process.env,
+            ...(opts.callerSessionId ? { OO_CALLER_SESSION_ID: opts.callerSessionId } : {}),
+          },
           maxBuffer: 64 * 1024 * 1024,
           signal,
           timeout: (params.timeout ?? 30) * 1_000,
@@ -253,11 +260,20 @@ export function createOwnerOperatorBashTool(): AnyTool {
   });
 }
 
-export function registerBlacklistAwareFileTools(pi: ExtensionAPI): void {
+export function registerBlacklistAwareFileTools(
+  pi: ExtensionAPI,
+  opts: OwnerOperatorBashToolOptions = {},
+): void {
   for (const tool of createBlacklistAwareFileTools()) pi.registerTool(tool);
-  pi.registerTool(createOwnerOperatorBashTool());
+  pi.registerTool(createOwnerOperatorBashTool(opts));
 }
 
 export const blacklistAwareFileToolsExtension: ExtensionFactory = (pi) => {
   registerBlacklistAwareFileTools(pi);
+};
+
+export const createBlacklistAwareFileToolsExtension = (
+  opts: OwnerOperatorBashToolOptions = {},
+): ExtensionFactory => (pi) => {
+  registerBlacklistAwareFileTools(pi, opts);
 };

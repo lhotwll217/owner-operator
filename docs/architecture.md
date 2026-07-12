@@ -46,8 +46,13 @@ process/model runtime and that application code never loads from development-ski
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
-  the pinned upstream `session-grep` CLI. The wrapper—not application runtime code—owns the local
-  source mapping and blacklist policy.
+  the pinned upstream `session-grep` CLI. The wrapper—not application runtime code—owns local
+  source mapping, blacklist policy, and the decision to exclude the caller during discovery.
+  Caller identity comes from provenance. Owner Operator's own saved conversations remain a
+  separate, explicit wrapper scope rather than entering default coding-session discovery.
+  The vendored primitive owns canonical-ID exclusion and its opt-in candidate aperture, which
+  groups the complete ranked match set by stable session ID before applying limits or output
+  budgets; literal/IDF ranking remains unchanged.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
 
 ## State and events

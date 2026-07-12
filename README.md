@@ -52,7 +52,10 @@ with `oo "question"`: a single turn that prints its session id on stderr, with `
 / `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
 saved under `~/.owner-operator/sessions` (never mixed with your coding sessions), labeled
 with its surface and caller repo; agents pass `--from-session <id>` so the audit trail
-records who called.
+records who called. Codex callers are detected from `CODEX_THREAD_ID`; other harnesses pass
+`--from-session` or `OO_FROM_SESSION`. Transcript discovery excludes that caller session to
+avoid prompt-echo retrieval. Owner Operator's own saved conversations remain outside normal
+coding-session search and are searched only through the explicit `--owner-operator` scope.
 
 Model-free calls for scripts and agents: `oo --session-state` prints the current state
 rows as JSON, and `oo --done <id...>` marks threads done (ids come from `--session-state`;

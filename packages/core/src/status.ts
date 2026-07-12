@@ -32,6 +32,8 @@ export interface ScanRow {
   repo: string;
   /** Session cwd (absolute) — the identity the privacy blacklist matches on. */
   project?: string;
+  /** Absolute path of the source transcript, when the adapter has one. */
+  transcriptPath?: string;
   /** App / GUI the session was made from (the scan's `ui`). */
   app: string;
   topic: string;

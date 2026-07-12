@@ -4,7 +4,7 @@
 
 import { execFile } from 'node:child_process';
 
-const NO_TOOLS = 'Task,Bash,Read,Write,Edit,MultiEdit,Grep,Glob,WebSearch,WebFetch,TodoWrite,NotebookEdit';
+const NO_TOOLS = 'Agent,Task,Skill,Bash,Read,Write,Edit,MultiEdit,Grep,Glob,WebSearch,WebFetch,TodoWrite,NotebookEdit';
 
 export default class ClaudeGraderProvider {
   constructor(options = {}) {
@@ -17,7 +17,8 @@ export default class ClaudeGraderProvider {
   }
 
   async callApi(prompt) {
-    const model = process.env.EVAL_GRADER_MODEL ?? this.config.model ?? 'sonnet';
+    // Exact model id: a moving family alias makes longitudinal evals incomparable.
+    const model = process.env.EVAL_GRADER_MODEL ?? this.config.model ?? 'claude-fable-5';
     const args = [
       '-p', prompt,
       '--model', model,

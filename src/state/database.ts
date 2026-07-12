@@ -5,6 +5,7 @@ import {
   ScheduleRunStatus,
   ScheduleRunTrigger,
   formatRelative,
+  isSessionBoilerplate,
   type ScheduleDefinition,
   type ScheduleRun,
   type ScheduleTriggerContext,
@@ -365,10 +366,15 @@ export class ThreadDb {
     const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
       Array<Omit<SessionStateRow, "lastActive">>;
     const nowMs = Date.parse(this.now());
-    return rows.map((row) => ({
-      ...row,
-      lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
-    }));
+    return rows
+      // Generated/owner titles are deliberate user-facing labels. Apply the legacy
+      // transport-noise classifier only to raw topics; its broad scan-time patterns must
+      // never hide a real title produced after inspecting the conversation.
+      .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
+      .map((row) => ({
+        ...row,
+        lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
+      }));
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {

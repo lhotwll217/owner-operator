@@ -27,8 +27,9 @@ DerivedData/
 .pi/schedule-prompts.json
 .pi/schedule-prompts-settings.json
 
-# Eval outputs (trajectory logs + result JSONs)
+# Eval outputs (trajectory logs + private, machine-specific causal evidence)
 eval/results/
+eval/findings.jsonl
 
 # Logs
 *.log

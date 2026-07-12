@@ -1,9 +1,45 @@
 // Unit: Owner Operator session tool allowlists.
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  evalSettingsOverrides,
+  lastAssistantError,
+  ownerOperatorPrompt,
   ownerOperatorTools,
   ownerOperatorCustomTools,
+  repoRoot,
 } from "./agent";
+
+assert.deepEqual(evalSettingsOverrides({}), {}, "product sessions keep their configured transport");
+assert.deepEqual(
+  evalSettingsOverrides({ OO_EVAL_READ_ONLY: "1", OO_EVAL_TRANSPORT: "sse" }),
+  { transport: "sse" },
+  "read-only eval subjects use the manifest-recorded stable transport",
+);
+assert.deepEqual(
+  evalSettingsOverrides({
+    OO_EVAL_READ_ONLY: "1",
+    OO_EVAL_DEFAULT_PROVIDER: "example-provider",
+    OO_EVAL_DEFAULT_MODEL: "example-model",
+  }),
+  { defaultProvider: "example-provider", defaultModel: "example-model" },
+  "the manifest-selected eval model overrides ambient Pi defaults",
+);
+assert.throws(
+  () => evalSettingsOverrides({ OO_EVAL_TRANSPORT: "sse" }),
+  /read-only eval/i,
+  "the eval transport override cannot leak into product sessions",
+);
+assert.throws(
+  () => evalSettingsOverrides({ OO_EVAL_READ_ONLY: "1", OO_EVAL_DEFAULT_MODEL: "orphan-model" }),
+  /must be set together/i,
+  "partial eval model pins fail closed",
+);
+assert.throws(
+  () => evalSettingsOverrides({ OO_EVAL_READ_ONLY: "1", OO_EVAL_TRANSPORT: "auto" }),
+  /unsupported eval transport/i,
+);
 
 // Mutation and broad file traversal stay out. The same-name bash override only executes
 // the session-search skill helper; privacy-tools.integration.test proves arbitrary commands are rejected.
@@ -24,11 +60,40 @@ for (const t of ["get_current_session_state", "mark_thread_done", "query_databas
 
 assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === "search_sessions"), "session search is a skill, not a duplicate custom tool");
 
+const harnessPrompt = ownerOperatorPrompt();
+const sessionSearchSkill = readFileSync(
+  join(repoRoot, "src", "agent", "skills", "session-search", "SKILL.md"),
+  "utf8",
+);
+for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
+  assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
+}
+for (const flag of ["--query", "--candidates", "--skim", "--session"]) {
+  assert.doesNotMatch(harnessPrompt, new RegExp(flag), `the harness delegates ${flag} mechanics to the skill`);
+  assert.match(sessionSearchSkill, new RegExp(flag), `the session-search skill owns ${flag} mechanics`);
+}
+assert.doesNotMatch(
+  sessionSearchSkill,
+  /get_current_session_state|query_database/,
+  "the reusable transcript skill does not route between Owner Operator's other tools",
+);
+
 const queryTool = ownerOperatorCustomTools.find((tool) => tool.name === "query_database");
 assert.doesNotMatch(
   queryTool?.description ?? "",
   /CREATE statement/,
   "query_database describes the documented columns it returns, not raw SQLite DDL",
+);
+
+const session = (messages: unknown[]) => ({ state: { messages } }) as any;
+assert.equal(lastAssistantError(session([{ role: "assistant", stopReason: "stop", content: [] }])), null);
+assert.equal(
+  lastAssistantError(session([{ role: "assistant", stopReason: "error", errorMessage: "usage exhausted", content: [] }])),
+  "usage exhausted",
+);
+assert.equal(
+  lastAssistantError(session([{ role: "assistant", stopReason: "error", content: [] }])),
+  "model turn stopped with an error",
 );
 
 process.stdout.write("ok — session capabilities: constrained skill execution plus typed state tools\n");

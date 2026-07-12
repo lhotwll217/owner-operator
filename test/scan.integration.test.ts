@@ -71,6 +71,25 @@ writeFileSync(
   JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Backoff test added." }] } }) + "\n",
 );
 
+// Codex App injects connector recommendations as a synthetic user turn before the real
+// prompt. It must not become the topic or appear in the sampled conversation.
+const codexId = "0198a111-2222-7333-8444-555555555555";
+const codexCwd = join(home, "dev", "codex-app");
+mkdirSync(codexCwd, { recursive: true });
+const codexFile = join(home, ".codex", "sessions", "2026", "07", "10", `rollout-2026-07-10T08-30-00-${codexId}.jsonl`);
+mkdirSync(dirname(codexFile), { recursive: true });
+const codexMessage = (role: "user" | "assistant", text: string, ts: string) =>
+  JSON.stringify({ timestamp: ts, type: "response_item", payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] } }) + "\n";
+writeFileSync(
+  codexFile,
+  JSON.stringify({ timestamp: at(24), type: "session_meta", payload: { id: codexId, cwd: codexCwd, originator: "codex_cli_rs", source: "vscode" } }) + "\n" +
+    codexMessage("user", "<recommended_plugins>available connector catalog</recommended_plugins>\n<environment_context>injected</environment_context>", at(23)) +
+    JSON.stringify({ timestamp: at(22), type: "event_msg", payload: { type: "task_started" } }) + "\n" +
+    codexMessage("user", "find the real customer context", at(22)) +
+    codexMessage("assistant", "The customer context is in the linked transcript.", at(19)) +
+    JSON.stringify({ timestamp: at(19), type: "event_msg", payload: { type: "task_complete" } }) + "\n",
+);
+
 // Plain workspace stacked on a non-main base branch. The old scanner always tried
 // origin/main first, which made the diff include the release branch's own line.
 const stackedRepoDir = join(home, "dev", "feature-from-release");
@@ -285,11 +304,16 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 11, "scan finds the Claude, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode, Antigravity, and Grok Build sessions");
+  assert.equal(fresh.count, 12, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode, Antigravity, and Grok Build sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
   assert.equal(claude.diffAdded, undefined, "no repo at the claude cwd → no delta");
+
+  const codex = byId(fresh, codexId)!;
+  assert.equal(codex.ui, "Codex App", "vscode source hint → Codex App");
+  assert.equal(codex.topic, "find the real customer context", "injected plugin catalog is not the topic");
+  assert.ok(codex.firstMessages.every((m) => !m.text.includes("recommended_plugins")), "injected plugin catalog is absent from samples");
 
   // The Cursor finder: slug → real cwd (dashes inside the leaf), origin app, git delta.
   const cursor = byId(fresh, cid)!;
@@ -414,7 +438,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 11, "visible set unchanged");
+  assert.equal(run().count, 12, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 
