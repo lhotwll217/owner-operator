@@ -38,9 +38,32 @@ export function sessionCatalogReviewContract(
       defaults,
       common,
     })),
-    hosts: hosts.filter(({ review }) => review).map(({ id, harnesses: hostHarnesses }) => ({
+    hosts: hosts.filter(({ review }) => review).map(({
       id,
       harnesses: hostHarnesses,
+      defaultRoots,
+      formats,
+      entrypoints,
+      originators,
+      sourceHints,
+      formatMatch,
+      automatedTransport,
+      fallback,
+      overridesAutomation,
+      surfaceEmpty,
+    }) => ({
+      id,
+      harnesses: hostHarnesses,
+      defaultRoots,
+      formats,
+      entrypoints,
+      originators,
+      sourceHints,
+      formatMatch,
+      automatedTransport,
+      fallback,
+      overridesAutomation,
+      surfaceEmpty,
     })),
   };
 }

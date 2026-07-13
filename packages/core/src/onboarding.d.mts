@@ -16,7 +16,20 @@ export function sessionCatalogReviewContract(
   hosts?: readonly SessionHostDescriptor[],
 ): {
   harnesses: Array<Pick<AgentHarnessDescriptor, "id" | "transcriptFormat" | "defaults" | "common">>;
-  hosts: Array<{ id: SessionHostId; harnesses: readonly AgentHarnessDescriptor["id"][] }>;
+  hosts: Array<Pick<SessionHostDescriptor,
+    | "id"
+    | "harnesses"
+    | "defaultRoots"
+    | "formats"
+    | "entrypoints"
+    | "originators"
+    | "sourceHints"
+    | "formatMatch"
+    | "automatedTransport"
+    | "fallback"
+    | "overridesAutomation"
+    | "surfaceEmpty"
+  >>;
 };
 
 /** One configured (source, root) probed for existing sessions. */

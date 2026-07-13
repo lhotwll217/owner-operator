@@ -16,7 +16,10 @@ import { formatHarnessDoctor } from "./doctor";
 const ooHome = mkdtempSync(join(tmpdir(), "oo-doctor-"));
 try {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
+  const userHome = join(ooHome, "user-home");
+  const conductorDefault = join(userHome, "conductor", "workspaces");
   const existingHostRoot = join(ooHome, "superset-worktrees");
+  mkdirSync(conductorDefault, { recursive: true });
   mkdirSync(existingHostRoot, { recursive: true });
   for (const source of KNOWN_SESSION_SOURCES) disableSessionSource(ooHome, source);
   addSessionRoot(ooHome, "codex", "/sessions/codex");
@@ -36,6 +39,7 @@ try {
     taskCwd: "/tmp/task",
     installRoot: "/opt/owner-operator",
     personalSkillsRoot: "/home/me/.agents/skills",
+    userHome,
   });
   assert.match(output, /Status: ready/);
   assert.match(output, new RegExp(`Harness home: ${ooHome}`));
@@ -50,6 +54,7 @@ try {
   assert.match(output, /Model: codex\/gpt-test/);
   assert.match(output, /Transcript stores: codex=\/sessions\/codex/);
   assert.match(output, new RegExp(`Session host roots: .*Superset App=${existingHostRoot}`));
+  assert.match(output, new RegExp(`Session host roots: .*Conductor=${conductorDefault}`));
   assert.doesNotMatch(output, /missing\/conductor-workspaces/, "doctor omits host roots that do not exist");
   assert.match(output, /Interactive gates: edit=ask, write=ask, risky bash=ask/);
   assert.match(output, /Headless gates: edit=deny, write=deny, risky bash=deny/);

@@ -12,6 +12,7 @@ import { repoRoot } from "../shared/repo-root";
 
 export interface HarnessDoctorOptions {
   ooHome?: string;
+  userHome?: string;
   taskCwd?: string;
   installRoot?: string;
   personalSkillsRoot?: string;
@@ -38,7 +39,8 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
   const importedFrom = typeof imports?.source === "string" ? `; imported from ${imports.source}` : "";
   const provider = typeof piSettings.defaultProvider === "string" ? piSettings.defaultProvider : undefined;
   const model = typeof piSettings.defaultModel === "string" ? piSettings.defaultModel : undefined;
-  const personalRoot = options.personalSkillsRoot ?? join(homedir(), ".agents", "skills");
+  const userHome = options.userHome ?? homedir();
+  const personalRoot = options.personalSkillsRoot ?? join(userHome, ".agents", "skills");
   const personal = settings.skillPolicy.mode === "owner-operator"
     ? "disabled"
     : settings.skillPolicy.mode === "all-personal"
@@ -52,7 +54,7 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     ? loadTranscriptStores(paths.home).map(({ format, root }) => `${format}=${root}`).join(", ") || "(none)"
     : "(none until setup)";
   const hostRoots = ready
-    ? loadSessionHosts(paths.home).flatMap((host) => host.roots
+    ? loadSessionHosts(paths.home, { home: userHome }).flatMap((host) => host.roots
       .filter((root) => existsSync(root))
       .map((root) => `${host.label}=${root}`)).join(", ") || "(none)"
     : "(none until setup)";

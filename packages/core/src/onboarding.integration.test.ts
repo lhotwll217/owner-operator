@@ -98,6 +98,12 @@ try {
       ? { ...descriptor, harnesses: [] }
       : descriptor),
   ), catalogContract, "host attribution changes reopen consent");
+  assert.notDeepEqual(sessionCatalogReviewContract(
+    AGENT_HARNESS_DESCRIPTORS,
+    SESSION_HOST_DESCRIPTORS.map((descriptor, index) => index === 0
+      ? { ...descriptor, defaultRoots: [["changed-host-root"]] }
+      : descriptor),
+  ), catalogContract, "host root matcher changes reopen consent");
 
   // Pi migration is explicit and owned: all auth entries and custom models are copied, while
   // resource/package settings are excluded from the model-settings import.

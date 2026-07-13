@@ -1,7 +1,4 @@
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { KNOWN_TRANSCRIPT_FORMATS, REVIEWED_SESSION_HOSTS } from "@owner-operator/core";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { buildSessionCatalogReview, reviewSessionCatalog } from "./session-catalog-review";
@@ -141,8 +138,7 @@ await reviewSessionCatalog({ mode: "tui", ui: {
 } as any }, catalog);
 assert.deepEqual(cancelWarnings, [], "cancelling manual store entry is not reported as invalid input");
 
-const missingParent = mkdtempSync(join(tmpdir(), "oo-catalog-missing-"));
-const missingRoot = join(missingParent, "future-store");
+const missingRoot = "/future/store";
 const missingWarnings: string[] = [];
 let missingRender: string[] = [];
 customCalls = 0;
@@ -167,11 +163,10 @@ const missingResult = await reviewSessionCatalog({ mode: "tui", ui: {
   async select(): Promise<string> { return "codex"; },
   async input(): Promise<string> { return missingRoot; },
   notify(message: string): void { missingWarnings.push(message); },
-} as any }, buildSessionCatalogReview([], []));
+} as any }, buildSessionCatalogReview([], []), { pathExists: () => false });
 assert.ok(missingResult?.roots.some(({ format, root }) => format === "codex" && root === missingRoot), "a future absolute store remains configurable");
 assert.match(missingWarnings[0] ?? "", /does not exist/i, "a missing manual store is disclosed");
 assert.ok(!missingRender.join("\n").includes(`detected at ${missingRoot}`), "a missing manual store is not presented as detected");
-rmSync(missingParent, { recursive: true, force: true });
 
 let detectedRender: string[] = [];
 await reviewSessionCatalog({ mode: "tui", ui: {
@@ -196,7 +191,7 @@ await reviewSessionCatalog({ mode: "tui", ui: {
 assert.ok(detectedRender.join("\n").includes("detected at /actual/claude"), "the displayed detection path is one that exists");
 assert.ok(detectedRender.every((line) => visibleWidth(line) <= 80), "every catalog row fits an 80-column terminal");
 
-const explicitOnlyRoot = mkdtempSync(join(tmpdir(), "oo-catalog-explicit-"));
+const explicitOnlyRoot = "/standard/claude";
 customCalls = 0;
 const explicitOnly = await reviewSessionCatalog({ mode: "tui", ui: {
   ...tuiUi,
@@ -217,10 +212,11 @@ const explicitOnly = await reviewSessionCatalog({ mode: "tui", ui: {
   },
   async select(): Promise<string> { return "claude-code"; },
   async input(): Promise<string> { return explicitOnlyRoot; },
-} as any }, buildSessionCatalogReview([], []));
+} as any }, buildSessionCatalogReview([
+  { source: "claude", root: explicitOnlyRoot, tier: 2, exists: false, shape: false },
+], []), { pathExists: () => false });
 assert.ok(explicitOnly?.selectedFormats.includes("claude"));
 assert.ok(!explicitOnly?.defaultFormats.includes("claude"), "adding one explicit store after ignoring a harness does not restore standard stores");
-assert.ok(explicitOnly?.roots.some(({ format, root }) => format === "claude" && root === explicitOnlyRoot));
-rmSync(explicitOnlyRoot, { recursive: true, force: true });
+assert.ok(explicitOnly?.roots.some(({ format, root }) => format === "claude" && root === explicitOnlyRoot), "a manually authorized standard path remains explicit");
 
 process.stdout.write("ok — session catalog review: inventory, preserved choices, deep search, manual store, RPC fallback\n");

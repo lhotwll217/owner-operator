@@ -17,6 +17,7 @@ export interface HarnessReviewRow {
   format: TranscriptFormat;
   roots: string[];
   standardRoots: string[];
+  explicitRoots: string[];
   detectedRoots: string[];
   detected: boolean;
   selected: boolean;
@@ -43,6 +44,7 @@ export interface SessionCatalogReviewResult {
 
 export interface SessionCatalogReviewOptions {
   searchMore?: () => Promise<SessionCatalogReview>;
+  pathExists?: (root: string) => boolean;
 }
 
 const resultFrom = (
@@ -52,8 +54,8 @@ const resultFrom = (
 ): SessionCatalogReviewResult => ({
   selectedFormats: catalog.harnesses.map(({ format }) => format).filter((format) => enabled.has(format)),
   defaultFormats: catalog.harnesses.map(({ format }) => format).filter((format) => enabled.has(format) && defaultsEnabled.has(format)),
-  roots: catalog.harnesses.flatMap(({ format, roots, standardRoots }) => enabled.has(format)
-    ? roots.filter((root) => !standardRoots.includes(root)).map((root) => ({ format, root }))
+  roots: catalog.harnesses.flatMap(({ format, explicitRoots }) => enabled.has(format)
+    ? explicitRoots.map((root) => ({ format, root }))
     : []),
 });
 
@@ -74,6 +76,7 @@ export function buildSessionCatalogReview(
         format: descriptor.transcriptFormat,
         roots: [...new Set(candidates.map(({ root }) => root).filter((root): root is string => typeof root === "string"))],
         standardRoots: [...new Set(candidates.filter(({ tier }) => tier === 2).map(({ root }) => root))],
+        explicitRoots: [...new Set(candidates.filter(({ tier }) => tier !== 2).map(({ root }) => root))],
         detectedRoots: [...new Set(candidates.filter(({ exists }) => exists).map(({ root }) => root))],
         detected: candidates.some(({ exists }) => exists),
         selected: selected.has(descriptor.transcriptFormat),
@@ -222,6 +225,7 @@ export async function reviewSessionCatalog(
           ...row,
           roots: [...new Set([...(previous.get(row.format)?.roots ?? []), ...row.roots])],
           standardRoots: [...new Set([...(previous.get(row.format)?.standardRoots ?? []), ...row.standardRoots])],
+          explicitRoots: [...new Set([...(previous.get(row.format)?.explicitRoots ?? []), ...row.explicitRoots])],
           detectedRoots: [...new Set([...(previous.get(row.format)?.detectedRoots ?? []), ...row.detectedRoots])],
           detected: row.detected || Boolean(previous.get(row.format)?.detected),
           selected: selected.has(row.format),
@@ -240,7 +244,7 @@ export async function reviewSessionCatalog(
       ctx.ui.notify("Transcript store paths must be absolute.", "warning");
       continue;
     }
-    const exists = existsSync(root);
+    const exists = options.pathExists?.(root) ?? existsSync(root);
     if (!exists) ctx.ui.notify("That transcript store does not exist yet. It will remain configured and activate when created.", "warning");
     current = {
       ...current,
@@ -248,6 +252,7 @@ export async function reviewSessionCatalog(
         ? {
             ...row,
             roots: [...new Set([...row.roots, root])],
+            explicitRoots: [...new Set([...row.explicitRoots, root])],
             detectedRoots: exists ? [...new Set([...row.detectedRoots, root])] : row.detectedRoots,
             detected: row.detected || exists,
             selected: true,
