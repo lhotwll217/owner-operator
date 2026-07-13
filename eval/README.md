@@ -46,17 +46,14 @@ is a cheap pinned model at minimal reasoning (`openai-codex/gpt-5.4`; override w
 
 ## PR comparison contract
 
-The base branch carries earlier full-suite entries in `eval_stat_log.json`. Every valid
-full run automatically writes a detailed `global_results.json` under its ignored result
-folder and prepends a compact single-subject entry — label, commit/branch, subject,
-model/grader (with reasoning levels), cases × repeat, pass rates, and distribution
-statistics (mean/median/min/max/stdev) for calls, tokens, cost, and latency (the `oo`
-subprocess wall-clock; promptfoo's `result.latencyMs` is the fallback). A full run that cannot publish exits nonzero with
-the reasons. Rerunning stats for the same (eval folder, subject) refreshes the entry
-without duplicating it. When posting a PR, backfill each run's entry to the commit that
-carries its work (`--backfill-git`); run-time git provenance stays in the raw
-global result. Targeted development runs stay in `history.jsonl` and cannot publish here.
-When the suite changes, `compare.mjs` reports shared and unpaired cases separately.
+The base branch carries earlier full-suite entries in `eval_stat_log.json` — one compact
+single-subject summary per run (shape: `buildStatsEntry` in [`stats-log.mjs`](stats-log.mjs));
+the raw `global_results.json` under the run's ignored result folder holds run-time git state
+and per-case detail. Spend distributions cover calls, tokens, cost, and latency (the `oo`
+subprocess wall-clock, `result.latencyMs` fallback). A full run that cannot publish exits
+nonzero with the reasons. When posting a PR, backfill each run's entry to the commit that
+carries its work (`--backfill-git`). Targeted runs stay in `history.jsonl` and cannot
+publish; `compare.mjs` reports shared and unpaired cases separately when suites differ.
 
 ## Layout
 
@@ -79,27 +76,21 @@ When the suite changes, `compare.mjs` reports shared and unpaired cases separate
 | `eval_stat_log.json` | committed newest-first compact single-subject summaries of valid full runs; commit/branch resolve to the PR state via --backfill-git |
 | `hypotheses/` | campaign-specific claims and expected trajectory changes |
 
-## How this maps to promptfoo's documented practice
+## Mapping to promptfoo
 
-Grounded in promptfoo's agent-eval docs, not improvised:
-
-- **Provider** — a [custom JS provider](https://www.promptfoo.dev/docs/providers/custom-api/) that spawns the CLI and returns `{ output, tokenUsage, cost, metadata }`. (The simpler `exec:` provider returns stdout text only — no token/cost/metadata — so it can't carry our efficiency data.)
-- **Subjects** — two labeled providers over one `tests` set; a run filters to one via `--filter-providers`.
-- **Correctness** — native `llm-rubric` per case, graded by a pinned provider.
+- **Provider** — a [custom JS provider](https://www.promptfoo.dev/docs/providers/custom-api/) spawning the CLI, returning `{ output, tokenUsage, cost, metadata }` (`exec:` returns only stdout, no metadata).
+- **Subjects** — two labeled providers over one `tests` set; a run filters to one with `--filter-providers`.
+- **Correctness** — `llm-rubric` per case, graded by a pinned provider.
 - **Tool behavior** — a `javascript` assertion over the provider's ordered `OO_TRACE`
-  metadata ([custom-api docs](https://www.promptfoo.dev/docs/providers/custom-api/)). Cases
-  can require a successful `session-search`, require a DB/state locator before it, and
-  reject direct transcript reads. Mutation tools are structurally absent from every controlled
-  subject; the assertion's mutation-name denylist is defense in depth, not a scored safety canary.
-  Native OTLP trajectory assertions are not used
-  because `oo`/pi does not emit OTLP spans.
-- **Cross-run comparison** — promptfoo has **no native** cross-run pairing or gate; the documented practice is to emit `outputPath` JSON and post-process. That's what `compare.mjs` does, downstream over two published runs.
+  metadata ([docs](https://www.promptfoo.dev/docs/providers/custom-api/)): require a
+  `session-search`, require a DB/state locator before it, reject direct transcript reads.
+  Mutation tools are absent from every subject; the denylist is defense in depth.
+- **Cross-run comparison** — no promptfoo native for this; emit `outputPath` JSON and post-process (`compare.mjs`).
 
-Providers reseed the sandbox at load, so every eval run gets fresh activity windows.
-Manifests, daemon logs, complete Pi sessions, and tool traces land in
-`results/logs/<run>/`; the loop's publish gate fails closed on missing grades, provider
-errors, count mismatches, or missing provenance. A fatal model turn opens a run-wide
-circuit breaker so later cases fail cheaply instead of consuming judge tokens.
+Providers reseed the sandbox at load, so every run gets fresh activity windows. Manifests,
+daemon logs, Pi sessions, and tool traces land in `results/logs/<run>/`. The publish gate
+fails closed on missing grades, provider errors, count mismatches, or missing provenance; a
+fatal model turn trips a run-wide circuit breaker so later cases fail cheaply.
 
 ## Reading results
 
