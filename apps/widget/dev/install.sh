@@ -39,6 +39,12 @@ cat > "$DAEMON_PLIST" <<EOF
   <key>ProgramArguments</key>
   <array><string>$ROOT/oo</string><string>daemon</string></array>
   <key>WorkingDirectory</key><string>$ROOT</string>
+  <!-- launchd agents get a minimal PATH; the oo launcher resolves node via env. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$HOME/.owner-operator/daemon.log</string>
