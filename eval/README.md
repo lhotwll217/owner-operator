@@ -55,15 +55,13 @@ carries its work (`--backfill-git`); run-time git provenance stays in the raw
 global result. Targeted development runs stay in `history.jsonl` and cannot publish here.
 When the suite changes, `compare.mjs` reports shared and unpaired cases separately.
 
-## One chain, not a DB suite
+## No separate DB suite
 
-`query_database` is just one of OO's tools, so there is no separate DB eval. Every subject
-attempts every case; the naive-session-grep control has only grep, OO may shortcut through
-its state DB. The `qtype` breakdown in `compare.mjs` is where the locator payoff shows: on
-the locate-led cases (`state`, `stale`, `audit`, `handoff`) OO should reach parity with
-fewer tool calls. Pure `query_database` correctness (does a SELECT return the right rows)
-is covered deterministically and for free by `src/state/query.test.ts` — not re-tested
-through an LLM run.
+`query_database` is one of OO's tools, not a subsystem evaluated on its own. Every subject
+attempts every case; `compare.mjs`'s `qtype` breakdown compares tool-call counts on the
+DB-locatable cases (`state`, `stale`, `audit`, `handoff`), where OO's state DB cuts calls
+versus grep-only. Deterministic SQL correctness lives in `src/state/query.test.ts`, not an
+LLM run.
 
 ## Layout
 
@@ -110,9 +108,10 @@ circuit breaker so later cases fail cheaply instead of consuming judge tokens.
 
 ## Reading results
 
-- Comparative spend (tokens/tool calls/cost) is the locator payoff, and since every
-  subject runs the same model it is attributable to OO's composition.
-- The `handoff-needs-me-evidence` case is the "no evidence answers from summaries alone"
-  criterion: passing requires transcript detail, not just the DB row.
-- One variable per run: change the prompt OR a tool, reseed nothing else, re-run both
-  configs, then `compare.mjs`.
+- Spend deltas (tokens/tool calls/latency/cost) are attributable to the change under test
+  only when the two compared runs share a model, grader, reasoning level, and repeat;
+  `compare.mjs` prints a caveat when they don't.
+- `handoff-needs-me-evidence` enforces "no evidence answers from summaries alone": passing
+  requires transcript detail, not just the DB row.
+- One variable per run: change the prompt OR a tool, re-run the subject, `compare.mjs`
+  against the prior run.
