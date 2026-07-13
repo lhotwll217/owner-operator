@@ -22,6 +22,38 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
   vendor ([#20](https://github.com/lhotwll217/owner-operator/issues/20)); house vendoring
   model: the skill wrapper owns local policy (sources, blacklist), and its private `vendor/`
   receives the pinned upstream primitive untouched.
+- **Agent Deck** — borrowed one canonical, ordered tool registry and exact-set regression tests
+  ([registry contract](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry.go#L15-L33),
+  [canonical test](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry_test.go#L8-L27)).
+  Its combined instance record was rejected because it embeds separate fields for each upstream
+  agent session instead of one extensible reference
+  ([fields](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/instance.go#L184-L220)).
+- **Herdr** — borrowed the separation of host workspace/pane identity from an opaque upstream
+  agent-session reference
+  ([snapshot](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/persist/snapshot.rs#L11-L29),
+  [reference](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/persist/snapshot.rs#L97-L116)).
+  Its separate detection and integration enums were rejected because their membership drifts
+  ([detection](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/detect/mod.rs#L41-L89),
+  [integration](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/api/schema/integrations.rs#L13-L30)).
+  Herdr is AGPL-3.0-or-later/commercial, so no code was copied
+  ([license declaration](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/README.md#L81-L88)).
+- **Paperclip** — borrowed stable runtime identity, adapter-owned native session decoding, and a
+  versioned parser boundary
+  ([Pi codec](https://github.com/paperclipai/paperclip/blob/ce7dedf33d2689673826ffdcfd6af7ee06be39af/packages/adapters/pi-local/src/server/index.ts#L7-L49),
+  [parser contract](https://github.com/paperclipai/paperclip/blob/ce7dedf33d2689673826ffdcfd6af7ee06be39af/server/src/adapters/plugin-loader.ts#L82-L109)).
+  Its dynamic adapter/plugin system was rejected; a closed local catalog is enough here.
+- **Harnss** — borrowed the distinction between an engine ID and a concrete installed agent
+  ([types](https://github.com/OpenSource03/harnss/blob/dc1dfd8a33caa46a1eefcfe9e14697b27ac4c33d/shared/types/engine.ts#L19-L28),
+  [installed record](https://github.com/OpenSource03/harnss/blob/dc1dfd8a33caa46a1eefcfe9e14697b27ac4c33d/shared/types/registry.ts#L8-L25)).
+  Its remote agent store was rejected because Owner Operator does not install or update harnesses.
+- **Conductor** — validated that a workspace host and the harness running inside it are separate:
+  one workspace may run Claude Code, Codex, Cursor, or OpenCode
+  ([workspace guide](https://www.conductor.build/docs/first-workspace),
+  [workspace model](https://www.conductor.build/docs/concepts/workspaces-and-branches)).
+- **Superset** — its worktree home is configurable globally and per project, so host detection
+  reads those settings instead of assuming `~/.superset/worktrees`
+  ([schema](https://github.com/superset-sh/superset/blob/df775f8e62c82758cf37ef47f6a9a20978de4df0/packages/host-service/src/db/schema.ts#L60-L91),
+  [resolution](https://github.com/superset-sh/superset/blob/df775f8e62c82758cf37ef47f6a9a20978de4df0/packages/host-service/src/trpc/router/settings/worktree-location.ts#L11-L73)).
 
 ## pi — the toolkit we build on
 

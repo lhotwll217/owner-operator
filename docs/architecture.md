@@ -63,6 +63,30 @@ the daemon does not scan or enrich transcripts, headless model calls return setu
 widget displays setup-required. `oo doctor` and `oo status` report the effective boundary without
 printing credential values.
 
+## Session inventory
+
+Four identities stay separate:
+
+| Identity | Example | Owns |
+|---|---|---|
+| Agent harness | Claude Code | Agent runtime the owner used |
+| Transcript format | `claude` | Record shape the scanner parses |
+| Transcript store | `~/.claude/projects` | Directory containing that format |
+| Session host | Claude App, Claude CLI, Superset App | Owner-facing app or CLI used to open the session |
+
+`AGENT_HARNESS_DESCRIPTORS` is the canonical supported-harness catalog. Each harness names one
+implemented transcript format and its store candidates. `SESSION_HOST_DESCRIPTORS` separately
+names apps, CLIs, and internal SDK transports. Rooted hosts win over transcript metadata, so a
+Codex or Claude session inside a Superset worktree belongs to Superset. Superset roots are read
+from its legacy and current settings databases because the worktree home is configurable.
+
+Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
+ignore. Host detection supplies attribution only and does not grant transcript access. The marker
+records the reviewed stable IDs and catalog hash, so an identity, matcher, or root change reopens only this review. The scanner asserts
+that every catalog format has an implementation and the integration suite exercises every parser.
+The same review can run the bounded deep search or accept an explicit absolute transcript-store
+path; neither adds a mandatory onboarding screen.
+
 ## Agent capabilities
 
 - **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`; same-name

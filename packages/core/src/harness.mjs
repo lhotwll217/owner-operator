@@ -34,6 +34,7 @@ export function ownerOperatorPaths(ooHome = defaultHome()) {
     onboardingMarker: join(ooHome, "onboarded.json"),
     blacklist: join(ooHome, "blacklist.json"),
     sessionSources: join(ooHome, "session_sources.json"),
+    sessionHosts: join(ooHome, "session_hosts.json"),
   };
 }
 

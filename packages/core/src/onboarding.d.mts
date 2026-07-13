@@ -2,7 +2,8 @@
 // without a build step). Keep in lockstep with onboarding.mjs.
 
 import type { Blacklist } from "./blacklist.d.mts";
-import type { SessionSource } from "./session-sources.d.mts";
+import type { SessionSource, TranscriptFormat } from "./session-sources.d.mts";
+import type { SessionHostId } from "./session-hosts.d.mts";
 
 /** Bumped when the flow gains a step the owner must be re-walked through. */
 export const ONBOARDING_VERSION: number;
@@ -38,11 +39,18 @@ export function markOnboardingStep(
 
 /** Record that onboarding finished — version + timestamp, plus any provenance passed in. */
 export function markOnboarded(ooHome?: string, extra?: Record<string, unknown>): Record<string, unknown>;
+export function loadPiImportDecision(ooHome?: string): "imported" | "declined" | null;
+export function recordPiImportDecision(
+  ooHome: string | undefined,
+  decision: "imported" | "declined",
+): "imported" | "declined";
 
 export interface PiConfigurationDetection {
   auth: boolean;
   settings: boolean;
   models: boolean;
+  selectedModel: boolean;
+  selectedModelAuthorized: boolean;
 }
 export function detectPiConfiguration(piAgentDir: string): PiConfigurationDetection;
 export function importPiConfiguration(
@@ -61,6 +69,18 @@ export function saveSessionRoots(
   ooHome: string | undefined,
   roots: readonly { source: string; root: string }[],
 ): Array<{ source: SessionSource; root: string }>;
+
+export function saveTranscriptAccess(
+  ooHome: string | undefined,
+  selectedFormats: readonly string[],
+  roots?: readonly { format?: string; source?: string; root: string }[],
+  defaultFormats?: readonly string[],
+): { selected: TranscriptFormat[]; add: Array<{ source: TranscriptFormat; root: string }> };
+
+export function saveSessionHostRoots(
+  ooHome: string | undefined,
+  roots: readonly { host: string; root: string }[],
+): Array<{ host: SessionHostId; root: string }>;
 
 /** Skip a default source's roots via session_sources.json `disable`. Returns the merged list. */
 export function disableSessionSource(ooHome: string | undefined, source: string): string[];
@@ -94,3 +114,5 @@ export function detectSessionSourceCandidates(
   ooHome?: string,
   options?: SessionSourceDetectionOptions,
 ): SessionSourceCandidate[];
+export { detectSessionHostCandidates } from "./host-detection.mjs";
+export type { SessionHostCandidate } from "./host-detection.mjs";

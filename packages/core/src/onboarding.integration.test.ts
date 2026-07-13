@@ -2,26 +2,37 @@
 //   tsx src/onboarding.integration.test.ts
 
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadBlacklist } from "./blacklist.mjs";
 import { loadActiveWindow } from "./settings.mjs";
-import { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
+import {
+  KNOWN_AGENT_HARNESSES,
+  KNOWN_SESSION_SOURCES,
+  KNOWN_TRANSCRIPT_FORMATS,
+  loadSessionSources,
+} from "./session-sources.mjs";
+import { REVIEWED_SESSION_HOSTS } from "./session-hosts.mjs";
 import {
   ONBOARDING_VERSION,
   ONBOARDING_STEPS,
   detectPiConfiguration,
   detectSessionSourceCandidates,
+  detectSessionHostCandidates,
   importPiConfiguration,
   isOnboarded,
+  loadPiImportDecision,
   markOnboardingStep,
   markOnboarded,
   pendingOnboardingSteps,
+  recordPiImportDecision,
   addBlacklistEntries,
   addSessionRoot,
   disableSessionSource,
   saveSessionRoots,
+  saveTranscriptAccess,
+  saveSessionHostRoots,
   saveActiveWindow,
   detectSources,
   summarizeDetectedSources,
@@ -32,6 +43,9 @@ const ooHome = mkdtempSync(join(tmpdir(), "oo-onboarding-"));
 try {
   // First-run marker: absent before, step-based, and complete only at the current version.
   assert.equal(isOnboarded(ooHome), false, "no marker → not onboarded");
+  assert.equal(loadPiImportDecision(ooHome), null);
+  assert.equal(recordPiImportDecision(ooHome, "declined"), "declined");
+  assert.equal(loadPiImportDecision(ooHome), "declined", "import choice persists without completing auth");
   markOnboardingStep(ooHome, "intro");
   assert.equal(isOnboarded(ooHome), false, "one completed step does not finish onboarding");
   assert.deepEqual(pendingOnboardingSteps(ooHome), ONBOARDING_STEPS.filter((step) => step !== "intro"));
@@ -40,6 +54,26 @@ try {
   assert.equal(marker.via, "test", "marker carries provenance");
   assert.ok(typeof marker.at === "string", "marker records a timestamp");
   assert.equal(isOnboarded(ooHome), true, "marker present → onboarded");
+  const markerPath = join(ooHome, "onboarded.json");
+  const oldVersion = JSON.parse(readFileSync(markerPath, "utf8"));
+  oldVersion.version = ONBOARDING_VERSION - 1;
+  delete oldVersion.authVersion;
+  writeFileSync(markerPath, JSON.stringify(oldVersion));
+  assert.deepEqual(pendingOnboardingSteps(ooHome), ["auth"], "older markers must pass the current model authorization check");
+  markOnboardingStep(ooHome, "auth");
+  assert.equal(isOnboarded(ooHome), true);
+
+  const staleCatalog = JSON.parse(readFileSync(markerPath, "utf8"));
+  staleCatalog.reviewedSessionHosts = staleCatalog.reviewedSessionHosts.slice(0, -1);
+  staleCatalog.sessionCatalogHash = "stale";
+  writeFileSync(markerPath, JSON.stringify(staleCatalog));
+  assert.equal(isOnboarded(ooHome), false, "a catalog addition reopens consent");
+  assert.deepEqual(pendingOnboardingSteps(ooHome), ["session-sources"], "only the catalog review reopens");
+  markOnboardingStep(ooHome, "session-sources", {
+    reviewedHarnesses: [...KNOWN_AGENT_HARNESSES],
+    reviewedSessionHosts: [...REVIEWED_SESSION_HOSTS],
+  });
+  assert.equal(isOnboarded(ooHome), true, "reviewing the current catalog closes the marker");
 
   // Pi migration is explicit and owned: all auth entries and custom models are copied, while
   // resource/package settings are excluded from the model-settings import.
@@ -58,9 +92,9 @@ try {
     skills: ["ambient-skill"],
   }));
   writeFileSync(join(piAgentDir, "models.json"), JSON.stringify({ providers: { local: { baseUrl: "http://localhost" } } }));
-  assert.deepEqual(detectPiConfiguration(piAgentDir), { auth: true, settings: true, models: true });
+  assert.deepEqual(detectPiConfiguration(piAgentDir), { auth: true, settings: true, models: true, selectedModel: true, selectedModelAuthorized: true });
   const imported = importPiConfiguration(ooHome, piAgentDir);
-  assert.deepEqual(imported, { auth: true, settings: true, models: true, source: piAgentDir });
+  assert.deepEqual(imported, { auth: true, settings: true, models: true, selectedModel: true, selectedModelAuthorized: true, source: piAgentDir });
   const ownedPi = join(ooHome, "pi");
   assert.deepEqual(JSON.parse(readFileSync(join(ownedPi, "auth.json"), "utf8")), {
     anthropic: { type: "api_key", key: "a" },
@@ -130,6 +164,44 @@ try {
   assert.ok(!deep.some((candidate) => candidate.root.startsWith(join(sourceHome, "repo-blocked"))), "deep detection prunes blacklisted repository names");
   rmSync(sourceHome, { recursive: true, force: true });
 
+  // Superset's worktree home is configuration, not a fixed path. Read both its legacy local DB
+  // and current per-host DB without opening a transcript.
+  const supersetHome = mkdtempSync(join(tmpdir(), "oo-superset-home-"));
+  const legacyRoot = join(supersetHome, "legacy-worktrees");
+  const currentRoot = join(supersetHome, "current-worktrees");
+  const applications = join(supersetHome, "Applications");
+  const bin = join(supersetHome, "bin");
+  mkdirSync(legacyRoot, { recursive: true });
+  mkdirSync(currentRoot, { recursive: true });
+  mkdirSync(join(applications, "Claude.app"), { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\n");
+  chmodSync(join(bin, "codex"), 0o755);
+  writeFileSync(join(bin, "claude"), "#!/bin/sh\n");
+  chmodSync(join(bin, "claude"), 0o755);
+  const { DatabaseSync } = await import("node:sqlite");
+  const legacyDb = new DatabaseSync(join(supersetHome, "local.db"));
+  legacyDb.exec("CREATE TABLE settings (worktree_base_dir TEXT)");
+  legacyDb.prepare("INSERT INTO settings VALUES (?)").run(legacyRoot);
+  legacyDb.close();
+  const hostDir = join(supersetHome, "host", "example");
+  mkdirSync(hostDir, { recursive: true });
+  const currentDb = new DatabaseSync(join(hostDir, "host.db"));
+  currentDb.exec("CREATE TABLE projects (worktree_base_dir TEXT)");
+  currentDb.prepare("INSERT INTO projects VALUES (?)").run(currentRoot);
+  currentDb.close();
+  const hosts = await detectSessionHostCandidates(join(supersetHome, "oo"), {
+    home: supersetHome,
+    env: { SUPERSET_HOME_DIR: supersetHome, PATH: bin },
+    applications: [applications],
+  });
+  assert.ok(hosts.some(({ host, root, origin }) => host === "superset" && root === legacyRoot && origin === "superset-settings"));
+  assert.ok(hosts.some(({ host, root, origin }) => host === "superset" && root === currentRoot && origin === "superset-settings"));
+  assert.ok(hosts.some(({ host, origin }) => host === "claude-app" && origin === "app"), "app detection remains distinct from Claude CLI");
+  assert.ok(hosts.some(({ host, origin }) => host === "codex-cli" && origin === "command"), "CLI detection remains distinct from Codex App");
+  assert.ok(hosts.some(({ host, origin }) => host === "claude-cli" && origin === "command"), "Claude executable detects Claude CLI, not its SDK transport");
+  rmSync(supersetHome, { recursive: true, force: true });
+
   // Blacklist writer merges + de-dupes with what the loader reads back, and strips trailing slashes.
   addBlacklistEntries(ooHome, { paths: ["/work/clientX/"], repos: ["Personal"] });
   addBlacklistEntries(ooHome, { paths: ["/work/clientX", "/home/me/secret"], repos: ["Personal", "Vault"] });
@@ -144,6 +216,15 @@ try {
   const roots = loadSessionSources(ooHome);
   assert.equal(roots.filter((r) => r.source === "claude" && r.root === "/alt/claude").length, 1, "added root once, de-duped");
   assert.throws(() => addSessionRoot(ooHome, "nope", "/x"), /unknown session source/, "unknown source rejected");
+
+  saveTranscriptAccess(ooHome, KNOWN_TRANSCRIPT_FORMATS.filter((format) => format !== "cursor"), [
+    { source: "codex", root: "/reviewed/codex" },
+  ]);
+  assert.ok(!loadSessionSources(ooHome).some(({ source }) => source === "cursor"), "ignored harness format is disabled");
+  assert.ok(loadSessionSources(ooHome).some(({ source, root }) => source === "codex" && root === "/reviewed/codex"));
+  assert.deepEqual(saveSessionHostRoots(ooHome, [{ host: "superset", root: "/custom/superset" }]), [
+    { host: "superset", root: "/custom/superset" },
+  ]);
 
   // Disabling a default source drops its built-in roots from the resolved list.
   disableSessionSource(ooHome, "cursor");

@@ -4,21 +4,29 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-  KNOWN_SESSION_SOURCES,
+  KNOWN_AGENT_HARNESSES,
+  KNOWN_SESSION_HOSTS,
   ONBOARDING_STEPS,
+  REVIEWED_SESSION_HOSTS,
   addBlacklistEntries,
   detectPiConfiguration,
+  detectSessionHostCandidates,
   detectSessionSourceCandidates,
   ensureOwnerOperatorWorkspace,
   importPiConfiguration,
   isOnboarded,
+  loadPiImportDecision,
+  loadTranscriptAccess,
   markOnboarded,
   markOnboardingStep,
   pendingOnboardingSteps,
   saveActiveWindow,
   saveHarnessSettings,
-  saveSessionRoots,
+  saveSessionHostRoots,
+  saveTranscriptAccess,
+  recordPiImportDecision,
   type OnboardingStep,
+  type SessionHostCandidate,
   type SessionSourceCandidate,
 } from "@owner-operator/core";
 import {
@@ -27,6 +35,12 @@ import {
   type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { repoRoot } from "../shared/repo-root";
+import {
+  buildSessionCatalogReview,
+  reviewSessionCatalog,
+  type SessionCatalogReview,
+  type SessionCatalogReviewResult,
+} from "./session-catalog-review";
 
 const execFileAsync = promisify(execFile);
 let running = false;
@@ -37,6 +51,9 @@ export interface OnboardingFlowOptions {
   piAgentDir?: string;
   platform?: NodeJS.Platform;
   detectCandidates?: (deep: boolean) => SessionSourceCandidate[];
+  detectHosts?: () => Promise<SessionHostCandidate[]> | SessionHostCandidate[];
+  reviewCatalog?: (catalog: SessionCatalogReview) => Promise<SessionCatalogReviewResult | undefined>;
+  resolveModel?: (provider: string, model: string) => boolean;
   installAlwaysOn?: (ooHome: string) => Promise<void>;
   refreshConfiguration?: () => Promise<void>;
 }
@@ -65,7 +82,7 @@ const installAlwaysOn = async (ooHome: string): Promise<void> => {
 };
 
 export async function runOnboarding(
-  ctx: Pick<ExtensionContext, "hasUI" | "ui">,
+  ctx: Pick<ExtensionContext, "hasUI" | "ui"> & Partial<Pick<ExtensionContext, "mode" | "modelRegistry">>,
   options: OnboardingFlowOptions = {},
 ): Promise<boolean> {
   if (running || !ctx.hasUI) return false;
@@ -88,7 +105,7 @@ export async function runOnboarding(
 
     if (needs("privacy")) {
       const raw = await ctx.ui.input(
-        "Anything off-limits?",
+        "Are there any coding projects or repositories you don’t want Owner Operator to interact with?",
         "paths or repository names, comma-separated; blank for none",
       );
       addBlacklistEntries(paths.home, privacyEntries(raw ?? ""));
@@ -98,46 +115,110 @@ export async function runOnboarding(
     if (needs("auth")) {
       const piAgentDir = options.piAgentDir ?? getAgentDir();
       const detected = detectPiConfiguration(piAgentDir);
-      if (detected.auth || detected.settings || detected.models) {
+      const priorImportDecision = loadPiImportDecision(paths.home);
+      let piImport: "imported" | "declined" | "owned" = priorImportDecision ?? "owned";
+      const externalPi = path.resolve(piAgentDir) !== path.resolve(paths.piAgentDir);
+      let owned = detectPiConfiguration(paths.piAgentDir);
+      const selectedModel = (): { provider: string; model: string } => {
+        let configured: Record<string, unknown> = {};
+        try { configured = JSON.parse(readFileSync(paths.piSettings, "utf8")); } catch { /* missing or invalid */ }
+        return {
+          provider: typeof configured.defaultProvider === "string" ? configured.defaultProvider : "",
+          model: typeof configured.defaultModel === "string" ? configured.defaultModel : "",
+        };
+      };
+      const ownedSelectionReady = (): boolean => {
+        const selection = selectedModel();
+        const registryModel = ctx.modelRegistry?.find(selection.provider, selection.model);
+        if (!selection.provider || !selection.model) return false;
+        return ctx.modelRegistry
+          ? Boolean(registryModel && ctx.modelRegistry.hasConfiguredAuth(registryModel))
+          : owned.selectedModelAuthorized;
+      };
+      const canOfferImport = !priorImportDecision || options.force;
+      if (!ownedSelectionReady() && canOfferImport && externalPi && (detected.auth || detected.settings || detected.models)) {
         const port = await ctx.ui.confirm(
-          "Import Pi setup?",
-          "Copy every Pi authorization entry plus model selection and custom model settings into Owner Operator? Pi remains unchanged.",
+          "Import existing standalone Pi setup?",
+          "Copy its authorization entries, model selection, and custom model settings into Owner Operator? Standalone Pi remains unchanged.",
         );
         if (port) {
           importPiConfiguration(paths.home, piAgentDir);
           await options.refreshConfiguration?.();
         }
-        markOnboardingStep(paths.home, "auth", { piImport: port ? "imported" : "declined" });
-      } else {
-        markOnboardingStep(paths.home, "auth", { piImport: "not-found" });
+        piImport = port ? "imported" : "declined";
+        recordPiImportDecision(paths.home, piImport);
+        owned = detectPiConfiguration(paths.piAgentDir);
       }
+      const hasOwnedAuthorization = ctx.modelRegistry
+        ? ctx.modelRegistry.getAvailable().length > 0
+        : owned.auth;
+      if (!owned.selectedModel && !hasOwnedAuthorization) {
+        ctx.ui.notify("A model provider is required. Complete Owner Operator’s built-in provider login, then run /onboarding to continue.", "warning");
+        ctx.ui.setEditorText("/login");
+        return false;
+      }
+      if (!owned.selectedModel) {
+        ctx.ui.notify("Choose the model Owner Operator should use, then run /onboarding to continue.", "warning");
+        ctx.ui.setEditorText("/model");
+        return false;
+      }
+      const { provider, model } = selectedModel();
+      const registryModel = ctx.modelRegistry?.find(provider, model);
+      const resolves = options.resolveModel?.(provider, model) ?? Boolean(registryModel);
+      if (!resolves) {
+        ctx.ui.notify("The configured model is unavailable. Choose a model from Owner Operator’s built-in picker, then run /onboarding to continue.", "warning");
+        ctx.ui.setEditorText("/model");
+        return false;
+      }
+      const authorized = registryModel
+        ? Boolean(ctx.modelRegistry?.hasConfiguredAuth(registryModel))
+        : Boolean(options.resolveModel && owned.selectedModelAuthorized);
+      if (!authorized) {
+        ctx.ui.notify("The selected model provider still needs authorization. Complete Owner Operator’s built-in provider login, then run /onboarding to continue.", "warning");
+        ctx.ui.setEditorText("/login");
+        return false;
+      }
+      markOnboardingStep(paths.home, "auth", { piImport });
     }
 
     if (needs("session-sources")) {
       const detect = options.detectCandidates ?? ((deep: boolean) =>
         detectSessionSourceCandidates(paths.home, { deep }));
-      const confirmed: Array<{ source: string; root: string }> = [];
-      const offered = new Set<string>();
-      const offer = async (candidate: SessionSourceCandidate): Promise<void> => {
-        const key = `${candidate.source}\0${candidate.root}`;
-        if (offered.has(key) || !candidate.exists || (candidate.tier === 3 && !candidate.shape)) return;
-        offered.add(key);
-        if (await ctx.ui.confirm(`Use ${candidate.source} sessions?`, candidate.root)) {
-          confirmed.push({ source: candidate.source, root: candidate.root });
+      const sourceCandidates = detect(false);
+      const hostCandidates = await (options.detectHosts?.() ?? detectSessionHostCandidates(paths.home));
+      const access = loadTranscriptAccess(paths.home);
+      const catalog = buildSessionCatalogReview(sourceCandidates, hostCandidates, access.selectedFormats, access.defaultFormats);
+      const reviewed = options.reviewCatalog
+        ? await options.reviewCatalog(catalog)
+        : await reviewSessionCatalog(ctx, catalog, {
+          searchMore: async () => buildSessionCatalogReview(detect(true), hostCandidates),
+        });
+      if (!reviewed) return false;
+      saveTranscriptAccess(paths.home, reviewed.selectedFormats, reviewed.roots, reviewed.defaultFormats);
+      saveSessionHostRoots(paths.home, hostCandidates
+        .filter((candidate): candidate is SessionHostCandidate & { root: string } =>
+          KNOWN_SESSION_HOSTS.includes(candidate.host as typeof KNOWN_SESSION_HOSTS[number]) && typeof candidate.root === "string")
+        .map(({ host, root }) => ({ host, root })));
+      markOnboardingStep(paths.home, "session-sources", {
+        reviewedHarnesses: [...KNOWN_AGENT_HARNESSES],
+        reviewedSessionHosts: [...REVIEWED_SESSION_HOSTS],
+      });
+    }
+
+    if (needs("always-on")) {
+      if ((options.platform ?? process.platform) === "darwin") {
+        const install = await ctx.ui.confirm(
+          "Keep Owner Operator running?",
+          "Install the existing widget and daemon LaunchAgents for login and crash recovery?",
+        );
+        if (install) {
+          await (options.installAlwaysOn ?? installAlwaysOn)(paths.home);
+          saveHarnessSettings(paths.home, { alwaysOn: "installed" });
+        } else {
+          saveHarnessSettings(paths.home, { alwaysOn: "declined" });
         }
-      };
-      for (const candidate of detect(false)) await offer(candidate);
-      if (await ctx.ui.confirm("Search more locations?", "Run a bounded name-only search of your home and mounted volumes?")) {
-        for (const candidate of detect(true).filter((candidate) => candidate.tier === 3)) await offer(candidate);
       }
-      for (;;) {
-        const source = await ctx.ui.select("Add or override a session root", ["Done", ...KNOWN_SESSION_SOURCES]);
-        if (!source || source === "Done") break;
-        const root = await ctx.ui.input(`Path to ${source} sessions`, "/absolute/path");
-        if (root?.trim()) confirmed.push({ source, root: path.resolve(expandHome(root.trim())) });
-      }
-      saveSessionRoots(paths.home, confirmed);
-      markOnboardingStep(paths.home, "session-sources");
+      markOnboardingStep(paths.home, "always-on");
     }
 
     if (needs("active-window")) {
@@ -162,22 +243,6 @@ export async function runOnboarding(
         saveHarnessSettings(paths.home, { skillPolicy: { mode: "owner-operator", allowlist: [] } });
       }
       markOnboardingStep(paths.home, "skills");
-    }
-
-    if (needs("always-on")) {
-      if ((options.platform ?? process.platform) === "darwin") {
-        const install = await ctx.ui.confirm(
-          "Keep Owner Operator running?",
-          "Install the existing widget and daemon LaunchAgents for login and crash recovery?",
-        );
-        if (install) {
-          await (options.installAlwaysOn ?? installAlwaysOn)(paths.home);
-          saveHarnessSettings(paths.home, { alwaysOn: "installed" });
-        } else {
-          saveHarnessSettings(paths.home, { alwaysOn: "declined" });
-        }
-      }
-      markOnboardingStep(paths.home, "always-on");
     }
 
     if (pendingOnboardingSteps(paths.home).length === 0) {
@@ -205,9 +270,9 @@ export function createOnboardingExtension(options: Omit<OnboardingFlowOptions, "
       if (model) await pi.setModel(model);
     };
     pi.registerCommand("onboarding", {
-      description: "Configure Owner Operator privacy, credentials, sources, skills, and always-on services.",
+      description: "Configure Owner Operator privacy, model, session access, skills, and always-on services.",
       handler: async (_args, ctx) => {
-        if (await runOnboarding(ctx, { ...options, force: true })) await activateConfiguredModel(ctx);
+        if (await runOnboarding(ctx, { ...options, force: isOnboarded(options.ooHome) })) await activateConfiguredModel(ctx);
       },
     });
     pi.on("session_start", async (event, ctx) => {

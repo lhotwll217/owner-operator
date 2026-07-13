@@ -7,6 +7,7 @@
 import assert from "node:assert";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadGuiHosts, guiHostForCwd, interactiveHost } from "./gui-hosts.mjs";
 
@@ -22,19 +23,19 @@ try {
   );
 
   // cwd-marker match: a session living under the GUI's worktree dir resolves to that GUI.
-  assert.equal(guiHostForCwd("/Users/x/conductor/workspaces/repo/codename", hosts)?.ui, "Conductor", "Conductor cwd marker");
-  assert.equal(guiHostForCwd("/Users/x/.superset/worktrees/sb/repo", hosts)?.ui, "Superset App", "Superset cwd marker");
+  assert.equal(guiHostForCwd(join(homedir(), "conductor", "workspaces", "repo", "codename"), hosts)?.ui, "Conductor", "Conductor rooted host");
+  assert.equal(guiHostForCwd(join(homedir(), ".superset", "worktrees", "sb", "repo"), hosts)?.ui, "Superset App", "Superset rooted host");
   assert.equal(guiHostForCwd("/Users/x/dev/plain-repo", hosts), null, "plain cwd → no worktree host");
   assert.equal(guiHostForCwd(null, hosts), null, "no cwd → null, never throws");
 
   // interactiveHost: cwd marker wins over source (a Codex/Claude session in a Conductor
   // workspace IS Conductor), then falls back to source, else null (launch-mode rule applies).
-  assert.equal(interactiveHost("/Users/x/conductor/workspaces/r/c", "codex", hosts)?.ui, "Conductor", "worktree wins over source");
+  assert.equal(interactiveHost(join(homedir(), "conductor", "workspaces", "r", "c"), "codex", hosts)?.ui, "Conductor", "worktree wins over source");
   const ph = interactiveHost("/Users/x/dev/anything", "posthog-code", hosts)!;
   assert.equal(ph.ui, "PostHog Code", "source match when no cwd marker");
   assert.equal(ph.surfaceEmpty, true, "PostHog Code surfaces even with zero conversation");
   assert.equal(interactiveHost("/Users/x/dev/plain", "claude", hosts), null, "plain Claude session → no host → worker heuristics apply");
-  assert.notEqual(interactiveHost("/Users/x/conductor/workspaces/r/c", "claude", hosts)?.surfaceEmpty, true, "worktree host does NOT surface empty (needs a real turn)");
+  assert.notEqual(interactiveHost(join(homedir(), "conductor", "workspaces", "r", "c"), "claude", hosts)?.surfaceEmpty, true, "worktree host does NOT surface empty (needs a real turn)");
 
   // Owner `add`: extend with a custom GUI by cwd marker — the flexibility a new IDE needs,
   // no code change. Needs a ui name + at least one matcher; junk entries are dropped.

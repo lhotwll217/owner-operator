@@ -40,6 +40,7 @@ export interface OwnerOperatorPaths {
   onboardingMarker: string;
   blacklist: string;
   sessionSources: string;
+  sessionHosts: string;
 }
 
 export const DEFAULT_SKILL_POLICY: Readonly<SkillPolicy>;

@@ -5,7 +5,8 @@ import {
   ensureOwnerOperatorWorkspace,
   isOnboarded,
   loadHarnessSettings,
-  loadSessionSources,
+  loadSessionHosts,
+  loadTranscriptStores,
 } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
 
@@ -47,8 +48,11 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     const gate = settings.gatePolicy[surface];
     return `edit=${gate.edit}, write=${gate.write}, risky bash=${gate.riskyBash}`;
   };
-  const sessionRoots = ready
-    ? loadSessionSources(paths.home).map(({ source, root }) => `${source}=${root}`).join(", ") || "(none)"
+  const transcriptStores = ready
+    ? loadTranscriptStores(paths.home).map(({ format, root }) => `${format}=${root}`).join(", ") || "(none)"
+    : "(none until setup)";
+  const hostRoots = ready
+    ? loadSessionHosts(paths.home).flatMap((host) => host.roots.map((root) => `${host.label}=${root}`)).join(", ") || "(none)"
     : "(none until setup)";
 
   return [
@@ -66,7 +70,8 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     `Credentials: ${paths.piAuth} (${providerLabel}${importedFrom})`,
     `Model settings: ${paths.piSettings}`,
     `Model: ${provider && model ? `${provider}/${model}` : "not configured"}`,
-    `Session roots: ${sessionRoots}`,
+    `Transcript stores: ${transcriptStores}`,
+    `Session host roots: ${hostRoots}`,
     `Tool posture: ${settings.toolPosture.join(", ")}`,
     `Interactive gates: ${gates("interactive")}`,
     `Headless gates: ${gates("headless")}`,

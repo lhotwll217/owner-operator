@@ -15,13 +15,16 @@ npm install            # once, from the repo root
 ./oo                   # guided first-run setup
 ```
 
-Setup creates `~/.owner-operator/workspace`, asks what is off-limits, offers to copy Pi
-authorizations and model settings, confirms transcript roots, and configures the active window,
-skills, and macOS always-on services. The copy does not change standalone Pi. Until setup
-finishes, headless calls and transcript/model processing fail closed.
+Setup creates `~/.owner-operator/workspace`, asks which coding projects are off-limits, offers to
+copy existing standalone Pi authorizations and model settings, then shows every supported harness
+and recognized app or CLI on one review surface. Standalone Pi is optional; fresh installs use
+Owner Operator's built-in provider login and store credentials under `~/.owner-operator/pi`.
+Harnesses start included; mark any to ignore. It then configures macOS always-on services, the
+active window, and skills. The copy does not change standalone Pi. Until setup finishes, headless
+calls and transcript/model processing fail closed.
 
 `./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
-credentials/model source, transcript roots, skills, tools, and permission gates without printing
+credentials/model source, transcript stores, session host roots, skills, tools, and permission gates without printing
 secrets. Re-run `/onboarding` in the interactive terminal to change setup choices.
 
 ## The widget
@@ -59,8 +62,9 @@ Built on the [pi coding agent](https://github.com/earendil-works/pi). Embedded P
 Owner Operator-owned auth, model settings, workspace resources, and sessions under
 `~/.owner-operator`; standalone Pi keeps its own defaults. `oo` reads session
 files through application-owned scan/search modules and only sends bounded transcript samples to
-the model. Supported agents live in
-[`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents drive it headless
+the model. Supported harnesses and their transcript formats live in
+[`AGENT_HARNESS_DESCRIPTORS`](packages/core/src/session-sources.mjs); apps and CLIs live separately
+in [`SESSION_HOST_DESCRIPTORS`](packages/core/src/session-hosts.mjs). Agents drive it headless
 with `oo "question"`: a single turn that prints its session id on stderr, with `--continue`
 / `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
 saved under `~/.owner-operator/sessions` (never mixed with your coding sessions), labeled

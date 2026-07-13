@@ -13,4 +13,7 @@ Canonical terms for Owner Operator. Code, docs, and issues use these words with 
 - **Tool posture** — which built-in tools exist in a thread. Posture controls availability; the gate policy controls use.
 - **Gate policy** — per-operation `allow`/`ask`/`deny`. `ask` requires owner confirmation in context; without a TTY, `ask` degrades to `deny`. Reads and safe commands are `allow`; mutations (edit, write, risky bash) are `ask`. The blacklist is `deny` on every route, always.
 - **Skill policy** — the explicit config declaring which skill sources are visible: bundled Owner Operator skills and workspace skills by default; personal `~/.agents/skills` only by owner opt-in.
-- **Session source** — a known agent tool whose session transcripts Owner Operator reads (Claude, Codex, Cursor, …). A source's **workspace root** is where it stores sessions; roots are registrable per owner, not assumed.
+- **Agent harness** — a coding-agent runtime that conducts the model/tool loop and produces a session history, such as Claude Code, Codex, or Pi. A host may launch several harnesses.
+- **Transcript format** — the record shape Owner Operator can parse for one harness. Supporting a harness requires a known transcript format; recognizing its host is not enough.
+- **Transcript store** — a directory containing session histories in one transcript format. Stores are detected or owner-configured; transcript access is granted at this boundary.
+- **Session host** — the owner-facing CLI or app that launches or presents a session, such as Claude CLI, Claude App, Superset, or Conductor. A host identifies where the owner returns; it does not grant transcript access.

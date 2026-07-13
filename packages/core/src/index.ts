@@ -11,8 +11,26 @@ export type { Blacklist } from "./blacklist.mjs";
 
 // Where local agent sessions live — the (source, root) dirs the scan and monitor share, with
 // owner overrides from session_sources.json. One source of truth so they can't drift.
-export { loadSessionSources, KNOWN_SESSION_SOURCES, SESSION_SOURCE_DESCRIPTORS } from "./session-sources.mjs";
-export type { SessionSource, SessionRoot, SessionSourceDescriptor } from "./session-sources.mjs";
+export {
+  AGENT_HARNESS_DESCRIPTORS,
+  KNOWN_AGENT_HARNESSES,
+  KNOWN_SESSION_SOURCES,
+  KNOWN_TRANSCRIPT_FORMATS,
+  SESSION_SOURCE_DESCRIPTORS,
+  assertTranscriptFormatCoverage,
+  loadSessionSources,
+  loadTranscriptAccess,
+  loadTranscriptStores,
+} from "./session-sources.mjs";
+export type {
+  AgentHarnessDescriptor,
+  AgentHarnessId,
+  SessionSource,
+  SessionRoot,
+  SessionSourceDescriptor,
+  TranscriptFormat,
+  TranscriptStore,
+} from "./session-sources.mjs";
 
 // Transcript transport context must not become a visible topic. Shared by the scanner and
 // durable state projection so legacy rows follow the current classification too.
@@ -23,6 +41,16 @@ export { isSessionBoilerplate } from "./session-text.mjs";
 // worker. Read by the scan's launch-mode classifier and app detection. See gui-hosts.mjs.
 export { loadGuiHosts, guiHostForCwd, interactiveHost } from "./gui-hosts.mjs";
 export type { GuiHost } from "./gui-hosts.mjs";
+
+export {
+  KNOWN_SESSION_HOSTS,
+  REVIEWED_SESSION_HOSTS,
+  SESSION_HOST_DESCRIPTORS,
+  loadSessionHosts,
+  sessionHostFor,
+  sessionHostForCwd,
+} from "./session-hosts.mjs";
+export type { SessionHost, SessionHostDescriptor, SessionHostId, SessionIdentity } from "./session-hosts.mjs";
 
 // Owner settings — scalar knobs (today the active-thread window) from settings.json, later set
 // in onboarding. The window grammar (parseWindowMs) is shared so the scan's cutoff and the
@@ -55,14 +83,19 @@ export {
   ONBOARDING_STEPS,
   detectPiConfiguration,
   detectSessionSourceCandidates,
+  detectSessionHostCandidates,
   importPiConfiguration,
   isOnboarded,
+  loadPiImportDecision,
   markOnboardingStep,
   markOnboarded,
   pendingOnboardingSteps,
   addBlacklistEntries,
   addSessionRoot,
   saveSessionRoots,
+  saveTranscriptAccess,
+  saveSessionHostRoots,
+  recordPiImportDecision,
   disableSessionSource,
   saveActiveWindow,
   detectSources,
@@ -76,6 +109,7 @@ export type {
   SessionSourceCandidate,
   SessionSourceDetectionOptions,
 } from "./onboarding.mjs";
+export type { SessionHostCandidate } from "./onboarding.mjs";
 
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.
 export * from "./status";

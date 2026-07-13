@@ -8,6 +8,7 @@ import {
   ensureOwnerOperatorWorkspace,
   KNOWN_SESSION_SOURCES,
   markOnboarded,
+  saveSessionHostRoots,
   saveHarnessSettings,
 } from "@owner-operator/core";
 import { formatHarnessDoctor } from "./doctor";
@@ -17,6 +18,7 @@ try {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
   for (const source of KNOWN_SESSION_SOURCES) disableSessionSource(ooHome, source);
   addSessionRoot(ooHome, "codex", "/sessions/codex");
+  saveSessionHostRoots(ooHome, [{ host: "superset", root: "/worktrees/superset" }]);
   saveHarnessSettings(ooHome, { skillPolicy: { mode: "allowlist", allowlist: ["calendar"] } });
   writeFileSync(paths.piAuth, JSON.stringify({ codex: { type: "api_key", key: "hidden" } }), { mode: 0o600 });
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "codex", defaultModel: "gpt-test" }));
@@ -41,7 +43,8 @@ try {
   assert.match(output, /Credentials: .*auth\.json \(1 provider; imported from \/home\/me\/\.pi\/agent\)/);
   assert.doesNotMatch(output, /hidden/, "doctor never prints credential values");
   assert.match(output, /Model: codex\/gpt-test/);
-  assert.match(output, /Session roots: codex=\/sessions\/codex/);
+  assert.match(output, /Transcript stores: codex=\/sessions\/codex/);
+  assert.match(output, /Session host roots: .*Superset App=\/worktrees\/superset/);
   assert.match(output, /Interactive gates: edit=ask, write=ask, risky bash=ask/);
   assert.match(output, /Headless gates: edit=deny, write=deny, risky bash=deny/);
 
