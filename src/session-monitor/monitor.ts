@@ -23,6 +23,7 @@ export interface SessionMonitorOptions {
 export enum SessionMonitorLogEvent {
   PollFailed = "poll-failed",
   EnrichmentFailed = "enrichment-failed",
+  EnrichmentDiscarded = "enrichment-discarded",
 }
 
 export interface SessionMonitorLogRecord {
@@ -152,11 +153,26 @@ export class SessionMonitor {
 
   private async drainEnrichment(): Promise<void> {
     try {
-      for (;;) {
-        const candidate = this.state.listEnrichmentCandidates()[0];
-        if (!candidate?.lastMessageAt || !this.options.enrich) return;
-        const details = await this.options.enrich(candidate);
-        this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt);
+      // One snapshot, one attempt per thread per pass: a candidate whose result is
+      // rejected or whose call fails waits for the next poll instead of retrying in a
+      // tight loop, and one failing thread cannot block the rest of the queue.
+      const candidates = this.state.listEnrichmentCandidates();
+      for (const candidate of candidates) {
+        if (!candidate.lastMessageAt || !this.options.enrich) return;
+        try {
+          const details = await this.options.enrich(candidate);
+          if (!this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt)) {
+            this.logger({
+              event: SessionMonitorLogEvent.EnrichmentDiscarded,
+              error: `stale sample discarded for ${candidate.id}`,
+            });
+          }
+        } catch (error) {
+          this.logger({
+            event: SessionMonitorLogEvent.EnrichmentFailed,
+            error: `${candidate.id}: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       }
     } finally {
       this.enriching = false;

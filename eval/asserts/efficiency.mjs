@@ -1,6 +1,6 @@
-// Metrics-only assertion: surfaces the provider's efficiency telemetry as named
-// scores so promptfoo aggregates them per arm. Always passes — the 50%-efficiency
-// gate is enforced across arms by eval/compare.mjs, which needs both arms' numbers.
+// Metrics-only assertion: surfaces the provider's efficiency telemetry (tool calls,
+// tokens, cost, latency) as named scores so promptfoo aggregates them per subject.
+// Always passes — spend is compared downstream by eval/compare.mjs, not gated here.
 export default (output, context) => {
   const m = context.providerResponse?.metadata ?? {};
   return {

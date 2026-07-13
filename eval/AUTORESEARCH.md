@@ -1,9 +1,9 @@
 # Eval iteration protocol
 
-This is a development harness, not a one-shot scorecard. It adapts the proven loop in the
-local `session-grep/eval/AUTORESEARCH.md` and the Amplify MCP branch's generic-client
-pattern: the subject sees the real product surface, trajectories show how it used that
-surface, and each iteration changes one mechanism.
+Iteration protocol for developing the harness, adapted from the
+[session-grep eval harness](https://github.com/lhotwll217/session-grep)'s AUTORESEARCH loop: the
+subject sees the real product surface, trajectories show how it used that surface, and each
+iteration changes one mechanism.
 
 Put campaign-specific claims, expected trajectory changes, and selected cases in a file
 under [`hypotheses/`](hypotheses/). Keep this protocol agnostic to any one hypothesis.
@@ -44,12 +44,13 @@ ignored `eval/findings.jsonl`; the loop cannot infer those findings. Promote dur
 conclusions into the active hypothesis.
 
 A valid, complete `--full` run additionally writes
-`eval/results/logs/<run>/global_results.json` and prepends its compact summary to
-`eval/eval_stat_log.json`. This follows ai-backend's established raw-result → diff-friendly-log
-pattern. The committed entry records timestamp, short commit, branch, dirty-worktree content hash,
-eval folder, model/grader, repeat count, pass rates, and call/token/cost distributions. Reprocessing the same eval folder is
-idempotent; distinct full runs remain in the log even when they share a branch and commit.
-Targeted, probe, core, incomplete, and provider-invalid runs never enter it.
+`eval/results/logs/<run>/global_results.json` (raw per-run detail: run-time git state,
+per-case results) and prepends a compact summary to `eval/eval_stat_log.json`, following
+ai-backend's raw-result → diff-friendly-log pattern. `buildStatsEntry` in
+[`stats-log.mjs`](stats-log.mjs) is the entry shape — one per (eval folder, subject),
+idempotent on reprocess. `--backfill-git` resolves an entry's commit/branch to the state
+that carries the run's work. Only valid, complete `--full` runs publish; targeted, probe,
+core, incomplete, and provider-invalid runs never enter the log.
 
 ## Campaign closeout
 
@@ -81,12 +82,13 @@ comparison campaign.
 
 ## Accept/reject
 
-- Correctness is a veto: no paired case may regress and the fail-closed comparator must pass.
+- Correctness is a veto: `compare.mjs --gate` (subject vs its prior run) must not regress on
+  the shared cases. Inspect per-case pass rates, not just the aggregate.
 - A model/provider error invalidates the campaign. Circuit-break remaining subject calls; do
   not spend grader tokens scoring empty answers or interpret quota/auth failures as product data.
-- Inspect paired per-case tool calls, tokens, cost, and trajectory—not aggregate means alone.
-- Compare mean calls, tokens, and cost per evaluation. Totals and per-repeat sums scale with
-  suite size or repeat count and therefore do not belong in the PR comparison artifact.
+- Inspect per-case tool calls, tokens, cost, latency, and trajectory—not aggregate means alone.
+- Compare mean calls, tokens, cost, and latency per evaluation. Totals and per-repeat sums scale
+  with suite size or repeat count and therefore do not belong in the comparison artifact.
 - A global claim must select the intended accepted full entry for the current PR and an entry
   from the previous PR using branch, commit, and eval folder—not merely adjacent timestamps.
   Do not merge targeted runs with different manifests into a synthetic global snapshot. Compare

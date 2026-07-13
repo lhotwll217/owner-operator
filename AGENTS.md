@@ -19,3 +19,16 @@
 - **Single-source doc** Documentation should live in one place and be pointed to.
 - **Concise.** High-signal, low-noise — in the product, the docs, and your output.
 - **KISS** Keep It Simple Stupid. It's almost always better to build up than tear down. Complexity must earn it's keep. CHALLENGE COMPLEXITY.
+
+## Durable docs and comments
+
+Reread cold as a stranger before saving. Checks:
+
+- Prefer stating what to do over cataloging what not to do.
+- Point at self-documenting code instead of restating it.
+- No decision residue from the thread that produced it. Rationale docs
+  ([docs/inspiration.md](docs/inspiration.md), `eval/hypotheses/`) record accepted/rejected
+  borrows — that content is their job.
+- No context a fresh reader doesn't need.
+- Most literal wording; no jargon, fluff, or coined nouns.
+- Prompts/skills: state the goal; leave the model room to work.

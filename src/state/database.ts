@@ -282,7 +282,7 @@ export class ThreadDb {
     }
   }
 
-  appendModelDetailsIfCurrent(
+  appendModelDetailsIfFresh(
     threadId: string,
     details: ThreadDetails,
     throughMessageAt: string,
@@ -290,7 +290,15 @@ export class ThreadDb {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      if (current?.state !== "needs-you" || current.lastMessageAt !== throughMessageAt) {
+      // The thread may have flapped out of needs-you while the model ran — the sampled
+      // message is unchanged, so the belief still lands (state is a lifecycle flag, not a
+      // new message). But once a newer message has arrived the sample is stale: reject it
+      // and let the next poll re-enrich. The watermark rejects an already-enriched message
+      // and any out-of-order duplicate.
+      if (
+        !current || current.lastMessageAt !== throughMessageAt ||
+        (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
+      ) {
         this.db.exec("COMMIT");
         return null;
       }
@@ -382,7 +390,7 @@ export class ThreadDb {
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at != t.last_message_at)
+         AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at)
        ORDER BY t.last_message_at ASC`,
     ).all() as Array<{ id: string }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));

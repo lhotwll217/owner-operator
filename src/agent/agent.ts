@@ -54,7 +54,10 @@ export function evalSettingsOverrides(
   const transport = env.OO_EVAL_TRANSPORT?.trim();
   const defaultProvider = env.OO_EVAL_DEFAULT_PROVIDER?.trim();
   const defaultModel = env.OO_EVAL_DEFAULT_MODEL?.trim();
-  if (!transport && !defaultProvider && !defaultModel) return {};
+  const defaultThinkingLevel = env.OO_EVAL_DEFAULT_THINKING?.trim() as
+    | Parameters<SettingsManager["applyOverrides"]>[0]["defaultThinkingLevel"]
+    | undefined;
+  if (!transport && !defaultProvider && !defaultModel && !defaultThinkingLevel) return {};
   if (env.OO_EVAL_READ_ONLY !== "1") {
     throw new Error("OO_EVAL settings overrides are restricted to the read-only eval harness");
   }
@@ -67,6 +70,7 @@ export function evalSettingsOverrides(
   return {
     ...(transport ? { transport: "sse" as const } : {}),
     ...(defaultProvider && defaultModel ? { defaultProvider, defaultModel } : {}),
+    ...(defaultThinkingLevel ? { defaultThinkingLevel } : {}),
   };
 }
 

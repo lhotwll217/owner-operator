@@ -1,27 +1,19 @@
-# Owner Operator vs a naive session-search baseline (issue #31): does OO's composition —
-# its state DB as a locator + its neutral prompt — answer discovery/evidence questions at
-# >=parity correctness, ideally for less spend, versus a plain agent that only has grep?
+# Owner Operator harness eval: correctness and spend on session questions, against the
+# seeded fixture sandbox. A run measures ONE subject — the owner-operator composition by
+# default, or naive-session-grep (same `oo` binary, same model, OO_EVAL_BASELINE_PROMPT
+# swaps out the state/index composition) as the control study from issue #31. Mutation
+# tools are removed from both. The provider modules are the tool-roster source of truth.
 #
-# CONTROLLED: both arms run the SAME `oo` binary at the SAME configured model
-# (`.pi/settings.json`) against the SAME seeded fixture sandbox. Mutation tools are removed
-# from both arms. The subject uses OO's shipped read-only composition; the baseline uses the
-# same runner and search capability without OO's state/index composition. The provider modules
-# are the tool-roster source of truth.
-# Same framework + same model means the tool-call/token/correctness deltas are attributable
-# to OO's composition, not to a model or harness difference. A cross-model version was
-# retired because it changed the harness and model at once.
+# The DB is one of OO's tools, so there's no separate DB suite; per-case qtype tags feed
+# the downstream locator-payoff breakdown.
 #
-# One chain, one case set: both arms attempt every case. The DB is one of OO's tools, so
-# there's no separate DB suite — the report breaks down by qtype to show WHERE OO reached
-# for query_database instead of grepping.
+# Run:   node eval/loop.mjs --label ... --notes ...   (the ledgered runner; picks the subject)
+# Then:  node eval/compare.mjs <global_results_A.json> <global_results_B.json>
 #
-# Run:   npx promptfoo eval -c eval/promptfooconfig.yaml
-# Then:  node eval/compare.mjs                                  paired A/B breakdown
-#
-# Both arms run through `oo` (codex backend); only the grader uses `claude` (any capable
-# judge model works — it is not an arm). No API keys needed.
+# Subjects and grader all run on Codex subscription auth; the grader is a cheap model at
+# minimal reasoning (it is not a subject — override via EVAL_GRADER_MODEL). No API keys needed.
 
-description: Owner Operator vs naive session-search baseline — same model, correctness and spend
+description: Owner Operator harness eval — session-question correctness and spend, one subject per run
 
 prompts:
   - '{{question}}'
@@ -31,12 +23,12 @@ providers:
     label: owner-operator
     config: { timeoutMs: 600000 }
   - id: file://providers/naive-agent.mjs
-    label: baseline
+    label: naive-session-grep
     config: { timeoutMs: 600000 }
 
 defaultTest:
   options:
-    provider: file://providers/claude-grader.mjs
+    provider: file://providers/codex-grader.mjs
   assert:
     # Correctness is graded per case (llm-rubric in cases.yaml).
     # Soundness gate (#31 criterion 3): evidence answers must be read from a transcript,

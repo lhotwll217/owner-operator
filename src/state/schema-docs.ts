@@ -37,9 +37,9 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "state", description: "needs-you | working | idle | done." },
       { name: "state_reason", description: "Optional explanation for the current state." },
       { name: "priority", description: "Model-assigned owner attention, 1-5." },
-      { name: "topic", description: "Generated title." },
-      { name: "summary", description: "Current concise recap." },
-      { name: "next_steps", description: "Concrete action needed from the owner." },
+      { name: "topic", description: "Generated title; the widget/CLI row title unless owner_title overrides." },
+      { name: "summary", description: "Legacy model recap; enrichment no longer writes it and clears it as threads re-enrich." },
+      { name: "next_steps", description: "Concrete action needed from the owner; the widget's arrow line." },
     ],
   },
   {

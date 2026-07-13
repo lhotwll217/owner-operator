@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evalSandboxPath } from '../sandbox.mjs';
+import { DEFAULT_GRADER_MODEL, DEFAULT_GRADER_REASONING } from './codex-grader.mjs';
 import { readGitProvenance } from './git-provenance.mjs';
 import { loadEvalModelSettings } from './model-settings.mjs';
 import { readFatalModelError } from './trace-errors.mjs';
@@ -219,6 +220,9 @@ function runOo(prompt, traceFile, timeoutMs, extraEnv) {
         OO_EVAL_TRANSPORT: SUBJECT_TRANSPORT,
         OO_EVAL_DEFAULT_PROVIDER: evalModelSettings.settings.defaultProvider,
         OO_EVAL_DEFAULT_MODEL: evalModelSettings.settings.defaultModel,
+        ...(evalModelSettings.settings.defaultThinkingLevel
+          ? { OO_EVAL_DEFAULT_THINKING: evalModelSettings.settings.defaultThinkingLevel }
+          : {}),
       },
     });
     let stdout = '';
@@ -282,7 +286,7 @@ function buildRunManifest() {
     'eval/loop.mjs',
     'eval/sandbox.mjs',
     'eval/seed/build-fixture-home.mjs',
-    'eval/providers/claude-grader.mjs',
+    'eval/providers/codex-grader.mjs',
     'eval/providers/git-provenance.mjs',
     'eval/providers/model-settings.mjs',
     'eval/providers/pi-agent-core.mjs',
@@ -299,8 +303,10 @@ function buildRunManifest() {
     createdAt: new Date().toISOString(),
     modelLabel: [settings.defaultProvider, settings.defaultModel].filter(Boolean).join('/'),
     modelSettingsArtifact,
+    reasoningLevel: settings.defaultThinkingLevel ?? null,
     subjectTransport: SUBJECT_TRANSPORT,
-    graderModel: process.env.EVAL_GRADER_MODEL ?? 'claude-fable-5',
+    graderModel: process.env.EVAL_GRADER_MODEL ?? DEFAULT_GRADER_MODEL,
+    graderReasoning: DEFAULT_GRADER_REASONING,
     piVersion: JSON.parse(fs.readFileSync(path.join(repoRoot, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8')).version,
     promptfooVersion: JSON.parse(fs.readFileSync(path.join(repoRoot, 'node_modules', 'promptfoo', 'package.json'), 'utf8')).version,
     ...git,

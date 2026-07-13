@@ -1,9 +1,11 @@
-// Integration: mirror ai-backend's raw-global-result -> compact append-only stats pattern.
+// Integration: raw single-subject global result -> compact append-only stats entry,
+// with PR-time git backfill and (eval_folder, subject) idempotent upserts.
 import assert from "node:assert";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  backfillGitIdentity,
   buildGlobalResults,
   buildStatsEntry,
   upsertStatsLog,
@@ -17,53 +19,40 @@ const record = {
   runId: "run-repeat-3",
   label: "repeat-aware",
   notes: "prove stats do not depend on repeat=1",
+  subject: "owner-operator",
   scope: "full",
   pattern: null,
   repeat: 3,
   manifestHash: "manifest-a",
   model: "subject-model",
+  reasoningLevel: "medium",
   graderModel: "grader-model",
+  graderReasoning: "minimal",
   logs: "eval/results/logs/run-repeat-3",
   detail: "eval/results/iterations/run-repeat-3.json",
-  comparePass: true,
-  promptfooPass: false,
-  metrics: {
-    fewerCallWins: 2,
-    trajectoryPass: true,
-  },
+  promptfooPass: true,
+  metrics: { trajectoryPass: true },
 };
 
 const cases = [
   {
     caseId: "alpha",
-    oo: { n: 3, correct: 2 / 3, trajectoryPass: true, tokens: 100, toolCalls: 3, cost: 0.1, providerErrors: 0 },
-    baseline: { n: 3, correct: 1 / 3, trajectoryPass: true, tokens: 120, toolCalls: 4, cost: 0.12, providerErrors: 0 },
+    stats: { n: 3, qtype: "evidence", correct: 2 / 3, trajectoryPass: true, tokens: 100, toolCalls: 3, cost: 0.1, latencyMs: 4000, providerErrors: 0 },
   },
   {
     caseId: "beta",
-    oo: { n: 3, correct: 1, trajectoryPass: true, tokens: 50, toolCalls: 2, cost: 0.05, providerErrors: 0 },
-    baseline: { n: 3, correct: 1, trajectoryPass: true, tokens: 90, toolCalls: 3, cost: 0.09, providerErrors: 0 },
+    stats: { n: 3, qtype: "state", correct: 1, trajectoryPass: true, tokens: 50, toolCalls: 2, cost: 0.05, latencyMs: 2000, providerErrors: 0 },
   },
 ];
 
 const observations = [
-  ...[
-    [2, 90, 0.09],
-    [3, 100, 0.1],
-    [4, 110, 0.11],
-    [1, 40, 0.04],
-    [2, 50, 0.05],
-    [3, 60, 0.06],
-  ].map(([toolCalls, tokens, cost]) => ({ arm: "oo", toolCalls, tokens, cost })),
-  ...[
-    [3, 110, 0.11],
-    [4, 120, 0.12],
-    [5, 130, 0.13],
-    [2, 80, 0.08],
-    [3, 90, 0.09],
-    [4, 100, 0.1],
-  ].map(([toolCalls, tokens, cost]) => ({ arm: "baseline", toolCalls, tokens, cost })),
-];
+  [2, 90, 0.09, 3800],
+  [3, 100, 0.1, 4000],
+  [4, 110, 0.11, 4200],
+  [1, 40, 0.04, 1800],
+  [2, 50, 0.05, 2000],
+  [3, 60, 0.06, 2200],
+].map(([toolCalls, tokens, cost, latencyMs]) => ({ toolCalls, tokens, cost, latencyMs }));
 
 const manifest = {
   gitHead: "abcdef1234567890abcdef1234567890abcdef12",
@@ -87,6 +76,7 @@ try {
     loopSource.indexOf("fs.appendFileSync(historyFile") < loopSource.indexOf('if (scope === "full"'),
     "all runs enter durable history before the full-run stats boundary",
   );
+  assert.match(loopSource, /INVALID-NOT-PUBLISHED/, "an unpublishable full run fails loudly");
   assert.match(loopSource, /missing-git-commit/);
   assert.match(loopSource, /missing-git-branch/);
 
@@ -95,50 +85,70 @@ try {
 
   const globalResults = buildGlobalResults({ record, cases, observations, manifest });
   assert.equal(globalResults.eval_folder, "run-repeat-3");
+  assert.equal(globalResults.metadata.subject, "owner-operator");
   assert.equal(globalResults.metadata.branch, "feature/pr-eval-stats");
   assert.equal(globalResults.metadata.commit, "abcdef1");
   assert.equal(globalResults.metadata.repeat, 3);
-  assert.equal(globalResults.summary.total_tests_per_arm, 6);
-  assert.deepEqual(globalResults.summary.owner_operator, {
+  assert.equal(globalResults.metadata.reasoning_level, "medium");
+  assert.equal(globalResults.metadata.grader_reasoning, "minimal");
+  assert.deepEqual(globalResults.summary, {
+    cases: 2,
+    total_tests: 6,
     total_pass: 5,
     total_fail: 1,
     total_error: 0,
     global_pass_rate: 83.33,
+    trajectory_pass: true,
   });
-  assert.deepEqual(globalResults.tool_calls.owner_operator, {
+  assert.deepEqual(globalResults.tool_calls, {
     mean: 2.5,
     median: 2.5,
     min: 1,
     max: 4,
     stdev: 1.05,
-    total_requests: 6,
   });
-  assert.equal(globalResults.tokens.owner_operator.mean, 75);
-  assert.equal(globalResults.cost_usd.owner_operator.mean, 0.075);
+  assert.equal(globalResults.tokens.mean, 75);
+  assert.equal(globalResults.cost_usd.mean, 0.075);
+  assert.deepEqual(globalResults.latency_ms, {
+    mean: 3000,
+    median: 3000,
+    min: 1800,
+    max: 4200,
+    stdev: 1110,
+  }, "latency distribution rides the same observation pipeline as tokens/calls/cost");
   assert.equal(globalResults.cases.length, 2, "per-case detail belongs in the raw global result");
+  assert.equal(globalResults.cases[0].qtype, "evidence", "qtype rides along for downstream breakdowns");
+  assert.equal(globalResults.cases[0].mean_latency_ms, 4000, "per-case mean latency is recorded");
 
   const entry = buildStatsEntry(globalResults);
   assert.deepEqual(Object.keys(entry), [
     "timestamp",
+    "label",
     "commit",
     "branch",
-    "git_dirty",
-    "git_diff_hash",
     "eval_folder",
+    "subject",
     "model",
-    "grader_model",
     "reasoning_level",
-    "scope",
+    "grader_model",
+    "grader_reasoning",
+    "cases",
     "repeat",
+    "total_tests",
     "summary",
     "tool_calls",
     "tokens",
     "cost_usd",
+    "latency_ms",
   ]);
-  assert.equal(entry.git_dirty, true);
-  assert.equal(entry.git_diff_hash, "diff-a");
-  assert.ok(!("cases" in entry), "the committed stats log stays compact");
+  assert.equal(entry.subject, "owner-operator");
+  assert.equal(entry.latency_ms.median, 3000, "the compact entry carries the latency distribution");
+  assert.equal(entry.cases, 2);
+  assert.equal(entry.total_tests, 6, "the entry states how many evaluations backed it");
+  assert.ok(!("cases" in entry.summary), "the committed stats log stays compact");
   assert.ok(!("notes" in entry), "autoresearch narrative stays in history");
+  assert.ok(!("git_dirty" in entry), "run-time git provenance stays in the raw global result");
+  assert.ok(!("scope" in entry), "the log only holds full-suite entries; scope is not a field");
 
   assert.throws(
     () => buildGlobalResults({ record, cases, observations, manifest: { gitHead: manifest.gitHead } }),
@@ -154,6 +164,8 @@ try {
   );
 
   upsertStatsLog(file, entry);
+  const controlEntry = { ...entry, subject: "naive-session-grep", timestamp: "2026-07-11T12:00:30.000Z" };
+  upsertStatsLog(file, controlEntry);
   upsertStatsLog(file, {
     ...entry,
     timestamp: "2026-07-11T12:01:00.000Z",
@@ -166,28 +178,35 @@ try {
   });
 
   const log = JSON.parse(readFileSync(file, "utf8"));
-  assert.deepEqual(log.map((item: { eval_folder: string }) => item.eval_folder), [
-    "run-repeat-3",
-    "same-branch-new-global-run",
-  ]);
+  assert.deepEqual(
+    log.map((item: { eval_folder: string; subject: string }) => `${item.eval_folder}/${item.subject}`),
+    [
+      "run-repeat-3/owner-operator",
+      "same-branch-new-global-run/owner-operator",
+      "run-repeat-3/naive-session-grep",
+    ],
+    "entries are keyed by (eval_folder, subject)",
+  );
   assert.equal(log[0].summary.trajectory_pass, false, "the same run is idempotently refreshed");
-  assert.equal(log[1].branch, entry.branch, "distinct full runs on one PR branch remain comparable");
+
+  const backfilled = backfillGitIdentity(file, "run-repeat-3", { commit: "1234567", branch: "feature/pr-final" });
+  assert.equal(backfilled.length, 2, "every subject entry for the folder resolves together");
+  const afterBackfill = JSON.parse(readFileSync(file, "utf8"));
+  for (const item of afterBackfill.filter((entry: { eval_folder: string }) => entry.eval_folder === "run-repeat-3")) {
+    assert.equal(item.commit, "1234567");
+    assert.equal(item.branch, "feature/pr-final");
+    assert.ok(!("run_commit" in item), "one resolved identity, not two");
+  }
+  assert.throws(() => backfillGitIdentity(file, "no-such-folder", { commit: "1234567", branch: "x" }), /no stats entry/);
 
   const committedLog = JSON.parse(readFileSync(join(process.cwd(), "eval", "eval_stat_log.json"), "utf8"));
   assert.ok(committedLog.length >= 2, "the global artifact must retain pre-work and current snapshots");
-  for (const snapshot of committedLog) {
-    assert.equal(snapshot.scope, "full");
-    assert.match(snapshot.branch, /\S/);
-    assert.match(snapshot.commit, /^[0-9a-f]{7,40}$/i);
-    assert.ok(snapshot.git_dirty === null || typeof snapshot.git_dirty === "boolean");
-    assert.ok(snapshot.git_diff_hash === null || typeof snapshot.git_diff_hash === "string");
-    for (const metric of ["tool_calls", "tokens"]) {
-      assert.equal(typeof snapshot[metric].owner_operator.mean, "number");
-      assert.equal(typeof snapshot[metric].baseline.mean, "number");
-    }
-  }
+  assert.ok(
+    committedLog.every((item: { subject?: string }) => typeof item.subject === "string" && item.subject.length > 0),
+    "every committed entry names its subject explicitly",
+  );
 
-  process.stdout.write("ok — eval stats log mirrors the compact append-only global-run pattern\n");
+  process.stdout.write("ok — eval stats log: single-subject entries, keyed upserts, git backfill\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
