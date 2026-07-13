@@ -53,9 +53,15 @@ export async function enrichThread(sample: string): Promise<ThreadDetails> {
   const { model, auth } = await resolveModel(registry, settings);
 
   const response = await completeSimple(model, {
-    systemPrompt:
-      "Extract the current handoff for one coding-agent thread. Return only JSON with " +
-      "topic (short), summary (one sentence), nextSteps (the concrete owner action), and priority (1-5).",
+    systemPrompt: [
+      "You brief the human owner of one coding-agent session. Return only JSON with:",
+      "topic — noun-phrase title, 3-6 words.",
+      "summary — one sentence: where the session stands now.",
+      "nextSteps — the owner's own next move (a decision, review, answer, or test), imperative, " +
+        'under 15 words. The session\'s agent handles implementation, so never prescribe code changes. ' +
+        'Example: "Review the final diff and confirm whether to push."',
+      "priority — integer 1-5: how urgently this needs the owner.",
+    ].join("\n"),
     messages: [{ role: "user", content: sample, timestamp: Date.now() }],
   }, {
     apiKey: auth.apiKey,
