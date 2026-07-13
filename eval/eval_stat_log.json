@@ -262,7 +262,8 @@
       "min": null,
       "max": null,
       "stdev": null
-    }
+    },
+    "note": "Backfilled from PR #33. The raw run, distributions, grader, and exact eval commit were not retained; token means are rounded PR-body values and commit is the PR head at merge."
   },
   {
     "timestamp": "2026-07-07T15:53:40Z",
@@ -305,6 +306,7 @@
       "min": null,
       "max": null,
       "stdev": null
-    }
+    },
+    "note": "Backfilled from PR #33. The raw run, distributions, grader, and exact eval commit were not retained; token means are rounded PR-body values and commit is the PR head at merge."
   }
 ]

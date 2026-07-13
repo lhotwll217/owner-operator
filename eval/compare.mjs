@@ -19,8 +19,39 @@ if (files.length !== 2) {
   process.exit(2);
 }
 
-const [a, b] = files.map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
+const [a, b] = files.map((file) => {
+  const run = JSON.parse(fs.readFileSync(file, "utf8"));
+  rejectInvalidRun(run, file);
+  return run;
+});
 const describe = (run) => `${run.metadata.subject} [${run.metadata.label ?? run.eval_folder}] @ ${run.metadata.commit}`;
+
+// Malformed or legacy-schema input must fail closed, not average NaN into a passing gate.
+function rejectInvalidRun(run, file) {
+  const problems = [];
+  const metadata = run?.metadata ?? {};
+  if (!metadata.subject) problems.push("missing metadata.subject");
+  if (!Number.isInteger(metadata.repeat) || metadata.repeat < 1) problems.push("invalid metadata.repeat");
+  if (!Array.isArray(run?.cases) || !run.cases.length) problems.push("missing cases");
+  const seen = new Set();
+  for (const item of run?.cases ?? []) {
+    const id = item?.id;
+    if (!id) { problems.push("case without id"); continue; }
+    if (seen.has(id)) problems.push(`duplicate case id: ${id}`);
+    seen.add(id);
+    if (!Number.isInteger(item.repeat) || item.repeat < 1) problems.push(`${id}: invalid repeat`);
+    if (!Number.isInteger(item.total_pass) || item.total_pass < 0 || item.total_pass > item.repeat) {
+      problems.push(`${id}: invalid total_pass`);
+    }
+    for (const field of ["pass_rate", "mean_tool_calls", "mean_tokens", "mean_cost_usd"]) {
+      if (!Number.isFinite(Number(item[field]))) problems.push(`${id}: non-finite ${field}`);
+    }
+  }
+  if (problems.length) {
+    console.error(`invalid run ${file}:\n  - ${problems.join("\n  - ")}`);
+    process.exit(2);
+  }
+}
 console.log(`A: ${describe(a)}`);
 console.log(`B: ${describe(b)}`);
 

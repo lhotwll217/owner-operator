@@ -132,9 +132,10 @@ const metrics = summarize(cases);
 
 const manifest = readManifest(records);
 const runValidity = validateStatsRun(records, cases, {
-  expectedCases: scope === "full" ? knownIds.size : ids.length,
+  expectedIds: scope === "full" ? knownIds : new Set(ids),
   manifest,
   repeat,
+  evalStatus,
 });
 const detail = path.join(iterationsDir, `${runId}.json`);
 const record = {
@@ -206,30 +207,44 @@ if (evalStatus !== 0) process.exitCode = 2;
 
 function toRecord(result) {
   const providerLabel = result.provider?.label ?? result.provider?.id ?? "unknown";
-  const subjectName = SUBJECTS.find((name) => providerLabel.startsWith(name)) ?? "unknown";
+  const subjectName = SUBJECTS.includes(providerLabel) ? providerLabel : "unknown";
   const components = result.gradingResult?.componentResults ?? [];
   const rubric = components.find((component) => component.assertion?.type === "llm-rubric");
   const trajectory = components.find((component) => component.assertion?.metric === "tool_selection");
   const metadata = result.response?.metadata ?? {};
+  // A broken judge must not read as a failed answer: the grader emits a sentinel-prefixed
+  // error reason, and promptfoo tags its own grading failures.
+  const graderError =
+    rubric?.metadata?.graderError === true ||
+    result.gradingResult?.metadata?.gradingIncomplete === true ||
+    (typeof rubric?.reason === "string" && rubric.reason.includes("grader-error:"));
   return {
     caseId: result.vars?.id ?? result.description ?? `test-${result.testIdx}`,
     subject: subjectName,
     qtype: result.testCase?.metadata?.qtype ?? "unknown",
-    correct: rubric ? Number(rubric.pass === true) : null,
+    correct: rubric && !graderError ? Number(rubric.pass === true) : null,
+    graderError,
     // The tool-selection gate judges OO's composition; the control passes vacuously.
     trajectoryPass: subjectName === "owner-operator" ? trajectory?.pass === true : true,
     rubricReason: rubric?.reason ?? null,
-    tokens: Number(metadata.tokensTotal ?? result.tokenUsage?.total ?? 0),
-    toolCalls: Number(metadata.toolCallCount ?? 0),
-    cost: Number(metadata.costUsd ?? result.cost ?? 0),
+    tokens: metric(metadata.tokensTotal ?? result.tokenUsage?.total),
+    toolCalls: metric(metadata.toolCallCount),
+    cost: metric(metadata.costUsd ?? result.cost),
     // Our own subprocess wall-clock; promptfoo's result.latencyMs (provider-wrapper view)
     // is the fallback cross-check.
-    latencyMs: Number(metadata.durationMs ?? result.latencyMs ?? 0),
+    latencyMs: metric(metadata.durationMs ?? result.latencyMs),
     runId: metadata.runId ?? null,
+    manifestHash: metadata.manifestHash ?? null,
     modelLabel: metadata.modelLabel ?? null,
     traceFile: metadata.traceFile ?? null,
     providerError: result.response?.error ?? null,
   };
+}
+
+// Finite non-negative or null — never a silent zero for missing/garbage telemetry.
+function metric(value) {
+  const n = Number(value);
+  return value != null && Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function collectCases(records) {
@@ -249,10 +264,10 @@ function aggregate(items) {
     qtype: items[0]?.qtype ?? "unknown",
     correct: mean(items.map((item) => item.correct ?? 0)),
     trajectoryPass: items.every((item) => item.trajectoryPass),
-    tokens: mean(items.map((item) => item.tokens)),
-    toolCalls: mean(items.map((item) => item.toolCalls)),
-    cost: mean(items.map((item) => item.cost)),
-    latencyMs: mean(items.map((item) => item.latencyMs)),
+    tokens: mean(items.map((item) => item.tokens ?? 0)),
+    toolCalls: mean(items.map((item) => item.toolCalls ?? 0)),
+    cost: mean(items.map((item) => item.cost ?? 0)),
+    latencyMs: mean(items.map((item) => item.latencyMs ?? 0)),
     providerErrors: items.filter((item) => item.providerError).length,
   };
 }
@@ -269,16 +284,31 @@ function summarize(cases) {
   };
 }
 
-function validateStatsRun(records, cases, { expectedCases, manifest, repeat }) {
+function validateStatsRun(records, cases, { expectedIds, manifest, repeat, evalStatus }) {
   const reasons = [];
+  if (evalStatus !== 0) reasons.push("promptfoo-failed");
   if (!manifest) reasons.push("missing-manifest");
   if (!manifest?.gitHead) reasons.push("missing-git-commit");
   if (!manifest?.gitBranch || manifest.gitBranch === "HEAD") reasons.push("missing-git-branch");
-  if (cases.length !== expectedCases) reasons.push(`cases-${cases.length}-of-${expectedCases}`);
-  if (records.length !== expectedCases * repeat) reasons.push(`records-${records.length}-of-${expectedCases * repeat}`);
+  // Exact membership, not cardinality: a swapped case must not publish as a full run.
+  const observedIds = new Set(cases.map((item) => item.caseId));
+  const missing = [...expectedIds].filter((id) => !observedIds.has(id));
+  const extra = [...observedIds].filter((id) => !expectedIds.has(id));
+  if (missing.length) reasons.push(`missing-cases:${missing.join("+")}`);
+  if (extra.length) reasons.push(`unexpected-cases:${extra.join("+")}`);
+  if (records.length !== expectedIds.size * repeat) reasons.push(`records-${records.length}-of-${expectedIds.size * repeat}`);
   if (records.some((item) => item.subject === "unknown")) reasons.push("unknown-subject");
+  if (records.some((item) => item.graderError)) reasons.push("grader-error");
   if (records.some((item) => item.correct === null)) reasons.push("missing-grade");
   if (records.some((item) => item.providerError)) reasons.push("provider-error");
+  // Every observation carries the same run identity, or the results are not one run.
+  if (records.some((item) => !item.runId)) reasons.push("missing-run-id");
+  if (records.some((item) => !item.traceFile)) reasons.push("missing-trace");
+  if (records.some((item) => item.manifestHash !== manifest?.manifestHash)) reasons.push("manifest-mismatch");
+  if (unique(records.map((item) => item.modelLabel)).length !== 1) reasons.push("model-mismatch");
+  if (records.some((item) =>
+    item.tokens === null || item.toolCalls === null || item.cost === null || item.latencyMs === null
+  )) reasons.push("missing-telemetry");
   if (cases.some((item) => item.stats.n !== repeat)) reasons.push("repeat-mismatch");
   return { valid: reasons.length === 0, reasons };
 }

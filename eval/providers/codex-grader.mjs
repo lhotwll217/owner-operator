@@ -67,7 +67,9 @@ export default class CodexGraderProvider {
         },
       };
     } catch (error) {
-      return { output: '', error: String(error?.message ?? error) };
+      // The sentinel prefix survives into the rubric's failure reason, letting the
+      // runner distinguish "the judge broke" from "the judge failed the answer".
+      return { output: '', error: `grader-error: ${String(error?.message ?? error)}` };
     }
   }
 }

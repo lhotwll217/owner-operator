@@ -103,6 +103,16 @@ try {
   assert.equal(disjoint.status, 2, "zero shared cases fails closed");
   assert.match(disjoint.stderr, /no shared cases/);
 
+  const malformedRun = run("owner-operator", "malformed", [caseResult("alpha", 100)]) as Record<string, unknown>;
+  delete (malformedRun.cases as Array<Record<string, unknown>>)[0].repeat;
+  (malformedRun.cases as Array<Record<string, unknown>>)[0].mean_tokens = "not-a-number";
+  const malformedFile = write("malformed.json", malformedRun);
+  const malformed = compare(malformedFile, controlFile, "--gate");
+  assert.equal(malformed.status, 2, "malformed input fails closed, never NaN-passes the gate");
+  assert.match(malformed.stderr, /invalid run/);
+  assert.match(malformed.stderr, /invalid repeat/);
+  assert.match(malformed.stderr, /non-finite mean_tokens/);
+
   process.stdout.write("ok — eval compare: downstream pairing, caveats, and a fail-closed correctness gate\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
