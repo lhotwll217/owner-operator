@@ -21,13 +21,11 @@ function parseDetails(text: string): ThreadDetails {
     throw new Error("enrichment model omitted nextSteps");
   }
   if (value.topic !== undefined && typeof value.topic !== "string") throw new Error("invalid enrichment topic");
-  if (value.summary !== undefined && typeof value.summary !== "string") throw new Error("invalid enrichment summary");
   if (value.priority !== undefined && (!Number.isInteger(value.priority) || Number(value.priority) < 1 || Number(value.priority) > 5)) {
     throw new Error("invalid enrichment priority");
   }
   return {
     ...(typeof value.topic === "string" ? { topic: value.topic.trim() } : {}),
-    ...(typeof value.summary === "string" ? { summary: value.summary.trim() } : {}),
     nextSteps: value.nextSteps.trim(),
     ...(typeof value.priority === "number" ? { priority: value.priority } : {}),
   };
@@ -56,7 +54,6 @@ export async function enrichThread(sample: string): Promise<ThreadDetails> {
     systemPrompt: [
       "You brief the human owner of one coding-agent session. Return only JSON with:",
       "topic — noun-phrase title, 3-6 words.",
-      "summary — one sentence: where the session stands now.",
       "nextSteps — the owner's own next move (a decision, review, answer, or test), imperative, " +
         'under 15 words. The session\'s agent handles implementation, so never prescribe code changes. ' +
         'Example: "Review the final diff and confirm whether to push."',
