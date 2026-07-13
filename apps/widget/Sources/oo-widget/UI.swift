@@ -17,6 +17,8 @@ struct WidgetRoot: View {
                 Divider()
                 if !client.online {
                     offline
+                } else if client.setupRequired {
+                    setupRequired
                 } else if client.groups.isEmpty {
                     Text("no active threads")
                         .foregroundStyle(.secondary).font(.system(size: 11)).padding(12)
@@ -59,6 +61,15 @@ struct WidgetRoot: View {
         .padding(12)
     }
 
+    private var setupRequired: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Setup required").font(.system(size: 12, weight: .medium))
+            Text("run  oo  in a terminal").foregroundStyle(.secondary).font(.system(size: 11))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+    }
+
     private var footer: some View {
         HStack {
             Spacer()
@@ -78,7 +89,10 @@ struct CompactBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if client.online {
+            if client.online && client.setupRequired {
+                Text("setup required").font(.system(size: 11)).foregroundStyle(.yellow)
+                Spacer(minLength: 6)
+            } else if client.online {
                 CountsRow(counts: client.counts)
                 if !expanded && !fresh.isEmpty {
                     FreshTicker(items: fresh)

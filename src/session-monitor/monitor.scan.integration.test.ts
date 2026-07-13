@@ -11,6 +11,7 @@ import assert from "node:assert";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { markOnboarded } from "@owner-operator/core";
 import { tempOoHome } from "../gateway/test/helpers";
 
 const realHome = process.env.HOME;
@@ -18,6 +19,7 @@ const realPath = process.env.PATH;
 const home = mkdtempSync(join(tmpdir(), "oo-monitor-scan-home-"));
 process.env.HOME = home; // the real scan reads $HOME/.claude/projects, …
 const { dir, cleanup } = tempOoHome("oo-monitor-scan"); // isolated OO_HOME: state + scan overrides
+markOnboarded(dir, { via: "test" });
 
 const sid = "abcdef01-2345-6789-abcd-ef0123456789";
 const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();

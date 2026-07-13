@@ -6,6 +6,7 @@ import {
   type DaemonInfo,
   type DaemonReady,
   ensureOwnerOperatorWorkspace,
+  isOnboarded,
 } from "@owner-operator/core";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
@@ -52,6 +53,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   modules.state = true;
   const monitor = new SessionMonitor(state, {
     ...options.monitor,
+    canEnrich: options.monitor?.canEnrich ?? (() => isOnboarded()),
     logger: options.monitor?.logger ?? ((record) => {
       process.stderr.write(`${JSON.stringify({ component: "session-monitor", ...record })}\n`);
     }),
@@ -76,6 +78,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   });
   const ready = (): DaemonReady => ({
     ready: Object.values(modules).every(Boolean) && !stale,
+    setupRequired: !isOnboarded(),
     modules: { ...modules },
   });
 

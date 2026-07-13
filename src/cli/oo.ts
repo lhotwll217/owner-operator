@@ -10,13 +10,14 @@
 
 import readline from "node:readline/promises";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import { ensureOwnerOperatorWorkspace, isOnboarded } from "@owner-operator/core";
 import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
 
 const USAGE = `Owner Operator (oo) — track and act on your local CLI agent sessions.
 
-  oo                         pi's stock interactive mode
+  oo                         embedded Pi interactive mode
   oo -i | --interactive      alias for the default interactive mode
   oo "what's ongoing?"       headless single-turn question (prose)
   oo --continue "and then?"  resume the most recent oo thread
@@ -24,10 +25,11 @@ const USAGE = `Owner Operator (oo) — track and act on your local CLI agent ses
   oo --from-session <id>     audit: record which coding session is calling
   oo --session-state         current session state snapshot
   oo --done <id...>          mark threads done by id (model-free; ids from --session-state)
+  oo doctor | status         effective workspace, resources, credentials, and gates
   oo daemon                  run the state-owning daemon
   oo --help | -h             this help
 
-Model: OO_MODEL or .pi/settings.json`;
+Model: imported or configured under OO_HOME/pi/settings.json`;
 
 const cli = parseOoArgs(process.argv.slice(2));
 
@@ -36,6 +38,13 @@ const cli = parseOoArgs(process.argv.slice(2));
 if (cli.help) {
   console.log(USAGE);
   process.exit(0);
+}
+
+if (cli.doctor) {
+  const { formatHarnessDoctor } = await import("../agent/doctor");
+  const output = formatHarnessDoctor();
+  process.stdout.write(output);
+  process.exit(output.startsWith("Status: ready") ? 0 : 1);
 }
 
 // `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
@@ -101,6 +110,12 @@ if (cli.done) {
     missingIds: result.missingIds,
   }, null, 2) + "\n");
   process.exit(result.missingIds.length > 0 ? 1 : 0);
+}
+
+const harnessPaths = ensureOwnerOperatorWorkspace();
+if (!isOnboarded(harnessPaths.home)) {
+  process.stderr.write("oo: setup required; run `oo` in an interactive terminal\n");
+  process.exit(2);
 }
 
 const {

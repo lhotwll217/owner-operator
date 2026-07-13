@@ -14,6 +14,7 @@ final class DaemonClient: ObservableObject {
     @Published var groups: [RepoGroup] = []
     @Published var counts: [ThreadState: Int] = [:]
     @Published var online = false
+    @Published var setupRequired = false
     @Published var port = defaultPort
 
     nonisolated static let defaultPort = 47711
@@ -61,6 +62,10 @@ final class DaemonClient: ObservableObject {
         let authToken: String
     }
 
+    nonisolated struct Readiness: Decodable {
+        let setupRequired: Bool
+    }
+
     /// ~/.owner-operator/daemon.json → the authenticated local Gateway discovery record.
     nonisolated static func discoverGateway() -> Discovery? {
         let path = (NSHomeDirectory() as NSString).appendingPathComponent(".owner-operator/daemon.json")
@@ -79,12 +84,15 @@ final class DaemonClient: ObservableObject {
     func refresh() async {
         guard let discovery = Self.discoverGateway() else { online = false; return }
         do {
+            let readiness = try await Self.get(Readiness.self, "/ready", discovery: discovery)
             lastRows = try await Self.get([SessionStateRow].self, "/session-state", discovery: discovery)
             port = discovery.port
+            setupRequired = readiness.setupRequired
             online = true
             rebuild()
         } catch {
             online = false
+            setupRequired = false
         }
     }
 

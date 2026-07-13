@@ -10,6 +10,9 @@ assert.equal(parseOoArgs(["hello"]).help, false, "no help flag");
 // `daemon` is a subcommand only as the FIRST token.
 assert.equal(parseOoArgs(["daemon"]).daemon, true, "daemon subcommand");
 assert.equal(parseOoArgs(["what about the daemon"]).daemon, false, "daemon only at argv[0]");
+assert.equal(parseOoArgs(["doctor"]).doctor, true, "doctor is a model-free subcommand");
+assert.equal(parseOoArgs(["status"]).doctor, true, "status aliases the harness doctor");
+assert.equal(parseOoArgs(["what about status"]).doctor, false, "status is a subcommand only at argv[0]");
 
 // --session-state is recognized and stripped from the prompt; old --json fails fast elsewhere.
 const st = parseOoArgs(["--session-state", "what", "needs", "me"]);

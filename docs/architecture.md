@@ -25,7 +25,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/gateway` | Loopback HTTP/SSE translation and client SDK | SQLite, child processes, polling, model calls |
 | `src/daemon` | Composition, process lifecycle, readiness, discovery, source fingerprint | Domain decisions |
-| `src/agent` | Pi session factory, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
+| `src/agent` | Owned Pi runtime, onboarding, diagnostics, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
 
 Dependencies point toward the owning seam:
 
@@ -37,6 +37,31 @@ core ← gateway client ← { agent, CLI, widget }
 The Gateway server receives module interfaces from the daemon. It does not import the monitor or
 scheduler implementations. `src/gateway/gateway.boundaries.test.ts` enforces that transport owns no
 process/model runtime and that application code never loads from development-skill directories.
+
+## Harness boundary
+
+Code and agent state have separate roots:
+
+| Scope | Path | Responsibility |
+|---|---|---|
+| Install root | checkout/package | executable code and bundled prompt, tools, and skills |
+| Harness home | `OO_HOME` or `~/.owner-operator` | config, copied credentials/model settings, SQLite, transcripts, logs, daemon files |
+| Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
+| Task cwd | caller or scheduled-run cwd | file and command target for that run |
+
+Every entry point creates missing workspace files without overwriting owner edits. Embedded Pi uses
+`OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not change standalone
+Pi. The resource loader disables ambient context, extensions, skills, prompts, and themes, then
+adds only the product prompt, bundled skills, workspace `AGENTS.md`, workspace skills, and personal
+skills explicitly selected during onboarding. This follows Pi's existing independent cwd/resource
+loader seams and OpenClaw's bounded embedded-agent loader; provenance is recorded in
+[the boundary research](harness-resource-boundaries-research.md).
+
+The core config API is authoritative; onboarding is its first-run TTY client. Before the versioned
+consent marker is complete,
+the daemon does not scan or enrich transcripts, headless model calls return setup-required, and the
+widget displays setup-required. `oo doctor` and `oo status` report the effective boundary without
+printing credential values.
 
 ## Agent capabilities
 
@@ -54,6 +79,13 @@ process/model runtime and that application code never loads from development-ski
   groups the complete ranked match set by stable session ID before applying limits or output
   budgets; literal/IDF ranking remains unchanged.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
+
+The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. Reads and
+safe shell commands are allowed. Mutating file operations and risky shell commands ask in the
+interactive surface and deny headlessly. The privacy blacklist denies access before those gates
+and cannot be overridden by confirmation. The shell classifier reuses the maintained parser from
+`@thurstonsand/pi-permissions`; the adoption and rejected drop-ins are recorded with pinned sources
+in [docs/inspiration.md](inspiration.md).
 
 ## State and events
 

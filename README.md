@@ -12,7 +12,17 @@ history and create prompt schedules that run in fresh isolated sessions.
 
 ```bash
 npm install            # once, from the repo root
+./oo                   # guided first-run setup
 ```
+
+Setup creates `~/.owner-operator/workspace`, asks what is off-limits, offers to copy Pi
+authorizations and model settings, confirms transcript roots, and configures the active window,
+skills, and macOS always-on services. The copy does not change standalone Pi. Until setup
+finishes, headless calls and transcript/model processing fail closed.
+
+`./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
+credentials/model source, transcript roots, skills, tools, and permission gates without printing
+secrets. Re-run `/onboarding` in the interactive terminal to change setup choices.
 
 ## The widget
 
@@ -27,10 +37,11 @@ cd apps/widget && make run
 ## The terminal
 
 ```bash
-./oo                   # pi's stock interactive mode
+./oo                   # embedded Pi interactive mode; starts setup when needed
 ./oo "what's ongoing?" # headless single-turn question, prose on stdout
 ./oo --continue "more" # resume the most recent oo thread
 ./oo --session-state   # current widget/gateway state, no model call
+./oo doctor            # effective harness configuration, no model call
 ```
 
 The terminal starts the background daemon when it needs state. The widget is the always-on UI
@@ -44,7 +55,9 @@ installs daemon + widget LaunchAgents together; the widget itself never spawns p
 
 ## How it works
 
-Built on the [pi coding agent](https://github.com/earendil-works/pi). `oo` reads session
+Built on the [pi coding agent](https://github.com/earendil-works/pi). Embedded Pi uses
+Owner Operator-owned auth, model settings, workspace resources, and sessions under
+`~/.owner-operator`; standalone Pi keeps its own defaults. `oo` reads session
 files through application-owned scan/search modules and only sends bounded transcript samples to
 the model. Supported agents live in
 [`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents drive it headless
@@ -67,8 +80,8 @@ Durable prompt schedules use the typed `schedule_prompt` tool. Each run gets a f
 Owner Operator transcript; failures and output are inspectable through `query_database` over
 `schedules` and `schedule_runs`.
 
-So far this has only been tested with a Codex subscription as the driver for the pi agent.
-Other model backends should work but are unverified.
+So far this has only been tested with a Codex subscription as the driver for the embedded Pi
+agent. Other model backends should work but are unverified.
 
 Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,
 standards): [CONTRIBUTING.md](CONTRIBUTING.md).

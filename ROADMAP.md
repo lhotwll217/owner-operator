@@ -4,6 +4,5 @@
 
 ## Onboarding
 
-- [ ] **First-run onboarding.** Guided one-time setup: privacy blacklist (off-limits
-  repos/paths), active-thread window (`settings.json` `activeWindow`), likely more. Flow not
-  defined yet.
+- [x] **First-run onboarding.** Privacy, Pi auth/model import, confirmed session roots,
+  active window, skills, and macOS always-on setup ([#56](https://github.com/lhotwll217/owner-operator/issues/56)).

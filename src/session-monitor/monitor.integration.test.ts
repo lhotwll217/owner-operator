@@ -27,6 +27,20 @@ try {
   );
   assert.deepEqual(state.listEnrichmentCandidates(), [], "worker advances the enrichment watermark");
 
+  let gatedEnrichmentCalls = 0;
+  const gatedMonitor = new SessionMonitor(state, {
+    scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:05:00.000Z" })],
+    enrich: async () => {
+      gatedEnrichmentCalls += 1;
+      return { topic: "should not run", nextSteps: "should not run" };
+    },
+    canEnrich: () => false,
+  });
+  await gatedMonitor.poll();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  gatedMonitor.stop();
+  assert.equal(gatedEnrichmentCalls, 0, "setup gate prevents model enrichment before consent");
+
   const backgroundErrors: string[] = [];
   const failingMonitor = new SessionMonitor(state, {
     intervalMs: 10,

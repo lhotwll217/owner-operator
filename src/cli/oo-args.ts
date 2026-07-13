@@ -4,6 +4,7 @@
 export interface OoArgs {
   help: boolean; // --help / -h (anywhere)
   daemon: boolean; // `oo daemon` (first token only)
+  doctor: boolean; // `oo doctor` / `oo status` (first token only)
   sessionState: boolean; // --session-state
   removedJson: boolean; // old --json spelling; fail fast before building a model session
   removedHeadlessSubcommand: boolean; // removed headless subcommand; fail fast before building a model session
@@ -34,9 +35,11 @@ export function parseOoArgs(argv: readonly string[]): OoArgs {
   let missingSession = false;
   let missingFromSession = false;
   let done: string[] | undefined;
+  let doctor = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--session-state") sessionState = true;
+    if (i === 0 && (a === "doctor" || a === "status")) doctor = true;
+    else if (a === "--session-state") sessionState = true;
     else if (a === "--json") removedJson = true;
     else if (REMOVED_HEADLESS_SUBCOMMANDS.has(a)) removedHeadlessSubcommand = true;
     else if (a === "-i" || a === "--interactive") interactive = true;
@@ -66,6 +69,7 @@ export function parseOoArgs(argv: readonly string[]): OoArgs {
   return {
     help: argv.includes("--help") || argv.includes("-h"),
     daemon: argv[0] === "daemon",
+    doctor,
     sessionState,
     removedJson,
     removedHeadlessSubcommand,
