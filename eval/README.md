@@ -12,6 +12,9 @@ committed `.pi/settings.example.json`) with `OO_EVAL_BASELINE_PROMPT` swapping o
 state/index composition. Mutation tools are removed from both; the agent factory is the
 tool-roster source of truth; SSE transport is pinned and recorded in the manifest.
 
+Scope: this eval grades answers, not SQL. Deterministic `query_database` correctness lives
+in `src/state/query.test.ts`.
+
 ## Run
 
 ```sh
@@ -54,14 +57,6 @@ without duplicating it. When posting a PR, backfill each run's entry to the comm
 carries its work (`--backfill-git`); run-time git provenance stays in the raw
 global result. Targeted development runs stay in `history.jsonl` and cannot publish here.
 When the suite changes, `compare.mjs` reports shared and unpaired cases separately.
-
-## Database coverage
-
-`query_database` is one of OO's tools, not a subsystem evaluated on its own. Every subject
-attempts every case; `compare.mjs`'s `qtype` breakdown compares tool-call counts on the
-DB-locatable cases (`state`, `stale`, `audit`, `handoff`), where OO's state DB cuts calls
-versus grep-only. Deterministic SQL correctness lives in `src/state/query.test.ts`, not an
-LLM run.
 
 ## Layout
 
