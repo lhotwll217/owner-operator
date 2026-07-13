@@ -55,7 +55,7 @@ carries its work (`--backfill-git`); run-time git provenance stays in the raw
 global result. Targeted development runs stay in `history.jsonl` and cannot publish here.
 When the suite changes, `compare.mjs` reports shared and unpaired cases separately.
 
-## No separate DB suite
+## Database coverage
 
 `query_database` is one of OO's tools, not a subsystem evaluated on its own. Every subject
 attempts every case; `compare.mjs`'s `qtype` breakdown compares tool-call counts on the
