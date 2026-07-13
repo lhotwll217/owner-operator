@@ -47,8 +47,15 @@ resolves user and package policy through Pi's global agent directory
 `@gotgenes/pi-permission-system` was also rejected as a drop-in because it selects project policy
 from the task cwd
 ([source](https://github.com/gotgenes/pi-packages/blob/ca66df6efddffb0dd6e6fafc5707238a1881a075/packages/pi-permission-system/src/permission-manager.ts#L387-L401)).
-The local adapter owns only the product rules: the privacy blacklist and the documented
-interactive/headless gate table.
+The adopted parser is macOS-compatible TypeScript plus a WebAssembly Bash grammar, with no
+Linux-only sandbox dependency. Version `0.8.0` was released from the pinned
+[release commit](https://github.com/thurstonsand/pi-permissions/commit/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c)
+on the day of this triage, and its upstream suite covers assignments, wrappers, substitutions, flags, and nested
+shell payloads
+([tests](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/test/shell.test.ts#L24-L99)).
+Pinning the exact version and retaining only that tested parser keeps maintenance exposure smaller
+than adopting its policy/config runtime. The local adapter owns only the product rules: the privacy
+blacklist and the documented interactive/headless gate table.
 
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in

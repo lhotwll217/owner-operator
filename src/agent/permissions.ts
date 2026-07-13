@@ -5,7 +5,12 @@ import {
 } from "@thurstonsand/pi-permissions";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { loadBlacklist, loadHarnessSettings, ownerOperatorPaths } from "@owner-operator/core";
-import { blacklistedBashReason, blacklistedDescendantVerdict, blacklistedPathVerdict } from "./privacy-tools";
+import {
+  blacklistedBashReason,
+  blacklistedDescendantVerdict,
+  blacklistedPathVerdict,
+  shellAssignmentCanExecute,
+} from "./privacy-tools";
 import { repoRoot } from "../shared/repo-root";
 
 export type OwnerOperatorGateSurface = "interactive" | "headless";
@@ -35,6 +40,7 @@ const RISKY_GIT_FLAGS = new Set([
 const OUTPUT_REDIRECTION = /(^|[^<])(?:>>?|&>)/;
 
 function commandIsSafe(command: SimpleCommand): boolean {
+  if (command.assignments.some((assignment) => shellAssignmentCanExecute(assignment.text))) return false;
   const program = command.programName;
   if (!program) return false;
   if (SHELL_WRAPPERS.has(program)) return command.hasFlag("-c");

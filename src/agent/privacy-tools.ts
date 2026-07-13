@@ -182,6 +182,7 @@ const PRIVACY_INSPECTABLE_PROGRAMS = new Set([
 const OPAQUE_GIT_FLAGS = new Set([
   "-c", "--config-env", "--exec-path", "--ext-diff", "--textconv", "--open-files-in-pager",
 ]);
+const EXECUTION_ENVIRONMENT = /^(?:GIT_(?:ASKPASS|CONFIG_|EDITOR|EXEC_PATH|EXTERNAL_DIFF|PAGER|SEQUENCE_EDITOR|SSH|SSH_COMMAND)|LD_|DYLD_|LESSOPEN|NODE_OPTIONS|PAGER|PATH|PYTHONPATH)=/;
 const REDIRECTION_TARGET = /(?:^|\s)(?:\d*(?:>>?|<<?)|&>)\s*(?:"([^"]*)"|'([^']*)'|([^\s|;&]+))/g;
 const expandHome = (value: string): string => value
   .replace(/^\$HOME(?=\/|$)/, homedir())
@@ -197,10 +198,14 @@ function argumentPathCandidates(token: string): string[] {
   if (equals >= 0 && equals < value.length - 1) {
     const rhs = value.slice(equals + 1);
     const nestedEquals = rhs.lastIndexOf("=");
-    return [nestedEquals >= 0 ? rhs.slice(nestedEquals + 1) : rhs];
+    return [tokenPath(nestedEquals >= 0 ? rhs.slice(nestedEquals + 1) : rhs)];
   }
-  if (value.startsWith("-C") && value.length > 2) return [value.slice(2)];
+  if (value.startsWith("-C") && value.length > 2) return [tokenPath(value.slice(2))];
   return [];
+}
+
+export function shellAssignmentCanExecute(text: string): boolean {
+  return EXECUTION_ENVIRONMENT.test(text);
 }
 
 function allowedSessionSearchNode(command: Awaited<ReturnType<typeof parseShellCommand>>["commands"][number]): boolean {
@@ -221,6 +226,9 @@ function opaquePrivacyRouteReason(
     return "Privacy blacklist denies bash with dynamically constructed paths";
   }
   for (const command of parsed.commands) {
+    if (command.assignments.some((assignment) => shellAssignmentCanExecute(assignment.text))) {
+      return "Privacy blacklist denies environment hooks that execute external helpers";
+    }
     if (!command.programName || !PRIVACY_INSPECTABLE_PROGRAMS.has(command.programName) || !allowedSessionSearchNode(command)) {
       return `Privacy blacklist denies opaque bash program ${command.programName ?? "(unknown)"}`;
     }

@@ -1,4 +1,4 @@
-import { AgentToolId, loadHarnessSettings } from "@owner-operator/core";
+import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
 import { withOoRenderers } from "../../shared/oo-presentation";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
@@ -26,13 +26,7 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
 ];
 
 export const ownerOperatorTools: readonly AgentToolId[] = [
-  AgentToolId.Bash,
-  AgentToolId.Read,
-  AgentToolId.Grep,
-  AgentToolId.Find,
-  AgentToolId.Ls,
-  AgentToolId.Edit,
-  AgentToolId.Write,
+  ...DEFAULT_TOOL_POSTURE as AgentToolId[],
   ...ownerOperatorTypedTools,
 ];
 

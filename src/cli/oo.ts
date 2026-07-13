@@ -128,7 +128,6 @@ const {
   ooProvenance,
   ooSessionsDir,
   openOoSession,
-  ownerOperatorTools,
   shutdownSessionExtensions,
 } = await import("../agent/agent");
 
@@ -156,11 +155,11 @@ async function resolveSessionManager(): Promise<SessionManager> {
 
 const sessionManager = await resolveSessionManager();
 await (await import("../daemon/ensure")).ensureDaemon();
-const { session, modelLabel } = await createOwnerOperatorSession("chat", {
+const { session, modelLabel, toolNames } = await createOwnerOperatorSession("chat", {
   sessionManager,
   callerSessionId: provenance.fromSession,
 });
-console.error(`[oo] ${modelLabel} · tools: ${ownerOperatorTools.join(", ")}\n`);
+console.error(`[oo] ${modelLabel} · tools: ${toolNames.join(", ")}\n`);
 
 const headlessPrompt = cli.prompt;
 

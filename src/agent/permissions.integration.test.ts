@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluateOwnerOperatorToolCall } from "./permissions";
 
@@ -12,7 +12,8 @@ const blocked = join(task, "Private");
 mkdirSync(blocked, { recursive: true });
 mkdirSync(ooHome, { recursive: true });
 mkdirSync(openOoHome, { recursive: true });
-writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [blocked], repos: [] }));
+const homeBlocked = join(homedir(), "Private");
+writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [blocked, homeBlocked], repos: [] }));
 
 const decide = (
   toolName: string,
@@ -45,6 +46,16 @@ try {
     (await decide("bash", { command: `git --git-dir=${join(blocked, ".git")} show HEAD:secret` }, "headless")).action,
     "deny",
     "path-valued git flags are checked against the blacklist",
+  );
+  assert.equal(
+    (await decide("bash", { command: "git --git-dir=$HOME/Private/.git show HEAD:secret" }, "headless")).action,
+    "deny",
+    "known variables inside path-valued flags are expanded before blacklist checks",
+  );
+  assert.equal(
+    (await decideWithoutBlacklist("bash", { command: "GIT_EXTERNAL_DIFF=/tmp/helper git diff" }, "headless")).action,
+    "deny",
+    "environment hooks that execute helpers are risky even without a blacklist",
   );
   assert.equal(
     (await decide("bash", { command: "git -c core.fsmonitor=/tmp/hook status" }, "headless")).action,

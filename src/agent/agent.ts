@@ -42,6 +42,7 @@ export {
 export interface OwnerOperatorSession {
   session: Awaited<ReturnType<typeof createAgentSession>>["session"];
   modelLabel: string;
+  toolNames: readonly string[];
 }
 
 export interface OwnerOperatorSessionOptions {
@@ -177,7 +178,7 @@ export async function createOwnerOperatorSession(
   const modelLabel = session.model
     ? `${session.model.provider}/${session.model.id}`
     : configuredModel || "model unavailable";
-  return { session, modelLabel };
+  return { session, modelLabel, toolNames: tools };
 }
 
 /** Pi modes emit extension teardown on quit; raw-session surfaces must do it before dispose. */
