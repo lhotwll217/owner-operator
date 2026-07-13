@@ -8,7 +8,7 @@
     "eval_folder": "2026-07-13T09-42-57-oo-only",
     "label": "pr53-enrichment-smoke",
     "model": "openai-codex/gpt-5.6-sol",
-    "grader_model": "claude-fable-5",
+    "grader_model": "openai-codex/gpt-5.4",
     "reasoning_level": null,
     "scope": "full",
     "arms": "oo",
