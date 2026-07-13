@@ -3,15 +3,15 @@
 // runs once. This is that write half — and the source DETECTION the flow shows ("found Claude ✓,
 // Codex ✓") before it scans for real. Kept beside the loaders so the two never drift on shape.
 //
-// Writers merge, never clobber: re-running onboarding adds to blacklist.json / session_sources.json
-// rather than wiping an owner's hand-edits. Detection reuses loadSessionSources so it honors the
-// same overrides the scan will. Plain ESM (not TS) so the zero-install scan skill can import it
-// (re-exported via @owner-operator/core). Types: onboarding.d.mts.
+// Additive writers merge and de-duplicate. The confirmed source-aperture writer replaces only its
+// `disable`/`add` fields so re-running setup can remove consent. Detection reuses
+// loadSessionSources, so configured roots match the scan. Plain ESM (not TS) lets the zero-install
+// scan skill import the same API (re-exported via @owner-operator/core). Types: onboarding.d.mts.
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { loadBlacklist } from "./blacklist.mjs";
+import { join, resolve } from "node:path";
+import { isBlacklisted, loadBlacklist } from "./blacklist.mjs";
 import { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
 import { isWindowSpec } from "./settings.mjs";
 import { ensureOwnerOperatorWorkspace } from "./harness.mjs";
@@ -98,6 +98,9 @@ const PI_MODEL_SETTING_KEYS = [
   "transport",
   "enabledModels",
   "thinkingBudgets",
+  "httpProxy",
+  "httpIdleTimeoutMs",
+  "websocketConnectTimeoutMs",
 ];
 
 export function detectPiConfiguration(piAgentDir) {
@@ -179,6 +182,26 @@ export function addSessionRoot(ooHome = defaultHome(), source, root) {
   return { source, root: trimmed };
 }
 
+/** Replace the configured scan aperture with exactly the roots the owner confirmed. */
+export function saveSessionRoots(ooHome = defaultHome(), roots = []) {
+  ensureHome(ooHome);
+  const add = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(roots) ? roots : []) {
+    if (!KNOWN_SESSION_SOURCES.includes(entry?.source)) {
+      throw new Error(`unknown session source "${entry?.source}" — one of: ${KNOWN_SESSION_SOURCES.join(", ")}`);
+    }
+    const root = String(entry?.root ?? "").trim();
+    if (!root) throw new Error("session root path is required");
+    const key = `${entry.source}\0${root}`;
+    if (!seen.has(key)) add.push({ source: entry.source, root });
+    seen.add(key);
+  }
+  const path = join(ooHome, "session_sources.json");
+  writeJson(path, { ...readJson(path), disable: [...KNOWN_SESSION_SOURCES], add });
+  return add;
+}
+
 /** Skip a default source's roots via <ooHome>/session_sources.json `disable`. Merged, de-duped. */
 export function disableSessionSource(ooHome = defaultHome(), source) {
   ensureHome(ooHome);
@@ -218,7 +241,7 @@ function countSessions(root, { cap = 500, maxDepth = 6 } = {}) {
     for (const e of entries) {
       if (count >= cap) return;
       if (e.isDirectory()) { walk(join(dir, e.name), depth + 1); continue; }
-      if (e.name.endsWith(".jsonl") || e.name.endsWith(".json")) count++;
+    if (e.name.endsWith(".jsonl") || e.name.endsWith(".ndjson") || e.name.endsWith(".json")) count++;
     }
   };
   walk(root, 0);
@@ -248,4 +271,131 @@ export function summarizeDetectedSources(detected) {
     by.set(source, acc);
   }
   return [...by.values()];
+}
+
+const DEFAULT_SOURCE_ROOTS = [
+  ["claude", [".claude", "projects"]],
+  ["codex", [".codex", "sessions"]],
+  ["cursor", [".cursor", "projects"]],
+  ["posthog-code", [".posthog-code", "sessions"]],
+  ["pi", [".pi", "agent", "sessions"]],
+  ["opencode", [".local", "share", "opencode", "storage"]],
+  ["antigravity", [".gemini", "antigravity"]],
+  ["antigravity", [".gemini", "antigravity-cli"]],
+  ["grok-build", [".grok", "sessions"]],
+];
+const COMMON_SOURCE_ROOTS = [
+  ["claude", [".config", "claude", "projects"]],
+  ["codex", [".config", "codex", "sessions"]],
+  ["pi", [".config", "pi", "agent", "sessions"]],
+];
+const DECLARED_ROOTS = [
+  ["CLAUDE_CONFIG_DIR", "claude", ["projects"]],
+  ["CODEX_HOME", "codex", ["sessions"]],
+  ["CURSOR_HOME", "cursor", ["projects"]],
+  ["POSTHOG_CODE_HOME", "posthog-code", ["sessions"]],
+  ["PI_CODING_AGENT_DIR", "pi", ["sessions"]],
+  ["OPENCODE_HOME", "opencode", ["storage"]],
+  ["GEMINI_HOME", "antigravity", ["antigravity"]],
+  ["GROK_HOME", "grok-build", ["sessions"]],
+];
+const DEEP_MARKERS = new Map([
+  [".claude", [["claude", ["projects"]]]],
+  [".codex", [["codex", ["sessions"]]]],
+  [".cursor", [["cursor", ["projects"]]]],
+  [".posthog-code", [["posthog-code", ["sessions"]]]],
+  [".pi", [["pi", ["agent", "sessions"]]]],
+  ["opencode", [["opencode", ["storage"]]]],
+  [".gemini", [["antigravity", ["antigravity"]], ["antigravity", ["antigravity-cli"]]]],
+  [".grok", [["grok-build", ["sessions"]]]],
+]);
+const PRUNED_NAMES = new Set([".git", "node_modules", "Caches", "CloudStorage", "Mobile Documents", "iCloud Drive"]);
+
+function sourceCandidate(source, root, tier) {
+  const counted = countSessions(root, { cap: 1, maxDepth: 3 });
+  return { source, root, tier, exists: counted.exists, shape: counted.count > 0 };
+}
+
+function mountedVolumes() {
+  if (process.platform !== "darwin") return [];
+  try {
+    return readdirSync("/Volumes", { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join("/Volumes", entry.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Detect candidate roots without configuring them. Tier 3 is opt-in and bounded. */
+export function detectSessionSourceCandidates(ooHome = defaultHome(), options = {}) {
+  const home = options.home ?? homedir();
+  const env = options.env ?? process.env;
+  const candidates = [];
+  const add = (source, root, tier) => {
+    if (KNOWN_SESSION_SOURCES.includes(source) && typeof root === "string" && root.trim()) {
+      candidates.push(sourceCandidate(source, resolve(root), tier));
+    }
+  };
+
+  const configured = readJson(join(ooHome, "session_sources.json"));
+  for (const entry of Array.isArray(configured.add) ? configured.add : []) add(entry?.source, entry?.root, 1);
+  for (const [name, source, suffix] of DECLARED_ROOTS) {
+    if (typeof env[name] === "string" && env[name].trim()) add(source, join(env[name], ...suffix), 1);
+  }
+  const piAgentDir = typeof env.PI_CODING_AGENT_DIR === "string" && env.PI_CODING_AGENT_DIR.trim()
+    ? resolve(env.PI_CODING_AGENT_DIR)
+    : join(home, ".pi", "agent");
+  const piSettings = readJson(join(piAgentDir, "settings.json"));
+  if (typeof piSettings.sessionDir === "string" && piSettings.sessionDir.trim()) {
+    const value = piSettings.sessionDir.trim();
+    add("pi", value === "~" ? home : value.startsWith("~/") ? join(home, value.slice(2)) : resolve(piAgentDir, value), 1);
+  }
+  if (typeof env.PI_CODING_AGENT_SESSION_DIR === "string" && env.PI_CODING_AGENT_SESSION_DIR.trim()) {
+    add("pi", resolve(env.PI_CODING_AGENT_SESSION_DIR), 1);
+  }
+  if (typeof env.XDG_DATA_HOME === "string" && env.XDG_DATA_HOME.trim()) {
+    add("opencode", join(env.XDG_DATA_HOME, "opencode", "storage"), 1);
+  }
+
+  const disabled = new Set(Array.isArray(configured.disable) ? configured.disable : []);
+  for (const [source, parts] of [...DEFAULT_SOURCE_ROOTS, ...COMMON_SOURCE_ROOTS]) {
+    if (!disabled.has(source)) add(source, join(home, ...parts), 2);
+  }
+
+  if (options.deep) {
+    const blacklist = loadBlacklist(ooHome);
+    const deadline = Date.now() + Math.max(1, options.timeoutMs ?? 2_000);
+    const maxDepth = Math.max(1, options.maxDepth ?? 5);
+    const roots = [home, ...(options.volumes ?? mountedVolumes())];
+    const walk = (dir, depth) => {
+      if (depth > maxDepth || Date.now() >= deadline) return;
+      if (isBlacklisted(blacklist, { cwd: dir })) return;
+      let entries;
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        if (Date.now() >= deadline) return;
+        if (!entry.isDirectory() || PRUNED_NAMES.has(entry.name)) continue;
+        const path = join(dir, entry.name);
+        if (isBlacklisted(blacklist, { cwd: path })) continue;
+        const matches = DEEP_MARKERS.get(entry.name) ?? [];
+        for (const [source, suffix] of matches) {
+          const candidate = sourceCandidate(source, join(path, ...suffix), 3);
+          if (candidate.shape) candidates.push(candidate);
+        }
+        walk(path, depth + 1);
+      }
+    };
+    for (const root of roots) walk(root, 0);
+  }
+
+  const seen = new Set();
+  return candidates
+    .sort((a, b) => a.tier - b.tier)
+    .filter((candidate) => {
+      const key = `${candidate.source}\0${candidate.root}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }

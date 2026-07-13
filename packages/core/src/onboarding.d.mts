@@ -56,6 +56,12 @@ export function addBlacklistEntries(ooHome?: string, entries?: { paths?: string[
 /** Point a known source at an extra root in session_sources.json `add`. Throws on unknown source. */
 export function addSessionRoot(ooHome: string | undefined, source: string, root: string): { source: SessionSource; root: string };
 
+/** Replace the scan aperture with exactly the roots confirmed during setup. */
+export function saveSessionRoots(
+  ooHome: string | undefined,
+  roots: readonly { source: string; root: string }[],
+): Array<{ source: SessionSource; root: string }>;
+
 /** Skip a default source's roots via session_sources.json `disable`. Returns the merged list. */
 export function disableSessionSource(ooHome: string | undefined, source: string): string[];
 
@@ -67,3 +73,24 @@ export function detectSources(ooHome?: string, opts?: { cap?: number; maxDepth?:
 
 /** Collapse detectSources() rows to one per source — the per-tool summary the confirm screen lists. */
 export function summarizeDetectedSources(detected: DetectedRoot[]): DetectedSource[];
+
+export interface SessionSourceCandidate {
+  source: SessionSource;
+  root: string;
+  tier: 1 | 2 | 3;
+  exists: boolean;
+  shape: boolean;
+}
+export interface SessionSourceDetectionOptions {
+  home?: string;
+  env?: Record<string, string | undefined>;
+  deep?: boolean;
+  maxDepth?: number;
+  timeoutMs?: number;
+  volumes?: string[];
+}
+/** Detect candidates without configuring them. Tier 3 runs only when `deep` is true. */
+export function detectSessionSourceCandidates(
+  ooHome?: string,
+  options?: SessionSourceDetectionOptions,
+): SessionSourceCandidate[];

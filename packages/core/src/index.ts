@@ -47,12 +47,13 @@ export type {
   SkillPolicy,
 } from "./harness.mjs";
 
-// First-run setup's dependency-light config API: merge-safe writers, versioned marker, and
-// bounded source detection. The interactive flow is one client; scripts can call the same seam.
+// First-run setup's dependency-light config API: validated writers, versioned marker, and bounded
+// source detection. The interactive flow is one client; scripts can call the same seam.
 export {
   ONBOARDING_VERSION,
   ONBOARDING_STEPS,
   detectPiConfiguration,
+  detectSessionSourceCandidates,
   importPiConfiguration,
   isOnboarded,
   markOnboardingStep,
@@ -60,6 +61,7 @@ export {
   pendingOnboardingSteps,
   addBlacklistEntries,
   addSessionRoot,
+  saveSessionRoots,
   disableSessionSource,
   saveActiveWindow,
   detectSources,
@@ -70,6 +72,8 @@ export type {
   DetectedSource,
   OnboardingStep,
   PiConfigurationDetection,
+  SessionSourceCandidate,
+  SessionSourceDetectionOptions,
 } from "./onboarding.mjs";
 
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.

@@ -133,7 +133,7 @@ export async function createOwnerOperatorSession(
             AgentToolId.QueryDatabase,
           ]
         : [...configuredTools];
-  const cwd = opts.cwd ?? runtimeCwd();
+  const cwd = opts.cwd ?? ownerOperatorTaskCwd();
 
   settingsManager.applyOverrides(evalSettingsOverrides(process.env));
 
@@ -194,7 +194,8 @@ export async function shutdownSessionExtensions(session: OwnerOperatorSession["s
 // This module owns that policy: callers build managers through the helpers below, which bake
 // the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
 // manager isn't given one). Same OO_HOME base as the durable state database. Product threads
-// use repoRoot; isolated eval threads use their sandbox cwd consistently for create/list/resume.
+// use one stable identity cwd; isolated eval threads use their sandbox cwd consistently for
+// create/list/resume. Tool execution is separate: it defaults to the caller's cwd.
 //
 // Every invocation stamps an `oo-provenance` custom entry (never sent to the LLM): WHICH
 // surface, owner vs agent origin, the caller's cwd + repo, and — the audit trail — the
@@ -242,23 +243,28 @@ export function stampProvenance(sm: SessionManager, p: OoProvenance): void {
 
 /** A fresh oo thread, stamped with its surface + caller provenance. */
 export function createOoSession(provenance: OoProvenance): SessionManager {
-  const sm = SessionManager.create(runtimeCwd(), ooSessionsDir());
+  const sm = SessionManager.create(sessionIdentityCwd(), ooSessionsDir());
   stampProvenance(sm, provenance);
   return sm;
 }
 
-/** Eval subjects run outside the checkout so answer-key files are not their ambient cwd. */
-function runtimeCwd(): string {
+/** Task tools operate where `oo` was invoked; evals override this with their isolated sandbox. */
+export function ownerOperatorTaskCwd(): string {
+  return process.env.OO_EVAL_CWD || process.cwd();
+}
+
+/** Keep OO thread lookup stable across caller directories; evals remain sandbox-scoped. */
+function sessionIdentityCwd(): string {
   return process.env.OO_EVAL_CWD || repoRoot;
 }
 /** Resume the most recent oo thread (or a fresh one if none); each resume re-stamps. */
 export function continueOoSession(provenance: OoProvenance): SessionManager {
-  const sm = SessionManager.continueRecent(runtimeCwd(), ooSessionsDir());
+  const sm = SessionManager.continueRecent(sessionIdentityCwd(), ooSessionsDir());
   stampProvenance(sm, provenance);
   return sm;
 }
 /** List oo threads — for resolving a `--session <id>` reference. */
-export const listOoSessions = () => SessionManager.list(runtimeCwd(), ooSessionsDir());
+export const listOoSessions = () => SessionManager.list(sessionIdentityCwd(), ooSessionsDir());
 /** Open a specific oo thread file (re-stamped by the caller), keeping oo's dir for /new or /fork. */
 export function openOoSession(path: string, provenance: OoProvenance): SessionManager {
   const sm = SessionManager.open(path, ooSessionsDir());

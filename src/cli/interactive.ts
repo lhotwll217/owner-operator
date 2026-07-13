@@ -1,4 +1,4 @@
-// Owner Operator — pi's stock interactive mode, wired to our agent config. This is the
+// Owner Operator — Pi's interactive mode, wired to Owner Operator-owned config. This is the
 // default terminal surface; the widget owns the always-visible session list.
 //
 //   ./oo    (bare — this is the default surface)
@@ -28,6 +28,7 @@ import {
 } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
 import { createOwnerOperatorPermissionExtension } from "../agent/permissions";
+import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
 
@@ -44,6 +45,7 @@ const interactiveTools = configuredOwnerOperatorTools(paths.home);
 // whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
 const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const { settingsManager } = ownerOperatorPiServices(paths.home);
+  let refreshRegistry = (): void => undefined;
   const services = await createAgentSessionServices({
     cwd,
     agentDir: paths.piAgentDir,
@@ -57,9 +59,18 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
         blacklistAwareFileToolsExtension,           // same-name file/bash tools enforce the absolute blacklist
         createOwnerOperatorPermissionExtension({ surface: "interactive", ooHome: paths.home }),
         ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner
+        createOnboardingExtension({
+          ooHome: paths.home,
+          refreshConfiguration: async () => {
+            authStorage.reload();
+            await settingsManager.reload();
+            refreshRegistry();
+          },
+        }),
       ],
     },
   });
+  refreshRegistry = () => services.modelRegistry.refresh();
   const created = await createAgentSessionFromServices({
     services,
     sessionManager,

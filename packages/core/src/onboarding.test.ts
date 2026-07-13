@@ -13,6 +13,7 @@ import {
   ONBOARDING_VERSION,
   ONBOARDING_STEPS,
   detectPiConfiguration,
+  detectSessionSourceCandidates,
   importPiConfiguration,
   isOnboarded,
   markOnboardingStep,
@@ -21,6 +22,7 @@ import {
   addBlacklistEntries,
   addSessionRoot,
   disableSessionSource,
+  saveSessionRoots,
   saveActiveWindow,
   detectSources,
   summarizeDetectedSources,
@@ -48,6 +50,9 @@ try {
     defaultProvider: "codex",
     defaultModel: "gpt-test",
     defaultThinkingLevel: "high",
+    httpProxy: "http://127.0.0.1:8080",
+    httpIdleTimeoutMs: 120000,
+    websocketConnectTimeoutMs: 15000,
     enabledModels: ["codex/*"],
     packages: ["ambient-package"],
     extensions: ["ambient-extension"],
@@ -67,12 +72,57 @@ try {
     defaultProvider: "codex",
     defaultModel: "gpt-test",
     defaultThinkingLevel: "high",
+    httpProxy: "http://127.0.0.1:8080",
+    httpIdleTimeoutMs: 120000,
+    websocketConnectTimeoutMs: 15000,
     enabledModels: ["codex/*"],
   });
   assert.deepEqual(JSON.parse(readFileSync(join(ownedPi, "models.json"), "utf8")), {
     providers: { local: { baseUrl: "http://localhost" } },
   });
   rmSync(piAgentDir, { recursive: true, force: true });
+
+  // Session roots are candidates, not configuration: declared roots are tier 1, fixed defaults
+  // tier 2, and the bounded home walk is opt-in tier 3 with blacklist pruning.
+  const sourceHome = mkdtempSync(join(tmpdir(), "oo-source-home-"));
+  const detectionOoHome = join(sourceHome, "oo-home");
+  const codexHome = join(sourceHome, "relocated-codex");
+  const claudeHome = join(sourceHome, "relocated-claude");
+  const piHome = join(sourceHome, "relocated-pi");
+  const piSessions = join(piHome, "custom-sessions");
+  mkdirSync(join(codexHome, "sessions"), { recursive: true });
+  mkdirSync(join(claudeHome, "projects"), { recursive: true });
+  mkdirSync(piSessions, { recursive: true });
+  writeFileSync(join(codexHome, "sessions", "one.jsonl"), "{}\n");
+  writeFileSync(join(claudeHome, "projects", "one.jsonl"), "{}\n");
+  writeFileSync(join(piSessions, "one.jsonl"), "{}\n");
+  writeFileSync(join(piHome, "settings.json"), JSON.stringify({ sessionDir: "custom-sessions" }));
+  const declared = detectSessionSourceCandidates(detectionOoHome, {
+    home: sourceHome,
+    env: { CODEX_HOME: codexHome, CLAUDE_CONFIG_DIR: claudeHome, PI_CODING_AGENT_DIR: piHome },
+  });
+  assert.ok(declared.some((candidate) => candidate.tier === 1 && candidate.source === "codex" && candidate.root === join(codexHome, "sessions")));
+  assert.ok(declared.some((candidate) => candidate.tier === 1 && candidate.source === "claude" && candidate.root === join(claudeHome, "projects")));
+  assert.ok(declared.some((candidate) => candidate.tier === 1 && candidate.source === "pi" && candidate.root === piSessions));
+
+  const discoveredCodex = join(sourceHome, "archive", ".codex", "sessions");
+  const blockedClaude = join(sourceHome, "blocked", ".claude", "projects");
+  mkdirSync(discoveredCodex, { recursive: true });
+  mkdirSync(blockedClaude, { recursive: true });
+  writeFileSync(join(discoveredCodex, "deep.jsonl"), "{}\n");
+  writeFileSync(join(blockedClaude, "private.jsonl"), "{}\n");
+  addBlacklistEntries(detectionOoHome, { paths: [join(sourceHome, "blocked")] });
+  const deep = detectSessionSourceCandidates(detectionOoHome, {
+    home: sourceHome,
+    env: {},
+    deep: true,
+    maxDepth: 5,
+    timeoutMs: 2_000,
+    volumes: [],
+  });
+  assert.ok(deep.some((candidate) => candidate.tier === 3 && candidate.source === "codex" && candidate.root === discoveredCodex));
+  assert.ok(!deep.some((candidate) => candidate.root.startsWith(join(sourceHome, "blocked"))), "deep detection prunes the privacy blacklist");
+  rmSync(sourceHome, { recursive: true, force: true });
 
   // Blacklist writer merges + de-dupes with what the loader reads back, and strips trailing slashes.
   addBlacklistEntries(ooHome, { paths: ["/work/clientX/"], repos: ["Personal"] });
@@ -92,6 +142,8 @@ try {
   // Disabling a default source drops its built-in roots from the resolved list.
   disableSessionSource(ooHome, "cursor");
   assert.ok(!loadSessionSources(ooHome).some((r) => r.source === "cursor"), "disabled source dropped");
+  saveSessionRoots(ooHome, [{ source: "codex", root: "/only/codex" }]);
+  assert.deepEqual(loadSessionSources(ooHome), [{ source: "codex", root: "/only/codex" }], "confirmed roots replace earlier choices");
 
   // Active-window writer validates against the shared grammar; a typo throws, a good spec loads back.
   assert.throws(() => saveActiveWindow(ooHome, "whenever"), /invalid active window/, "typo rejected before write");
