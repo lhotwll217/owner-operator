@@ -1,102 +1,106 @@
-// Integration: the post-processor is a fail-closed gate. Incomplete pairs, provider errors,
-// and stale artifact provenance must fail; a complete attested pair passes.
+// Integration: compare.mjs is a downstream report over two published single-subject
+// runs — pairing by case id, comparability caveats, and an A>=B correctness gate.
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const repoRoot = process.cwd();
-const runId = `harness-test-${process.pid}`;
-const runDir = join(repoRoot, "eval", "results", "logs", runId);
-mkdirSync(runDir, { recursive: true });
+const dir = mkdtempSync(join(tmpdir(), "oo-eval-compare-"));
 
-const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
-const trace = relative(repoRoot, join(runDir, "case.trace.ndjson"));
-const sessionTrace = relative(repoRoot, join(runDir, "case.session.jsonl"));
-writeFileSync(join(repoRoot, trace), '{"event":"turn"}\n');
-writeFileSync(join(repoRoot, sessionTrace), '{"type":"session"}\n');
-
-const manifestBody = (artifactHash = sha256(readFileSync(join(repoRoot, "package.json")))) => ({
-  runId,
-  createdAt: new Date().toISOString(),
-  modelLabel: "test/model",
-  piVersion: "test",
-  promptfooVersion: "test",
-  gitHead: "test",
-  gitStatus: "",
-  gitDiffHash: "test",
-  artifacts: { "package.json": artifactHash },
+const caseResult = (id: string, passRate: number, repeat = 3, qtype = "evidence") => ({
+  id,
+  qtype,
+  repeat,
+  total_pass: Math.round((passRate / 100) * repeat),
+  total_fail: repeat - Math.round((passRate / 100) * repeat),
+  total_error: 0,
+  pass_rate: passRate,
+  trajectory_pass: true,
+  mean_tool_calls: 3,
+  mean_tokens: 90000,
+  mean_cost_usd: 0.08,
 });
 
-const writeManifest = (body: ReturnType<typeof manifestBody>) => {
-  const manifestHash = sha256(JSON.stringify(body));
-  writeFileSync(join(runDir, "manifest.json"), JSON.stringify({ ...body, manifestHash }));
-  return manifestHash;
-};
-
-const record = (arm: "owner-operator" | "baseline", manifestHash: string) => ({
-  provider: { label: arm },
-  vars: { id: "paired-case" },
-  testIdx: 0,
-  testCase: { metadata: { qtype: "evidence" } },
-  response: {
-    metadata: {
-      runId,
-      manifestHash,
-      modelLabel: "test/model",
-      traceFile: trace,
-      sessionTraceFile: sessionTrace,
-      toolCallCount: arm === "owner-operator" ? 2 : 3,
-      tokensTotal: arm === "owner-operator" ? 100 : 120,
-    },
+const run = (subject: string, label: string, cases: ReturnType<typeof caseResult>[], grader = "grader-x") => ({
+  eval_folder: `${label}-folder`,
+  metadata: {
+    timestamp: "2026-07-13T00:00:00.000Z",
+    label,
+    subject,
+    scope: "full",
+    model_under_test: "subject-model",
+    reasoning_level: "medium",
+    grader_model: grader,
+    repeat: 3,
+    branch: "main",
+    commit: "abcdef1",
   },
-  gradingResult: {
-    componentResults: [
-      { pass: true, assertion: { type: "llm-rubric" } },
-      { pass: true, assertion: { metric: "tool_selection" } },
-    ],
+  summary: {
+    cases: cases.length,
+    total_tests: cases.length * 3,
+    total_pass: cases.reduce((total, item) => total + item.total_pass, 0),
+    total_fail: cases.reduce((total, item) => total + item.total_fail, 0),
+    total_error: 0,
+    global_pass_rate: 100,
+    trajectory_pass: true,
   },
+  tool_calls: { mean: 3, median: 3, min: 1, max: 7, stdev: 1 },
+  tokens: { mean: 90000, median: 90000, min: 50000, max: 170000, stdev: 20000 },
+  cost_usd: { mean: 0.08, median: 0.08, min: 0.03, max: 0.17, stdev: 0.03 },
+  cases,
 });
 
-const run = (results: unknown[]) => {
-  const file = join(runDir, "results.json");
-  writeFileSync(file, JSON.stringify({ results: { results } }));
-  return spawnSync(process.execPath, ["eval/compare.mjs", file, "--gate"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
+const write = (name: string, body: unknown) => {
+  const file = join(dir, name);
+  writeFileSync(file, JSON.stringify(body, null, 2));
+  return file;
 };
+
+const compare = (...argv: string[]) =>
+  spawnSync(process.execPath, [join(repoRoot, "eval", "compare.mjs"), ...argv], { encoding: "utf8" });
 
 try {
-  let manifestHash = writeManifest(manifestBody());
-  const complete = [record("owner-operator", manifestHash), record("baseline", manifestHash)];
-  const pass = run(complete);
-  assert.equal(pass.status, 0, pass.stdout + pass.stderr);
-  assert.match(pass.stdout, /GATE: PASS/);
+  const subjectFile = write("subject.json", run("owner-operator", "pr-run", [
+    caseResult("alpha", 100),
+    caseResult("beta", 100, 3, "state"),
+    caseResult("only-in-a", 100),
+  ]));
+  const controlFile = write("control.json", run("naive-session-grep", "control-run", [
+    caseResult("alpha", 100),
+    caseResult("beta", 67, 3, "state"),
+  ], "grader-y"));
 
-  const incomplete = run(complete.slice(0, 1));
-  assert.equal(incomplete.status, 2);
-  assert.match(incomplete.stdout, /incomplete arm pair/);
+  const pass = compare(subjectFile, controlFile, "--gate");
+  assert.equal(pass.status, 0, `expected gate pass, got: ${pass.stdout}${pass.stderr}`);
+  assert.match(pass.stdout, /A: owner-operator \[pr-run\]/, "the report names subjects explicitly");
+  assert.match(pass.stdout, /caveat: grader_model differs/, "comparability caveats are surfaced");
+  assert.match(pass.stdout, /only in A \(unpaired, excluded\): only-in-a/, "unpaired cases are reported, not absorbed");
+  assert.match(pass.stdout, /qtype/, "the qtype breakdown survives for locator-payoff analysis");
+  assert.match(pass.stdout, /gate: PASS/);
 
-  const errored: any[] = structuredClone(complete);
-  errored[0].response.error = "subject crashed";
-  const errorResult = run(errored);
-  assert.equal(errorResult.status, 2);
-  assert.match(errorResult.stdout, /provider error/);
+  const regressed = write("regressed.json", run("owner-operator", "regressed-run", [
+    caseResult("alpha", 33),
+    caseResult("beta", 67, 3, "state"),
+  ]));
+  const fail = compare(regressed, controlFile, "--gate");
+  assert.equal(fail.status, 2, "the gate fails closed when A's correctness is below B's");
+  assert.match(fail.stderr, /gate: FAIL/);
 
-  manifestHash = writeManifest(manifestBody("0".repeat(64)));
-  const stale = run([record("owner-operator", manifestHash), record("baseline", manifestHash)]);
-  assert.equal(stale.status, 2);
-  assert.match(stale.stdout, /manifest artifact changed since run/);
+  const noGate = compare(regressed, controlFile);
+  assert.equal(noGate.status, 0, "without --gate the report is informational");
 
-  writeFileSync(join(runDir, "manifest.json"), "{not valid json\n");
-  const corrupt = run([record("owner-operator", manifestHash), record("baseline", manifestHash)]);
-  assert.equal(corrupt.status, 2, "a corrupt manifest is a structured gate failure");
-  assert.match(corrupt.stdout, /run manifest is invalid JSON/);
-  assert.doesNotMatch(corrupt.stderr, /SyntaxError/, "the comparator does not crash with a raw parser stack");
+  const usage = compare(subjectFile);
+  assert.equal(usage.status, 2, "one file is a usage error");
 
-  process.stdout.write("ok — eval compare: complete pairs pass; incomplete/error/stale runs fail closed\n");
+  const disjointA = write("disjoint-a.json", run("owner-operator", "a", [caseResult("x", 100)]));
+  const disjointB = write("disjoint-b.json", run("owner-operator", "b", [caseResult("y", 100)]));
+  const disjoint = compare(disjointA, disjointB);
+  assert.equal(disjoint.status, 2, "zero shared cases fails closed");
+  assert.match(disjoint.stderr, /no shared cases/);
+
+  process.stdout.write("ok — eval compare: downstream pairing, caveats, and a fail-closed correctness gate\n");
 } finally {
-  rmSync(runDir, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true });
 }

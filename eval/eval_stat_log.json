@@ -1,325 +1,303 @@
 [
   {
     "timestamp": "2026-07-13T10:01:18.133Z",
+    "label": "pr53-enrichment-smoke",
     "commit": "5cc542d",
     "branch": "fix/enrichment-discard-and-model",
-    "git_dirty": true,
-    "git_diff_hash": "af1ef40951002dc33a1d3dd4ccf0f3f212551d98a39c82df7ee9bbbc2f1f9d5d",
     "eval_folder": "2026-07-13T09-42-57-oo-only",
-    "label": "pr53-enrichment-smoke",
+    "subject": "owner-operator",
     "model": "openai-codex/gpt-5.6-sol",
-    "grader_model": "openai-codex/gpt-5.4",
     "reasoning_level": null,
-    "scope": "full",
-    "arms": "oo",
+    "grader_model": "openai-codex/gpt-5.4",
+    "grader_reasoning": "minimal",
+    "cases": 14,
     "repeat": 1,
+    "total_tests": 14,
     "summary": {
-      "paired_cases": 14,
-      "total_tests_per_arm": 14,
-      "owner_operator": {
-        "total_pass": 14,
-        "total_fail": 0,
-        "total_error": 0,
-        "global_pass_rate": 100
-      },
-      "baseline": null,
-      "comparison_gate_pass": null,
-      "trajectory_pass": true,
-      "fewer_call_wins": null
+      "total_pass": 14,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": true
     },
     "tool_calls": {
-      "owner_operator": {
-        "mean": 3.07,
-        "median": 3,
-        "min": 1,
-        "max": 7,
-        "stdev": 1.54,
-        "total_requests": 14
-      },
-      "baseline": null
+      "mean": 3.07,
+      "median": 3,
+      "min": 1,
+      "max": 7,
+      "stdev": 1.54
     },
     "tokens": {
-      "owner_operator": {
-        "mean": 95944.5,
-        "median": 96267,
-        "min": 45844,
-        "max": 176286,
-        "stdev": 34072.14,
-        "total_requests": 14
-      },
-      "baseline": null
+      "mean": 95944.5,
+      "median": 96267,
+      "min": 45844,
+      "max": 176286,
+      "stdev": 34072.14
     },
     "cost_usd": {
-      "owner_operator": {
-        "mean": 0.089965,
-        "median": 0.08195,
-        "min": 0.033376,
-        "max": 0.168733,
-        "stdev": 0.037126,
-        "total_requests": 14
-      },
-      "baseline": null
-    },
-    "run_commit": "48e577b",
-    "run_branch": "fix/enrichment-discard-and-model"
+      "mean": 0.089965,
+      "median": 0.08195,
+      "min": 0.033376,
+      "max": 0.168733,
+      "stdev": 0.037126
+    }
   },
   {
     "timestamp": "2026-07-11T00:17:20.877Z",
+    "label": null,
     "commit": "3a47ef4",
     "branch": "main",
-    "git_dirty": true,
-    "git_diff_hash": "caef3bc9e2a3a4a092b1718612ca9439aebcbb6d13dadbeb163634a511bc86ef",
     "eval_folder": "2026-07-11T00-17-20-877Z",
+    "subject": "owner-operator",
     "model": "openai-codex/gpt-5.6-sol",
-    "grader_model": "claude-fable-5",
     "reasoning_level": null,
-    "scope": "full",
+    "grader_model": "claude-fable-5",
+    "grader_reasoning": null,
+    "cases": 14,
     "repeat": 3,
+    "total_tests": 42,
     "summary": {
-      "paired_cases": 14,
-      "total_tests_per_arm": 42,
-      "owner_operator": {
-        "total_pass": 42,
-        "total_fail": 0,
-        "total_error": 0,
-        "global_pass_rate": 100
-      },
-      "baseline": {
-        "total_pass": 36,
-        "total_fail": 6,
-        "total_error": 0,
-        "global_pass_rate": 85.71
-      },
-      "comparison_gate_pass": true,
-      "trajectory_pass": true,
-      "fewer_call_wins": 8
+      "total_pass": 42,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": true
     },
     "tool_calls": {
-      "owner_operator": {
-        "mean": 3.02,
-        "median": 3,
-        "min": 1,
-        "max": 7,
-        "stdev": 1.16,
-        "total_requests": 42
-      },
-      "baseline": {
-        "mean": 4.79,
-        "median": 4,
-        "min": 3,
-        "max": 14,
-        "stdev": 2.39,
-        "total_requests": 42
-      }
+      "mean": 3.02,
+      "median": 3,
+      "min": 1,
+      "max": 7,
+      "stdev": 1.16
     },
     "tokens": {
-      "owner_operator": {
-        "mean": 93755.36,
-        "median": 95463.5,
-        "min": 46103,
-        "max": 174354,
-        "stdev": 24804.89,
-        "total_requests": 42
-      },
-      "baseline": {
-        "mean": 109550.74,
-        "median": 91288,
-        "min": 89613,
-        "max": 194823,
-        "stdev": 26664.1,
-        "total_requests": 42
-      }
+      "mean": 93755.36,
+      "median": 95463.5,
+      "min": 46103,
+      "max": 174354,
+      "stdev": 24804.89
     },
     "cost_usd": {
-      "owner_operator": {
-        "mean": 0.083654,
-        "median": 0.076971,
-        "min": 0.034296,
-        "max": 0.1736,
-        "stdev": 0.030358,
-        "total_requests": 42
-      },
-      "baseline": {
-        "mean": 0.08962,
-        "median": 0.0769,
-        "min": 0.065153,
-        "max": 0.185549,
-        "stdev": 0.028842,
-        "total_requests": 42
-      }
+      "mean": 0.083654,
+      "median": 0.076971,
+      "min": 0.034296,
+      "max": 0.1736,
+      "stdev": 0.030358
+    }
+  },
+  {
+    "timestamp": "2026-07-11T00:17:20.877Z",
+    "label": null,
+    "commit": "3a47ef4",
+    "branch": "main",
+    "eval_folder": "2026-07-11T00-17-20-877Z",
+    "subject": "naive-session-grep",
+    "model": "openai-codex/gpt-5.6-sol",
+    "reasoning_level": null,
+    "grader_model": "claude-fable-5",
+    "grader_reasoning": null,
+    "cases": 14,
+    "repeat": 3,
+    "total_tests": 42,
+    "summary": {
+      "total_pass": 36,
+      "total_fail": 6,
+      "total_error": 0,
+      "global_pass_rate": 85.71,
+      "trajectory_pass": true
+    },
+    "tool_calls": {
+      "mean": 4.79,
+      "median": 4,
+      "min": 3,
+      "max": 14,
+      "stdev": 2.39
+    },
+    "tokens": {
+      "mean": 109550.74,
+      "median": 91288,
+      "min": 89613,
+      "max": 194823,
+      "stdev": 26664.1
+    },
+    "cost_usd": {
+      "mean": 0.08962,
+      "median": 0.0769,
+      "min": 0.065153,
+      "max": 0.185549,
+      "stdev": 0.028842
     }
   },
   {
     "timestamp": "2026-07-10T23:22:35.153Z",
+    "label": null,
     "commit": "3a47ef4",
     "branch": "main",
-    "git_dirty": true,
-    "git_diff_hash": "3192846f8b9446dec332af0070201028dc9e5ec88d982c73d9107fd39642c67c",
     "eval_folder": "2026-07-10T23-22-35-153Z",
+    "subject": "owner-operator",
     "model": "openai-codex/gpt-5.6-sol",
-    "grader_model": "claude-fable-5",
     "reasoning_level": null,
-    "scope": "full",
+    "grader_model": "claude-fable-5",
+    "grader_reasoning": null,
+    "cases": 14,
     "repeat": 3,
+    "total_tests": 42,
     "summary": {
-      "paired_cases": 14,
-      "total_tests_per_arm": 42,
-      "owner_operator": {
-        "total_pass": 40,
-        "total_fail": 2,
-        "total_error": 0,
-        "global_pass_rate": 95.24
-      },
-      "baseline": {
-        "total_pass": 35,
-        "total_fail": 7,
-        "total_error": 0,
-        "global_pass_rate": 83.33
-      },
-      "comparison_gate_pass": false,
-      "trajectory_pass": false,
-      "fewer_call_wins": 7
+      "total_pass": 40,
+      "total_fail": 2,
+      "total_error": 0,
+      "global_pass_rate": 95.24,
+      "trajectory_pass": false
     },
     "tool_calls": {
-      "owner_operator": {
-        "mean": 3.12,
-        "median": 3,
-        "min": 1,
-        "max": 7,
-        "stdev": 1.47,
-        "total_requests": 42
-      },
-      "baseline": {
-        "mean": 4.98,
-        "median": 4,
-        "min": 3,
-        "max": 12,
-        "stdev": 2.44,
-        "total_requests": 42
-      }
+      "mean": 3.12,
+      "median": 3,
+      "min": 1,
+      "max": 7,
+      "stdev": 1.47
     },
     "tokens": {
-      "owner_operator": {
-        "mean": 92484.48,
-        "median": 95295.5,
-        "min": 45987,
-        "max": 149202,
-        "stdev": 25783.98,
-        "total_requests": 42
-      },
-      "baseline": {
-        "mean": 110811.9,
-        "median": 102153.5,
-        "min": 66833,
-        "max": 192232,
-        "stdev": 28204.02,
-        "total_requests": 42
-      }
+      "mean": 92484.48,
+      "median": 95295.5,
+      "min": 45987,
+      "max": 149202,
+      "stdev": 25783.98
     },
     "cost_usd": {
-      "owner_operator": {
-        "mean": 0.097768,
-        "median": 0.079015,
-        "min": 0.033566,
-        "max": 0.183563,
-        "stdev": 0.046555,
-        "total_requests": 42
-      },
-      "baseline": {
-        "mean": 0.103979,
-        "median": 0.096574,
-        "min": 0.05265,
-        "max": 0.170619,
-        "stdev": 0.035182,
-        "total_requests": 42
-      }
+      "mean": 0.097768,
+      "median": 0.079015,
+      "min": 0.033566,
+      "max": 0.183563,
+      "stdev": 0.046555
+    }
+  },
+  {
+    "timestamp": "2026-07-10T23:22:35.153Z",
+    "label": null,
+    "commit": "3a47ef4",
+    "branch": "main",
+    "eval_folder": "2026-07-10T23-22-35-153Z",
+    "subject": "naive-session-grep",
+    "model": "openai-codex/gpt-5.6-sol",
+    "reasoning_level": null,
+    "grader_model": "claude-fable-5",
+    "grader_reasoning": null,
+    "cases": 14,
+    "repeat": 3,
+    "total_tests": 42,
+    "summary": {
+      "total_pass": 35,
+      "total_fail": 7,
+      "total_error": 0,
+      "global_pass_rate": 83.33,
+      "trajectory_pass": true
+    },
+    "tool_calls": {
+      "mean": 4.98,
+      "median": 4,
+      "min": 3,
+      "max": 12,
+      "stdev": 2.44
+    },
+    "tokens": {
+      "mean": 110811.9,
+      "median": 102153.5,
+      "min": 66833,
+      "max": 192232,
+      "stdev": 28204.02
+    },
+    "cost_usd": {
+      "mean": 0.103979,
+      "median": 0.096574,
+      "min": 0.05265,
+      "max": 0.170619,
+      "stdev": 0.035182
     }
   },
   {
     "timestamp": "2026-07-07T15:53:40Z",
+    "label": null,
     "commit": "771d3de",
     "branch": "issue-31-db-locator-neutral-prompt",
-    "git_dirty": null,
-    "git_diff_hash": null,
     "eval_folder": "pr-33-controlled-result",
+    "subject": "owner-operator",
     "model": "gpt-5.5",
-    "grader_model": null,
     "reasoning_level": null,
-    "scope": "full",
+    "grader_model": null,
+    "grader_reasoning": null,
+    "cases": 10,
     "repeat": 1,
+    "total_tests": 10,
     "summary": {
-      "paired_cases": 10,
-      "total_tests_per_arm": 10,
-      "owner_operator": {
-        "total_pass": 10,
-        "total_fail": 0,
-        "total_error": 0,
-        "global_pass_rate": 100
-      },
-      "baseline": {
-        "total_pass": 10,
-        "total_fail": 0,
-        "total_error": 0,
-        "global_pass_rate": 100
-      },
-      "comparison_gate_pass": true,
-      "trajectory_pass": true,
-      "fewer_call_wins": null
+      "total_pass": 10,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": true
     },
     "tool_calls": {
-      "owner_operator": {
-        "mean": 3.7,
-        "median": null,
-        "min": null,
-        "max": null,
-        "stdev": null,
-        "total_requests": 10
-      },
-      "baseline": {
-        "mean": 5.7,
-        "median": null,
-        "min": null,
-        "max": null,
-        "stdev": null,
-        "total_requests": 10
-      }
+      "mean": 3.7,
+      "median": null,
+      "min": null,
+      "max": null,
+      "stdev": null
     },
     "tokens": {
-      "owner_operator": {
-        "mean": 13800,
-        "median": null,
-        "min": null,
-        "max": null,
-        "stdev": null,
-        "total_requests": 10
-      },
-      "baseline": {
-        "mean": 12500,
-        "median": null,
-        "min": null,
-        "max": null,
-        "stdev": null,
-        "total_requests": 10
-      }
+      "mean": 13800,
+      "median": null,
+      "min": null,
+      "max": null,
+      "stdev": null
     },
     "cost_usd": {
-      "owner_operator": {
-        "mean": null,
-        "median": null,
-        "min": null,
-        "max": null,
-        "stdev": null,
-        "total_requests": 10
-      },
-      "baseline": {
-        "mean": null,
-        "median": null,
-        "min": null,
-        "max": null,
-        "stdev": null,
-        "total_requests": 10
-      }
+      "mean": null,
+      "median": null,
+      "min": null,
+      "max": null,
+      "stdev": null
+    }
+  },
+  {
+    "timestamp": "2026-07-07T15:53:40Z",
+    "label": null,
+    "commit": "771d3de",
+    "branch": "issue-31-db-locator-neutral-prompt",
+    "eval_folder": "pr-33-controlled-result",
+    "subject": "naive-session-grep",
+    "model": "gpt-5.5",
+    "reasoning_level": null,
+    "grader_model": null,
+    "grader_reasoning": null,
+    "cases": 10,
+    "repeat": 1,
+    "total_tests": 10,
+    "summary": {
+      "total_pass": 10,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": true
     },
-    "note": "Backfilled from PR #33. The raw run, distributions, grader, and exact eval commit were not retained; token means are rounded PR-body values and commit is the PR head at merge."
+    "tool_calls": {
+      "mean": 5.7,
+      "median": null,
+      "min": null,
+      "max": null,
+      "stdev": null
+    },
+    "tokens": {
+      "mean": 12500,
+      "median": null,
+      "min": null,
+      "max": null,
+      "stdev": null
+    },
+    "cost_usd": {
+      "mean": null,
+      "median": null,
+      "min": null,
+      "max": null,
+      "stdev": null
+    }
   }
 ]

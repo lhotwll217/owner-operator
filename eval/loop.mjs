@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Eval-development loop, adapted from the proven session-grep campaign:
 // one failure mechanism -> one case -> distributed probe -> core -> full holdout.
-// Writes experiment history; valid full runs add raw global results plus a compact PR stats entry.
+// A run measures ONE subject (owner-operator by default, naive-session-grep as the
+// control study). Every run enters durable history; valid full runs add a raw global
+// result plus a compact stats entry. Cross-subject comparison is downstream: compare.mjs
+// over two global_results.json files.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -16,6 +19,8 @@ const historyFile = path.join(here, "history.jsonl");
 const statsLogFile = path.join(here, "eval_stat_log.json");
 const iterationsDir = path.join(here, "results", "iterations");
 fs.mkdirSync(iterationsDir, { recursive: true });
+
+const SUBJECTS = ["owner-operator", "naive-session-grep"];
 
 const PROBE_IDS = [
   "evidence-flaky-error",             // rare literal / query-led
@@ -35,13 +40,13 @@ const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
     "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full]\n" +
-    "         [--repeat N (default 3; 1 = smoke)] [--naive-session-grep-compare] [--dry]\n" +
+    "         [--subject owner-operator|naive-session-grep] [--repeat N (default 3; 1 = smoke)] [--dry]\n" +
     "       node eval/loop.mjs --backfill-git EVAL_FOLDER [--commit SHA] [--branch NAME]\n" +
-    "Default runs the owner-operator arm only; --naive-session-grep-compare adds the\n" +
-    "grep-baseline arm for a paired A/B (issue #31 style). --dry ledgers an existing\n" +
-    "eval/results/latest.json without re-running. --backfill-git re-points a published\n" +
-    "stats entry at the commit/branch that carries the run's work (runs happen on dirty\n" +
-    "worktrees; the durable commit and PR usually come after).",
+    "A run measures one subject. Compare two runs downstream:\n" +
+    "  node eval/compare.mjs <global_results_A.json> <global_results_B.json> [--gate]\n" +
+    "--dry ledgers an existing eval/results/latest.json without re-running. --backfill-git\n" +
+    "resolves a published entry's commit/branch to the state that carries the run's work\n" +
+    "(runs happen on dirty worktrees; the durable commit and PR come after).",
   );
   process.exit(0);
 }
@@ -53,21 +58,25 @@ const has = (name) => args.includes(`--${name}`);
 if (has("backfill-git")) {
   const folder = option("backfill-git");
   if (!folder) fail("--backfill-git requires an eval folder id");
-  const entry = backfillGitIdentity(statsLogFile, folder, {
+  const entries = backfillGitIdentity(statsLogFile, folder, {
     commit: option("commit"),
     branch: option("branch"),
     cwd: repoRoot,
   });
-  console.log(`[loop] backfilled ${folder} -> ${entry.branch}@${entry.commit} (run-time identity kept as ${entry.run_branch}@${entry.run_commit})`);
+  for (const entry of entries) {
+    console.log(`[loop] backfilled ${folder} (${entry.subject}) -> ${entry.branch}@${entry.commit}`);
+  }
   process.exit(0);
 }
 const label = option("label");
 const notes = option("notes");
 const custom = option("cases");
+let subject = option("subject", "owner-operator");
 const repeat = Number(option("repeat", "3"));
 const dry = has("dry");
 if (!label) fail("--label is required: name the mechanism being tested");
 if (!notes) fail("--notes is required: state the hypothesis and expected trajectory effect");
+if (!SUBJECTS.includes(subject)) fail(`unknown subject: ${subject}; expected ${SUBJECTS.join(" | ")}`);
 if (!Number.isInteger(repeat) || repeat < 1) fail("--repeat must be a positive integer");
 if ([has("probe"), has("full"), Boolean(custom)].filter(Boolean).length > 1) {
   fail("choose only one of --probe, --full, or --cases id1,id2");
@@ -81,7 +90,6 @@ const ids = custom ? custom.split(",").filter(Boolean) : has("probe") ? PROBE_ID
 for (const id of ids) if (!knownIds.has(id)) fail(`unknown case id: ${id}`);
 const scope = custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
 const pattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
-let withBaseline = has("naive-session-grep-compare");
 const createdAt = new Date().toISOString();
 const requestedRunId = createdAt.replace(/[:.]/g, "-");
 
@@ -92,11 +100,11 @@ if (!dry) {
     "-c", "eval/promptfooconfig.yaml",
     "--no-cache",
     "--max-concurrency", "1",
-    ...(withBaseline ? [] : ["--filter-providers", "owner-operator"]),
+    "--filter-providers", `^${escapeRegex(subject)}$`,
     ...(pattern ? ["--filter-pattern", pattern] : []),
     ...(repeat > 1 ? ["--repeat", String(repeat)] : []),
   ];
-  console.log(`[loop] ${label} scope=${scope} arms=${withBaseline ? "oo+baseline" : "oo"}${ids.length ? ` cases=${ids.join(",")}` : ""} repeat=${repeat}`);
+  console.log(`[loop] ${label} subject=${subject} scope=${scope}${ids.length ? ` cases=${ids.join(",")}` : ""} repeat=${repeat}`);
   const run = spawnSync("npx", command, {
     cwd: repoRoot,
     stdio: "inherit",
@@ -114,27 +122,19 @@ const runIds = unique(records.map((record) => record.runId).filter(Boolean));
 if (runIds.length !== 1) fail(`latest results are not one run: ${runIds.join(", ") || "no run id"}`);
 const runId = runIds[0];
 if (!dry && runId !== requestedRunId) fail(`result run id ${runId} does not match requested ${requestedRunId}`);
-if (dry) withBaseline = records.some((record) => record.arm === "baseline");
+const observedSubjects = unique(records.map((record) => record.subject));
+if (observedSubjects.length !== 1) fail(`a run measures one subject; results contain: ${observedSubjects.join(", ")}`);
+if (dry) subject = observedSubjects[0];
+else if (observedSubjects[0] !== subject) fail(`results are ${observedSubjects[0]}, expected ${subject}`);
 
-const pairs = collectCases(records, withBaseline);
-const metrics = summarize(pairs, withBaseline);
-const compare = withBaseline
-  ? spawnSync(process.execPath, ["eval/compare.mjs", resultsFile, "--gate"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  })
-  : null;
-if (compare) {
-  process.stdout.write(compare.stdout);
-  process.stderr.write(compare.stderr);
-}
+const cases = collectCases(records);
+const metrics = summarize(cases);
 
 const manifest = readManifest(records);
-const runValidity = validateStatsRun(records, pairs, {
+const runValidity = validateStatsRun(records, cases, {
   expectedCases: scope === "full" ? knownIds.size : ids.length,
   manifest,
   repeat,
-  withBaseline,
 });
 const detail = path.join(iterationsDir, `${runId}.json`);
 const record = {
@@ -142,24 +142,25 @@ const record = {
   runId,
   label,
   notes,
+  subject,
   scope,
-  arms: withBaseline ? "oo+baseline" : "oo",
   pattern,
   repeat,
   manifestHash: manifest?.manifestHash ?? null,
   model: manifest?.modelLabel ?? unique(records.map((item) => item.modelLabel))[0] ?? null,
+  reasoningLevel: manifest?.reasoningLevel ?? null,
   graderModel: manifest?.graderModel ?? null,
+  graderReasoning: manifest?.graderReasoning ?? null,
   logs: records[0]?.traceFile ? path.dirname(records[0].traceFile) : null,
   detail: path.relative(repoRoot, detail),
   promptfooPass: evalStatus === 0,
-  comparePass: compare ? compare.status === 0 : null,
   metrics,
 };
-fs.writeFileSync(detail, JSON.stringify({ ...record, cases: pairs }, null, 2) + "\n");
+fs.writeFileSync(detail, JSON.stringify({ ...record, cases }, null, 2) + "\n");
 fs.appendFileSync(historyFile, JSON.stringify(record) + "\n");
 let statsStatus = "not-applicable:targeted-run";
 if (scope === "full" && runValidity.valid) {
-  const globalResults = buildGlobalResults({ record, cases: pairs, observations: records, manifest });
+  const globalResults = buildGlobalResults({ record, cases, observations: records, manifest });
   const globalResultsFile = path.join(repoRoot, record.logs, "global_results.json");
   fs.writeFileSync(globalResultsFile, `${JSON.stringify(globalResults, null, 2)}\n`);
   upsertStatsLog(statsLogFile, buildStatsEntry(globalResults));
@@ -170,66 +171,51 @@ if (scope === "full" && runValidity.valid) {
   process.exitCode = 2;
 }
 
-console.log(`\n[loop] ${withBaseline ? "paired" : "owner-operator"} trajectory metrics`);
-console.table(pairs.map((pair) => ({
-  case: pair.caseId,
-  repeats: pair.oo.n,
-  "correct(oo)": pct(pair.oo.correct),
-  ...(withBaseline ? { "correct(base)": pct(pair.baseline.correct) } : {}),
-  "calls(oo)": round(pair.oo.toolCalls),
-  ...(withBaseline ? { "calls(base)": round(pair.baseline.toolCalls) } : {}),
-  "tokens(oo)": Math.round(pair.oo.tokens),
-  ...(withBaseline ? { "tokens(base)": Math.round(pair.baseline.tokens) } : {}),
+console.log(`\n[loop] ${subject} trajectory metrics`);
+console.table(cases.map((item) => ({
+  case: item.caseId,
+  repeats: item.stats.n,
+  correct: pct(item.stats.correct),
+  calls: round(item.stats.toolCalls),
+  tokens: Math.round(item.stats.tokens),
 })));
-if (withBaseline) {
-  console.log(
-    `[loop] acc=${pct(metrics.accuracy.oo)} vs ${pct(metrics.accuracy.baseline)} ` +
-    `callRatio=${ratio(metrics.toolCalls.oo, metrics.toolCalls.baseline)} ` +
-    `tokenRatio=${ratio(metrics.tokens.oo, metrics.tokens.baseline)} ` +
-    `costRatio=${ratio(metrics.cost.oo, metrics.cost.baseline)} ` +
-    `fewer-call wins=${metrics.fewerCallWins}/${metrics.paired}`,
-  );
-} else {
-  console.log(
-    `[loop] acc=${pct(metrics.accuracy.oo)} ` +
-    `calls=${round(metrics.toolCalls.oo / pairs.length)}/case ` +
-    `tokens=${Math.round(metrics.tokens.oo / pairs.length)}/case ` +
-    `cost=$${(metrics.cost.oo / pairs.length).toFixed(4)}/case over ${pairs.length} cases x ${repeat} repeat(s)`,
-  );
-}
+console.log(
+  `[loop] acc=${pct(metrics.accuracy)} ` +
+  `calls=${round(metrics.toolCalls / cases.length)}/case ` +
+  `tokens=${Math.round(metrics.tokens / cases.length)}/case ` +
+  `cost=$${(metrics.cost / cases.length).toFixed(4)}/case over ${cases.length} cases x ${repeat} repeat(s)`,
+);
 
-const previousArms = (item) => item.arms ?? "oo+baseline";
 const previous = readHistory().filter((item) =>
   item.runId !== runId && item.scope === scope && item.pattern === pattern &&
-  item.repeat === repeat && previousArms(item) === record.arms
+  item.repeat === repeat && (item.subject ?? "owner-operator") === subject
 ).at(-1);
-if (previous) {
+if (previous?.metrics?.accuracy !== undefined && typeof previous.metrics.accuracy === "number") {
   console.log(
-    withBaseline
-      ? `[loop] vs ${previous.label}: callRatio ${ratio(previous.metrics.toolCalls.oo, previous.metrics.toolCalls.baseline)} -> ${ratio(metrics.toolCalls.oo, metrics.toolCalls.baseline)}, ` +
-        `acc(oo) ${pct(previous.metrics.accuracy.oo)} -> ${pct(metrics.accuracy.oo)}`
-      : `[loop] vs ${previous.label}: acc(oo) ${pct(previous.metrics.accuracy.oo)} -> ${pct(metrics.accuracy.oo)}, ` +
-        `calls(oo) ${round(previous.metrics.toolCalls.oo / previous.metrics.paired)} -> ${round(metrics.toolCalls.oo / metrics.paired)}/case`,
+    `[loop] vs ${previous.label}: acc ${pct(previous.metrics.accuracy)} -> ${pct(metrics.accuracy)}, ` +
+    `calls ${round(previous.metrics.toolCalls / previous.metrics.cases)} -> ${round(metrics.toolCalls / metrics.cases)}/case`,
   );
 }
 console.log(
   `[loop] history=${path.relative(repoRoot, historyFile)} stats=${statsStatus} ` +
   `detail=${path.relative(repoRoot, detail)}`,
 );
-if (evalStatus !== 0 || (compare && compare.status !== 0)) process.exitCode = 2;
+if (evalStatus !== 0) process.exitCode = 2;
 
 function toRecord(result) {
-  const label = result.provider?.label ?? result.provider?.id ?? "unknown";
-  const arm = label.startsWith("owner-operator") ? "oo" : label.startsWith("baseline") ? "baseline" : "unknown";
+  const providerLabel = result.provider?.label ?? result.provider?.id ?? "unknown";
+  const subjectName = SUBJECTS.find((name) => providerLabel.startsWith(name)) ?? "unknown";
   const components = result.gradingResult?.componentResults ?? [];
   const rubric = components.find((component) => component.assertion?.type === "llm-rubric");
   const trajectory = components.find((component) => component.assertion?.metric === "tool_selection");
   const metadata = result.response?.metadata ?? {};
   return {
     caseId: result.vars?.id ?? result.description ?? `test-${result.testIdx}`,
-    arm,
+    subject: subjectName,
+    qtype: result.testCase?.metadata?.qtype ?? "unknown",
     correct: rubric ? Number(rubric.pass === true) : null,
-    trajectoryPass: arm === "oo" ? trajectory?.pass === true : true,
+    // The tool-selection gate judges OO's composition; the control passes vacuously.
+    trajectoryPass: subjectName === "owner-operator" ? trajectory?.pass === true : true,
     rubricReason: rubric?.reason ?? null,
     tokens: Number(metadata.tokensTotal ?? result.tokenUsage?.total ?? 0),
     toolCalls: Number(metadata.toolCallCount ?? 0),
@@ -241,30 +227,21 @@ function toRecord(result) {
   };
 }
 
-function collectCases(records, withBaseline) {
+function collectCases(records) {
   const byCase = new Map();
   for (const record of records) {
-    if (record.arm === "unknown") continue;
-    const arms = byCase.get(record.caseId) ?? { oo: [], baseline: [] };
-    arms[record.arm].push(record);
-    byCase.set(record.caseId, arms);
+    if (record.subject === "unknown") continue;
+    const items = byCase.get(record.caseId) ?? [];
+    items.push(record);
+    byCase.set(record.caseId, items);
   }
-  const output = [];
-  for (const [caseId, arms] of byCase) {
-    if (!arms.oo.length) continue;
-    if (withBaseline && arms.oo.length !== arms.baseline.length) continue;
-    output.push({
-      caseId,
-      oo: aggregate(arms.oo),
-      baseline: withBaseline ? aggregate(arms.baseline) : null,
-    });
-  }
-  return output;
+  return [...byCase].map(([caseId, items]) => ({ caseId, stats: aggregate(items) }));
 }
 
 function aggregate(items) {
   return {
     n: items.length,
+    qtype: items[0]?.qtype ?? "unknown",
     correct: mean(items.map((item) => item.correct ?? 0)),
     trajectoryPass: items.every((item) => item.trajectoryPass),
     tokens: mean(items.map((item) => item.tokens)),
@@ -274,44 +251,28 @@ function aggregate(items) {
   };
 }
 
-function summarize(pairs, withBaseline) {
+function summarize(cases) {
   return {
-    paired: pairs.length,
-    accuracy: {
-      oo: mean(pairs.map((pair) => pair.oo.correct)),
-      baseline: withBaseline ? mean(pairs.map((pair) => pair.baseline.correct)) : null,
-    },
-    toolCalls: {
-      oo: sum(pairs.map((pair) => pair.oo.toolCalls)),
-      baseline: withBaseline ? sum(pairs.map((pair) => pair.baseline.toolCalls)) : null,
-    },
-    tokens: {
-      oo: sum(pairs.map((pair) => pair.oo.tokens)),
-      baseline: withBaseline ? sum(pairs.map((pair) => pair.baseline.tokens)) : null,
-    },
-    cost: {
-      oo: sum(pairs.map((pair) => pair.oo.cost)),
-      baseline: withBaseline ? sum(pairs.map((pair) => pair.baseline.cost)) : null,
-    },
-    fewerCallWins: withBaseline
-      ? pairs.filter((pair) => pair.oo.toolCalls < pair.baseline.toolCalls).length
-      : null,
-    trajectoryPass: pairs.every((pair) => pair.oo.trajectoryPass),
+    cases: cases.length,
+    accuracy: mean(cases.map((item) => item.stats.correct)),
+    toolCalls: sum(cases.map((item) => item.stats.toolCalls)),
+    tokens: sum(cases.map((item) => item.stats.tokens)),
+    cost: sum(cases.map((item) => item.stats.cost)),
+    trajectoryPass: cases.every((item) => item.stats.trajectoryPass),
   };
 }
 
-function validateStatsRun(records, pairs, { expectedCases, manifest, repeat, withBaseline }) {
-  const armCount = withBaseline ? 2 : 1;
+function validateStatsRun(records, cases, { expectedCases, manifest, repeat }) {
   const reasons = [];
   if (!manifest) reasons.push("missing-manifest");
   if (!manifest?.gitHead) reasons.push("missing-git-commit");
   if (!manifest?.gitBranch || manifest.gitBranch === "HEAD") reasons.push("missing-git-branch");
-  if (pairs.length !== expectedCases) reasons.push(`paired-cases-${pairs.length}-of-${expectedCases}`);
-  if (records.length !== expectedCases * repeat * armCount) reasons.push(`records-${records.length}-of-${expectedCases * repeat * armCount}`);
-  if (records.some((item) => item.arm === "unknown")) reasons.push("unknown-arm");
+  if (cases.length !== expectedCases) reasons.push(`cases-${cases.length}-of-${expectedCases}`);
+  if (records.length !== expectedCases * repeat) reasons.push(`records-${records.length}-of-${expectedCases * repeat}`);
+  if (records.some((item) => item.subject === "unknown")) reasons.push("unknown-subject");
   if (records.some((item) => item.correct === null)) reasons.push("missing-grade");
   if (records.some((item) => item.providerError)) reasons.push("provider-error");
-  if (pairs.some((item) => item.oo.n !== repeat || (withBaseline && item.baseline.n !== repeat))) reasons.push("repeat-mismatch");
+  if (cases.some((item) => item.stats.n !== repeat)) reasons.push("repeat-mismatch");
   return { valid: reasons.length === 0, reasons };
 }
 
@@ -332,6 +293,5 @@ function sum(values) { return values.reduce((total, value) => total + Number(val
 function unique(values) { return [...new Set(values)]; }
 function round(value) { return Math.round(value * 10) / 10; }
 function pct(value) { return `${Math.round(value * 100)}%`; }
-function ratio(a, b) { return b > 0 ? (a / b).toFixed(2) : "-"; }
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function fail(message) { console.error(`eval/loop: ${message}`); process.exit(2); }

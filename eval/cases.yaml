@@ -1,6 +1,6 @@
-# Eval cases (issue #31): one chain — OO answers, we grade the answer and observe which
-# tools it reached for. Both arms (owner-operator, sessions-grep baseline) attempt every
-# case; the baseline greps transcripts, OO may shortcut through its state DB. Ground truth
+# Eval cases: one chain — the subject answers, we grade the answer and observe which
+# tools it reached for. Every subject (owner-operator, naive-session-grep) attempts every
+# case; the control greps transcripts, OO may shortcut through its state DB. Ground truth
 # is planted in fixtures/sessions.mjs — change a fact there, change its rubric here.
 #
 # qtype tags where the DB earns its keep: state/stale/audit/handoff cases are the ones OO
