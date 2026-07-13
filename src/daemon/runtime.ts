@@ -5,6 +5,7 @@ import {
   type DaemonHealth,
   type DaemonInfo,
   type DaemonReady,
+  ensureOwnerOperatorWorkspace,
 } from "@owner-operator/core";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
@@ -36,6 +37,7 @@ export interface RunningDaemon {
 }
 
 export async function startDaemon(options: DaemonOptions = {}): Promise<RunningDaemon> {
+  ensureOwnerOperatorWorkspace();
   const dbPath = options.dbPath ?? stateDatabasePath();
   const startedAt = new Date().toISOString();
   const fingerprint = runtimeFingerprint();

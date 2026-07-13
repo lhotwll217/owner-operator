@@ -9,7 +9,6 @@ import { basename, join } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
-  getAgentDir,
   SessionManager,
   SettingsManager,
   AuthStorage,
@@ -17,6 +16,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentToolId,
+  ensureOwnerOperatorWorkspace,
+  ownerOperatorPaths,
   type ScheduleExecutionResult,
   type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
@@ -79,6 +80,22 @@ export function evalSettingsOverrides(
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "src", "prompts", "owner-operator.md"), "utf8");
 
+export function ownerOperatorPiServices(ooHome?: string): {
+  paths: ReturnType<typeof ownerOperatorPaths>;
+  authStorage: AuthStorage;
+  modelRegistry: ModelRegistry;
+  settingsManager: SettingsManager;
+} {
+  const paths = ensureOwnerOperatorWorkspace(ooHome);
+  const authStorage = AuthStorage.create(paths.piAuth);
+  return {
+    paths,
+    authStorage,
+    modelRegistry: ModelRegistry.create(authStorage, paths.piModels),
+    settingsManager: SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false }),
+  };
+}
+
 // Every owner chat is saved (and labeled with its surface) like any other oo thread;
 // `ephemeral` is the opt-out for tests that shouldn't leave files in OO_HOME.
 export async function createOwnerOperatorSession(
@@ -114,14 +131,13 @@ export async function createOwnerOperatorSession(
         : [...ownerOperatorTools];
   const cwd = opts.cwd ?? runtimeCwd();
 
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json
+  const { authStorage, modelRegistry, paths, settingsManager } = ownerOperatorPiServices();
   settingsManager.applyOverrides(evalSettingsOverrides(process.env));
 
   const loader = new DefaultResourceLoader({
     cwd,
-    agentDir: getAgentDir(),
+    agentDir: paths.piAgentDir,
+    settingsManager,
     ...ownerOperatorResourceLoaderOptions(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
@@ -131,6 +147,7 @@ export async function createOwnerOperatorSession(
 
   const { session } = await createAgentSession({
     cwd,
+    agentDir: paths.piAgentDir,
     resourceLoader: loader,
     settingsManager,
     sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(cwd) : createOoSession(ooProvenance(surface))),

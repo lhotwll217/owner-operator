@@ -32,6 +32,7 @@ const daemon = await startDaemon({
 });
 
 try {
+  assert.ok(statSync(join(dir, "workspace", "AGENTS.md")).isFile(), "daemon entry creates the owned workspace");
   await waitFor(() => daemon.state.listSessionState().length === 1, 1_000, "initial monitor poll");
   const unauthenticated = await fetch(`http://127.0.0.1:${daemon.port}/health`);
   assert.equal(unauthenticated.status, 401, "every Gateway route requires the discovery credential");

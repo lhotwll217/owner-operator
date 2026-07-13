@@ -3,7 +3,7 @@
 //   tsx src/onboarding.test.ts
 
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadBlacklist } from "./blacklist.mjs";
@@ -11,8 +11,13 @@ import { loadActiveWindow } from "./settings.mjs";
 import { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
 import {
   ONBOARDING_VERSION,
+  ONBOARDING_STEPS,
+  detectPiConfiguration,
+  importPiConfiguration,
   isOnboarded,
+  markOnboardingStep,
   markOnboarded,
+  pendingOnboardingSteps,
   addBlacklistEntries,
   addSessionRoot,
   disableSessionSource,
@@ -24,13 +29,50 @@ import {
 const ooHome = mkdtempSync(join(tmpdir(), "oo-onboarding-"));
 
 try {
-  // First-run marker: absent before, present-and-versioned after. The writers create ooHome.
+  // First-run marker: absent before, step-based, and complete only at the current version.
   assert.equal(isOnboarded(ooHome), false, "no marker → not onboarded");
+  markOnboardingStep(ooHome, "intro");
+  assert.equal(isOnboarded(ooHome), false, "one completed step does not finish onboarding");
+  assert.deepEqual(pendingOnboardingSteps(ooHome), ONBOARDING_STEPS.filter((step) => step !== "intro"));
   const marker = markOnboarded(ooHome, { via: "test" });
   assert.equal(marker.version, ONBOARDING_VERSION, "marker records the version");
   assert.equal(marker.via, "test", "marker carries provenance");
   assert.ok(typeof marker.at === "string", "marker records a timestamp");
   assert.equal(isOnboarded(ooHome), true, "marker present → onboarded");
+
+  // Pi migration is explicit and owned: all auth entries and custom models are copied, while
+  // resource/package settings are excluded from the model-settings import.
+  const piAgentDir = mkdtempSync(join(tmpdir(), "oo-pi-source-"));
+  writeFileSync(join(piAgentDir, "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "a" }, codex: { type: "oauth", access: "b" } }));
+  writeFileSync(join(piAgentDir, "settings.json"), JSON.stringify({
+    defaultProvider: "codex",
+    defaultModel: "gpt-test",
+    defaultThinkingLevel: "high",
+    enabledModels: ["codex/*"],
+    packages: ["ambient-package"],
+    extensions: ["ambient-extension"],
+    skills: ["ambient-skill"],
+  }));
+  writeFileSync(join(piAgentDir, "models.json"), JSON.stringify({ providers: { local: { baseUrl: "http://localhost" } } }));
+  assert.deepEqual(detectPiConfiguration(piAgentDir), { auth: true, settings: true, models: true });
+  const imported = importPiConfiguration(ooHome, piAgentDir);
+  assert.deepEqual(imported, { auth: true, settings: true, models: true, source: piAgentDir });
+  const ownedPi = join(ooHome, "pi");
+  assert.deepEqual(JSON.parse(readFileSync(join(ownedPi, "auth.json"), "utf8")), {
+    anthropic: { type: "api_key", key: "a" },
+    codex: { type: "oauth", access: "b" },
+  });
+  assert.equal(statSync(join(ownedPi, "auth.json")).mode & 0o777, 0o600, "owned credentials are private");
+  assert.deepEqual(JSON.parse(readFileSync(join(ownedPi, "settings.json"), "utf8")), {
+    defaultProvider: "codex",
+    defaultModel: "gpt-test",
+    defaultThinkingLevel: "high",
+    enabledModels: ["codex/*"],
+  });
+  assert.deepEqual(JSON.parse(readFileSync(join(ownedPi, "models.json"), "utf8")), {
+    providers: { local: { baseUrl: "http://localhost" } },
+  });
+  rmSync(piAgentDir, { recursive: true, force: true });
 
   // Blacklist writer merges + de-dupes with what the loader reads back, and strips trailing slashes.
   addBlacklistEntries(ooHome, { paths: ["/work/clientX/"], repos: ["Personal"] });

@@ -1,15 +1,35 @@
 // Unit: Owner Operator session tool allowlists.
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   evalSettingsOverrides,
   lastAssistantError,
   ownerOperatorPrompt,
+  ownerOperatorPiServices,
   ownerOperatorTools,
   ownerOperatorCustomTools,
   repoRoot,
 } from "./agent";
+
+const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
+try {
+  const ooHome = join(configRoot, "oo-home");
+  const task = join(configRoot, "task");
+  mkdirSync(join(ooHome, "pi"), { recursive: true });
+  mkdirSync(join(task, ".pi"), { recursive: true });
+  writeFileSync(join(ooHome, "pi", "auth.json"), JSON.stringify({ owned: { type: "api_key", key: "secret" } }));
+  writeFileSync(join(ooHome, "pi", "settings.json"), JSON.stringify({ defaultProvider: "owned", defaultModel: "owned-model" }));
+  writeFileSync(join(task, ".pi", "settings.json"), JSON.stringify({ defaultProvider: "ambient", defaultModel: "ambient-model" }));
+  const services = ownerOperatorPiServices(ooHome);
+  assert.deepEqual(services.authStorage.list(), ["owned"], "embedded runtime reads only owned credentials");
+  assert.equal(services.settingsManager.getDefaultProvider(), "owned");
+  assert.equal(services.settingsManager.getDefaultModel(), "owned-model");
+  assert.equal(services.settingsManager.isProjectTrusted(), false, "project Pi settings cannot alter harness policy");
+} finally {
+  rmSync(configRoot, { recursive: true, force: true });
+}
 
 assert.deepEqual(evalSettingsOverrides({}), {}, "product sessions keep their configured transport");
 assert.deepEqual(

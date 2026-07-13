@@ -10,9 +10,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  AuthStorage,
-  SettingsManager,
-  getAgentDir,
   createAgentSessionServices,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
@@ -20,7 +17,15 @@ import {
   initTheme,
 } from "@earendil-works/pi-coding-agent";
 import { getCapabilities } from "@earendil-works/pi-tui";
-import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
+import {
+  createOoSession,
+  ooProvenance,
+  ownerOperatorCustomTools,
+  ownerOperatorPiServices,
+  ownerOperatorPrompt,
+  ownerOperatorTools,
+  repoRoot,
+} from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
@@ -31,16 +36,17 @@ if (!process.stdout.isTTY) {
 }
 
 const prompt = ownerOperatorPrompt();
-const authStorage = AuthStorage.create();
+const { authStorage, paths } = ownerOperatorPiServices();
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
-// whatever cwd it hands us (always repoRoot here) so those flows keep our prompt and tools.
-const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+// whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
+const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
+  const { settingsManager } = ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
     cwd,
-    agentDir,
+    agentDir: paths.piAgentDir,
     authStorage,
-    settingsManager: SettingsManager.create(cwd), // model from .pi/settings.json
+    settingsManager,
     resourceLoaderOptions: {
       ...ownerOperatorResourceLoaderOptions(),
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
@@ -62,8 +68,8 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
 };
 
 const runtime = await createAgentSessionRuntime(createRuntime, {
-  cwd: repoRoot,
-  agentDir: getAgentDir(),
+  cwd: process.cwd(),
+  agentDir: paths.piAgentDir,
   sessionManager: createOoSession(ooProvenance("interactive")), // saved + labeled like every oo surface
 });
 

@@ -8,16 +8,26 @@
 // same overrides the scan will. Plain ESM (not TS) so the zero-install scan skill can import it
 // (re-exported via @owner-operator/core). Types: onboarding.d.mts.
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadBlacklist } from "./blacklist.mjs";
 import { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
 import { isWindowSpec } from "./settings.mjs";
+import { ensureOwnerOperatorWorkspace } from "./harness.mjs";
 
 // Bumped when the flow gains a step the owner must be re-walked through. isOnboarded() only
 // checks presence, so a bump today just records provenance; a future flow can gate on it.
-export const ONBOARDING_VERSION = 1;
+export const ONBOARDING_VERSION = 2;
+export const ONBOARDING_STEPS = Object.freeze([
+  "intro",
+  "privacy",
+  "auth",
+  "session-sources",
+  "active-window",
+  "skills",
+  "always-on",
+]);
 
 const defaultHome = () => process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 
@@ -38,18 +48,98 @@ function writeJson(path, value) {
 
 const uniq = (xs) => [...new Set(xs)];
 
-/** True once the guided setup has completed at least once (marker at <ooHome>/onboarded.json). */
+export function pendingOnboardingSteps(ooHome = defaultHome()) {
+  const marker = readJson(join(ooHome, "onboarded.json"));
+  const completed = new Set(Array.isArray(marker.completed) ? marker.completed : []);
+  return ONBOARDING_STEPS.filter((step) => !completed.has(step));
+}
+
+/** True once every current consent step has completed at the current marker version. */
 export function isOnboarded(ooHome = defaultHome()) {
   const m = readJson(join(ooHome, "onboarded.json"));
-  return typeof m.version === "number";
+  return m.version === ONBOARDING_VERSION && pendingOnboardingSteps(ooHome).length === 0;
+}
+
+export function markOnboardingStep(ooHome = defaultHome(), step, extra = {}) {
+  if (!ONBOARDING_STEPS.includes(step)) throw new Error(`unknown onboarding step "${step}"`);
+  ensureHome(ooHome);
+  const path = join(ooHome, "onboarded.json");
+  const current = readJson(path);
+  const completed = uniq([...(Array.isArray(current.completed) ? current.completed : []), step]);
+  const marker = {
+    ...current,
+    version: ONBOARDING_VERSION,
+    completed,
+    updatedAt: new Date().toISOString(),
+    ...extra,
+  };
+  writeJson(path, marker);
+  return marker;
 }
 
 /** Record that onboarding finished — version + timestamp, plus any provenance the flow passes. */
 export function markOnboarded(ooHome = defaultHome(), extra = {}) {
   ensureHome(ooHome);
-  const marker = { version: ONBOARDING_VERSION, at: new Date().toISOString(), ...extra };
+  const marker = {
+    ...readJson(join(ooHome, "onboarded.json")),
+    version: ONBOARDING_VERSION,
+    completed: [...ONBOARDING_STEPS],
+    at: new Date().toISOString(),
+    ...extra,
+  };
   writeJson(join(ooHome, "onboarded.json"), marker);
   return marker;
+}
+
+const PI_MODEL_SETTING_KEYS = [
+  "defaultProvider",
+  "defaultModel",
+  "defaultThinkingLevel",
+  "transport",
+  "enabledModels",
+  "thinkingBudgets",
+];
+
+export function detectPiConfiguration(piAgentDir) {
+  return {
+    auth: existsSync(join(piAgentDir, "auth.json")),
+    settings: existsSync(join(piAgentDir, "settings.json")),
+    models: existsSync(join(piAgentDir, "models.json")),
+  };
+}
+
+function readRequiredObject(path) {
+  const value = JSON.parse(readFileSync(path, "utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`expected JSON object in ${path}`);
+  return value;
+}
+
+export function importPiConfiguration(ooHome = defaultHome(), piAgentDir) {
+  if (!piAgentDir) throw new Error("Pi agent directory is required");
+  const paths = ensureOwnerOperatorWorkspace(ooHome);
+  const detected = detectPiConfiguration(piAgentDir);
+  if (detected.auth) {
+    const source = readRequiredObject(join(piAgentDir, "auth.json"));
+    writeJson(paths.piAuth, { ...readJson(paths.piAuth), ...source });
+    chmodSync(paths.piAuth, 0o600);
+  }
+  if (detected.settings) {
+    const source = readRequiredObject(join(piAgentDir, "settings.json"));
+    const modelSettings = Object.fromEntries(
+      PI_MODEL_SETTING_KEYS.filter((key) => Object.hasOwn(source, key)).map((key) => [key, source[key]]),
+    );
+    writeJson(paths.piSettings, { ...readJson(paths.piSettings), ...modelSettings });
+  }
+  if (detected.models) {
+    const source = readRequiredObject(join(piAgentDir, "models.json"));
+    writeJson(paths.piModels, { ...readJson(paths.piModels), ...source });
+  }
+  const imports = readJson(paths.imports);
+  writeJson(paths.imports, {
+    ...imports,
+    pi: { source: piAgentDir, importedAt: new Date().toISOString(), ...detected },
+  });
+  return { ...detected, source: piAgentDir };
 }
 
 /**

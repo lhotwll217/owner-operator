@@ -29,12 +29,35 @@ export type { GuiHost } from "./gui-hosts.mjs";
 // settings validator can't drift. See settings.mjs.
 export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
 
+export {
+  DEFAULT_GATE_POLICY,
+  DEFAULT_SKILL_POLICY,
+  DEFAULT_TOOL_POSTURE,
+  ensureOwnerOperatorWorkspace,
+  loadHarnessSettings,
+  ownerOperatorPaths,
+  saveHarnessSettings,
+} from "./harness.mjs";
+export type {
+  GateAction,
+  GatePolicy,
+  GateSurfacePolicy,
+  HarnessSettings,
+  OwnerOperatorPaths,
+  SkillPolicy,
+} from "./harness.mjs";
+
 // First-run setup's dependency-light config API: merge-safe writers, versioned marker, and
 // bounded source detection. The interactive flow is one client; scripts can call the same seam.
 export {
   ONBOARDING_VERSION,
+  ONBOARDING_STEPS,
+  detectPiConfiguration,
+  importPiConfiguration,
   isOnboarded,
+  markOnboardingStep,
   markOnboarded,
+  pendingOnboardingSteps,
   addBlacklistEntries,
   addSessionRoot,
   disableSessionSource,
@@ -42,7 +65,12 @@ export {
   detectSources,
   summarizeDetectedSources,
 } from "./onboarding.mjs";
-export type { DetectedRoot, DetectedSource } from "./onboarding.mjs";
+export type {
+  DetectedRoot,
+  DetectedSource,
+  OnboardingStep,
+  PiConfigurationDetection,
+} from "./onboarding.mjs";
 
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.
 export * from "./status";

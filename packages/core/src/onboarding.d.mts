@@ -6,6 +6,8 @@ import type { SessionSource } from "./session-sources.d.mts";
 
 /** Bumped when the flow gains a step the owner must be re-walked through. */
 export const ONBOARDING_VERSION: number;
+export type OnboardingStep = "intro" | "privacy" | "auth" | "session-sources" | "active-window" | "skills" | "always-on";
+export const ONBOARDING_STEPS: readonly OnboardingStep[];
 
 /** One configured (source, root) probed for existing sessions. */
 export interface DetectedRoot {
@@ -27,9 +29,26 @@ export interface DetectedSource {
 
 /** True once the guided setup has completed at least once (<ooHome>/onboarded.json present). */
 export function isOnboarded(ooHome?: string): boolean;
+export function pendingOnboardingSteps(ooHome?: string): OnboardingStep[];
+export function markOnboardingStep(
+  ooHome: string | undefined,
+  step: OnboardingStep,
+  extra?: Record<string, unknown>,
+): Record<string, unknown>;
 
 /** Record that onboarding finished — version + timestamp, plus any provenance passed in. */
 export function markOnboarded(ooHome?: string, extra?: Record<string, unknown>): Record<string, unknown>;
+
+export interface PiConfigurationDetection {
+  auth: boolean;
+  settings: boolean;
+  models: boolean;
+}
+export function detectPiConfiguration(piAgentDir: string): PiConfigurationDetection;
+export function importPiConfiguration(
+  ooHome: string | undefined,
+  piAgentDir: string,
+): PiConfigurationDetection & { source: string };
 
 /** Add off-limits paths/repos to <ooHome>/blacklist.json, merged and de-duped. Returns the result. */
 export function addBlacklistEntries(ooHome?: string, entries?: { paths?: string[]; repos?: string[] }): Blacklist;
