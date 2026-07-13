@@ -28,9 +28,8 @@ node eval/compare.mjs <global_results_A.json> <global_results_B.json> [--gate]
 Comparison is downstream: point `compare.mjs` at any two published runs (harness vs its
 last global entry, or harness vs the naive-session-grep control). Every stats entry
 records `subject`, `repeat`, and `total_tests`, so smoke, full, and control runs stay
-differentiated. Evals normally run in flight, before the commits exist — an entry pointing
-at a dirty worktree is the expected initial state, and backfilling it once the durable
-commit lands is part of posting the PR:
+differentiated. Evals often run in flight, before the commits exist; an entry may point at
+a dirty worktree. Backfill it once the durable commit lands:
 
 ```sh
 node eval/loop.mjs --backfill-git <eval_folder>   # uses current HEAD/branch; --commit/--branch override
