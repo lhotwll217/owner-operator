@@ -290,10 +290,15 @@ export class ThreadDb {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      // Monotonic watermark: the thread may have flapped out of needs-you or gained
-      // messages while the model ran — the belief still lands; only a belief already
-      // enriched through a newer message wins over this one.
-      if (!current || (current.enrichedThroughMessageAt ?? "") >= throughMessageAt) {
+      // The thread may have flapped out of needs-you while the model ran — the sampled
+      // message is unchanged, so the belief still lands (state is a lifecycle flag, not a
+      // new message). But once a newer message has arrived the sample is stale: reject it
+      // and let the next poll re-enrich. The watermark rejects an already-enriched message
+      // and any out-of-order duplicate.
+      if (
+        !current || current.lastMessageAt !== throughMessageAt ||
+        (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
+      ) {
         this.db.exec("COMMIT");
         return null;
       }

@@ -136,20 +136,36 @@ try {
   state.recordObservation(row("2026-07-09T10:02:00.000Z"));
   assert.equal(state.listSessionState()[0].state, "needs-you", "new transcript activity reopens done");
 
+  // State-only flap: the thread leaves needs-you while the model runs but the sampled
+  // message is unchanged — the enrichment still lands.
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap" });
-  state.recordObservation({ ...row("2026-07-09T10:03:05.000Z"), id: "thread-flap", working: true });
+  state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap", working: true });
   assert.equal(
     state.appendEnrichment("thread-flap", { nextSteps: "Ship the fix" }, "2026-07-09T10:03:00.000Z"),
     true,
-    "a completed enrichment lands even after the needs-you window closes",
+    "a completed enrichment lands after a state-only needs-you→working flap",
   );
   const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
   assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
   assert.equal(flapped?.nextSteps, "Ship the fix");
   assert.equal(
-    state.appendEnrichment("thread-flap", { nextSteps: "Stale action" }, "2026-07-09T10:02:59.000Z"),
+    state.appendEnrichment("thread-flap", { nextSteps: "Duplicate" }, "2026-07-09T10:03:00.000Z"),
     false,
-    "an enrichment older than the watermark is still rejected",
+    "re-enriching an already-enriched message is rejected by the watermark",
+  );
+
+  // Message advanced while the model ran: the sample is stale and must be rejected, not
+  // written over the current handoff. The thread stays a candidate for the next poll.
+  state.recordObservation({ ...row("2026-07-09T10:04:00.000Z"), id: "thread-stale" });
+  state.recordObservation({ ...row("2026-07-09T10:04:30.000Z"), id: "thread-stale" });
+  assert.equal(
+    state.appendEnrichment("thread-stale", { nextSteps: "Stale action" }, "2026-07-09T10:04:00.000Z"),
+    false,
+    "an enrichment sampled before a newer message is rejected as stale",
+  );
+  assert.ok(
+    state.listEnrichmentCandidates().some((item) => item.id === "thread-stale"),
+    "the rejected thread stays queued to re-enrich at the newer message",
   );
 
   const needsYouSchedule: ScheduleDefinition = {
