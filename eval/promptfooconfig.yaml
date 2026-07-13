@@ -18,8 +18,8 @@
 # Run:   npx promptfoo eval -c eval/promptfooconfig.yaml
 # Then:  node eval/compare.mjs                                  paired A/B breakdown
 #
-# Both arms run through `oo` (codex backend); only the grader uses `claude` (any capable
-# judge model works — it is not an arm). No API keys needed.
+# Arms and grader all run on Codex subscription auth; the grader is a cheap model at
+# minimal reasoning (it is not an arm — override via EVAL_GRADER_MODEL). No API keys needed.
 
 description: Owner Operator vs naive session-search baseline — same model, correctness and spend
 
@@ -36,7 +36,7 @@ providers:
 
 defaultTest:
   options:
-    provider: file://providers/claude-grader.mjs
+    provider: file://providers/codex-grader.mjs
   assert:
     # Correctness is graded per case (llm-rubric in cases.yaml).
     # Soundness gate (#31 criterion 3): evidence answers must be read from a transcript,

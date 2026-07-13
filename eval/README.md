@@ -30,9 +30,10 @@ npm run eval:compare   # paired report + correctness gate
 Iteration policy lives in [`AUTORESEARCH.md`](AUTORESEARCH.md); campaign-specific claims
 live under [`hypotheses/`](hypotheses/).
 
-Needs: `oo`'s configured model backend for both arms (copy `.pi/settings.example.json` to the
-ignored `.pi/settings.json` only to customize it), and Claude Code auth for the grader only
-(any capable judge model works — it is not an arm). No API keys.
+Needs: `oo`'s configured model backend — arms and grader all run on it (copy
+`.pi/settings.example.json` to the ignored `.pi/settings.json` only to customize it). The
+grader is a cheap pinned model at minimal reasoning (`openai-codex/gpt-5.4`; override with
+`EVAL_GRADER_MODEL=provider/model` — it is not an arm). No API keys.
 
 ## PR comparison contract
 
@@ -66,7 +67,7 @@ an LLM run.
 | `providers/oo-agent.mjs` | subject arm: OO's shipped read-only composition |
 | `providers/naive-agent.mjs` | controlled ablation: same runner/model/search capability without OO's state/index composition |
 | `fixtures/naive-baseline-prompt.md` | the control arm's generic session-search prompt |
-| `providers/claude-grader.mjs` | pinned rubric grader (strict, verbosity-bias guarded; judge only, not an arm) |
+| `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not an arm) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; both arms attempt all of them |
 | `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator arm, opt-in per case) |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |
