@@ -110,6 +110,7 @@ const manualUi = {
   async input(): Promise<string> { return manualRoot; },
 };
 const manual = await reviewSessionCatalog({ mode: "tui", ui: manualUi as any }, catalog, {
+  pathExists: () => true,
   searchMore: async () => buildSessionCatalogReview(
     [{ source: "codex", root: deepRoot, tier: 3, exists: true, shape: true }],
     [],
