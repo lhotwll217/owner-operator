@@ -22,11 +22,13 @@
 
 ## Durable docs and comments
 
-Reread cold as a stranger before saving. Every line must pass:
+Reread cold as a stranger before saving. Checks:
 
-- States what to do; doesn't catalog what not to do.
-- Points at self-documenting code; never restates it.
-- No decision residue from the thread that produced it.
+- Prefer stating what to do over cataloging what not to do.
+- Point at self-documenting code instead of restating it.
+- No decision residue from the thread that produced it. Rationale docs
+  ([docs/inspiration.md](docs/inspiration.md), `eval/hypotheses/`) record accepted/rejected
+  borrows — that content is their job.
 - No context a fresh reader doesn't need.
-- Most literal wording possible; no jargon, fluff, or coined nouns.
-- Prompts/skills: state the goal; don't over-constrain the model.
+- Most literal wording; no jargon, fluff, or coined nouns.
+- Prompts/skills: state the goal; leave the model room to work.
