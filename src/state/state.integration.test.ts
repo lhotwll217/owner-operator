@@ -136,6 +136,22 @@ try {
   state.recordObservation(row("2026-07-09T10:02:00.000Z"));
   assert.equal(state.listSessionState()[0].state, "needs-you", "new transcript activity reopens done");
 
+  state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap" });
+  state.recordObservation({ ...row("2026-07-09T10:03:05.000Z"), id: "thread-flap", working: true });
+  assert.equal(
+    state.appendEnrichment("thread-flap", { nextSteps: "Ship the fix" }, "2026-07-09T10:03:00.000Z"),
+    true,
+    "a completed enrichment lands even after the needs-you window closes",
+  );
+  const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
+  assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
+  assert.equal(flapped?.nextSteps, "Ship the fix");
+  assert.equal(
+    state.appendEnrichment("thread-flap", { nextSteps: "Stale action" }, "2026-07-09T10:02:59.000Z"),
+    false,
+    "an enrichment older than the watermark is still rejected",
+  );
+
   const needsYouSchedule: ScheduleDefinition = {
     id: "needs-you-job",
     name: "Needs you job",

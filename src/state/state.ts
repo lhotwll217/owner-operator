@@ -106,7 +106,7 @@ export class State {
   }
 
   appendEnrichment(threadId: string, details: ThreadDetails, throughMessageAt: string): boolean {
-    const applied = this.db.appendModelDetailsIfCurrent(threadId, details, throughMessageAt) !== null;
+    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt) !== null;
     if (!applied) return false;
     const current = this.db.resolutionRow(threadId);
     if (current) {

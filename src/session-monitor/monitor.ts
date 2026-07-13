@@ -23,6 +23,7 @@ export interface SessionMonitorOptions {
 export enum SessionMonitorLogEvent {
   PollFailed = "poll-failed",
   EnrichmentFailed = "enrichment-failed",
+  EnrichmentDiscarded = "enrichment-discarded",
 }
 
 export interface SessionMonitorLogRecord {
@@ -156,7 +157,12 @@ export class SessionMonitor {
         const candidate = this.state.listEnrichmentCandidates()[0];
         if (!candidate?.lastMessageAt || !this.options.enrich) return;
         const details = await this.options.enrich(candidate);
-        this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt);
+        if (!this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt)) {
+          this.logger({
+            event: SessionMonitorLogEvent.EnrichmentDiscarded,
+            error: `newer enrichment already landed for ${candidate.id}`,
+          });
+        }
       }
     } finally {
       this.enriching = false;

@@ -282,7 +282,7 @@ export class ThreadDb {
     }
   }
 
-  appendModelDetailsIfCurrent(
+  appendModelDetailsIfFresh(
     threadId: string,
     details: ThreadDetails,
     throughMessageAt: string,
@@ -290,7 +290,10 @@ export class ThreadDb {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      if (current?.state !== "needs-you" || current.lastMessageAt !== throughMessageAt) {
+      // Monotonic watermark: the thread may have flapped out of needs-you or gained
+      // messages while the model ran — the belief still lands; only a belief already
+      // enriched through a newer message wins over this one.
+      if (!current || (current.enrichedThroughMessageAt ?? "") >= throughMessageAt) {
         this.db.exec("COMMIT");
         return null;
       }
