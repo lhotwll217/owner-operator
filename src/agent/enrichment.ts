@@ -6,9 +6,10 @@ import { repoRoot } from "../shared/repo-root";
 // Enrichment is a one-shot extraction, not a conversation: prefer a fast model over
 // the interactive default, cap reasoning, and never let a call outlive the poll cadence.
 const PREFERRED_MODELS: ReadonlyArray<readonly [provider: string, id: string]> = [
+  ["openai-codex", "gpt-5.4-mini"],
   ["openai-codex", "gpt-5.6-sol"],
 ];
-const REASONING = "medium" as const;
+const REASONING = "minimal" as const;
 const MAX_OUTPUT_TOKENS = 8_192;
 const TIMEOUT_MS = 45_000;
 
