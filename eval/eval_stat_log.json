@@ -1,5 +1,67 @@
 [
   {
+    "timestamp": "2026-07-13T10:01:18.133Z",
+    "commit": "48e577b",
+    "branch": "fix/enrichment-discard-and-model",
+    "git_dirty": true,
+    "git_diff_hash": "af1ef40951002dc33a1d3dd4ccf0f3f212551d98a39c82df7ee9bbbc2f1f9d5d",
+    "eval_folder": "2026-07-13T09-42-57-oo-only",
+    "label": "pr53-enrichment-smoke",
+    "model": "openai-codex/gpt-5.6-sol",
+    "grader_model": "claude-fable-5",
+    "reasoning_level": null,
+    "scope": "full",
+    "arms": "oo",
+    "repeat": 1,
+    "summary": {
+      "paired_cases": 14,
+      "total_tests_per_arm": 14,
+      "owner_operator": {
+        "total_pass": 14,
+        "total_fail": 0,
+        "total_error": 0,
+        "global_pass_rate": 100
+      },
+      "baseline": null,
+      "comparison_gate_pass": null,
+      "trajectory_pass": true,
+      "fewer_call_wins": null
+    },
+    "tool_calls": {
+      "owner_operator": {
+        "mean": 3.07,
+        "median": 3,
+        "min": 1,
+        "max": 7,
+        "stdev": 1.54,
+        "total_requests": 14
+      },
+      "baseline": null
+    },
+    "tokens": {
+      "owner_operator": {
+        "mean": 95944.5,
+        "median": 96267,
+        "min": 45844,
+        "max": 176286,
+        "stdev": 34072.14,
+        "total_requests": 14
+      },
+      "baseline": null
+    },
+    "cost_usd": {
+      "owner_operator": {
+        "mean": 0.089965,
+        "median": 0.08195,
+        "min": 0.033376,
+        "max": 0.168733,
+        "stdev": 0.037126,
+        "total_requests": 14
+      },
+      "baseline": null
+    }
+  },
+  {
     "timestamp": "2026-07-11T00:17:20.877Z",
     "commit": "3a47ef4",
     "branch": "main",

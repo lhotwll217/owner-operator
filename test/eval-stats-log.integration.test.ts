@@ -125,10 +125,12 @@ try {
     "git_dirty",
     "git_diff_hash",
     "eval_folder",
+    "label",
     "model",
     "grader_model",
     "reasoning_level",
     "scope",
+    "arms",
     "repeat",
     "summary",
     "tool_calls",
@@ -137,8 +139,26 @@ try {
   ]);
   assert.equal(entry.git_dirty, true);
   assert.equal(entry.git_diff_hash, "diff-a");
+  assert.equal(entry.arms, "oo+baseline", "legacy paired records stay differentiated");
+  assert.equal(entry.label, "repeat-aware");
   assert.ok(!("cases" in entry), "the committed stats log stays compact");
   assert.ok(!("notes" in entry), "autoresearch narrative stays in history");
+
+  const ooOnlyResults = buildGlobalResults({
+    record: { ...record, runId: "run-oo-only", arms: "oo", comparePass: null },
+    cases: cases.map((item) => ({ ...item, baseline: null })),
+    observations: observations.filter((item) => item.arm === "oo"),
+    manifest,
+  });
+  assert.equal(ooOnlyResults.metadata.arms, "oo");
+  assert.equal(ooOnlyResults.summary.baseline, null, "an oo-only run records no baseline arm");
+  assert.equal(ooOnlyResults.summary.total_tests_per_arm, 6);
+  assert.equal(ooOnlyResults.tool_calls.baseline, null);
+  assert.equal(ooOnlyResults.cases[0].baseline, null);
+  assert.equal(ooOnlyResults.tool_calls.owner_operator.mean, 2.5, "oo distributions are unchanged by arm scope");
+  const ooOnlyEntry = buildStatsEntry(ooOnlyResults);
+  assert.equal(ooOnlyEntry.arms, "oo");
+  assert.equal(ooOnlyEntry.summary.comparison_gate_pass, null, "no cross-arm gate without a baseline arm");
 
   assert.throws(
     () => buildGlobalResults({ record, cases, observations, manifest: { gitHead: manifest.gitHead } }),

@@ -23,8 +23,19 @@ A cross-model version was retired because it changed the harness and model at on
 
 ```sh
 npm run eval:loop -- --help  # causal one-case → probe → core → holdout loop
-npm run eval -- --label "<campaign>" --notes "<claim>" --repeat 1  # ledgered full suite
-npm run eval:compare   # paired report + correctness gate
+npm run eval -- --label "<campaign>" --notes "<claim>"              # full suite, repeat 3
+npm run eval -- --label "<campaign>" --notes "<claim>" --repeat 1   # smoke: one pass
+npm run eval -- ... --naive-session-grep-compare                    # add the grep-baseline arm (#31-style A/B)
+npm run eval:compare   # paired report + correctness gate (baseline runs only)
+```
+
+The default run measures the harness alone (owner-operator arm); the settled #31 baseline
+comparison is opt-in. Every stats entry records `arms` and `repeat`, so smoke, full, and
+A/B runs stay differentiated in the log. Runs happen on dirty worktrees before the PR
+exists — once the durable commit does, re-point the entry at it:
+
+```sh
+node eval/loop.mjs --backfill-git <eval_folder>   # uses current HEAD/branch; --commit/--branch override
 ```
 
 Iteration policy lives in [`AUTORESEARCH.md`](AUTORESEARCH.md); campaign-specific claims

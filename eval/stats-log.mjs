@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -5,6 +6,8 @@ export function buildGlobalResults({ record, cases, observations = [], manifest 
   const gitHead = requiredGitCommit(manifest?.gitHead);
   const branch = requiredGitBranch(manifest?.gitBranch);
   const values = observations.length ? observations : observationsFromCaseMeans(cases);
+  const arms = record.arms ?? "oo+baseline";
+  const hasBaseline = arms !== "oo";
 
   return {
     eval_folder: record.runId,
@@ -13,6 +16,7 @@ export function buildGlobalResults({ record, cases, observations = [], manifest 
       label: record.label,
       notes: record.notes,
       scope: record.scope,
+      arms,
       model_under_test: record.model,
       grader_model: record.graderModel,
       reasoning_level: manifest?.reasoningLevel ?? null,
@@ -33,18 +37,18 @@ export function buildGlobalResults({ record, cases, observations = [], manifest 
       paired_cases: cases.length,
       total_tests_per_arm: totalTests(cases, "oo"),
       owner_operator: summarizeArm(cases, "oo"),
-      baseline: summarizeArm(cases, "baseline"),
+      baseline: hasBaseline ? summarizeArm(cases, "baseline") : null,
       comparison_gate_pass: record.comparePass,
       trajectory_pass: record.metrics?.trajectoryPass ?? cases.every((item) => item.oo.trajectoryPass),
       fewer_call_wins: record.metrics?.fewerCallWins ?? null,
     },
-    tool_calls: summarizeMetric(values, "toolCalls", 2),
-    tokens: summarizeMetric(values, "tokens", 2),
-    cost_usd: summarizeMetric(values, "cost", 6),
+    tool_calls: summarizeMetric(values, "toolCalls", 2, hasBaseline),
+    tokens: summarizeMetric(values, "tokens", 2, hasBaseline),
+    cost_usd: summarizeMetric(values, "cost", 6, hasBaseline),
     cases: cases.map((item) => ({
       id: item.caseId,
       owner_operator: summarizeCaseArm(item.oo),
-      baseline: summarizeCaseArm(item.baseline),
+      baseline: item.baseline ? summarizeCaseArm(item.baseline) : null,
     })),
   };
 }
@@ -65,16 +69,40 @@ export function buildStatsEntry(globalResults) {
     git_dirty: metadata.git_dirty,
     git_diff_hash: metadata.git_diff_hash,
     eval_folder: globalResults.eval_folder,
+    label: metadata.label ?? null,
     model: metadata.model_under_test,
     grader_model: metadata.grader_model,
     reasoning_level: metadata.reasoning_level,
     scope: metadata.scope,
+    arms: metadata.arms ?? "oo+baseline",
     repeat: metadata.repeat,
     summary: globalResults.summary,
     tool_calls: globalResults.tool_calls,
     tokens: globalResults.tokens,
     cost_usd: globalResults.cost_usd,
   };
+}
+
+/**
+ * Runs happen on dirty mid-iteration worktrees; the commits and PR come after. Backfill
+ * re-points a published entry at the durable state that carries the run's work, keeping
+ * the run-time identity as run_branch/run_commit provenance.
+ */
+export function backfillGitIdentity(file, evalFolder, { commit, branch, cwd } = {}) {
+  if (!fs.existsSync(file)) throw new Error(`${file} does not exist`);
+  const entries = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!Array.isArray(entries)) throw new Error(`${file} must contain a JSON array`);
+  const entry = entries.find((item) => item.eval_folder === evalFolder);
+  if (!entry) throw new Error(`no stats entry for eval folder: ${evalFolder}`);
+  const git = (command) => execSync(command, { cwd: cwd ?? process.cwd(), encoding: "utf8" }).trim();
+  const nextCommit = requiredShortCommit(commit ?? git("git rev-parse --short HEAD"));
+  const nextBranch = requiredGitBranch(branch ?? git("git rev-parse --abbrev-ref HEAD"));
+  entry.run_commit ??= entry.commit;
+  entry.run_branch ??= entry.branch;
+  entry.commit = nextCommit.slice(0, 7);
+  entry.branch = nextBranch;
+  fs.writeFileSync(file, `${JSON.stringify(entries, null, 2)}\n`);
+  return entry;
 }
 
 export function upsertStatsLog(file, entry) {
@@ -98,16 +126,18 @@ export function upsertStatsLog(file, entry) {
   fs.writeFileSync(file, `${JSON.stringify(entries, null, 2)}\n`);
 }
 
-function summarizeMetric(observations, field, places) {
+function summarizeMetric(observations, field, places, hasBaseline = true) {
   return {
     owner_operator: distribution(
       observations.filter((item) => normalizeArm(item.arm) === "oo").map((item) => item[field]),
       places,
     ),
-    baseline: distribution(
-      observations.filter((item) => normalizeArm(item.arm) === "baseline").map((item) => item[field]),
-      places,
-    ),
+    baseline: hasBaseline
+      ? distribution(
+        observations.filter((item) => normalizeArm(item.arm) === "baseline").map((item) => item[field]),
+        places,
+      )
+      : null,
   };
 }
 
@@ -139,6 +169,7 @@ function observationsFromCaseMeans(cases) {
   for (const item of cases) {
     for (const arm of ["oo", "baseline"]) {
       const value = item[arm];
+      if (!value) continue;
       for (let index = 0; index < value.n; index++) {
         output.push({
           arm,

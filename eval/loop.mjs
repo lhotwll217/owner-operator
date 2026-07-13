@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildGlobalResults, buildStatsEntry, upsertStatsLog } from "./stats-log.mjs";
+import { backfillGitIdentity, buildGlobalResults, buildStatsEntry, upsertStatsLog } from "./stats-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -33,7 +33,16 @@ const CORE_IDS = [
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
-  console.log("Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full] [--repeat N] [--dry]");
+  console.log(
+    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full]\n" +
+    "         [--repeat N (default 3; 1 = smoke)] [--naive-session-grep-compare] [--dry]\n" +
+    "       node eval/loop.mjs --backfill-git EVAL_FOLDER [--commit SHA] [--branch NAME]\n" +
+    "Default runs the owner-operator arm only; --naive-session-grep-compare adds the\n" +
+    "grep-baseline arm for a paired A/B (issue #31 style). --dry ledgers an existing\n" +
+    "eval/results/latest.json without re-running. --backfill-git re-points a published\n" +
+    "stats entry at the commit/branch that carries the run's work (runs happen on dirty\n" +
+    "worktrees; the durable commit and PR usually come after).",
+  );
   process.exit(0);
 }
 const option = (name, fallback = null) => {
@@ -41,10 +50,21 @@ const option = (name, fallback = null) => {
   return index < 0 ? fallback : args[index + 1];
 };
 const has = (name) => args.includes(`--${name}`);
+if (has("backfill-git")) {
+  const folder = option("backfill-git");
+  if (!folder) fail("--backfill-git requires an eval folder id");
+  const entry = backfillGitIdentity(statsLogFile, folder, {
+    commit: option("commit"),
+    branch: option("branch"),
+    cwd: repoRoot,
+  });
+  console.log(`[loop] backfilled ${folder} -> ${entry.branch}@${entry.commit} (run-time identity kept as ${entry.run_branch}@${entry.run_commit})`);
+  process.exit(0);
+}
 const label = option("label");
 const notes = option("notes");
 const custom = option("cases");
-const repeat = Number(option("repeat", "1"));
+const repeat = Number(option("repeat", "3"));
 const dry = has("dry");
 if (!label) fail("--label is required: name the mechanism being tested");
 if (!notes) fail("--notes is required: state the hypothesis and expected trajectory effect");
@@ -61,6 +81,7 @@ const ids = custom ? custom.split(",").filter(Boolean) : has("probe") ? PROBE_ID
 for (const id of ids) if (!knownIds.has(id)) fail(`unknown case id: ${id}`);
 const scope = custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
 const pattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
+let withBaseline = has("naive-session-grep-compare");
 const createdAt = new Date().toISOString();
 const requestedRunId = createdAt.replace(/[:.]/g, "-");
 
@@ -71,10 +92,11 @@ if (!dry) {
     "-c", "eval/promptfooconfig.yaml",
     "--no-cache",
     "--max-concurrency", "1",
+    ...(withBaseline ? [] : ["--filter-providers", "owner-operator"]),
     ...(pattern ? ["--filter-pattern", pattern] : []),
     ...(repeat > 1 ? ["--repeat", String(repeat)] : []),
   ];
-  console.log(`[loop] ${label} scope=${scope}${ids.length ? ` cases=${ids.join(",")}` : ""} repeat=${repeat}`);
+  console.log(`[loop] ${label} scope=${scope} arms=${withBaseline ? "oo+baseline" : "oo"}${ids.length ? ` cases=${ids.join(",")}` : ""} repeat=${repeat}`);
   const run = spawnSync("npx", command, {
     cwd: repoRoot,
     stdio: "inherit",
@@ -92,21 +114,27 @@ const runIds = unique(records.map((record) => record.runId).filter(Boolean));
 if (runIds.length !== 1) fail(`latest results are not one run: ${runIds.join(", ") || "no run id"}`);
 const runId = runIds[0];
 if (!dry && runId !== requestedRunId) fail(`result run id ${runId} does not match requested ${requestedRunId}`);
+if (dry) withBaseline = records.some((record) => record.arm === "baseline");
 
-const pairs = pairCases(records);
-const metrics = summarize(pairs);
-const compare = spawnSync(process.execPath, ["eval/compare.mjs", resultsFile, "--gate"], {
-  cwd: repoRoot,
-  encoding: "utf8",
-});
-process.stdout.write(compare.stdout);
-process.stderr.write(compare.stderr);
+const pairs = collectCases(records, withBaseline);
+const metrics = summarize(pairs, withBaseline);
+const compare = withBaseline
+  ? spawnSync(process.execPath, ["eval/compare.mjs", resultsFile, "--gate"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+  : null;
+if (compare) {
+  process.stdout.write(compare.stdout);
+  process.stderr.write(compare.stderr);
+}
 
 const manifest = readManifest(records);
 const runValidity = validateStatsRun(records, pairs, {
   expectedCases: scope === "full" ? knownIds.size : ids.length,
   manifest,
   repeat,
+  withBaseline,
 });
 const detail = path.join(iterationsDir, `${runId}.json`);
 const record = {
@@ -115,6 +143,7 @@ const record = {
   label,
   notes,
   scope,
+  arms: withBaseline ? "oo+baseline" : "oo",
   pattern,
   repeat,
   manifestHash: manifest?.manifestHash ?? null,
@@ -123,7 +152,7 @@ const record = {
   logs: records[0]?.traceFile ? path.dirname(records[0].traceFile) : null,
   detail: path.relative(repoRoot, detail),
   promptfooPass: evalStatus === 0,
-  comparePass: compare.status === 0,
+  comparePass: compare ? compare.status === 0 : null,
   metrics,
 };
 fs.writeFileSync(detail, JSON.stringify({ ...record, cases: pairs }, null, 2) + "\n");
@@ -136,42 +165,58 @@ if (scope === "full" && runValidity.valid) {
   upsertStatsLog(statsLogFile, buildStatsEntry(globalResults));
   statsStatus = `${path.relative(repoRoot, statsLogFile)} (${path.relative(repoRoot, globalResultsFile)})`;
 } else if (scope === "full") {
-  statsStatus = `skipped-invalid:${runValidity.reasons.join(",")}`;
+  // A full run that cannot publish is a broken measurement, not a quiet skip.
+  statsStatus = `INVALID-NOT-PUBLISHED:${runValidity.reasons.join(",")}`;
+  process.exitCode = 2;
 }
 
-console.log("\n[loop] paired trajectory metrics");
+console.log(`\n[loop] ${withBaseline ? "paired" : "owner-operator"} trajectory metrics`);
 console.table(pairs.map((pair) => ({
   case: pair.caseId,
   repeats: pair.oo.n,
   "correct(oo)": pct(pair.oo.correct),
-  "correct(base)": pct(pair.baseline.correct),
+  ...(withBaseline ? { "correct(base)": pct(pair.baseline.correct) } : {}),
   "calls(oo)": round(pair.oo.toolCalls),
-  "calls(base)": round(pair.baseline.toolCalls),
+  ...(withBaseline ? { "calls(base)": round(pair.baseline.toolCalls) } : {}),
   "tokens(oo)": Math.round(pair.oo.tokens),
-  "tokens(base)": Math.round(pair.baseline.tokens),
+  ...(withBaseline ? { "tokens(base)": Math.round(pair.baseline.tokens) } : {}),
 })));
-console.log(
-  `[loop] acc=${pct(metrics.accuracy.oo)} vs ${pct(metrics.accuracy.baseline)} ` +
-  `callRatio=${ratio(metrics.toolCalls.oo, metrics.toolCalls.baseline)} ` +
-  `tokenRatio=${ratio(metrics.tokens.oo, metrics.tokens.baseline)} ` +
-  `costRatio=${ratio(metrics.cost.oo, metrics.cost.baseline)} ` +
-  `fewer-call wins=${metrics.fewerCallWins}/${metrics.paired}`,
-);
+if (withBaseline) {
+  console.log(
+    `[loop] acc=${pct(metrics.accuracy.oo)} vs ${pct(metrics.accuracy.baseline)} ` +
+    `callRatio=${ratio(metrics.toolCalls.oo, metrics.toolCalls.baseline)} ` +
+    `tokenRatio=${ratio(metrics.tokens.oo, metrics.tokens.baseline)} ` +
+    `costRatio=${ratio(metrics.cost.oo, metrics.cost.baseline)} ` +
+    `fewer-call wins=${metrics.fewerCallWins}/${metrics.paired}`,
+  );
+} else {
+  console.log(
+    `[loop] acc=${pct(metrics.accuracy.oo)} ` +
+    `calls=${round(metrics.toolCalls.oo / pairs.length)}/case ` +
+    `tokens=${Math.round(metrics.tokens.oo / pairs.length)}/case ` +
+    `cost=$${(metrics.cost.oo / pairs.length).toFixed(4)}/case over ${pairs.length} cases x ${repeat} repeat(s)`,
+  );
+}
 
+const previousArms = (item) => item.arms ?? "oo+baseline";
 const previous = readHistory().filter((item) =>
-  item.runId !== runId && item.scope === scope && item.pattern === pattern && item.repeat === repeat
+  item.runId !== runId && item.scope === scope && item.pattern === pattern &&
+  item.repeat === repeat && previousArms(item) === record.arms
 ).at(-1);
 if (previous) {
   console.log(
-    `[loop] vs ${previous.label}: callRatio ${ratio(previous.metrics.toolCalls.oo, previous.metrics.toolCalls.baseline)} -> ${ratio(metrics.toolCalls.oo, metrics.toolCalls.baseline)}, ` +
-    `acc(oo) ${pct(previous.metrics.accuracy.oo)} -> ${pct(metrics.accuracy.oo)}`,
+    withBaseline
+      ? `[loop] vs ${previous.label}: callRatio ${ratio(previous.metrics.toolCalls.oo, previous.metrics.toolCalls.baseline)} -> ${ratio(metrics.toolCalls.oo, metrics.toolCalls.baseline)}, ` +
+        `acc(oo) ${pct(previous.metrics.accuracy.oo)} -> ${pct(metrics.accuracy.oo)}`
+      : `[loop] vs ${previous.label}: acc(oo) ${pct(previous.metrics.accuracy.oo)} -> ${pct(metrics.accuracy.oo)}, ` +
+        `calls(oo) ${round(previous.metrics.toolCalls.oo / previous.metrics.paired)} -> ${round(metrics.toolCalls.oo / metrics.paired)}/case`,
   );
 }
 console.log(
   `[loop] history=${path.relative(repoRoot, historyFile)} stats=${statsStatus} ` +
   `detail=${path.relative(repoRoot, detail)}`,
 );
-if (evalStatus !== 0 || compare.status !== 0) process.exitCode = 2;
+if (evalStatus !== 0 || (compare && compare.status !== 0)) process.exitCode = 2;
 
 function toRecord(result) {
   const label = result.provider?.label ?? result.provider?.id ?? "unknown";
@@ -196,7 +241,7 @@ function toRecord(result) {
   };
 }
 
-function pairCases(records) {
+function collectCases(records, withBaseline) {
   const byCase = new Map();
   for (const record of records) {
     if (record.arm === "unknown") continue;
@@ -206,8 +251,13 @@ function pairCases(records) {
   }
   const output = [];
   for (const [caseId, arms] of byCase) {
-    if (!arms.oo.length || arms.oo.length !== arms.baseline.length) continue;
-    output.push({ caseId, oo: aggregate(arms.oo), baseline: aggregate(arms.baseline) });
+    if (!arms.oo.length) continue;
+    if (withBaseline && arms.oo.length !== arms.baseline.length) continue;
+    output.push({
+      caseId,
+      oo: aggregate(arms.oo),
+      baseline: withBaseline ? aggregate(arms.baseline) : null,
+    });
   }
   return output;
 }
@@ -224,41 +274,44 @@ function aggregate(items) {
   };
 }
 
-function summarize(pairs) {
+function summarize(pairs, withBaseline) {
   return {
     paired: pairs.length,
     accuracy: {
       oo: mean(pairs.map((pair) => pair.oo.correct)),
-      baseline: mean(pairs.map((pair) => pair.baseline.correct)),
+      baseline: withBaseline ? mean(pairs.map((pair) => pair.baseline.correct)) : null,
     },
     toolCalls: {
       oo: sum(pairs.map((pair) => pair.oo.toolCalls)),
-      baseline: sum(pairs.map((pair) => pair.baseline.toolCalls)),
+      baseline: withBaseline ? sum(pairs.map((pair) => pair.baseline.toolCalls)) : null,
     },
     tokens: {
       oo: sum(pairs.map((pair) => pair.oo.tokens)),
-      baseline: sum(pairs.map((pair) => pair.baseline.tokens)),
+      baseline: withBaseline ? sum(pairs.map((pair) => pair.baseline.tokens)) : null,
     },
     cost: {
       oo: sum(pairs.map((pair) => pair.oo.cost)),
-      baseline: sum(pairs.map((pair) => pair.baseline.cost)),
+      baseline: withBaseline ? sum(pairs.map((pair) => pair.baseline.cost)) : null,
     },
-    fewerCallWins: pairs.filter((pair) => pair.oo.toolCalls < pair.baseline.toolCalls).length,
+    fewerCallWins: withBaseline
+      ? pairs.filter((pair) => pair.oo.toolCalls < pair.baseline.toolCalls).length
+      : null,
     trajectoryPass: pairs.every((pair) => pair.oo.trajectoryPass),
   };
 }
 
-function validateStatsRun(records, pairs, { expectedCases, manifest, repeat }) {
+function validateStatsRun(records, pairs, { expectedCases, manifest, repeat, withBaseline }) {
+  const armCount = withBaseline ? 2 : 1;
   const reasons = [];
   if (!manifest) reasons.push("missing-manifest");
   if (!manifest?.gitHead) reasons.push("missing-git-commit");
   if (!manifest?.gitBranch || manifest.gitBranch === "HEAD") reasons.push("missing-git-branch");
   if (pairs.length !== expectedCases) reasons.push(`paired-cases-${pairs.length}-of-${expectedCases}`);
-  if (records.length !== expectedCases * repeat * 2) reasons.push(`records-${records.length}-of-${expectedCases * repeat * 2}`);
+  if (records.length !== expectedCases * repeat * armCount) reasons.push(`records-${records.length}-of-${expectedCases * repeat * armCount}`);
   if (records.some((item) => item.arm === "unknown")) reasons.push("unknown-arm");
   if (records.some((item) => item.correct === null)) reasons.push("missing-grade");
   if (records.some((item) => item.providerError)) reasons.push("provider-error");
-  if (pairs.some((item) => item.oo.n !== repeat || item.baseline.n !== repeat)) reasons.push("repeat-mismatch");
+  if (pairs.some((item) => item.oo.n !== repeat || (withBaseline && item.baseline.n !== repeat))) reasons.push("repeat-mismatch");
   return { valid: reasons.length === 0, reasons };
 }
 
