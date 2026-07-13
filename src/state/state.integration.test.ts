@@ -168,6 +168,20 @@ try {
     "the rejected thread stays queued to re-enrich at the newer message",
   );
 
+  // A rewritten/truncated transcript can move last_message_at backwards. A watermark
+  // ahead of the message must not make the thread a candidate — selecting it would
+  // burn a model call on a sample the guard is certain to reject.
+  state.recordObservation({ ...row("2026-07-09T10:05:00.000Z"), id: "thread-regressed" });
+  assert.equal(
+    state.appendEnrichment("thread-regressed", { nextSteps: "Enriched at T2" }, "2026-07-09T10:05:00.000Z"),
+    true,
+  );
+  state.recordObservation({ ...row("2026-07-09T10:04:45.000Z"), id: "thread-regressed" });
+  assert.ok(
+    !state.listEnrichmentCandidates().some((item) => item.id === "thread-regressed"),
+    "a watermark ahead of a regressed last_message_at is not a candidate",
+  );
+
   const needsYouSchedule: ScheduleDefinition = {
     id: "needs-you-job",
     name: "Needs you job",

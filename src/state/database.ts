@@ -390,7 +390,7 @@ export class ThreadDb {
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at != t.last_message_at)
+         AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at)
        ORDER BY t.last_message_at ASC`,
     ).all() as Array<{ id: string }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));

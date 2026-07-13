@@ -85,7 +85,7 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
   metadata ([docs](https://www.promptfoo.dev/docs/providers/custom-api/)): require a
   `session-search`, require a DB/state locator before it, reject direct transcript reads.
   Mutation tools are absent from every subject; the denylist is defense in depth.
-- **Cross-run comparison** — no promptfoo native for this; emit `outputPath` JSON and post-process (`compare.mjs`).
+- **Cross-run comparison** — `compare.mjs` post-processes two runs' `outputPath` JSON: per-case pairing, spend deltas, and the A≥B correctness gate (promptfoo's viewer compares evals visually, without a gate).
 
 Providers reseed the sandbox at load, so every run gets fresh activity windows. Manifests,
 daemon logs, Pi sessions, and tool traces land in `results/logs/<run>/`. The publish gate

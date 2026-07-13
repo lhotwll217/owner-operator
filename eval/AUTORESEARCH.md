@@ -1,7 +1,7 @@
 # Eval iteration protocol
 
-Iteration protocol for developing the harness, adapted from the local
-`session-grep/eval/AUTORESEARCH.md` and the Amplify MCP branch's generic-client pattern: the
+Iteration protocol for developing the harness, adapted from the
+[session-grep eval harness](https://github.com/lhotwll217/session-grep)'s AUTORESEARCH loop: the
 subject sees the real product surface, trajectories show how it used that surface, and each
 iteration changes one mechanism.
 
