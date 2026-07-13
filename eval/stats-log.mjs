@@ -40,6 +40,7 @@ export function buildGlobalResults({ record, cases, observations = [], manifest 
     tool_calls: distribution(values.map((item) => item.toolCalls), 2),
     tokens: distribution(values.map((item) => item.tokens), 2),
     cost_usd: distribution(values.map((item) => item.cost), 6),
+    latency_ms: distribution(values.map((item) => item.latencyMs), 0),
     cases: cases.map((item) => ({ id: item.caseId, ...summarizeCase(item.stats) })),
   };
 }
@@ -78,6 +79,7 @@ export function buildStatsEntry(globalResults) {
     tool_calls: globalResults.tool_calls,
     tokens: globalResults.tokens,
     cost_usd: globalResults.cost_usd,
+    latency_ms: globalResults.latency_ms,
   };
 }
 
@@ -155,6 +157,7 @@ function summarizeCase(stats) {
     mean_tool_calls: round(stats.toolCalls, 2),
     mean_tokens: round(stats.tokens, 2),
     mean_cost_usd: round(stats.cost, 6),
+    mean_latency_ms: round(stats.latencyMs, 0),
   };
 }
 
@@ -188,6 +191,7 @@ function observationsFromCaseMeans(cases) {
         toolCalls: item.stats.toolCalls,
         tokens: item.stats.tokens,
         cost: item.stats.cost,
+        latencyMs: item.stats.latencyMs,
       });
     }
   }

@@ -80,6 +80,7 @@ console.log(
   `shared cases: ${shared.length} | pass A=${rateA.toFixed(2)}% B=${rateB.toFixed(2)}% | ` +
   `calls/case A=${meanOf(casesA, shared, "mean_tool_calls").toFixed(2)} B=${meanOf(casesB, shared, "mean_tool_calls").toFixed(2)} | ` +
   `tokens/case A=${Math.round(meanOf(casesA, shared, "mean_tokens"))} B=${Math.round(meanOf(casesB, shared, "mean_tokens"))} | ` +
+  `latency/case A=${secondsPerCase(casesA, shared)} B=${secondsPerCase(casesB, shared)} | ` +
   `cost/case A=$${meanOf(casesA, shared, "mean_cost_usd").toFixed(4)} B=$${meanOf(casesB, shared, "mean_cost_usd").toFixed(4)}`,
 );
 
@@ -97,6 +98,11 @@ function passRate(caseMap, ids) {
 }
 function meanOf(caseMap, ids, field) {
   return ids.reduce((total, id) => total + Number(caseMap.get(id)[field] ?? 0), 0) / ids.length;
+}
+// Runs predating the latency field have no per-case number; show n/a rather than NaN.
+function secondsPerCase(caseMap, ids) {
+  if (ids.some((id) => caseMap.get(id).mean_latency_ms == null)) return "n/a";
+  return `${(meanOf(caseMap, ids, "mean_latency_ms") / 1000).toFixed(1)}s`;
 }
 function unique(values) { return [...new Set(values)]; }
 function round(value) { return Math.round(value * 10) / 10; }

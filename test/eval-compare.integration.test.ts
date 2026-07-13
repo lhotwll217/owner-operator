@@ -21,6 +21,7 @@ const caseResult = (id: string, passRate: number, repeat = 3, qtype = "evidence"
   mean_tool_calls: 3,
   mean_tokens: 90000,
   mean_cost_usd: 0.08,
+  mean_latency_ms: 20000,
 });
 
 const run = (subject: string, label: string, cases: ReturnType<typeof caseResult>[], grader = "grader-x") => ({
@@ -49,6 +50,7 @@ const run = (subject: string, label: string, cases: ReturnType<typeof caseResult
   tool_calls: { mean: 3, median: 3, min: 1, max: 7, stdev: 1 },
   tokens: { mean: 90000, median: 90000, min: 50000, max: 170000, stdev: 20000 },
   cost_usd: { mean: 0.08, median: 0.08, min: 0.03, max: 0.17, stdev: 0.03 },
+  latency_ms: { mean: 20000, median: 20000, min: 8000, max: 40000, stdev: 6000 },
   cases,
 });
 
@@ -78,6 +80,7 @@ try {
   assert.match(pass.stdout, /caveat: grader_model differs/, "comparability caveats are surfaced");
   assert.match(pass.stdout, /only in A \(unpaired, excluded\): only-in-a/, "unpaired cases are reported, not absorbed");
   assert.match(pass.stdout, /qtype/, "the qtype breakdown survives for locator-payoff analysis");
+  assert.match(pass.stdout, /latency\/case/, "latency is reported alongside calls/tokens/cost");
   assert.match(pass.stdout, /gate: PASS/);
 
   const regressed = write("regressed.json", run("owner-operator", "regressed-run", [

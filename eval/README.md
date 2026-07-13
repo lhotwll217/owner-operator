@@ -47,7 +47,8 @@ The base branch carries earlier full-suite entries in `eval_stat_log.json`. Ever
 full run automatically writes a detailed `global_results.json` under its ignored result
 folder and prepends a compact single-subject entry — label, commit/branch, subject,
 model/grader (with reasoning levels), cases × repeat, pass rates, and distribution
-statistics for calls, tokens, and cost. A full run that cannot publish exits nonzero with
+statistics (mean/median/min/max/stdev) for calls, tokens, cost, and latency (the `oo`
+subprocess wall-clock; promptfoo's `result.latencyMs` is the fallback). A full run that cannot publish exits nonzero with
 the reasons. Rerunning stats for the same (eval folder, subject) refreshes the entry
 without duplicating it. When posting a PR, backfill each run's entry to the commit that
 carries its work (`--backfill-git`); run-time git provenance stays in the raw

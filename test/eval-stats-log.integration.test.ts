@@ -37,22 +37,22 @@ const record = {
 const cases = [
   {
     caseId: "alpha",
-    stats: { n: 3, qtype: "evidence", correct: 2 / 3, trajectoryPass: true, tokens: 100, toolCalls: 3, cost: 0.1, providerErrors: 0 },
+    stats: { n: 3, qtype: "evidence", correct: 2 / 3, trajectoryPass: true, tokens: 100, toolCalls: 3, cost: 0.1, latencyMs: 4000, providerErrors: 0 },
   },
   {
     caseId: "beta",
-    stats: { n: 3, qtype: "state", correct: 1, trajectoryPass: true, tokens: 50, toolCalls: 2, cost: 0.05, providerErrors: 0 },
+    stats: { n: 3, qtype: "state", correct: 1, trajectoryPass: true, tokens: 50, toolCalls: 2, cost: 0.05, latencyMs: 2000, providerErrors: 0 },
   },
 ];
 
 const observations = [
-  [2, 90, 0.09],
-  [3, 100, 0.1],
-  [4, 110, 0.11],
-  [1, 40, 0.04],
-  [2, 50, 0.05],
-  [3, 60, 0.06],
-].map(([toolCalls, tokens, cost]) => ({ toolCalls, tokens, cost }));
+  [2, 90, 0.09, 3800],
+  [3, 100, 0.1, 4000],
+  [4, 110, 0.11, 4200],
+  [1, 40, 0.04, 1800],
+  [2, 50, 0.05, 2000],
+  [3, 60, 0.06, 2200],
+].map(([toolCalls, tokens, cost, latencyMs]) => ({ toolCalls, tokens, cost, latencyMs }));
 
 const manifest = {
   gitHead: "abcdef1234567890abcdef1234567890abcdef12",
@@ -109,8 +109,16 @@ try {
   });
   assert.equal(globalResults.tokens.mean, 75);
   assert.equal(globalResults.cost_usd.mean, 0.075);
+  assert.deepEqual(globalResults.latency_ms, {
+    mean: 3000,
+    median: 3000,
+    min: 1800,
+    max: 4200,
+    stdev: 1110,
+  }, "latency distribution rides the same observation pipeline as tokens/calls/cost");
   assert.equal(globalResults.cases.length, 2, "per-case detail belongs in the raw global result");
   assert.equal(globalResults.cases[0].qtype, "evidence", "qtype rides along for downstream breakdowns");
+  assert.equal(globalResults.cases[0].mean_latency_ms, 4000, "per-case mean latency is recorded");
 
   const entry = buildStatsEntry(globalResults);
   assert.deepEqual(Object.keys(entry), [
@@ -131,8 +139,10 @@ try {
     "tool_calls",
     "tokens",
     "cost_usd",
+    "latency_ms",
   ]);
   assert.equal(entry.subject, "owner-operator");
+  assert.equal(entry.latency_ms.median, 3000, "the compact entry carries the latency distribution");
   assert.equal(entry.cases, 2);
   assert.equal(entry.total_tests, 6, "the entry states how many evaluations backed it");
   assert.ok(!("cases" in entry.summary), "the committed stats log stays compact");

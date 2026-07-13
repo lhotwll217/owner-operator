@@ -178,11 +178,13 @@ console.table(cases.map((item) => ({
   correct: pct(item.stats.correct),
   calls: round(item.stats.toolCalls),
   tokens: Math.round(item.stats.tokens),
+  "latency(s)": round(item.stats.latencyMs / 1000),
 })));
 console.log(
   `[loop] acc=${pct(metrics.accuracy)} ` +
   `calls=${round(metrics.toolCalls / cases.length)}/case ` +
   `tokens=${Math.round(metrics.tokens / cases.length)}/case ` +
+  `latency=${round(metrics.latencyMs / cases.length / 1000)}s/case ` +
   `cost=$${(metrics.cost / cases.length).toFixed(4)}/case over ${cases.length} cases x ${repeat} repeat(s)`,
 );
 
@@ -220,6 +222,9 @@ function toRecord(result) {
     tokens: Number(metadata.tokensTotal ?? result.tokenUsage?.total ?? 0),
     toolCalls: Number(metadata.toolCallCount ?? 0),
     cost: Number(metadata.costUsd ?? result.cost ?? 0),
+    // Our own subprocess wall-clock; promptfoo's result.latencyMs (provider-wrapper view)
+    // is the fallback cross-check.
+    latencyMs: Number(metadata.durationMs ?? result.latencyMs ?? 0),
     runId: metadata.runId ?? null,
     modelLabel: metadata.modelLabel ?? null,
     traceFile: metadata.traceFile ?? null,
@@ -247,6 +252,7 @@ function aggregate(items) {
     tokens: mean(items.map((item) => item.tokens)),
     toolCalls: mean(items.map((item) => item.toolCalls)),
     cost: mean(items.map((item) => item.cost)),
+    latencyMs: mean(items.map((item) => item.latencyMs)),
     providerErrors: items.filter((item) => item.providerError).length,
   };
 }
@@ -258,6 +264,7 @@ function summarize(cases) {
     toolCalls: sum(cases.map((item) => item.stats.toolCalls)),
     tokens: sum(cases.map((item) => item.stats.tokens)),
     cost: sum(cases.map((item) => item.stats.cost)),
+    latencyMs: sum(cases.map((item) => item.stats.latencyMs)),
     trajectoryPass: cases.every((item) => item.stats.trajectoryPass),
   };
 }
