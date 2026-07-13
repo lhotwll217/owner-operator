@@ -63,6 +63,8 @@ export class SessionMonitor {
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
   private watchers: FSWatcher[] = [];
+  private watching = false;
+  private watchRoots: readonly string[] | undefined;
   private polling = false;
   private enriching = false;
   private readonly logger: (record: SessionMonitorLogRecord) => void;
@@ -76,6 +78,7 @@ export class SessionMonitor {
     if (this.polling) return this.current;
     this.polling = true;
     try {
+      this.armWatchers();
       const rows = await (this.options.scan ?? scanTranscripts)(
         this.options.since ?? loadActiveWindow(),
         this.options.limit ?? 50,
@@ -97,7 +100,14 @@ export class SessionMonitor {
   }
 
   watch(roots?: readonly string[]): void {
-    const watchedRoots = roots ?? (isOnboarded() ? loadSessionSources().map((source) => source.root) : []);
+    this.watching = true;
+    this.watchRoots = roots ? [...roots] : undefined;
+    this.armWatchers();
+  }
+
+  private armWatchers(): void {
+    if (!this.watching || this.watchers.length > 0) return;
+    const watchedRoots = this.watchRoots ?? (isOnboarded() ? loadSessionSources().map((source) => source.root) : []);
     for (const root of watchedRoots) {
       try {
         const watcher = fsWatch(root, { recursive: true }, (_event, file) => {
@@ -130,6 +140,8 @@ export class SessionMonitor {
     if (this.debounce) clearTimeout(this.debounce);
     this.timer = null;
     this.debounce = null;
+    this.watching = false;
+    this.watchRoots = undefined;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
   }

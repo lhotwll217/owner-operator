@@ -13,6 +13,10 @@ export interface GatePolicy {
   interactive: GateSurfacePolicy;
   headless: GateSurfacePolicy;
 }
+export interface GatePolicyPatch {
+  interactive?: Partial<GateSurfacePolicy>;
+  headless?: Partial<GateSurfacePolicy>;
+}
 export interface HarnessSettings {
   activeWindow: string;
   skillPolicy: SkillPolicy;
@@ -46,5 +50,5 @@ export function ensureOwnerOperatorWorkspace(ooHome?: string): OwnerOperatorPath
 export function loadHarnessSettings(ooHome?: string): HarnessSettings;
 export function saveHarnessSettings(
   ooHome: string | undefined,
-  patch?: Partial<HarnessSettings>,
+  patch?: Omit<Partial<HarnessSettings>, "gatePolicy"> & { gatePolicy?: GatePolicyPatch },
 ): HarnessSettings;

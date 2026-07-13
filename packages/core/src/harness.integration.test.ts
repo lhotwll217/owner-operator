@@ -49,6 +49,18 @@ try {
   assert.deepEqual(configured.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
   assert.deepEqual(configured.gatePolicy, DEFAULT_GATE_POLICY, "partial updates retain safe defaults");
 
+  saveHarnessSettings(ooHome, {
+    gatePolicy: {
+      interactive: { edit: "allow", write: "deny", riskyBash: "deny" },
+      headless: { edit: "allow", write: "ask", riskyBash: "ask" },
+    },
+  });
+  const patchedGate = saveHarnessSettings(ooHome, { gatePolicy: { interactive: { edit: "ask" } } });
+  assert.deepEqual(patchedGate.gatePolicy, {
+    interactive: { edit: "ask", write: "deny", riskyBash: "deny" },
+    headless: { edit: "allow", write: "ask", riskyBash: "ask" },
+  }, "partial gate updates preserve sibling operations and the untouched surface");
+
   process.stdout.write("ok — harness: owned paths, missing-only workspace, least-permissive settings\n");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });

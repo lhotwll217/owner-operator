@@ -30,6 +30,25 @@ try {
   assert.deepEqual(await decide("read", { path: "README.md" }), { action: "allow" });
   assert.deepEqual(await decide("bash", { command: "git status --short" }), { action: "allow" });
   assert.deepEqual(await decide("bash", { command: "rg TODO src" }), { action: "allow" });
+  assert.deepEqual(await decide("bash", { command: `bash -c "echo hello"` }), { action: "allow" }, "bash payloads remain inspectable with a privacy blacklist");
+  assert.deepEqual(await decideWithoutBlacklist("bash", { command: "bash -c 'ls'" }), { action: "allow" }, "fully inspected safe shell payloads remain allowed");
+  const escapedShellPayload = `bash -c "rm \\"a b\\" -rf /tmp/target"`;
+  const partiallyVisibleShellPayload = `bash -c "rm \\"a b\\" -rf /tmp/target; echo $(ls)"`;
+  assert.equal(
+    (await decideWithoutBlacklist("bash", { command: escapedShellPayload })).action,
+    "ask",
+    "an interactive shell payload the parser cannot inspect requires approval",
+  );
+  assert.equal(
+    (await decideWithoutBlacklist("bash", { command: escapedShellPayload }, "headless")).action,
+    "deny",
+    "a headless shell payload the parser cannot inspect is denied",
+  );
+  assert.equal(
+    (await decideWithoutBlacklist("bash", { command: partiallyVisibleShellPayload })).action,
+    "ask",
+    "a visible command substitution does not make an undecomposed shell payload safe",
+  );
   assert.deepEqual(
     await decide("bash", { command: 'node "$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs" --query TODO' }, "headless"),
     { action: "allow" },

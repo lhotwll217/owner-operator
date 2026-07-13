@@ -101,6 +101,7 @@ export function loadHarnessSettings(ooHome = defaultHome()) {
 export function saveHarnessSettings(ooHome = defaultHome(), patch = {}) {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
   const current = readJson(paths.settings);
+  const currentGatePolicy = loadHarnessSettings(ooHome).gatePolicy;
   const merged = {
     ...current,
     ...patch,
@@ -108,9 +109,18 @@ export function saveHarnessSettings(ooHome = defaultHome(), patch = {}) {
     ...(patch.toolPosture
       ? { toolPosture: cleanStrings(patch.toolPosture).filter((name) => TOOL_NAMES.has(name)) }
       : {}),
-    ...(patch.gatePolicy
-      ? { gatePolicy: gatePolicy({ ...loadHarnessSettings(ooHome).gatePolicy, ...patch.gatePolicy }) }
-      : {}),
+    ...(patch.gatePolicy ? {
+      gatePolicy: gatePolicy({
+        interactive: {
+          ...currentGatePolicy.interactive,
+          ...patch.gatePolicy.interactive,
+        },
+        headless: {
+          ...currentGatePolicy.headless,
+          ...patch.gatePolicy.headless,
+        },
+      }),
+    } : {}),
   };
   if (Object.hasOwn(patch, "activeWindow") && !isWindowSpec(patch.activeWindow)) {
     throw new Error(`invalid active window "${patch.activeWindow}" — use Nh, Nd, today, or YYYY-MM-DD`);

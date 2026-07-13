@@ -40,8 +40,8 @@ function readJson(path) {
 }
 
 // Pretty, newline-terminated — these files get hand-edited, so keep them diff-friendly.
-function writeJson(path, value) {
-  writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
+function writeJson(path, value, options) {
+  writeFileSync(path, JSON.stringify(value, null, 2) + "\n", options);
 }
 
 const uniq = (xs) => [...new Set(xs)];
@@ -121,7 +121,7 @@ export function importPiConfiguration(ooHome = defaultHome(), piAgentDir) {
   const detected = detectPiConfiguration(piAgentDir);
   if (detected.auth) {
     const source = readRequiredObject(join(piAgentDir, "auth.json"));
-    writeJson(paths.piAuth, { ...readJson(paths.piAuth), ...source });
+    writeJson(paths.piAuth, { ...readJson(paths.piAuth), ...source }, { mode: 0o600 });
     chmodSync(paths.piAuth, 0o600);
   }
   if (detected.settings) {

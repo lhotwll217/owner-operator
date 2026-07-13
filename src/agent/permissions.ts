@@ -39,11 +39,33 @@ const RISKY_GIT_FLAGS = new Set([
 ]);
 const OUTPUT_REDIRECTION = /(^|[^<])(?:>>?|&>)/;
 
-function commandIsSafe(command: SimpleCommand): boolean {
+function inspectedShellPayload(command: SimpleCommand, commands: readonly SimpleCommand[]): boolean {
+  for (let index = 0; index < command.args.length; index += 1) {
+    const arg = command.args[index];
+    if (!arg) continue;
+    const payload = arg.text === "-c" ? command.args[index + 1] : undefined;
+    if (arg.text === "-c" && payload) {
+      const rawLength = payload.end - payload.start;
+      if (rawLength !== payload.text.length && rawLength !== payload.text.length + 2) return false;
+    }
+    const inspectablePayload = payload ?? (arg.text.startsWith("-c") && arg.text.length > 2
+      ? { start: arg.start + 2, end: arg.end }
+      : undefined);
+    if (!inspectablePayload) continue;
+    return commands.some((candidate) =>
+      candidate !== command &&
+      candidate.span.start >= inspectablePayload.start &&
+      candidate.span.end <= inspectablePayload.end
+    );
+  }
+  return false;
+}
+
+function commandIsSafe(command: SimpleCommand, commands: readonly SimpleCommand[]): boolean {
   if (command.assignments.some((assignment) => shellAssignmentCanExecute(assignment.text))) return false;
   const program = command.programName;
   if (!program) return false;
-  if (SHELL_WRAPPERS.has(program)) return command.hasFlag("-c");
+  if (SHELL_WRAPPERS.has(program)) return inspectedShellPayload(command, commands);
   if (program === "git") {
     if (command.args.some((arg) => RISKY_GIT_FLAGS.has(arg.text) || [...RISKY_GIT_FLAGS].some((flag) => arg.text.startsWith(`${flag}=`)))) return false;
     const subcommand = command.subcommand({ valueFlags: gitValueFlags })?.text;
@@ -64,7 +86,7 @@ function commandIsSafe(command: SimpleCommand): boolean {
 async function bashIsSafe(command: string): Promise<boolean> {
   if (OUTPUT_REDIRECTION.test(command) || /\b(?:sudo|doas)\b/.test(command)) return false;
   const parsed = await parseShellCommand(command);
-  return !parsed.hasErrors && parsed.commands.length > 0 && parsed.commands.every(commandIsSafe);
+  return !parsed.hasErrors && parsed.commands.length > 0 && parsed.commands.every((entry) => commandIsSafe(entry, parsed.commands));
 }
 
 function rawPath(input: Record<string, unknown>): string {

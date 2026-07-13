@@ -172,7 +172,7 @@ export function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: B
 
 const TRAVERSAL_PROGRAMS = new Set(["find", "grep", "ls", "rg"]);
 const PRIVACY_INSPECTABLE_PROGRAMS = new Set([
-  "[", "basename", "cat", "cd", "chmod", "chown", "command", "cp", "cut", "dash",
+  "[", "basename", "bash", "cat", "cd", "chmod", "chown", "command", "cp", "cut", "dash",
   "date", "df", "diff", "dirname", "du", "echo", "env", "false", "file", "find",
   "git", "grep", "head", "jq", "ln", "ls", "mkdir", "mv", "node", "printf",
   "printenv", "pwd", "readlink", "realpath", "rg", "rm", "rmdir", "sed", "sh",

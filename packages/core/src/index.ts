@@ -41,6 +41,7 @@ export {
 export type {
   GateAction,
   GatePolicy,
+  GatePolicyPatch,
   GateSurfacePolicy,
   HarnessSettings,
   OwnerOperatorPaths,
