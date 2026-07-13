@@ -1,7 +1,7 @@
 [
   {
     "timestamp": "2026-07-13T10:01:18.133Z",
-    "commit": "48e577b",
+    "commit": "5cc542d",
     "branch": "fix/enrichment-discard-and-model",
     "git_dirty": true,
     "git_diff_hash": "af1ef40951002dc33a1d3dd4ccf0f3f212551d98a39c82df7ee9bbbc2f1f9d5d",
@@ -59,7 +59,9 @@
         "total_requests": 14
       },
       "baseline": null
-    }
+    },
+    "run_commit": "48e577b",
+    "run_branch": "fix/enrichment-discard-and-model"
   },
   {
     "timestamp": "2026-07-11T00:17:20.877Z",
