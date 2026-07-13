@@ -82,7 +82,8 @@ from its legacy and current settings databases because the worktree home is conf
 
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
 ignore. Host detection supplies attribution only and does not grant transcript access. The marker
-records the reviewed stable IDs and catalog hash, so an identity, matcher, or root change reopens only this review. The scanner asserts
+records the reviewed stable IDs and an access contract hash. Harness identity, transcript format,
+standard-store scope, or host attribution changes reopen only this review; labels and detection hints do not. The scanner asserts
 that every catalog format has an implementation and the integration suite exercises every parser.
 The same review can run the bounded deep search or accept an explicit absolute transcript-store
 path; neither adds a mandatory onboarding screen.

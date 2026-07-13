@@ -95,6 +95,7 @@ export {
   saveSessionRoots,
   saveTranscriptAccess,
   saveSessionHostRoots,
+  sessionCatalogReviewContract,
   recordPiImportDecision,
   disableSessionSource,
   saveActiveWindow,

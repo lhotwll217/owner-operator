@@ -8,12 +8,13 @@ import { join } from "node:path";
 import { loadBlacklist } from "./blacklist.mjs";
 import { loadActiveWindow } from "./settings.mjs";
 import {
+  AGENT_HARNESS_DESCRIPTORS,
   KNOWN_AGENT_HARNESSES,
   KNOWN_SESSION_SOURCES,
   KNOWN_TRANSCRIPT_FORMATS,
   loadSessionSources,
 } from "./session-sources.mjs";
-import { REVIEWED_SESSION_HOSTS } from "./session-hosts.mjs";
+import { REVIEWED_SESSION_HOSTS, SESSION_HOST_DESCRIPTORS } from "./session-hosts.mjs";
 import {
   ONBOARDING_VERSION,
   ONBOARDING_STEPS,
@@ -34,6 +35,7 @@ import {
   saveTranscriptAccess,
   saveSessionHostRoots,
   saveActiveWindow,
+  sessionCatalogReviewContract,
   detectSources,
   summarizeDetectedSources,
 } from "./onboarding.mjs";
@@ -74,6 +76,28 @@ try {
     reviewedSessionHosts: [...REVIEWED_SESSION_HOSTS],
   });
   assert.equal(isOnboarded(ooHome), true, "reviewing the current catalog closes the marker");
+
+  const catalogContract = sessionCatalogReviewContract();
+  assert.deepEqual(sessionCatalogReviewContract(
+    AGENT_HARNESS_DESCRIPTORS.map((descriptor, index) => index === 0
+      ? { ...descriptor, label: "Renamed", declared: [], deep: [] }
+      : descriptor),
+    SESSION_HOST_DESCRIPTORS.map((descriptor, index) => index === 0
+      ? { ...descriptor, label: "Renamed", appNames: ["New app alias"], commands: ["new-command"] }
+      : descriptor),
+  ), catalogContract, "cosmetic and detection-hint edits do not reopen consent");
+  assert.notDeepEqual(sessionCatalogReviewContract(
+    AGENT_HARNESS_DESCRIPTORS.map((descriptor, index) => index === 0
+      ? { ...descriptor, defaults: [...descriptor.defaults, ["new-standard-root"]] }
+      : descriptor),
+    SESSION_HOST_DESCRIPTORS,
+  ), catalogContract, "standard transcript access changes reopen consent");
+  assert.notDeepEqual(sessionCatalogReviewContract(
+    AGENT_HARNESS_DESCRIPTORS,
+    SESSION_HOST_DESCRIPTORS.map((descriptor, index) => index === 0
+      ? { ...descriptor, harnesses: [] }
+      : descriptor),
+  ), catalogContract, "host attribution changes reopen consent");
 
   // Pi migration is explicit and owned: all auth entries and custom models are copied, while
   // resource/package settings are excluded from the model-settings import.
@@ -225,6 +249,10 @@ try {
   assert.deepEqual(saveSessionHostRoots(ooHome, [{ host: "superset", root: "/custom/superset" }]), [
     { host: "superset", root: "/custom/superset" },
   ]);
+  assert.deepEqual(saveSessionHostRoots(ooHome, [{ host: "conductor", root: "/custom/conductor" }]), [
+    { host: "superset", root: "/custom/superset" },
+    { host: "conductor", root: "/custom/conductor" },
+  ], "a later detection pass preserves configured host roots that may be temporarily offline");
 
   // Disabling a default source drops its built-in roots from the resolved list.
   disableSessionSource(ooHome, "cursor");

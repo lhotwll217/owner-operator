@@ -51,7 +51,10 @@ try {
     piAgentDir,
     platform: "darwin",
     detectCandidates: (_deep) => candidates,
-    detectHosts: () => [{ host: "superset", root: join(root, "superset-worktrees"), exists: true, origin: "superset-settings" }],
+    detectHosts: () => [
+      { host: "superset", root: join(root, "superset-worktrees"), exists: true, origin: "superset-settings" },
+      { host: "conductor", root: join(root, "missing-conductor"), exists: false, origin: "catalog" },
+    ],
     reviewCatalog: async (catalog) => {
       asked.push("Agent session access");
       assert.deepEqual(catalog.harnesses.map(({ id }) => id), [...KNOWN_AGENT_HARNESSES]);

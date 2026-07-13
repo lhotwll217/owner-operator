@@ -16,9 +16,14 @@ import { formatHarnessDoctor } from "./doctor";
 const ooHome = mkdtempSync(join(tmpdir(), "oo-doctor-"));
 try {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
+  const existingHostRoot = join(ooHome, "superset-worktrees");
+  mkdirSync(existingHostRoot, { recursive: true });
   for (const source of KNOWN_SESSION_SOURCES) disableSessionSource(ooHome, source);
   addSessionRoot(ooHome, "codex", "/sessions/codex");
-  saveSessionHostRoots(ooHome, [{ host: "superset", root: "/worktrees/superset" }]);
+  saveSessionHostRoots(ooHome, [
+    { host: "superset", root: existingHostRoot },
+    { host: "conductor", root: "/missing/conductor-workspaces" },
+  ]);
   saveHarnessSettings(ooHome, { skillPolicy: { mode: "allowlist", allowlist: ["calendar"] } });
   writeFileSync(paths.piAuth, JSON.stringify({ codex: { type: "api_key", key: "hidden" } }), { mode: 0o600 });
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "codex", defaultModel: "gpt-test" }));
@@ -44,7 +49,8 @@ try {
   assert.doesNotMatch(output, /hidden/, "doctor never prints credential values");
   assert.match(output, /Model: codex\/gpt-test/);
   assert.match(output, /Transcript stores: codex=\/sessions\/codex/);
-  assert.match(output, /Session host roots: .*Superset App=\/worktrees\/superset/);
+  assert.match(output, new RegExp(`Session host roots: .*Superset App=${existingHostRoot}`));
+  assert.doesNotMatch(output, /missing\/conductor-workspaces/, "doctor omits host roots that do not exist");
   assert.match(output, /Interactive gates: edit=ask, write=ask, risky bash=ask/);
   assert.match(output, /Headless gates: edit=deny, write=deny, risky bash=deny/);
 

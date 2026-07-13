@@ -7,6 +7,7 @@ import {
 } from "@owner-operator/core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -16,6 +17,7 @@ export interface HarnessReviewRow {
   format: TranscriptFormat;
   roots: string[];
   standardRoots: string[];
+  detectedRoots: string[];
   detected: boolean;
   selected: boolean;
   defaultsEnabled: boolean;
@@ -72,6 +74,7 @@ export function buildSessionCatalogReview(
         format: descriptor.transcriptFormat,
         roots: [...new Set(candidates.map(({ root }) => root).filter((root): root is string => typeof root === "string"))],
         standardRoots: [...new Set(candidates.filter(({ tier }) => tier === 2).map(({ root }) => root))],
+        detectedRoots: [...new Set(candidates.filter(({ exists }) => exists).map(({ root }) => root))],
         detected: candidates.some(({ exists }) => exists),
         selected: selected.has(descriptor.transcriptFormat),
         defaultsEnabled: defaultsEnabled.has(descriptor.transcriptFormat),
@@ -104,19 +107,27 @@ export async function reviewSessionCatalog(
       "Recognized apps and CLIs:",
       ...catalog.hosts.map((row) => `- ${row.label}${row.detected ? " (detected)" : ""}`),
     ].join("\n");
-    const raw = await ctx.ui.input(inventory, "IDs to ignore; prefix + to re-include; blank preserves current choices");
-    if (raw == null) return undefined;
-    const choices = raw.split(/[,\n]/).map((value) => value.trim()).filter(Boolean);
-    const included = new Set(choices.filter((value) => value.startsWith("+")).map((value) => value.slice(1)));
-    const ignored = new Set(choices.filter((value) => !value.startsWith("+")));
-    const enabled = new Set(catalog.harnesses
-      .filter(({ id, selected }) => (selected || included.has(id)) && !ignored.has(id))
-      .map(({ format }) => format));
-    const defaultsEnabled = new Set(catalog.harnesses.filter((row) => row.defaultsEnabled).map(({ format }) => format));
-    for (const row of catalog.harnesses) {
-      if (included.has(row.id)) defaultsEnabled.add(row.format);
+    const knownIds = new Set(catalog.harnesses.map(({ id }) => id));
+    for (;;) {
+      const raw = await ctx.ui.input(inventory, "IDs to ignore; prefix + to re-include; blank preserves current choices");
+      if (raw == null) return undefined;
+      const choices = raw.split(/[,\n]/).map((value) => value.trim()).filter(Boolean);
+      const unknown = choices.filter((value) => !knownIds.has(value.startsWith("+") ? value.slice(1) : value));
+      if (unknown.length) {
+        ctx.ui.notify(`Unknown harness ID${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`, "warning");
+        continue;
+      }
+      const included = new Set(choices.filter((value) => value.startsWith("+")).map((value) => value.slice(1)));
+      const ignored = new Set(choices.filter((value) => !value.startsWith("+")));
+      const enabled = new Set(catalog.harnesses
+        .filter(({ id, selected }) => (selected || included.has(id)) && !ignored.has(id))
+        .map(({ format }) => format));
+      const defaultsEnabled = new Set(catalog.harnesses.filter((row) => row.defaultsEnabled).map(({ format }) => format));
+      for (const row of catalog.harnesses) {
+        if (included.has(row.id)) defaultsEnabled.add(row.format);
+      }
+      return resultFrom(catalog, enabled, defaultsEnabled);
     }
-    return resultFrom(catalog, enabled, defaultsEnabled);
   }
 
   let current = catalog;
@@ -137,7 +148,7 @@ export async function reviewSessionCatalog(
             "",
             ...current.harnesses.map((row, index) => line(
               `${index === cursor ? "›" : " "} ${enabled.has(row.format) ? "[x]" : "[ ]"} ${row.label}` +
-              ` — ${row.detected ? `detected${row.roots[0] ? ` at ${row.roots[0]}` : ""}` : "not detected"}`,
+              ` — ${row.detected ? `detected${row.detectedRoots[0] ? ` at ${row.detectedRoots[0]}` : ""}` : "not detected"}`,
             )),
             "",
             theme.fg("accent", `${selected?.label ?? "Harness"} transcript stores`),
@@ -148,7 +159,7 @@ export async function reviewSessionCatalog(
             theme.fg("dim", "● detected · ○ supported"),
             ...wrapTextWithAnsi(hosts, width),
             "",
-            theme.fg("dim", `↑/↓ move · Space include/ignore · D toggle standard stores · A add store${options.searchMore ? " · S search more" : ""} · Enter continue · Esc cancel`),
+            ...wrapTextWithAnsi(theme.fg("dim", `↑/↓ move · Space include/ignore · D toggle standard stores · A add store${options.searchMore ? " · S search more" : ""} · Enter continue · Esc cancel`), width),
           ];
         },
         invalidate(): void {},
@@ -161,7 +172,10 @@ export async function reviewSessionCatalog(
           else if (matchesKey(data, "space")) {
             const format = current.harnesses[cursor]?.format;
             if (format) {
-              if (enabled.has(format)) enabled.delete(format);
+              if (enabled.has(format)) {
+                enabled.delete(format);
+                defaultsEnabled.delete(format);
+              }
               else {
                 enabled.add(format);
                 defaultsEnabled.add(format);
@@ -208,6 +222,7 @@ export async function reviewSessionCatalog(
           ...row,
           roots: [...new Set([...(previous.get(row.format)?.roots ?? []), ...row.roots])],
           standardRoots: [...new Set([...(previous.get(row.format)?.standardRoots ?? []), ...row.standardRoots])],
+          detectedRoots: [...new Set([...(previous.get(row.format)?.detectedRoots ?? []), ...row.detectedRoots])],
           detected: row.detected || Boolean(previous.get(row.format)?.detected),
           selected: selected.has(row.format),
           defaultsEnabled: defaultsEnabled.has(row.format),
@@ -219,15 +234,24 @@ export async function reviewSessionCatalog(
     if (!harnessId) continue;
     const raw = await ctx.ui.input(`Path to ${harnessId} transcripts`, "/absolute/path");
     const value = raw?.trim() ?? "";
+    if (!value) continue;
     const root = value === "~" ? homedir() : value.startsWith("~/") ? path.join(homedir(), value.slice(2)) : value;
     if (!path.isAbsolute(root)) {
       ctx.ui.notify("Transcript store paths must be absolute.", "warning");
       continue;
     }
+    const exists = existsSync(root);
+    if (!exists) ctx.ui.notify("That transcript store does not exist yet. It will remain configured and activate when created.", "warning");
     current = {
       ...current,
       harnesses: current.harnesses.map((row) => row.id === harnessId
-        ? { ...row, roots: [...new Set([...row.roots, root])], detected: true, selected: true }
+        ? {
+            ...row,
+            roots: [...new Set([...row.roots, root])],
+            detectedRoots: exists ? [...new Set([...row.detectedRoots, root])] : row.detectedRoots,
+            detected: row.detected || exists,
+            selected: true,
+          }
         : row),
     };
   }

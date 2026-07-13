@@ -52,7 +52,9 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     ? loadTranscriptStores(paths.home).map(({ format, root }) => `${format}=${root}`).join(", ") || "(none)"
     : "(none until setup)";
   const hostRoots = ready
-    ? loadSessionHosts(paths.home).flatMap((host) => host.roots.map((root) => `${host.label}=${root}`)).join(", ") || "(none)"
+    ? loadSessionHosts(paths.home).flatMap((host) => host.roots
+      .filter((root) => existsSync(root))
+      .map((root) => `${host.label}=${root}`)).join(", ") || "(none)"
     : "(none until setup)";
 
   return [

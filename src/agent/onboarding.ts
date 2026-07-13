@@ -197,7 +197,9 @@ export async function runOnboarding(
       saveTranscriptAccess(paths.home, reviewed.selectedFormats, reviewed.roots, reviewed.defaultFormats);
       saveSessionHostRoots(paths.home, hostCandidates
         .filter((candidate): candidate is SessionHostCandidate & { root: string } =>
-          KNOWN_SESSION_HOSTS.includes(candidate.host as typeof KNOWN_SESSION_HOSTS[number]) && typeof candidate.root === "string")
+          KNOWN_SESSION_HOSTS.includes(candidate.host as typeof KNOWN_SESSION_HOSTS[number]) &&
+          typeof candidate.root === "string" &&
+          candidate.exists)
         .map(({ host, root }) => ({ host, root })));
       markOnboardingStep(paths.home, "session-sources", {
         reviewedHarnesses: [...KNOWN_AGENT_HARNESSES],

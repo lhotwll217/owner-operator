@@ -2,13 +2,22 @@
 // without a build step). Keep in lockstep with onboarding.mjs.
 
 import type { Blacklist } from "./blacklist.d.mts";
-import type { SessionSource, TranscriptFormat } from "./session-sources.d.mts";
-import type { SessionHostId } from "./session-hosts.d.mts";
+import type { AgentHarnessDescriptor, SessionSource, TranscriptFormat } from "./session-sources.d.mts";
+import type { SessionHostDescriptor, SessionHostId } from "./session-hosts.d.mts";
 
 /** Bumped when the flow gains a step the owner must be re-walked through. */
 export const ONBOARDING_VERSION: number;
 export type OnboardingStep = "intro" | "privacy" | "auth" | "session-sources" | "active-window" | "skills" | "always-on";
 export const ONBOARDING_STEPS: readonly OnboardingStep[];
+
+/** The access and attribution fields whose changes require a fresh catalog review. */
+export function sessionCatalogReviewContract(
+  harnesses?: readonly AgentHarnessDescriptor[],
+  hosts?: readonly SessionHostDescriptor[],
+): {
+  harnesses: Array<Pick<AgentHarnessDescriptor, "id" | "transcriptFormat" | "defaults" | "common">>;
+  hosts: Array<{ id: SessionHostId; harnesses: readonly AgentHarnessDescriptor["id"][] }>;
+};
 
 /** One configured (source, root) probed for existing sessions. */
 export interface DetectedRoot {

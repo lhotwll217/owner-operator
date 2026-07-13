@@ -1,5 +1,9 @@
 import assert from "node:assert";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { KNOWN_TRANSCRIPT_FORMATS, REVIEWED_SESSION_HOSTS } from "@owner-operator/core";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { buildSessionCatalogReview, reviewSessionCatalog } from "./session-catalog-review";
 
 const catalog = buildSessionCatalogReview(
@@ -19,6 +23,19 @@ const reenabled = await reviewSessionCatalog({
 }, preserved);
 assert.ok(reenabled?.selectedFormats.includes("pi"), "RPC can explicitly re-include a previously ignored harness");
 assert.ok(reenabled?.defaultFormats.includes("pi"), "re-including a harness restores its standard stores");
+
+let rpcInputs = 0;
+const rpcWarnings: string[] = [];
+const correctedRpc = await reviewSessionCatalog({
+  mode: "rpc",
+  ui: {
+    async input(): Promise<string> { return rpcInputs++ === 0 ? "claude" : "claude-code"; },
+    notify(message: string): void { rpcWarnings.push(message); },
+  } as any,
+}, catalog);
+assert.equal(rpcInputs, 2, "unknown RPC consent IDs are rejected and re-prompted");
+assert.match(rpcWarnings[0] ?? "", /unknown.*claude/i);
+assert.ok(!correctedRpc?.selectedFormats.includes("claude"));
 
 const relocated = buildSessionCatalogReview(
   [
@@ -103,5 +120,107 @@ const manual = await reviewSessionCatalog({ mode: "tui", ui: manualUi as any }, 
 });
 assert.ok(manual?.roots?.some(({ format, root }) => format === "codex" && root === manualRoot), "manual store entry returns to the same review surface");
 assert.ok(manual?.roots?.some(({ format, root }) => format === "codex" && root === deepRoot), "deep search merges without dropping a manual store");
+
+customCalls = 0;
+const cancelWarnings: string[] = [];
+await reviewSessionCatalog({ mode: "tui", ui: {
+  ...tuiUi,
+  custom(factory: any): Promise<any> {
+    return new Promise((resolve) => {
+      Promise.resolve(factory(
+        { requestRender(): void {} },
+        { fg: (_color: string, value: string): string => value },
+        {},
+        resolve,
+      )).then((component) => component.handleInput(customCalls++ === 0 ? "a" : "\r"));
+    });
+  },
+  async select(): Promise<string> { return "codex"; },
+  async input(): Promise<undefined> { return undefined; },
+  notify(message: string): void { cancelWarnings.push(message); },
+} as any }, catalog);
+assert.deepEqual(cancelWarnings, [], "cancelling manual store entry is not reported as invalid input");
+
+const missingParent = mkdtempSync(join(tmpdir(), "oo-catalog-missing-"));
+const missingRoot = join(missingParent, "future-store");
+const missingWarnings: string[] = [];
+let missingRender: string[] = [];
+customCalls = 0;
+const missingResult = await reviewSessionCatalog({ mode: "tui", ui: {
+  ...tuiUi,
+  custom(factory: any): Promise<any> {
+    return new Promise((resolve) => {
+      Promise.resolve(factory(
+        { requestRender(): void {} },
+        { fg: (_color: string, value: string): string => value },
+        {},
+        resolve,
+      )).then((component) => {
+        if (customCalls++ === 0) component.handleInput("a");
+        else {
+          missingRender = component.render(240);
+          component.handleInput("\r");
+        }
+      });
+    });
+  },
+  async select(): Promise<string> { return "codex"; },
+  async input(): Promise<string> { return missingRoot; },
+  notify(message: string): void { missingWarnings.push(message); },
+} as any }, buildSessionCatalogReview([], []));
+assert.ok(missingResult?.roots.some(({ format, root }) => format === "codex" && root === missingRoot), "a future absolute store remains configurable");
+assert.match(missingWarnings[0] ?? "", /does not exist/i, "a missing manual store is disclosed");
+assert.ok(!missingRender.join("\n").includes(`detected at ${missingRoot}`), "a missing manual store is not presented as detected");
+rmSync(missingParent, { recursive: true, force: true });
+
+let detectedRender: string[] = [];
+await reviewSessionCatalog({ mode: "tui", ui: {
+  ...tuiUi,
+  custom(factory: any): Promise<any> {
+    return new Promise((resolve) => {
+      Promise.resolve(factory(
+        { requestRender(): void {} },
+        { fg: (_color: string, value: string): string => value },
+        {},
+        resolve,
+      )).then((component) => {
+        detectedRender = component.render(80);
+        component.handleInput("\r");
+      });
+    });
+  },
+} as any }, buildSessionCatalogReview([
+  { source: "claude", root: "/stale/claude", tier: 1, exists: false, shape: false },
+  { source: "claude", root: "/actual/claude", tier: 2, exists: true, shape: false },
+], []));
+assert.ok(detectedRender.join("\n").includes("detected at /actual/claude"), "the displayed detection path is one that exists");
+assert.ok(detectedRender.every((line) => visibleWidth(line) <= 80), "every catalog row fits an 80-column terminal");
+
+const explicitOnlyRoot = mkdtempSync(join(tmpdir(), "oo-catalog-explicit-"));
+customCalls = 0;
+const explicitOnly = await reviewSessionCatalog({ mode: "tui", ui: {
+  ...tuiUi,
+  custom(factory: any): Promise<any> {
+    return new Promise((resolve) => {
+      Promise.resolve(factory(
+        { requestRender(): void {} },
+        { fg: (_color: string, value: string): string => value },
+        {},
+        resolve,
+      )).then((component) => {
+        if (customCalls++ === 0) {
+          component.handleInput(" ");
+          component.handleInput("a");
+        } else component.handleInput("\r");
+      });
+    });
+  },
+  async select(): Promise<string> { return "claude-code"; },
+  async input(): Promise<string> { return explicitOnlyRoot; },
+} as any }, buildSessionCatalogReview([], []));
+assert.ok(explicitOnly?.selectedFormats.includes("claude"));
+assert.ok(!explicitOnly?.defaultFormats.includes("claude"), "adding one explicit store after ignoring a harness does not restore standard stores");
+assert.ok(explicitOnly?.roots.some(({ format, root }) => format === "claude" && root === explicitOnlyRoot));
+rmSync(explicitOnlyRoot, { recursive: true, force: true });
 
 process.stdout.write("ok — session catalog review: inventory, preserved choices, deep search, manual store, RPC fallback\n");

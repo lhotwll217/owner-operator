@@ -25,10 +25,29 @@ import { ensureOwnerOperatorWorkspace } from "./harness.mjs";
 // so adding a supported harness or owner-facing host reopens only that inventory step.
 export const ONBOARDING_VERSION = 3;
 const AUTH_CONSENT_VERSION = 1;
-const SESSION_CATALOG_HASH = createHash("sha256").update(JSON.stringify({
-  harnesses: AGENT_HARNESS_DESCRIPTORS,
-  hosts: SESSION_HOST_DESCRIPTORS.filter(({ review }) => review),
-})).digest("hex");
+
+/** Only access and attribution changes reopen the owner's catalog review. */
+export function sessionCatalogReviewContract(
+  harnesses = AGENT_HARNESS_DESCRIPTORS,
+  hosts = SESSION_HOST_DESCRIPTORS,
+) {
+  return {
+    harnesses: harnesses.map(({ id, transcriptFormat, defaults, common }) => ({
+      id,
+      transcriptFormat,
+      defaults,
+      common,
+    })),
+    hosts: hosts.filter(({ review }) => review).map(({ id, harnesses: hostHarnesses }) => ({
+      id,
+      harnesses: hostHarnesses,
+    })),
+  };
+}
+
+const SESSION_CATALOG_HASH = createHash("sha256")
+  .update(JSON.stringify(sessionCatalogReviewContract()))
+  .digest("hex");
 export const ONBOARDING_STEPS = Object.freeze([
   "intro",
   "privacy",
@@ -304,10 +323,19 @@ export function saveTranscriptAccess(ooHome = defaultHome(), selectedFormats = [
   return { selected, add };
 }
 
-/** Persist roots used only to attribute sessions to their owner-facing host. */
+/** Add roots used only to attribute sessions to their owner-facing host. */
 export function saveSessionHostRoots(ooHome = defaultHome(), roots = []) {
   const clean = [];
   const seen = new Set();
+  const path = join(ooHome, "session_hosts.json");
+  const configured = readJson(path).roots;
+  for (const entry of Array.isArray(configured) ? configured : []) {
+    if (!KNOWN_SESSION_HOSTS.includes(entry?.host) || typeof entry?.root !== "string" || !entry.root.trim()) continue;
+    const root = entry.root.trim();
+    const key = `${entry.host}\0${root}`;
+    if (!seen.has(key)) clean.push({ host: entry.host, root });
+    seen.add(key);
+  }
   for (const entry of Array.isArray(roots) ? roots : []) {
     if (!KNOWN_SESSION_HOSTS.includes(entry?.host)) {
       throw new Error(`unknown session host "${entry?.host}" — one of: ${KNOWN_SESSION_HOSTS.join(", ")}`);
@@ -319,7 +347,6 @@ export function saveSessionHostRoots(ooHome = defaultHome(), roots = []) {
     seen.add(key);
   }
   ensureHome(ooHome);
-  const path = join(ooHome, "session_hosts.json");
   writeJson(path, { ...readJson(path), roots: clean });
   return clean;
 }
