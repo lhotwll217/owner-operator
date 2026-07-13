@@ -60,11 +60,10 @@ process/model runtime and that application code never loads from development-ski
 SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its only production
 writer. The active `/session-state` response is a projection over `threads` and the latest dense
 `thread_details` version; there is no stored snapshot or embedded client store.
-This pre-release V0 intentionally starts `state.db` clean; the retired `threads.db` prototype is
-not a supported upgrade source.
+`state.db` starts clean; the retired `threads.db` is not an upgrade source.
 
 After a transaction commits, `State` publishes a rich typed event on a fail-isolated in-memory bus.
-The bus is a wake-up mechanism, never a queue. The Gateway maps domain events to three typed SSE
+The bus wakes consumers; clients refetch truth rather than consuming event payloads. The Gateway maps domain events to three typed SSE
 invalidations—state, schedule, or schedule-run changed—and clients refetch SQLite-backed truth.
 
 Enrichment is eligible when the current state is `needs-you` and `last_message_at` differs from
@@ -138,6 +137,5 @@ Long-lived Node clients invalidate cached discovery after authentication or conn
 their SSE subscriptions reread `daemon.json` before reconnecting.
 
 The widget installer installs both LaunchAgents. The widget itself remains a pure Gateway client
-and never spawns a process. Showing Owner Operator's own scheduled sessions in the widget is a
-separate feature; those transcripts are searchable now but excluded from external coding-session
-monitoring, preventing automation loops.
+and never spawns a process. Owner Operator's own scheduled-session transcripts are searchable
+but excluded from coding-session monitoring, preventing automation loops.

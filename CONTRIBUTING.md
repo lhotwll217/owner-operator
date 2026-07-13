@@ -24,8 +24,8 @@ to humans and agents alike.
 | Hermetic tests (unit · integration · e2e) | `npm test` | `ci.yml` |
 | Widget (Swift) | `cd apps/widget && swift test` | `widget.yml` (macOS, path-filtered) |
 
-`npm test` is hermetic; the `smoke`/`live` tiers are manual and stay out of CI by design —
-the tier taxonomy and hermetic rule live in [docs/testing.md](docs/testing.md).
+`npm test` is hermetic; the `smoke`/`live` tiers are manual and out of CI —
+tier taxonomy and hermetic rule: [docs/testing.md](docs/testing.md).
 
 ## Standards
 
