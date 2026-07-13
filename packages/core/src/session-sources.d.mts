@@ -18,7 +18,16 @@ export interface SessionRoot {
   root: string;
 }
 
+export interface SessionSourceDescriptor {
+  source: SessionSource;
+  defaults: readonly (readonly string[])[];
+  common: readonly (readonly string[])[];
+  declared: readonly { env: string; suffix: readonly string[] }[];
+  deep: readonly { marker: string; suffix: readonly string[] }[];
+}
+
 export const KNOWN_SESSION_SOURCES: readonly SessionSource[];
+export const SESSION_SOURCE_DESCRIPTORS: readonly SessionSourceDescriptor[];
 
 /**
  * The (source, root) dirs to scan/watch: built-in defaults minus `disable`, plus `add`,

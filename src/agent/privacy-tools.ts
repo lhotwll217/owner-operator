@@ -171,11 +171,71 @@ export function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: B
 }
 
 const TRAVERSAL_PROGRAMS = new Set(["find", "grep", "ls", "rg"]);
+const PRIVACY_INSPECTABLE_PROGRAMS = new Set([
+  "[", "basename", "cat", "cd", "chmod", "chown", "command", "cp", "cut", "dash",
+  "date", "df", "diff", "dirname", "du", "echo", "env", "false", "file", "find",
+  "git", "grep", "head", "jq", "ln", "ls", "mkdir", "mv", "node", "printf",
+  "printenv", "pwd", "readlink", "realpath", "rg", "rm", "rmdir", "sed", "sh",
+  "sleep", "sort", "stat", "tail", "tee", "test", "touch", "tr", "true", "type",
+  "uname", "uniq", "wc", "which", "whoami", "zsh",
+]);
+const OPAQUE_GIT_FLAGS = new Set([
+  "-c", "--config-env", "--exec-path", "--ext-diff", "--textconv", "--open-files-in-pager",
+]);
 const REDIRECTION_TARGET = /(?:^|\s)(?:\d*(?:>>?|<<?)|&>)\s*(?:"([^"]*)"|'([^']*)'|([^\s|;&]+))/g;
 const expandHome = (value: string): string => value
   .replace(/^\$HOME(?=\/|$)/, homedir())
   .replace(/^\$\{HOME\}(?=\/|$)/, homedir());
-const tokenPath = (token: string): string => expandHome(/^[A-Za-z_][A-Za-z0-9_]*=(.*)$/.exec(token)?.[1] ?? token);
+const tokenPath = (token: string): string => expandHome(/^[A-Za-z_][A-Za-z0-9_]*=(.*)$/.exec(token)?.[1] ?? token)
+  .replace(/^\$OO_INSTALL_ROOT(?=\/|$)/, repoRoot)
+  .replace(/^\$\{OO_INSTALL_ROOT\}(?=\/|$)/, repoRoot);
+
+function argumentPathCandidates(token: string): string[] {
+  const value = tokenPath(token);
+  if (!value.startsWith("-")) return [value];
+  const equals = value.indexOf("=");
+  if (equals >= 0 && equals < value.length - 1) {
+    const rhs = value.slice(equals + 1);
+    const nestedEquals = rhs.lastIndexOf("=");
+    return [nestedEquals >= 0 ? rhs.slice(nestedEquals + 1) : rhs];
+  }
+  if (value.startsWith("-C") && value.length > 2) return [value.slice(2)];
+  return [];
+}
+
+function allowedSessionSearchNode(command: Awaited<ReturnType<typeof parseShellCommand>>["commands"][number]): boolean {
+  if (command.programName !== "node") return true;
+  const script = command.positionals()[0]?.text;
+  return script === "$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs" ||
+    script === "${OO_INSTALL_ROOT}/src/agent/skills/session-search/scripts/session-search.mjs" ||
+    script === path.join(repoRoot, "src", "agent", "skills", "session-search", "scripts", "session-search.mjs");
+}
+
+function opaquePrivacyRouteReason(
+  commandText: string,
+  parsed: Awaited<ReturnType<typeof parseShellCommand>>,
+): string | undefined {
+  const withoutKnownVariables = commandText
+    .replace(/\$(?:HOME|\{HOME\}|OO_INSTALL_ROOT|\{OO_INSTALL_ROOT\})(?=\/|["'\s]|$)/g, "");
+  if (/`|\$\(|\$[A-Za-z_{]/.test(withoutKnownVariables)) {
+    return "Privacy blacklist denies bash with dynamically constructed paths";
+  }
+  for (const command of parsed.commands) {
+    if (!command.programName || !PRIVACY_INSPECTABLE_PROGRAMS.has(command.programName) || !allowedSessionSearchNode(command)) {
+      return `Privacy blacklist denies opaque bash program ${command.programName ?? "(unknown)"}`;
+    }
+    if (command.programName === "git" && command.args.some((arg) => OPAQUE_GIT_FLAGS.has(arg.text) || [...OPAQUE_GIT_FLAGS].some((flag) => arg.text.startsWith(`${flag}=`)))) {
+      return "Privacy blacklist denies git options that can execute external helpers";
+    }
+    if (command.programName === "find" && command.args.some((arg) => ["-exec", "-execdir", "-ok", "-okdir"].includes(arg.text))) {
+      return "Privacy blacklist denies find options that execute external commands";
+    }
+    if (command.programName === "sed" && command.positionals().some((arg) => /(^|[;\n])\s*e(?:\s|$)/.test(arg.text))) {
+      return "Privacy blacklist denies sed programs that execute external commands";
+    }
+  }
+  return undefined;
+}
 
 export async function blacklistedBashReason(
   command: string,
@@ -184,9 +244,16 @@ export async function blacklistedBashReason(
 ): Promise<string | undefined> {
   if (bl.paths.length === 0 && bl.repos.length === 0) return undefined;
   const parsed = await parseShellCommand(command);
-  const candidates = parsed.commands.flatMap((entry) => [...entry.args, ...entry.assignments].map((token) => tokenPath(token.text)));
+  if (parsed.hasErrors) return "Privacy blacklist denies an unparseable bash command";
+  const cwdVerdict = blacklistedPathVerdict(".", cwd, bl);
+  if (cwdVerdict.blacklisted) return `Privacy blacklist denies access to ${cwdVerdict.path}`;
+  const opaqueReason = opaquePrivacyRouteReason(command, parsed);
+  if (opaqueReason) return opaqueReason;
+  const candidates = parsed.commands.flatMap((entry) =>
+    [...entry.args, ...entry.assignments].flatMap((token) => argumentPathCandidates(token.text))
+  );
   for (const match of command.matchAll(REDIRECTION_TARGET)) candidates.push(tokenPath(match[1] ?? match[2] ?? match[3] ?? ""));
-  for (const candidate of candidates.filter((value) => value && !value.startsWith("-"))) {
+  for (const candidate of candidates.filter(Boolean)) {
     const verdict = blacklistedPathVerdict(candidate, cwd, bl);
     if (verdict.blacklisted) return `Privacy blacklist denies access to ${verdict.path}`;
   }

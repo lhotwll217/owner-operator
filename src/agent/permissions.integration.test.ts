@@ -6,10 +6,12 @@ import { evaluateOwnerOperatorToolCall } from "./permissions";
 
 const root = mkdtempSync(join(tmpdir(), "oo-permissions-"));
 const ooHome = join(root, "oo-home");
+const openOoHome = join(root, "open-oo-home");
 const task = join(root, "task");
 const blocked = join(task, "Private");
 mkdirSync(blocked, { recursive: true });
 mkdirSync(ooHome, { recursive: true });
+mkdirSync(openOoHome, { recursive: true });
 writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [blocked], repos: [] }));
 
 const decide = (
@@ -17,6 +19,11 @@ const decide = (
   input: Record<string, unknown>,
   surface: "interactive" | "headless" = "interactive",
 ) => evaluateOwnerOperatorToolCall({ toolName, input, cwd: task, ooHome, surface });
+const decideWithoutBlacklist = (
+  toolName: string,
+  input: Record<string, unknown>,
+  surface: "interactive" | "headless" = "interactive",
+) => evaluateOwnerOperatorToolCall({ toolName, input, cwd: task, ooHome: openOoHome, surface });
 
 try {
   assert.deepEqual(await decide("read", { path: "README.md" }), { action: "allow" });
@@ -32,7 +39,18 @@ try {
   assert.equal((await decide("write", { path: "notes.md" }, "headless")).action, "deny");
   assert.equal((await decide("bash", { command: "rm notes.md" })).action, "ask");
   assert.equal((await decide("bash", { command: "git push origin main" }, "headless")).action, "deny");
-  assert.equal((await decide("bash", { command: "python -c 'print(1)'" })).action, "ask", "unknown programs fail toward approval");
+  assert.equal((await decideWithoutBlacklist("bash", { command: "python -c 'print(1)'" })).action, "ask", "unknown programs ask when no privacy aperture is at risk");
+  assert.equal((await decide("bash", { command: "python -c 'print(1)'" })).action, "deny", "opaque interpreters cannot bypass an active blacklist after approval");
+  assert.equal(
+    (await decide("bash", { command: `git --git-dir=${join(blocked, ".git")} show HEAD:secret` }, "headless")).action,
+    "deny",
+    "path-valued git flags are checked against the blacklist",
+  );
+  assert.equal(
+    (await decide("bash", { command: "git -c core.fsmonitor=/tmp/hook status" }, "headless")).action,
+    "deny",
+    "git options that execute helpers are risky",
+  );
 
   for (const command of [
     `cat ${join(blocked, "secret.txt")}`,

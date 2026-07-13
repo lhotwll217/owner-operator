@@ -19,6 +19,13 @@ final class DaemonClient: ObservableObject {
 
     nonisolated static let defaultPort = 47711
 
+    nonisolated static func harnessHome(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        if let configured = environment["OO_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines), !configured.isEmpty {
+            return configured
+        }
+        return (NSHomeDirectory() as NSString).appendingPathComponent(".owner-operator")
+    }
+
     private var pollTimer: Timer?
     private var sseTask: Task<Void, Never>?
     private var started = false
@@ -66,9 +73,9 @@ final class DaemonClient: ObservableObject {
         let setupRequired: Bool
     }
 
-    /// ~/.owner-operator/daemon.json → the authenticated local Gateway discovery record.
+    /// <OO_HOME>/daemon.json → the authenticated local Gateway discovery record.
     nonisolated static func discoverGateway() -> Discovery? {
-        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".owner-operator/daemon.json")
+        let path = (harnessHome() as NSString).appendingPathComponent("daemon.json")
         guard let data = FileManager.default.contents(atPath: path),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let port = obj["port"] as? Int,

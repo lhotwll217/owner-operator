@@ -29,6 +29,9 @@ const ALWAYS_SAFE = new Set([
 ]);
 const SHELL_WRAPPERS = new Set(["bash", "dash", "sh", "zsh"]);
 const SAFE_GIT = new Set(["blame", "describe", "diff", "grep", "log", "ls-files", "rev-parse", "show", "status"]);
+const RISKY_GIT_FLAGS = new Set([
+  "-c", "--config-env", "--exec-path", "--ext-diff", "--textconv", "--open-files-in-pager", "--output",
+]);
 const OUTPUT_REDIRECTION = /(^|[^<])(?:>>?|&>)/;
 
 function commandIsSafe(command: SimpleCommand): boolean {
@@ -36,6 +39,7 @@ function commandIsSafe(command: SimpleCommand): boolean {
   if (!program) return false;
   if (SHELL_WRAPPERS.has(program)) return command.hasFlag("-c");
   if (program === "git") {
+    if (command.args.some((arg) => RISKY_GIT_FLAGS.has(arg.text) || [...RISKY_GIT_FLAGS].some((flag) => arg.text.startsWith(`${flag}=`)))) return false;
     const subcommand = command.subcommand({ valueFlags: gitValueFlags })?.text;
     return !!subcommand && SAFE_GIT.has(subcommand);
   }

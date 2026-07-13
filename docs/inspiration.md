@@ -40,7 +40,7 @@ intent/history and a fresh isolated Pi session per prompt run. The local schedul
 limited to time evaluation, durable claims through `State`, and execution lifecycle.
 
 Permission gates reuse `@thurstonsand/pi-permissions`' parsed shell-command model
-([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/src/shell.ts))
+([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/src/shell.ts#L130-L150))
 behind an Owner Operator extension. Its complete extension was not adopted because its runtime
 resolves user and package policy through Pi's global agent directory
 ([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/extensions/runtime.ts#L45-L72)).

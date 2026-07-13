@@ -1,8 +1,9 @@
-// Unit: Owner Operator session tool allowlists.
+// Integration: Owner Operator session configuration over isolated harness files.
 import assert from "node:assert";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
 import {
   evalSettingsOverrides,
   lastAssistantError,
@@ -11,6 +12,7 @@ import {
   ownerOperatorTools,
   ownerOperatorCustomTools,
   repoRoot,
+  runScheduledPrompt,
 } from "./agent";
 
 const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
@@ -32,6 +34,33 @@ try {
 }
 
 assert.deepEqual(evalSettingsOverrides({}), {}, "product sessions keep their configured transport");
+
+const priorOoHome = process.env.OO_HOME;
+const setupGateHome = join(configRoot, "setup-gate-home");
+process.env.OO_HOME = setupGateHome;
+const setupGateResult = await runScheduledPrompt({
+  cwd: configRoot,
+  runId: "run-before-setup",
+  schedule: {
+    id: "schedule-before-setup",
+    name: "before setup",
+    enabled: true,
+    trigger: { kind: ScheduleKind.At, at: new Date().toISOString() },
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt: "must not run", toolsAllow: [] },
+    cwd: configRoot,
+    timeoutSeconds: 30,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nextRunAt: null,
+  },
+  payload: { kind: ScheduledPayloadKind.Prompt, prompt: "must not run", toolsAllow: [] },
+  signal: new AbortController().signal,
+});
+assert.equal(setupGateResult.exitCode, 1);
+assert.match(setupGateResult.stderr, /setup required/i, "scheduled model work fails closed before consent");
+if (priorOoHome === undefined) delete process.env.OO_HOME;
+else process.env.OO_HOME = priorOoHome;
 assert.deepEqual(
   evalSettingsOverrides({ OO_EVAL_READ_ONLY: "1", OO_EVAL_TRANSPORT: "sse" }),
   { transport: "sse" },

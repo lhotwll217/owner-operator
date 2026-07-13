@@ -1,6 +1,5 @@
-// Unit test for onboarding writers + detection: the first-run marker, the merging config writers
-// (blacklist / session-sources / active-window), and source detection over a fake ooHome + roots.
-//   tsx src/onboarding.test.ts
+// Integration test for onboarding writers, Pi import, and source detection over isolated roots.
+//   tsx src/onboarding.integration.test.ts
 
 import assert from "node:assert";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -92,6 +91,7 @@ try {
   const piSessions = join(piHome, "custom-sessions");
   mkdirSync(join(codexHome, "sessions"), { recursive: true });
   mkdirSync(join(claudeHome, "projects"), { recursive: true });
+  mkdirSync(join(sourceHome, ".cursor", "projects"), { recursive: true });
   mkdirSync(piSessions, { recursive: true });
   writeFileSync(join(codexHome, "sessions", "one.jsonl"), "{}\n");
   writeFileSync(join(claudeHome, "projects", "one.jsonl"), "{}\n");
@@ -104,6 +104,7 @@ try {
   assert.ok(declared.some((candidate) => candidate.tier === 1 && candidate.source === "codex" && candidate.root === join(codexHome, "sessions")));
   assert.ok(declared.some((candidate) => candidate.tier === 1 && candidate.source === "claude" && candidate.root === join(claudeHome, "projects")));
   assert.ok(declared.some((candidate) => candidate.tier === 1 && candidate.source === "pi" && candidate.root === piSessions));
+  assert.ok(declared.some((candidate) => candidate.tier === 2 && candidate.source === "cursor" && candidate.exists && !candidate.shape), "tier 2 checks existence without listing for session shape");
 
   const discoveredCodex = join(sourceHome, "archive", ".codex", "sessions");
   const blockedClaude = join(sourceHome, "blocked", ".claude", "projects");
@@ -112,6 +113,10 @@ try {
   writeFileSync(join(discoveredCodex, "deep.jsonl"), "{}\n");
   writeFileSync(join(blockedClaude, "private.jsonl"), "{}\n");
   addBlacklistEntries(detectionOoHome, { paths: [join(sourceHome, "blocked")] });
+  addBlacklistEntries(detectionOoHome, { repos: ["repo-blocked"] });
+  const repoBlocked = join(sourceHome, "repo-blocked", ".codex", "sessions");
+  mkdirSync(repoBlocked, { recursive: true });
+  writeFileSync(join(repoBlocked, "private.jsonl"), "{}\n");
   const deep = detectSessionSourceCandidates(detectionOoHome, {
     home: sourceHome,
     env: {},
@@ -122,6 +127,7 @@ try {
   });
   assert.ok(deep.some((candidate) => candidate.tier === 3 && candidate.source === "codex" && candidate.root === discoveredCodex));
   assert.ok(!deep.some((candidate) => candidate.root.startsWith(join(sourceHome, "blocked"))), "deep detection prunes the privacy blacklist");
+  assert.ok(!deep.some((candidate) => candidate.root.startsWith(join(sourceHome, "repo-blocked"))), "deep detection prunes blacklisted repository names");
   rmSync(sourceHome, { recursive: true, force: true });
 
   // Blacklist writer merges + de-dupes with what the loader reads back, and strips trailing slashes.

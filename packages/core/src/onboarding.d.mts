@@ -27,7 +27,7 @@ export interface DetectedSource {
   count: number;
 }
 
-/** True once the guided setup has completed at least once (<ooHome>/onboarded.json present). */
+/** True once every current consent step is complete at the current marker version. */
 export function isOnboarded(ooHome?: string): boolean;
 export function pendingOnboardingSteps(ooHome?: string): OnboardingStep[];
 export function markOnboardingStep(

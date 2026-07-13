@@ -37,9 +37,9 @@ const ui = {
 const candidates: SessionSourceCandidate[] = [{
   source: "codex",
   root: codexRoot,
-  tier: 1,
+  tier: 2,
   exists: true,
-  shape: true,
+  shape: false,
 }];
 let installCalls = 0;
 

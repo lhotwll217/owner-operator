@@ -17,6 +17,7 @@ import {
 import {
   AgentToolId,
   ensureOwnerOperatorWorkspace,
+  isOnboarded,
   ownerOperatorPaths,
   type ScheduleExecutionResult,
   type ScheduledPromptRunRequest,
@@ -292,6 +293,10 @@ export function lastAssistantError(session: OwnerOperatorSession["session"]): st
 
 /** Fresh persisted session per scheduled run; never attaches to an active Pi conversation. */
 export async function runScheduledPrompt(request: ScheduledPromptRunRequest): Promise<ScheduleExecutionResult> {
+  const paths = ensureOwnerOperatorWorkspace();
+  if (!isOnboarded(paths.home)) {
+    return { exitCode: 1, stdout: "", stderr: "Owner Operator setup required; run `oo` interactively." };
+  }
   const sessionManager = SessionManager.create(request.cwd, ooSessionsDir());
   const provenance: OoProvenance = {
     surface: "schedule",

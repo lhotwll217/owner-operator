@@ -28,23 +28,78 @@ import { join } from "node:path";
  * A root is only honored for one of these. Docs and skill descriptions point here instead
  * of naming sources; add a source here first.
  */
-export const KNOWN_SESSION_SOURCES = ["claude", "codex", "cursor", "posthog-code", "pi", "opencode", "antigravity", "grok-build"];
+export const SESSION_SOURCE_DESCRIPTORS = Object.freeze([
+  {
+    source: "claude",
+    defaults: [[".claude", "projects"]],
+    common: [[".config", "claude", "projects"]],
+    declared: [{ env: "CLAUDE_CONFIG_DIR", suffix: ["projects"] }],
+    deep: [{ marker: ".claude", suffix: ["projects"] }],
+  },
+  {
+    source: "codex",
+    defaults: [[".codex", "sessions"]],
+    common: [[".config", "codex", "sessions"]],
+    declared: [{ env: "CODEX_HOME", suffix: ["sessions"] }],
+    deep: [{ marker: ".codex", suffix: ["sessions"] }],
+  },
+  {
+    source: "cursor",
+    defaults: [[".cursor", "projects"]],
+    common: [],
+    declared: [{ env: "CURSOR_HOME", suffix: ["projects"] }],
+    deep: [{ marker: ".cursor", suffix: ["projects"] }],
+  },
+  {
+    source: "posthog-code",
+    defaults: [[".posthog-code", "sessions"]],
+    common: [],
+    declared: [{ env: "POSTHOG_CODE_HOME", suffix: ["sessions"] }],
+    deep: [{ marker: ".posthog-code", suffix: ["sessions"] }],
+  },
+  {
+    source: "pi",
+    defaults: [[".pi", "agent", "sessions"]],
+    common: [[".config", "pi", "agent", "sessions"]],
+    declared: [{ env: "PI_CODING_AGENT_DIR", suffix: ["sessions"] }],
+    deep: [{ marker: ".pi", suffix: ["agent", "sessions"] }],
+  },
+  {
+    source: "opencode",
+    defaults: [[".local", "share", "opencode", "storage"]],
+    common: [],
+    declared: [
+      { env: "OPENCODE_HOME", suffix: ["storage"] },
+      { env: "XDG_DATA_HOME", suffix: ["opencode", "storage"] },
+    ],
+    deep: [{ marker: "opencode", suffix: ["storage"] }],
+  },
+  {
+    source: "antigravity",
+    defaults: [[".gemini", "antigravity"], [".gemini", "antigravity-cli"]],
+    common: [],
+    declared: [{ env: "GEMINI_HOME", suffix: ["antigravity"] }],
+    deep: [
+      { marker: ".gemini", suffix: ["antigravity"] },
+      { marker: ".gemini", suffix: ["antigravity-cli"] },
+    ],
+  },
+  {
+    source: "grok-build",
+    defaults: [[".grok", "sessions"]],
+    common: [],
+    declared: [{ env: "GROK_HOME", suffix: ["sessions"] }],
+    deep: [{ marker: ".grok", suffix: ["sessions"] }],
+  },
+]);
+
+export const KNOWN_SESSION_SOURCES = Object.freeze(SESSION_SOURCE_DESCRIPTORS.map(({ source }) => source));
 
 function defaultRoots() {
   const home = homedir();
-  return [
-    { source: "claude", root: join(home, ".claude", "projects") },
-    { source: "codex", root: join(home, ".codex", "sessions") },
-    { source: "cursor", root: join(home, ".cursor", "projects") },
-    { source: "posthog-code", root: join(home, ".posthog-code", "sessions") },
-    { source: "pi", root: join(home, ".pi", "agent", "sessions") },
-    // opencode keeps ~/.local/share on macOS too (no Application Support split).
-    { source: "opencode", root: join(home, ".local", "share", "opencode", "storage") },
-    // Antigravity writes brain transcripts under ~/.gemini — the IDE and the CLI each get a dir.
-    { source: "antigravity", root: join(home, ".gemini", "antigravity") },
-    { source: "antigravity", root: join(home, ".gemini", "antigravity-cli") },
-    { source: "grok-build", root: join(home, ".grok", "sessions") },
-  ];
+  return SESSION_SOURCE_DESCRIPTORS.flatMap(({ source, defaults }) =>
+    defaults.map((parts) => ({ source, root: join(home, ...parts) })),
+  );
 }
 
 const expand = (p) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);

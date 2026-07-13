@@ -11,8 +11,8 @@ export type { Blacklist } from "./blacklist.mjs";
 
 // Where local agent sessions live — the (source, root) dirs the scan and monitor share, with
 // owner overrides from session_sources.json. One source of truth so they can't drift.
-export { loadSessionSources, KNOWN_SESSION_SOURCES } from "./session-sources.mjs";
-export type { SessionSource, SessionRoot } from "./session-sources.mjs";
+export { loadSessionSources, KNOWN_SESSION_SOURCES, SESSION_SOURCE_DESCRIPTORS } from "./session-sources.mjs";
+export type { SessionSource, SessionRoot, SessionSourceDescriptor } from "./session-sources.mjs";
 
 // Transcript transport context must not become a visible topic. Shared by the scanner and
 // durable state projection so legacy rows follow the current classification too.

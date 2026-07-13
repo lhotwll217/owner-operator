@@ -32,6 +32,7 @@ const USAGE = `Owner Operator (oo) — track and act on your local CLI agent ses
 Model: imported or configured under OO_HOME/pi/settings.json`;
 
 const cli = parseOoArgs(process.argv.slice(2));
+const harnessPaths = ensureOwnerOperatorWorkspace();
 
 // --help / -h: usage and exit BEFORE building a model session, so probing help never makes a
 // paid call.
@@ -112,7 +113,6 @@ if (cli.done) {
   process.exit(result.missingIds.length > 0 ? 1 : 0);
 }
 
-const harnessPaths = ensureOwnerOperatorWorkspace();
 if (!isOnboarded(harnessPaths.home)) {
   process.stderr.write("oo: setup required; run `oo` in an interactive terminal\n");
   process.exit(2);

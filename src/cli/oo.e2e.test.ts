@@ -2,7 +2,7 @@
 // model session is built, so this stays hermetic and fast.
 import assert from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
@@ -33,6 +33,7 @@ try {
   assert.match(help.stdout, /oo --session-state/, "top-level help advertises --session-state");
   assert.doesNotMatch(help.stdout, /oo --json/, "top-level help does not advertise old --json name");
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
+  assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
   const setupRequired = spawnSync(ooBin, ["what is happening?"], opts);
   assert.equal(setupRequired.status, 2, "fresh headless runs fail closed before model or daemon work");

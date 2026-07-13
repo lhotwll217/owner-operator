@@ -37,7 +37,7 @@ export interface OnboardingFlowOptions {
   piAgentDir?: string;
   platform?: NodeJS.Platform;
   detectCandidates?: (deep: boolean) => SessionSourceCandidate[];
-  installAlwaysOn?: () => Promise<void>;
+  installAlwaysOn?: (ooHome: string) => Promise<void>;
   refreshConfiguration?: () => Promise<void>;
 }
 
@@ -57,8 +57,11 @@ function privacyEntries(raw: string): { paths: string[]; repos: string[] } {
   return { paths, repos };
 }
 
-const installAlwaysOn = async (): Promise<void> => {
-  await execFileAsync("make", ["install"], { cwd: path.join(repoRoot, "apps", "widget") });
+const installAlwaysOn = async (ooHome: string): Promise<void> => {
+  await execFileAsync("make", ["install"], {
+    cwd: path.join(repoRoot, "apps", "widget"),
+    env: { ...process.env, OO_HOME: ooHome },
+  });
 };
 
 export async function runOnboarding(
@@ -117,7 +120,7 @@ export async function runOnboarding(
       const offered = new Set<string>();
       const offer = async (candidate: SessionSourceCandidate): Promise<void> => {
         const key = `${candidate.source}\0${candidate.root}`;
-        if (offered.has(key) || !candidate.exists || !candidate.shape) return;
+        if (offered.has(key) || !candidate.exists || (candidate.tier === 3 && !candidate.shape)) return;
         offered.add(key);
         if (await ctx.ui.confirm(`Use ${candidate.source} sessions?`, candidate.root)) {
           confirmed.push({ source: candidate.source, root: candidate.root });
@@ -168,7 +171,7 @@ export async function runOnboarding(
           "Install the existing widget and daemon LaunchAgents for login and crash recovery?",
         );
         if (install) {
-          await (options.installAlwaysOn ?? installAlwaysOn)();
+          await (options.installAlwaysOn ?? installAlwaysOn)(paths.home);
           saveHarnessSettings(paths.home, { alwaysOn: "installed" });
         } else {
           saveHarnessSettings(paths.home, { alwaysOn: "declined" });
