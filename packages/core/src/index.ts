@@ -29,6 +29,21 @@ export type { GuiHost } from "./gui-hosts.mjs";
 // settings validator can't drift. See settings.mjs.
 export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
 
+// First-run setup's dependency-light config API: merge-safe writers, versioned marker, and
+// bounded source detection. The interactive flow is one client; scripts can call the same seam.
+export {
+  ONBOARDING_VERSION,
+  isOnboarded,
+  markOnboarded,
+  addBlacklistEntries,
+  addSessionRoot,
+  disableSessionSource,
+  saveActiveWindow,
+  detectSources,
+  summarizeDetectedSources,
+} from "./onboarding.mjs";
+export type { DetectedRoot, DetectedSource } from "./onboarding.mjs";
+
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.
 export * from "./status";
 
