@@ -23,12 +23,14 @@ import {
 } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
 import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
+import { createOwnerOperatorPermissionExtension } from "./permissions";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import { ownerOperatorCustomTools, ownerOperatorTools } from "./tools";
+import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
 
 export { repoRoot };
 export {
   getCurrentSessionStateTool,
+  configuredOwnerOperatorTools,
   markThreadDoneTool,
   ownerOperatorCustomTools,
   ownerOperatorTools,
@@ -108,6 +110,8 @@ export async function createOwnerOperatorSession(
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
+  const { authStorage, modelRegistry, paths, settingsManager } = ownerOperatorPiServices();
+  const configuredTools = configuredOwnerOperatorTools(paths.home);
   const readOnlyCustomToolNames = new Set<string>([
     AgentToolId.GetCurrentSessionState,
     AgentToolId.QueryDatabase,
@@ -120,7 +124,7 @@ export async function createOwnerOperatorSession(
   const tools = baselinePrompt
     ? ["read", "bash"]
     : opts.toolsAllow
-      ? [...opts.toolsAllow]
+      ? opts.toolsAllow.filter((tool) => configuredTools.includes(tool))
       : evalReadOnly
         ? [
             AgentToolId.Bash,
@@ -128,10 +132,9 @@ export async function createOwnerOperatorSession(
             AgentToolId.GetCurrentSessionState,
             AgentToolId.QueryDatabase,
           ]
-        : [...ownerOperatorTools];
+        : [...configuredTools];
   const cwd = opts.cwd ?? runtimeCwd();
 
-  const { authStorage, modelRegistry, paths, settingsManager } = ownerOperatorPiServices();
   settingsManager.applyOverrides(evalSettingsOverrides(process.env));
 
   const loader = new DefaultResourceLoader({
@@ -141,7 +144,13 @@ export async function createOwnerOperatorSession(
     ...ownerOperatorResourceLoaderOptions(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
-    extensionFactories: [createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId })],
+    extensionFactories: [
+      createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId }),
+      createOwnerOperatorPermissionExtension({
+        surface: surface === "interactive" ? "interactive" : "headless",
+        ooHome: paths.home,
+      }),
+    ],
   });
   await loader.reload();
 

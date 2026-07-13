@@ -31,16 +31,13 @@ try {
   const tools = new Map(createBlacklistAwareFileTools().map((tool) => [tool.name, tool]));
   const ctx = { cwd: publicDir } as any;
 
+  const bash = createOwnerOperatorBashTool();
+  const pwd = await bash.execute("bash-1", { command: "pwd" }, undefined, undefined, ctx);
+  assert.match((pwd.content[0] as { text: string }).text, new RegExp(publicDir), "bash executes in the task cwd");
   await assert.rejects(
-    () => createOwnerOperatorBashTool().execute(
-      "bash-1",
-      { command: "cat", args: [privateFile] },
-      undefined,
-      undefined,
-      ctx,
-    ),
-    /only runs the session-search skill helper/,
-    "bash cannot execute arbitrary commands or read paths directly",
+    () => bash.execute("bash-2", { command: `cat ${privateFile}` }, undefined, undefined, ctx),
+    /blacklist/i,
+    "bash rechecks the privacy blacklist at execution",
   );
 
   await assert.rejects(

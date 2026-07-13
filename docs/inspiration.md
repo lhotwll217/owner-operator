@@ -39,6 +39,17 @@ for daemon scheduling: it is a Pi-session timer, while Owner Operator needs SQLi
 intent/history and a fresh isolated Pi session per prompt run. The local scheduler is deliberately
 limited to time evaluation, durable claims through `State`, and execution lifecycle.
 
+Permission gates reuse `@thurstonsand/pi-permissions`' parsed shell-command model
+([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/src/shell.ts))
+behind an Owner Operator extension. Its complete extension was not adopted because its runtime
+resolves user and package policy through Pi's global agent directory
+([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/extensions/runtime.ts#L45-L72)).
+`@gotgenes/pi-permission-system` was also rejected as a drop-in because it selects project policy
+from the task cwd
+([source](https://github.com/gotgenes/pi-packages/blob/ca66df6efddffb0dd6e6fafc5707238a1881a075/packages/pi-permission-system/src/permission-manager.ts#L387-L401)).
+The local adapter owns only the product rules: the privacy blacklist and the documented
+interactive/headless gate table.
+
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in
 the issue/PR.

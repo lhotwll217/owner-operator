@@ -19,14 +19,15 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
   createOoSession,
+  configuredOwnerOperatorTools,
   ooProvenance,
   ownerOperatorCustomTools,
   ownerOperatorPiServices,
   ownerOperatorPrompt,
-  ownerOperatorTools,
   repoRoot,
 } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
+import { createOwnerOperatorPermissionExtension } from "../agent/permissions";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
 
@@ -37,6 +38,7 @@ if (!process.stdout.isTTY) {
 
 const prompt = ownerOperatorPrompt();
 const { authStorage, paths } = ownerOperatorPiServices();
+const interactiveTools = configuredOwnerOperatorTools(paths.home);
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
 // whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
@@ -52,7 +54,8 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
       extensionFactories: [
-        blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
+        blacklistAwareFileToolsExtension,           // same-name file/bash tools enforce the absolute blacklist
+        createOwnerOperatorPermissionExtension({ surface: "interactive", ooHome: paths.home }),
         ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner
       ],
     },
@@ -61,7 +64,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     services,
     sessionManager,
     sessionStartEvent,
-    tools: [...ownerOperatorTools],
+    tools: [...interactiveTools],
     customTools: ownerOperatorCustomTools,
   });
   return { ...created, services, diagnostics: services.diagnostics };

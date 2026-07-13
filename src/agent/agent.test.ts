@@ -61,14 +61,8 @@ assert.throws(
   /unsupported eval transport/i,
 );
 
-// Mutation and broad file traversal stay out. The same-name bash override only executes
-// the session-search skill helper; privacy-tools.integration.test proves arbitrary commands are rejected.
-for (const forbidden of ["edit", "write", "grep", "find", "ls"]) {
-  assert.ok(!ownerOperatorTools.some((tool) => tool === forbidden), `owner tools must NOT include ${forbidden}`);
-}
-
-// The tools it needs are present.
-for (const t of ["bash", "read", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt"]) {
+// Posture keeps every standard file/shell tool present; the gate decides each operation.
+for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 

@@ -1,4 +1,4 @@
-import { AgentToolId } from "@owner-operator/core";
+import { AgentToolId, loadHarnessSettings } from "@owner-operator/core";
 import { withOoRenderers } from "../../shared/oo-presentation";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
@@ -18,13 +18,27 @@ export const ownerOperatorCustomTools = [
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
 ];
 
-// `read` is a blacklist-aware override. `bash` is a same-name argv-only override that can
-// run only the session-search skill helper; it is not a general shell.
-export const ownerOperatorTools: readonly AgentToolId[] = [
-  AgentToolId.Bash,
-  AgentToolId.Read,
+const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.GetCurrentSessionState,
   AgentToolId.MarkThreadDone,
   AgentToolId.QueryDatabase,
   AgentToolId.SchedulePrompt,
 ];
+
+export const ownerOperatorTools: readonly AgentToolId[] = [
+  AgentToolId.Bash,
+  AgentToolId.Read,
+  AgentToolId.Grep,
+  AgentToolId.Find,
+  AgentToolId.Ls,
+  AgentToolId.Edit,
+  AgentToolId.Write,
+  ...ownerOperatorTypedTools,
+];
+
+export function configuredOwnerOperatorTools(ooHome?: string): readonly AgentToolId[] {
+  return [
+    ...loadHarnessSettings(ooHome).toolPosture as AgentToolId[],
+    ...ownerOperatorTypedTools,
+  ];
+}
