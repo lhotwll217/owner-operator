@@ -53,7 +53,7 @@ history and create prompt schedules that run in fresh isolated sessions.
 ## Install
 
 ```bash
-npm install            # once, from the repo root (Node 22+)
+npm install            # once, from the repo root; needs Node 22+
 ./oo                   # guided first-run setup
 ```
 

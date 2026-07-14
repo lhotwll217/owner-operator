@@ -9,7 +9,7 @@ read_when:
 # Agent
 
 Owner Operator is built on the [pi coding agent](https://github.com/earendil-works/pi),
-consumed as npm dependencies (`@earendil-works/pi-*`), pinned exact while pre-1.0. Embedded
+consumed as `@earendil-works/pi-*` npm dependencies, pinned exact while pre-1.0. Embedded
 Pi uses `OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not
 change standalone Pi. The resource loader disables ambient context, extensions, skills,
 prompts, and themes, then adds only the product prompt, bundled skills, workspace
@@ -52,8 +52,7 @@ The built-in tool posture is defined by
 mode during onboarding and changes it later with `/permissions`.
 
 Permission gating is
-[`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system) (pinned exact in
-`package.json`), not local code. It already provides deterministic allow/ask/deny rules, Bash
+[`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system), not local code. It already provides deterministic allow/ask/deny rules, Bash
 decomposition, cross-tool path gates, and once/session approval prompts
 ([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/README.md#L12-L47)).
 Its global config respects `PI_CODING_AGENT_DIR`

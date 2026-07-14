@@ -33,5 +33,5 @@ An ambiguous launchctl result fails closed and never authorizes direct signaling
 Long-lived Node clients invalidate cached discovery after authentication or connection failure, and
 their SSE subscriptions reread `daemon.json` before reconnecting.
 
-The widget installer installs both LaunchAgents (daemon + widget); the widget itself is a pure
-Gateway client ([widget.md](widget.md)).
+The widget installer installs the daemon and widget LaunchAgents together; the widget itself
+is a pure Gateway client ([widget.md](widget.md)).

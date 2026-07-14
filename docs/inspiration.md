@@ -21,7 +21,7 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
   an installed [service version stamp](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/daemon/service-env.ts#L430-L446),
   LaunchAgent [enable → kickstart → bootstrap recovery](https://github.com/openclaw/openclaw/blob/d4e93e791bc5/src/daemon/launchd.ts#L656-L684),
   and the [docs-list script](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/scripts/docs-list.js#L1-L179)
-  behind `npm run docs:list` (frontmatter routing: `summary` + `read_when` per page).
+  behind `npm run docs:list`.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven
   patterns at viral scale: skills grown from experience, persistent memory, one gateway
   process serving many chat surfaces. Pattern source for skills, memory, and surface design.
@@ -72,10 +72,10 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 
 | pi piece | Where it runs here |
 |---|---|
-| `@earendil-works/pi-coding-agent` (pinned in `package.json`) | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
-| `@earendil-works/pi-ai` (pinned in `package.json`) | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
-| [`croner`](https://github.com/Hexagon/croner) (pinned in `package.json`) | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
-| `jsonc-parser` (pinned in `package.json`) | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
+| `@earendil-works/pi-coding-agent` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
+| `@earendil-works/pi-ai` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
+| [`croner`](https://github.com/Hexagon/croner) | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
+| `jsonc-parser` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
 Permission gating is adopted wholesale from
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system). The full
