@@ -17,15 +17,17 @@ npm install            # once, from the repo root
 
 Setup creates `~/.owner-operator/workspace`, asks which coding projects are off-limits, offers to
 copy existing standalone Pi authorizations and model settings, then shows every supported harness
-and recognized app or CLI on one review surface. Standalone Pi is optional; fresh installs use
+and recognized app or CLI on one review surface. Setup also asks whether shell commands and changes
+should ask, run automatically, or remain unavailable. Standalone Pi is optional; fresh installs use
 Owner Operator's built-in provider login and store credentials under `~/.owner-operator/pi`.
 Harnesses start included; mark any to ignore. It then configures macOS always-on services, the
 active window, and skills. The copy does not change standalone Pi. Until setup finishes, headless
 calls and transcript/model processing fail closed.
 
 `./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
-credentials/model source, transcript stores, session host roots, skills, tools, and permission gates without printing
-secrets. Re-run `/onboarding` in the interactive terminal to change setup choices.
+credentials/model source, transcript stores, session host roots, skills, tools, and default permissions without printing
+secrets. Use `/permissions` to change the default mode, `/permission-system show` to inspect the
+composed Pi rules, or `/onboarding` to revisit setup.
 
 ## The widget
 
@@ -82,7 +84,9 @@ self-mark with `oo --done <that id>`.
 
 Durable prompt schedules use the typed `schedule_prompt` tool. Each run gets a fresh isolated
 Owner Operator transcript; failures and output are inspectable through `query_database` over
-`schedules` and `schedule_runs`.
+`schedules` and `schedule_runs`. Scheduled prompts inherit the global permission baseline;
+per-schedule tool availability and task-repository overrides are defined in the
+[scheduler contract](docs/architecture.md#scheduler).
 
 So far this has only been tested with a Codex subscription as the driver for the embedded Pi
 agent. Other model backends should work but are unverified.

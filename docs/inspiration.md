@@ -65,29 +65,32 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `@earendil-works/pi-coding-agent` (pinned in `package.json`) | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
 | `@earendil-works/pi-ai` (pinned in `package.json`) | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`croner`](https://github.com/Hexagon/croner) `10.0.1` | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
+| [`jsonc-parser`](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L109) `3.3.1` | `packages/core/src/permissions.mjs` — parse Pi's comment-bearing config and reject syntax errors before reconciliation |
 
 [`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) was considered and rejected
 for daemon scheduling: it is a Pi-session timer, while Owner Operator needs SQLite-owned job
 intent/history and a fresh isolated Pi session per prompt run. The local scheduler is deliberately
 limited to time evaluation, durable claims through `State`, and execution lifecycle.
 
-Permission gates reuse `@thurstonsand/pi-permissions`' parsed shell-command model
-([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/src/shell.ts#L130-L150))
-behind an Owner Operator extension. Its complete extension was not adopted because its runtime
-resolves user and package policy through Pi's global agent directory
-([source](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/extensions/runtime.ts#L45-L72)).
-`@gotgenes/pi-permission-system` was also rejected as a drop-in because it selects project policy
-from the task cwd
-([source](https://github.com/gotgenes/pi-packages/blob/ca66df6efddffb0dd6e6fafc5707238a1881a075/packages/pi-permission-system/src/permission-manager.ts#L387-L401)).
-The adopted parser is macOS-compatible TypeScript plus a WebAssembly Bash grammar, with no
-Linux-only sandbox dependency. Version `0.8.0` was released from the pinned
-[release commit](https://github.com/thurstonsand/pi-permissions/commit/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c)
-on the day of this triage, and its upstream suite covers assignments, wrappers, substitutions, flags, and nested
-shell payloads
-([tests](https://github.com/thurstonsand/pi-permissions/blob/6bed116b0099f2ddfbd1c2f0c985ed45dcf49e1c/test/shell.test.ts#L24-L99)).
-Pinning the exact version and retaining only that tested parser keeps maintenance exposure smaller
-than adopting its policy/config runtime. The local adapter owns only the product rules: the privacy
-blacklist and the documented interactive/headless gate table.
+Permissions use `@gotgenes/pi-permission-system` `20.7.1`. It already provides deterministic
+allow/ask/deny rules, Bash decomposition, cross-tool path gates, and once/session approval prompts
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/README.md#L12-L47)).
+Its global config respects `PI_CODING_AGENT_DIR`
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L5-L12)),
+so Owner Operator roots it under `OO_HOME/pi`. Owner Operator writes only three baseline modes and
+marker-owned blacklist path rules, preserving specific user rules and extension settings; it does
+not maintain executable or shell-subcommand classifiers. Pattern maps use the extension's broad-first,
+last-match-wins contract
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/config-schema.ts#L55-L87)).
+Its Bash safety floors can raise opaque or execution-wrapper commands from `allow` to `ask`
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L319-L331));
+headless calls cannot approve those prompts.
+Project rules still resolve from the task cwd
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/permission-manager.ts#L388-L401));
+project rules are therefore trusted task policy and may override the global baseline. The separate
+raw direct-file-tool guard enforces explicit paths, repository names, and symlink resolution. OS
+enforcement for process-internal access and recursive traversal from a parent directory is scoped to
+[#61](https://github.com/lhotwll217/owner-operator/issues/61), which starts from Anthropic Sandbox Runtime and an existing Pi adapter.
 
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in

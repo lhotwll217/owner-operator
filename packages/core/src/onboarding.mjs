@@ -20,10 +20,11 @@ import {
 import { KNOWN_SESSION_HOSTS, REVIEWED_SESSION_HOSTS, SESSION_HOST_DESCRIPTORS } from "./session-hosts.mjs";
 import { isWindowSpec } from "./settings.mjs";
 import { ensureOwnerOperatorWorkspace } from "./harness.mjs";
+import { reconcilePermissionSettings } from "./permissions.mjs";
 
 // Bumped when the flow gains a consent the owner must review. Catalog IDs are checked separately,
 // so adding a supported harness or owner-facing host reopens only that inventory step.
-export const ONBOARDING_VERSION = 3;
+export const ONBOARDING_VERSION = 4;
 const AUTH_CONSENT_VERSION = 1;
 
 /** Only access and attribution changes reopen the owner's catalog review. */
@@ -75,6 +76,7 @@ export const ONBOARDING_STEPS = Object.freeze([
   "intro",
   "privacy",
   "auth",
+  "permissions",
   "session-sources",
   "always-on",
   "active-window",
@@ -263,6 +265,7 @@ export function addBlacklistEntries(ooHome = defaultHome(), { paths = [], repos 
     repos: uniq([...current.repos, ...clean(repos)]),
   };
   writeJson(join(ooHome, "blacklist.json"), next);
+  reconcilePermissionSettings(ooHome);
   return next;
 }
 

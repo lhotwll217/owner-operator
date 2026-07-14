@@ -22,6 +22,7 @@ import {
   pendingOnboardingSteps,
   saveActiveWindow,
   saveHarnessSettings,
+  savePermissionMode,
   saveSessionHostRoots,
   saveTranscriptAccess,
   recordPiImportDecision,
@@ -41,6 +42,7 @@ import {
   type SessionCatalogReview,
   type SessionCatalogReviewResult,
 } from "./session-catalog-review";
+import { PERMISSION_MODE_CHOICES, permissionModeForChoice } from "./permission-settings";
 
 const execFileAsync = promisify(execFile);
 let running = false;
@@ -179,6 +181,13 @@ export async function runOnboarding(
         return false;
       }
       markOnboardingStep(paths.home, "auth", { piImport });
+    }
+
+    if (needs("permissions")) {
+      const mode = await ctx.ui.select("Default permissions", [...PERMISSION_MODE_CHOICES]);
+      if (!mode) return false;
+      savePermissionMode(paths.home, permissionModeForChoice(mode));
+      markOnboardingStep(paths.home, "permissions");
     }
 
     if (needs("session-sources")) {

@@ -7,7 +7,7 @@ import type { SessionHostDescriptor, SessionHostId } from "./session-hosts.d.mts
 
 /** Bumped when the flow gains a step the owner must be re-walked through. */
 export const ONBOARDING_VERSION: number;
-export type OnboardingStep = "intro" | "privacy" | "auth" | "session-sources" | "active-window" | "skills" | "always-on";
+export type OnboardingStep = "intro" | "privacy" | "auth" | "permissions" | "session-sources" | "active-window" | "skills" | "always-on";
 export const ONBOARDING_STEPS: readonly OnboardingStep[];
 
 /** The access and attribution fields whose changes require a fresh catalog review. */

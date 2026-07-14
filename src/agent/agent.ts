@@ -24,7 +24,11 @@ import {
 } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
 import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
-import { createOwnerOperatorPermissionExtension } from "./permissions";
+import {
+  configurePermissionSystemEnvironment,
+  createPermissionSettingsExtension,
+  permissionSystemExtensionPath,
+} from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
 
@@ -113,6 +117,7 @@ export async function createOwnerOperatorSession(
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
   const { authStorage, modelRegistry, paths, settingsManager } = ownerOperatorPiServices();
+  configurePermissionSystemEnvironment(paths);
   const configuredTools = configuredOwnerOperatorTools(paths.home);
   const readOnlyCustomToolNames = new Set<string>([
     AgentToolId.GetCurrentSessionState,
@@ -146,12 +151,16 @@ export async function createOwnerOperatorSession(
     ...ownerOperatorResourceLoaderOptions(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
+    additionalExtensionPaths: [permissionSystemExtensionPath()],
     extensionFactories: [
-      createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId }),
-      createOwnerOperatorPermissionExtension({
-        surface: surface === "interactive" ? "interactive" : "headless",
-        ooHome: paths.home,
-      }),
+      {
+        name: "owner-operator-privacy-tools",
+        factory: createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId }),
+      },
+      {
+        name: "owner-operator-permission-settings",
+        factory: createPermissionSettingsExtension({ ooHome: paths.home }),
+      },
     ],
   });
   await loader.reload();

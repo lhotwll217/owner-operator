@@ -3,25 +3,12 @@ export type SkillPolicy =
   | { mode: "all-personal"; allowlist: [] }
   | { mode: "allowlist"; allowlist: string[] };
 
-export type GateAction = "allow" | "ask" | "deny";
-export interface GateSurfacePolicy {
-  edit: GateAction;
-  write: GateAction;
-  riskyBash: GateAction;
-}
-export interface GatePolicy {
-  interactive: GateSurfacePolicy;
-  headless: GateSurfacePolicy;
-}
-export interface GatePolicyPatch {
-  interactive?: Partial<GateSurfacePolicy>;
-  headless?: Partial<GateSurfacePolicy>;
-}
+export type PermissionMode = "ask" | "allow" | "read-only";
 export interface HarnessSettings {
   activeWindow: string;
   skillPolicy: SkillPolicy;
   toolPosture: string[];
-  gatePolicy: GatePolicy;
+  permissionMode: PermissionMode;
   alwaysOn?: "installed" | "declined";
 }
 export interface OwnerOperatorPaths {
@@ -35,6 +22,7 @@ export interface OwnerOperatorPaths {
   piAuth: string;
   piSettings: string;
   piModels: string;
+  piPermissionConfig: string;
   imports: string;
   settings: string;
   onboardingMarker: string;
@@ -45,11 +33,12 @@ export interface OwnerOperatorPaths {
 
 export const DEFAULT_SKILL_POLICY: Readonly<SkillPolicy>;
 export const DEFAULT_TOOL_POSTURE: readonly string[];
-export const DEFAULT_GATE_POLICY: Readonly<GatePolicy>;
+export const DEFAULT_PERMISSION_MODE: PermissionMode;
+export function isPermissionMode(value: unknown): value is PermissionMode;
 export function ownerOperatorPaths(ooHome?: string): OwnerOperatorPaths;
 export function ensureOwnerOperatorWorkspace(ooHome?: string): OwnerOperatorPaths;
 export function loadHarnessSettings(ooHome?: string): HarnessSettings;
 export function saveHarnessSettings(
   ooHome: string | undefined,
-  patch?: Omit<Partial<HarnessSettings>, "gatePolicy"> & { gatePolicy?: GatePolicyPatch },
+  patch?: Partial<HarnessSettings>,
 ): HarnessSettings;

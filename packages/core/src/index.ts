@@ -58,23 +58,29 @@ export type { SessionHost, SessionHostDescriptor, SessionHostId, SessionIdentity
 export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
 
 export {
-  DEFAULT_GATE_POLICY,
+  DEFAULT_PERMISSION_MODE,
   DEFAULT_SKILL_POLICY,
   DEFAULT_TOOL_POSTURE,
   ensureOwnerOperatorWorkspace,
   loadHarnessSettings,
   ownerOperatorPaths,
   saveHarnessSettings,
+  isPermissionMode,
 } from "./harness.mjs";
 export type {
-  GateAction,
-  GatePolicy,
-  GatePolicyPatch,
-  GateSurfacePolicy,
   HarnessSettings,
   OwnerOperatorPaths,
+  PermissionMode,
   SkillPolicy,
 } from "./harness.mjs";
+
+export { reconcilePermissionSettings, savePermissionMode } from "./permissions.mjs";
+export type {
+  PiDenyRule,
+  PiPermissionConfig,
+  PiPermissionPatternMap,
+  PiPermissionState,
+} from "./permissions.mjs";
 
 // First-run setup's dependency-light config API: validated writers, versioned marker, and bounded
 // source detection. The interactive flow is one client; scripts can call the same seam.

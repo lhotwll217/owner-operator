@@ -10,6 +10,7 @@ import {
   loadBlacklist,
   loadHarnessSettings,
   loadSessionSources,
+  pendingOnboardingSteps,
   type SessionSourceCandidate,
 } from "@owner-operator/core";
 import { runOnboarding } from "./onboarding";
@@ -27,7 +28,7 @@ writeFileSync(join(piAgentDir, "settings.json"), JSON.stringify({ defaultProvide
 
 const confirms = [true, true, false]; // intro, Pi import, always-on
 const inputs = [blocked, "calendar, mail"];
-const selects = ["36h", "Selected personal skills"];
+const selects = ["Ask by default before shell commands and changes (recommended)", "36h", "Selected personal skills"];
 const asked: string[] = [];
 const ui = {
   async confirm(title: string): Promise<boolean> { asked.push(title); return confirms.shift() ?? false; },
@@ -90,17 +91,35 @@ try {
     { host: "superset", root: join(root, "superset-worktrees") },
   ]);
   const settings = loadHarnessSettings(ooHome);
+  assert.equal(settings.permissionMode, "ask");
   assert.equal(settings.activeWindow, "36h");
   assert.deepEqual(settings.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
   assert.equal(settings.alwaysOn, "declined");
   assert.equal(installCalls, 0, "declining always-on never invokes the installer");
-  assert.deepEqual(asked.slice(0, 4), [
+  assert.deepEqual(asked.slice(0, 5), [
     "Owner Operator",
     "Are there any coding projects or repositories you don’t want Owner Operator to interact with?",
     "Import existing standalone Pi setup?",
+    "Default permissions",
     "Agent session access",
-  ], "privacy and model setup precede the single catalog review");
+  ], "privacy, model, and permissions precede the single catalog review");
   assert.ok(asked.indexOf("Keep Owner Operator running?") < asked.indexOf("How far back counts as active?"), "always-on precedes the active window");
+
+  const cancelledHome = join(root, "cancelled-permissions-home");
+  const cancelledPi = join(cancelledHome, "pi");
+  mkdirSync(cancelledPi, { recursive: true });
+  writeFileSync(join(cancelledPi, "auth.json"), JSON.stringify({ codex: { type: "api_key", key: "owned" } }));
+  writeFileSync(join(cancelledPi, "settings.json"), JSON.stringify({ defaultProvider: "codex", defaultModel: "gpt-test" }));
+  assert.equal(await runOnboarding({
+    hasUI: true,
+    ui: {
+      async confirm(): Promise<boolean> { return true; },
+      async input(): Promise<string> { return ""; },
+      async select(): Promise<string | undefined> { return undefined; },
+      notify(): void {},
+    },
+  } as any, { ooHome: cancelledHome, piAgentDir: cancelledPi, resolveModel: () => true }), false);
+  assert.ok(pendingOnboardingSteps(cancelledHome).includes("permissions"), "cancelling does not silently accept the default");
 
   const freshHome = join(root, "fresh-home");
   const freshPi = join(root, "fresh-pi");

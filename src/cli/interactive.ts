@@ -13,6 +13,7 @@ import {
   createAgentSessionServices,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
+  getAgentDir,
   InteractiveMode,
   initTheme,
 } from "@earendil-works/pi-coding-agent";
@@ -27,7 +28,11 @@ import {
   repoRoot,
 } from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
-import { createOwnerOperatorPermissionExtension } from "../agent/permissions";
+import {
+  configurePermissionSystemEnvironment,
+  createPermissionSettingsExtension,
+  permissionSystemExtensionPath,
+} from "../agent/permission-settings";
 import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
@@ -38,7 +43,9 @@ if (!process.stdout.isTTY) {
 }
 
 const prompt = ownerOperatorPrompt();
+const standalonePiAgentDir = getAgentDir();
 const { authStorage, paths } = ownerOperatorPiServices();
+configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
@@ -55,18 +62,23 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       ...ownerOperatorResourceLoaderOptions(),
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
+      additionalExtensionPaths: [permissionSystemExtensionPath()],
       extensionFactories: [
-        blacklistAwareFileToolsExtension,           // same-name file/bash tools enforce the absolute blacklist
-        createOwnerOperatorPermissionExtension({ surface: "interactive", ooHome: paths.home }),
-        ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner
-        createOnboardingExtension({
-          ooHome: paths.home,
-          refreshConfiguration: async () => {
-            authStorage.reload();
-            await settingsManager.reload();
-            refreshRegistry();
-          },
-        }),
+        { name: "owner-operator-privacy-tools", factory: blacklistAwareFileToolsExtension },
+        { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
+        { name: "owner-operator-presentation", factory: ooPresentationExtension },
+        {
+          name: "owner-operator-onboarding",
+          factory: createOnboardingExtension({
+            ooHome: paths.home,
+            piAgentDir: standalonePiAgentDir,
+            refreshConfiguration: async () => {
+              authStorage.reload();
+              await settingsManager.reload();
+              refreshRegistry();
+            },
+          }),
+        },
       ],
     },
   });

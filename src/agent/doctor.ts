@@ -46,10 +46,11 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     : settings.skillPolicy.mode === "all-personal"
       ? `all from ${personalRoot}`
       : `allowlist from ${personalRoot}: ${settings.skillPolicy.allowlist.join(", ") || "(empty)"}`;
-  const gates = (surface: "interactive" | "headless"): string => {
-    const gate = settings.gatePolicy[surface];
-    return `edit=${gate.edit}, write=${gate.write}, risky bash=${gate.riskyBash}`;
-  };
+  const permissionMode = settings.permissionMode === "ask"
+    ? "ask before shell commands and changes"
+    : settings.permissionMode === "allow"
+      ? "allow shell commands and changes"
+      : "read-only (no shell)";
   const transcriptStores = ready
     ? loadTranscriptStores(paths.home).map(({ format, root }) => `${format}=${root}`).join(", ") || "(none)"
     : "(none until setup)";
@@ -73,12 +74,12 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     `Config: ${paths.settings}`,
     `Credentials: ${paths.piAuth} (${providerLabel}${importedFrom})`,
     `Model settings: ${paths.piSettings}`,
+    `Permission config: ${paths.piPermissionConfig}`,
     `Model: ${provider && model ? `${provider}/${model}` : "not configured"}`,
     `Transcript stores: ${transcriptStores}`,
     `Session host roots: ${hostRoots}`,
     `Tool posture: ${settings.toolPosture.join(", ")}`,
-    `Interactive gates: ${gates("interactive")}`,
-    `Headless gates: ${gates("headless")}`,
+    `Default permissions: ${permissionMode}`,
     "Reload: new headless/scheduled sessions reload workspace resources; interactive uses /reload or a new session; extension changes require restart.",
   ].join("\n") + "\n";
 }

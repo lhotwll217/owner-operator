@@ -53,7 +53,7 @@ Every entry point creates missing workspace files without overwriting owner edit
 `OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not change standalone
 Pi. The resource loader disables ambient context, extensions, skills, prompts, and themes, then
 adds only the product prompt, bundled skills, workspace `AGENTS.md`, workspace skills, and personal
-skills explicitly selected during onboarding. This follows Pi's existing independent cwd/resource
+skills explicitly selected during onboarding, plus the pinned permission-system extension. This follows Pi's existing independent cwd/resource
 loader seams and OpenClaw's bounded embedded-agent loader; provenance is recorded in
 [the boundary research](harness-resource-boundaries-research.md).
 
@@ -90,9 +90,9 @@ path; neither adds a mandatory onboarding screen.
 
 ## Agent capabilities
 
-- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`; same-name
-  safety overrides for Pi file/bash primitives live at the Agent boundary. Explicitly enabled
-  `edit` and `write` tools enforce the same blacklist, including symlinked parent directories.
+- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`. Same-name direct
+  file-tool guards at the Agent boundary enforce explicit path, repository-name, and symlinked-path
+  blacklists. The Bash wrapper supplies the task cwd and Owner Operator provenance environment.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
@@ -105,12 +105,17 @@ path; neither adds a mandatory onboarding screen.
   budgets; literal/IDF ranking remains unchanged.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
 
-The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. Reads and
-safe shell commands are allowed. Mutating file operations and risky shell commands ask in the
-interactive surface and deny headlessly. The privacy blacklist denies access before those gates
-and cannot be overridden by confirmation. The shell classifier reuses the maintained parser from
-`@thurstonsand/pi-permissions`; the adoption and rejected drop-ins are recorded with pinned sources
-in [docs/inspiration.md](inspiration.md).
+The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. During
+onboarding, the owner selects a default: ask before shell commands and changes, allow them, or use
+read-only without shell. `/permissions` changes it later. `@gotgenes/pi-permission-system` owns rule
+evaluation, prompts, and session grants; Owner Operator does not classify executables or shell
+subcommands. The concrete core adapter reconciles only the selected defaults and marker-owned
+blacklist rules into Pi's global config; it preserves advanced Pi settings and specific rules.
+Blacklist paths feed Pi's cross-tool path policy and the direct file-tool guards. Process-internal
+access and parent-directory traversal require separate [sandbox work](https://github.com/lhotwll217/owner-operator/issues/61).
+Specific global and task-repository `.pi` rules use Pi's standard precedence and may override these
+defaults. Pi also floors opaque or execution-wrapper shell commands to `ask`, including in `allow` mode.
+Adoption is recorded with pinned sources in [docs/inspiration.md](inspiration.md).
 
 ## State and events
 
@@ -156,6 +161,12 @@ Commands execute exact `argv` without a shell unless a caller deliberately suppl
 
 Scheduler policy:
 
+- Prompt schedules are headless and inherit the global permission baseline. `ask` calls that require
+  confirmation are denied because no human authority is present; `allow` permits unattended calls
+  unless Pi floors a shell pattern to `ask`; `read-only` defaults shell commands and changes to deny.
+  Specific Pi rules may override a baseline. `toolsAllow` independently narrows tool availability.
+- The scheduled task cwd activates repository `.pi` permission rules. Task repositories are trusted
+  policy sources and may override Owner Operator's global defaults.
 - Global concurrency starts at one; the same job never overlaps.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
 - Timer occurrences advance and create their running row in one transaction before external work starts.

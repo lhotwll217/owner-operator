@@ -90,7 +90,7 @@ assert.throws(
   /unsupported eval transport/i,
 );
 
-// Posture keeps every standard file/shell tool present; the gate decides each operation.
+// Posture keeps every standard file/shell tool present; the permission mode decides each operation.
 for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }

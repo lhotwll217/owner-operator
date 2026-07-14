@@ -10,6 +10,7 @@ import {
   markOnboarded,
   saveSessionHostRoots,
   saveHarnessSettings,
+  savePermissionMode,
 } from "@owner-operator/core";
 import { formatHarnessDoctor } from "./doctor";
 
@@ -28,6 +29,7 @@ try {
     { host: "conductor", root: "/missing/conductor-workspaces" },
   ]);
   saveHarnessSettings(ooHome, { skillPolicy: { mode: "allowlist", allowlist: ["calendar"] } });
+  savePermissionMode(ooHome, "ask");
   writeFileSync(paths.piAuth, JSON.stringify({ codex: { type: "api_key", key: "hidden" } }), { mode: 0o600 });
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "codex", defaultModel: "gpt-test" }));
   writeFileSync(paths.imports, JSON.stringify({ pi: { source: "/home/me/.pi/agent" } }));
@@ -56,8 +58,8 @@ try {
   assert.match(output, new RegExp(`Session host roots: .*Superset App=${existingHostRoot}`));
   assert.match(output, new RegExp(`Session host roots: .*Conductor=${conductorDefault}`));
   assert.doesNotMatch(output, /missing\/conductor-workspaces/, "doctor omits host roots that do not exist");
-  assert.match(output, /Interactive gates: edit=ask, write=ask, risky bash=ask/);
-  assert.match(output, /Headless gates: edit=deny, write=deny, risky bash=deny/);
+  assert.match(output, /Default permissions: ask before shell commands and changes/);
+  assert.match(output, new RegExp(`Permission config: ${paths.piPermissionConfig}`));
 
   process.stdout.write("ok — doctor reports effective harness boundaries without credential values\n");
 } finally {

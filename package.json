@@ -33,9 +33,10 @@
     "@earendil-works/pi-ai": "0.80.6",
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@earendil-works/pi-tui": "0.80.6",
+    "@gotgenes/pi-permission-system": "20.7.1",
     "@owner-operator/core": "*",
-    "@thurstonsand/pi-permissions": "0.8.0",
-    "croner": "10.0.1"
+    "croner": "10.0.1",
+    "jsonc-parser": "3.3.1"
   },
   "devDependencies": {
     "@types/node": "^24",

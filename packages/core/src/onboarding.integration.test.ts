@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadBlacklist } from "./blacklist.mjs";
 import { loadActiveWindow } from "./settings.mjs";
+import { ownerOperatorPaths } from "./harness.mjs";
 import {
   AGENT_HARNESS_DESCRIPTORS,
   KNOWN_AGENT_HARNESSES,
@@ -238,6 +239,14 @@ try {
   const bl = loadBlacklist(ooHome);
   assert.deepEqual(bl.paths.sort(), ["/home/me/secret", "/work/clientX"], "paths merged, de-duped, slash-stripped");
   assert.deepEqual(bl.repos.sort(), ["Personal", "Vault"], "repos merged and de-duped");
+  const permissionConfig = JSON.parse(readFileSync(ownerOperatorPaths(ooHome).piPermissionConfig, "utf8"));
+  assert.equal(
+    permissionConfig.permission["/work/clientX"],
+    undefined,
+    "blacklist paths belong to the Pi path surface, not the root permission map",
+  );
+  assert.equal(permissionConfig.permission.path["/work/clientX"].action, "deny");
+  assert.equal(permissionConfig.permission.path["/home/me/secret"].action, "deny");
 
   // Session-source writer: a known source at a new root shows up in loadSessionSources; a second
   // identical add is a no-op; an unknown source throws (a root with no parser is dead config).

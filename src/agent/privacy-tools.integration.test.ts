@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBlacklistAwareFileTools, createOwnerOperatorBashTool } from "./privacy-tools";
+import { blacklistedPathVerdict, createBlacklistAwareFileTools, createOwnerOperatorBashTool } from "./privacy-tools";
 
 const root = mkdtempSync(join(tmpdir(), "oo-privacy-tools-"));
 const ooHome = join(root, "oo-home");
@@ -34,10 +34,10 @@ try {
   const bash = createOwnerOperatorBashTool();
   const pwd = await bash.execute("bash-1", { command: "pwd" }, undefined, undefined, ctx);
   assert.match((pwd.content[0] as { text: string }).text, new RegExp(publicDir), "bash executes in the task cwd");
-  await assert.rejects(
-    () => bash.execute("bash-2", { command: `cat ${privateFile}` }, undefined, undefined, ctx),
-    /blacklist/i,
-    "bash rechecks the privacy blacklist at execution",
+  assert.equal(
+    blacklistedPathVerdict(privateFile, publicDir, { paths: [], repos: ["Private"] }).blacklisted,
+    true,
+    "direct tool guards enforce repository-name exclusions without path rules",
   );
 
   await assert.rejects(
@@ -98,22 +98,6 @@ try {
     /blacklisted/,
     "write resolves an existing symlink ancestor before creating a file",
   );
-  await assert.rejects(
-    () => tools.get("grep")!.execute("grep-2", { pattern: "SECRET", path: root }, undefined, undefined, ctx),
-    /would traverse blacklisted path/,
-    "grep blocks a parent search root that would recurse into a blacklisted tree",
-  );
-  await assert.rejects(
-    () => tools.get("find")!.execute("find-2", { pattern: "*", path: root }, undefined, undefined, ctx),
-    /would traverse blacklisted path/,
-    "find blocks a parent search root that would recurse into a blacklisted tree",
-  );
-  await assert.rejects(
-    () => tools.get("ls")!.execute("ls-2", { path: root }, undefined, undefined, ctx),
-    /would traverse blacklisted path/,
-    "ls blocks a parent directory that would expose a blacklisted child",
-  );
-
   process.stdout.write("ok — privacy tools: Pi file primitives reject blacklisted paths\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
