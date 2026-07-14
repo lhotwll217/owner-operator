@@ -19,7 +19,7 @@
 
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { markOnboarded, ownerOperatorPaths } from "@owner-operator/core";
+import { markOnboarded, ownerOperatorPaths, savePermissionMode } from "@owner-operator/core";
 import { assertEvalSandboxPath, evalSandboxPath } from "../sandbox.mjs";
 import { SESSIONS } from "../fixtures/sessions.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
@@ -97,6 +97,11 @@ for (const key of ["piAuth", "piSettings", "piModels"]) {
   mkdirSync(sandboxPi.piAgentDir, { recursive: true });
   cpSync(real[key], sandboxPi[key]);
 }
+
+// The default permission mode is read-only, which denies shell commands; eval subjects
+// need bash for transcript search, and the sandbox is already read-only at the tool
+// roster and cwd level.
+savePermissionMode(HOME, "allow");
 
 // Details history first (versions with real created_at spacing), then the final transcript
 // observation so current state matches the fixture.
