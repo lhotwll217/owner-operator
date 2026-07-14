@@ -186,7 +186,7 @@ export async function runOnboarding(
     }
 
     if (needs("permissions")) {
-      const mode = await ctx.ui.select("Default permissions", [...PERMISSION_MODE_CHOICES]);
+      const mode = await ctx.ui.select("Permission mode", [...PERMISSION_MODE_CHOICES]);
       if (!mode) return false;
       savePermissionMode(paths.home, permissionModeForChoice(mode));
       markOnboardingStep(paths.home, "permissions");

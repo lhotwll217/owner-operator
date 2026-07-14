@@ -102,7 +102,7 @@ try {
     "Owner Operator",
     "Are there any coding projects or repositories you don’t want Owner Operator to interact with?",
     "Import existing standalone Pi setup?",
-    "Default permissions",
+    "Permission mode",
     "Agent session access",
   ], "privacy, model, and permissions precede the single catalog review");
   assert.ok(asked.indexOf("Keep Owner Operator running?") < asked.indexOf("How far back counts as active?"), "always-on precedes the active window");

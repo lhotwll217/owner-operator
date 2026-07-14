@@ -50,17 +50,17 @@ export function configurePermissionSystemEnvironment(paths: OwnerOperatorPaths):
 export function createPermissionSettingsExtension(options: { ooHome?: string } = {}): ExtensionFactory {
   return (pi) => {
     pi.registerCommand("permissions", {
-      description: "Change Owner Operator's default permission mode.",
+      description: "Change Owner Operator's permission mode.",
       handler: async (_args, ctx) => {
         if (!ctx.hasUI) {
           ctx.ui.notify("/permissions requires interactive mode.", "warning");
           return;
         }
-        const choice = await ctx.ui.select("Default permissions", [...PERMISSION_MODE_CHOICES]);
+        const choice = await ctx.ui.select("Permission mode", [...PERMISSION_MODE_CHOICES]);
         if (!choice) return;
         const mode = permissionModeForChoice(choice);
         savePermissionMode(options.ooHome, mode);
-        ctx.ui.notify(`Default permissions: ${choice.replace(" (recommended)", "")}.`, "info");
+        ctx.ui.notify(`Permission mode: ${choice.replace(" (recommended)", "")}.`, "info");
         await ctx.reload();
       },
     });

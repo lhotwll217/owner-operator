@@ -25,8 +25,8 @@ active window, and skills. The copy does not change standalone Pi. Until setup f
 calls and transcript/model processing fail closed.
 
 `./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
-credentials/model source, transcript stores, session host roots, skills, tools, and default permissions without printing
-secrets. Use `/permissions` to change the default mode, `/permission-system show` to inspect the
+credentials/model source, transcript stores, session host roots, skills, tools, and permission mode without printing
+secrets. Use `/permissions` to change the mode, `/permission-system show` to inspect the
 composed Pi rules, or `/onboarding` to revisit setup.
 
 ## The widget

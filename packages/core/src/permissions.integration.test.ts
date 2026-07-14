@@ -17,6 +17,7 @@ try {
   mkdirSync(dirname(paths.piPermissionConfig), { recursive: true });
   mkdirSync(privateTarget, { recursive: true });
   symlinkSync(privateTarget, privateLink);
+  const canonicalPrivateTarget = realpathSync.native(privateTarget);
   writeFileSync(paths.settings, JSON.stringify({ permissionMode: "ask" }));
   writeFileSync(paths.blacklist, JSON.stringify({ paths: [privateLink], repos: [] }));
   writeFileSync(paths.piPermissionConfig, `{
@@ -26,24 +27,32 @@ try {
     "permission": {
       "custom_surface": { "private:*": "deny" },
       "bash": {
-        "*": "deny",
         // Keep this command-specific exception.
-        "git status": "allow"
+        "git status": "allow",
+        // Keep this default-policy explanation.
+        "*": "deny"
       },
       "path": {
         "*": "ask",
+        "/previous/private": { "action": "deny", "reason": "${generatedReason}" },
+        // Keep this owner path-rule explanation.
         "*.env": "deny",
-        "/previous/private": { "action": "deny", "reason": "${generatedReason}" }
+        "${privateLink}": "allow",
+        "${canonicalPrivateTarget}": "allow",
+        // Keep this trailing owner explanation.
+        "/previous/last": { "action": "deny", "reason": "${generatedReason}" }
       },
       "edit": { "*": "deny", "*.md": "allow" }
     }
   }`);
 
   const ask = reconcilePermissionSettings(ooHome);
-  const canonicalPrivateTarget = realpathSync.native(privateTarget);
   const reconciledText = readFileSync(paths.piPermissionConfig, "utf8");
   assert.match(reconciledText, /Pi runtime settings remain user-owned/, "top-level JSONC comments survive reconciliation");
   assert.match(reconciledText, /Keep this command-specific exception/, "comments inside permission rules survive reconciliation");
+  assert.match(reconciledText, /Keep this default-policy explanation/, "moving a wildcard preserves its comment");
+  assert.match(reconciledText, /Keep this owner path-rule explanation/, "removing a stale generated rule preserves adjacent comments");
+  assert.match(reconciledText, /Keep this trailing owner explanation/, "removing the last stale rule preserves its leading comment");
   assert.equal(ask.debugLog, true, "unowned top-level extension config is preserved");
   assert.equal(ask.yoloMode, false, "commented JSONC config is parsed without losing runtime settings");
   assert.deepEqual(ask.permission.custom_surface, { "private:*": "deny" }, "custom surfaces are preserved");
@@ -51,15 +60,26 @@ try {
   assert.deepEqual(ask.permission.edit, { "*": "ask", "*.md": "allow" });
   assert.equal(ask.permission.path["*.env"], "deny", "owner-authored path rules are preserved");
   assert.equal(ask.permission.path["/previous/private"], undefined, "obsolete generated rules are removed");
-  assert.deepEqual(ask.permission.path[privateLink], { action: "deny", reason: generatedReason });
+  assert.equal(ask.permission.path["/previous/last"], undefined);
+  assert.equal(ask.permission.path[privateLink], "allow", "specific global rules override generated Pi path rules");
+  assert.equal(ask.permission.path[canonicalPrivateTarget], "allow");
   assert.deepEqual(ask.permission.path[join(privateLink, "*")], { action: "deny", reason: generatedReason });
-  assert.deepEqual(ask.permission.path[canonicalPrivateTarget], { action: "deny", reason: generatedReason }, "resolved blacklist paths feed Pi policy");
   assert.deepEqual(ask.permission.path[join(canonicalPrivateTarget, "*")], { action: "deny", reason: generatedReason });
+  const parsedAsk = parse(reconciledText);
+  assert.equal(Object.keys(parsedAsk.permission.bash)[0], "*", "managed wildcard defaults precede specific Pi rules");
+  assert.equal(Object.keys(parsedAsk.permission.path)[0], "*", "the path wildcard remains the broadest rule");
+  assert.ok(
+    Object.keys(parsedAsk.permission.path).indexOf(join(privateLink, "*")) <
+      Object.keys(parsedAsk.permission.path).indexOf("*.env"),
+    "generated path rules precede owner-authored overrides",
+  );
 
   writeFileSync(paths.blacklist, JSON.stringify({ paths: [join(ooHome, "Vault")], repos: [] }));
   const reconciled = reconcilePermissionSettings(ooHome);
-  assert.equal(reconciled.permission.path[privateLink], undefined);
-  assert.equal(reconciled.permission.path[canonicalPrivateTarget], undefined);
+  assert.equal(reconciled.permission.path[privateLink], "allow");
+  assert.equal(reconciled.permission.path[canonicalPrivateTarget], "allow");
+  assert.equal(reconciled.permission.path[join(privateLink, "*")], undefined);
+  assert.equal(reconciled.permission.path[join(canonicalPrivateTarget, "*")], undefined);
   assert.deepEqual(reconciled.permission.path[join(ooHome, "Vault")], { action: "deny", reason: generatedReason });
   assert.equal(reconciled.permission.path["*.env"], "deny");
 

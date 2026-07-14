@@ -34,6 +34,32 @@ try {
   const bash = createOwnerOperatorBashTool();
   const pwd = await bash.execute("bash-1", { command: "pwd" }, undefined, undefined, ctx);
   assert.match((pwd.content[0] as { text: string }).text, new RegExp(publicDir), "bash executes in the task cwd");
+
+  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [], repos: ["Private"] }));
+  const privatePwd = await bash.execute(
+    "bash-2",
+    { command: "pwd" },
+    undefined,
+    undefined,
+    { cwd: privateDir } as any,
+  );
+  assert.match(
+    (privatePwd.content[0] as { text: string }).text,
+    new RegExp(privateDir),
+    "repository-name exclusions do not gate Bash without the OS sandbox",
+  );
+  await assert.doesNotReject(
+    () => tools.get("grep")!.execute(
+      "grep-repo-parent",
+      { pattern: "SECRET", path: root },
+      undefined,
+      undefined,
+      ctx,
+    ),
+    "repository-name exclusions do not gate traversal from an allowed parent",
+  );
+  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [privateDir], repos: [] }));
+
   assert.equal(
     blacklistedPathVerdict(privateFile, publicDir, { paths: [], repos: ["Private"] }).blacklisted,
     true,

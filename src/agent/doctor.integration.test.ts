@@ -58,7 +58,7 @@ try {
   assert.match(output, new RegExp(`Session host roots: .*Superset App=${existingHostRoot}`));
   assert.match(output, new RegExp(`Session host roots: .*Conductor=${conductorDefault}`));
   assert.doesNotMatch(output, /missing\/conductor-workspaces/, "doctor omits host roots that do not exist");
-  assert.match(output, /Default permissions: ask before shell commands and changes/);
+  assert.match(output, /Permission mode: ask before shell commands and changes/);
   assert.match(output, new RegExp(`Permission config: ${paths.piPermissionConfig}`));
 
   process.stdout.write("ok — doctor reports effective harness boundaries without credential values\n");

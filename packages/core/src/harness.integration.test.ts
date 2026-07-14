@@ -38,7 +38,10 @@ try {
   const defaults = loadHarnessSettings(ooHome);
   assert.deepEqual(defaults.skillPolicy, DEFAULT_SKILL_POLICY);
   assert.deepEqual(defaults.toolPosture, DEFAULT_TOOL_POSTURE);
-  assert.equal(defaults.permissionMode, "ask");
+  assert.equal(defaults.permissionMode, "read-only", "missing settings use the least-permissive mode");
+
+  writeFileSync(paths.settings, "{ invalid settings");
+  assert.equal(loadHarnessSettings(ooHome).permissionMode, "read-only", "invalid settings fail closed");
 
   saveHarnessSettings(ooHome, {
     activeWindow: "36h",

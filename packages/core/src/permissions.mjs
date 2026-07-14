@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { applyEdits, modify, parse } from "jsonc-parser";
+import {
+  SyntaxKind,
+  applyEdits,
+  createScanner,
+  findNodeAtLocation,
+  modify,
+  parse,
+  parseTree,
+} from "jsonc-parser";
 import { loadBlacklist, pathIdentities } from "./blacklist.mjs";
 import {
   DEFAULT_PERMISSION_MODE,
@@ -85,13 +93,14 @@ function permissionPolicy(existing, ooHome, mode) {
     if (pattern !== "*" && !isGeneratedBlacklistRule(value)) ownerPathRules[pattern] = value;
   }
   const generatedRule = { action: "deny", reason: BLACKLIST_REASON };
-  const pathRules = { "*": "allow", ...ownerPathRules };
+  const pathRules = { "*": "allow" };
   for (const blocked of loadBlacklist(ooHome).paths) {
     for (const identity of pathIdentities(blocked)) {
       pathRules[identity] = generatedRule;
       pathRules[`${identity}/*`] = generatedRule;
     }
   }
+  Object.assign(pathRules, ownerPathRules);
   next.path = pathRules;
   return next;
 }
@@ -103,28 +112,78 @@ function setJsoncValue(text, path, value, first = false) {
   }));
 }
 
+function jsoncProperty(text, path) {
+  const root = parseTree(text);
+  const value = root ? findNodeAtLocation(root, path) : undefined;
+  const property = value?.parent;
+  const siblings = property?.parent?.children;
+  if (property?.type !== "property" || !siblings) return undefined;
+  return { property, siblings, index: siblings.indexOf(property) };
+}
+
+function commaEdit(text, start, end) {
+  const scanner = createScanner(text);
+  scanner.setPosition(start);
+  for (let token = scanner.scan(); token !== SyntaxKind.EOF; token = scanner.scan()) {
+    if (scanner.getTokenOffset() >= end) return undefined;
+    if (token === SyntaxKind.CommaToken) {
+      return { offset: scanner.getTokenOffset(), length: scanner.getTokenLength(), content: "" };
+    }
+  }
+  return undefined;
+}
+
+// jsonc-parser's removal range includes neighboring comments. Remove only the property and its
+// separator so owner comments are not part of the deletion range.
+function removeJsoncProperty(text, path) {
+  const located = jsoncProperty(text, path);
+  if (!located) return text;
+  const { property, siblings, index } = located;
+  const edits = [{ offset: property.offset, length: property.length, content: "" }];
+  const separator = index < siblings.length - 1
+    ? commaEdit(text, property.offset + property.length, siblings[index + 1].offset)
+    : index > 0
+      ? commaEdit(text, siblings[index - 1].offset + siblings[index - 1].length, property.offset)
+      : undefined;
+  if (separator) edits.push(separator);
+  return applyEdits(text, edits);
+}
+
+function setJsoncDefaultFirst(text, path, value) {
+  const located = jsoncProperty(text, path);
+  const withoutLateDefault = located && located.index > 0 ? removeJsoncProperty(text, path) : text;
+  return setJsoncValue(withoutLateDefault, path, value, true);
+}
+
+function setJsoncAfterDefault(text, path, value) {
+  return applyEdits(text, modify(text, path, value, {
+    formattingOptions: JSON_FORMAT,
+    getInsertionIndex: (properties) => Math.max(0, properties.indexOf("*") + 1),
+  }));
+}
+
 function reconcilePermissionDocument(text, existingPermission, nextPermission) {
   if (!isRecord(existingPermission)) return setJsoncValue(text, ["permission"], nextPermission);
 
   let nextText = setJsoncValue(text, ["permission", "*"], nextPermission["*"], true);
   for (const surface of MANAGED_SURFACES) {
     nextText = isPatternMap(existingPermission[surface])
-      ? setJsoncValue(nextText, ["permission", surface, "*"], nextPermission[surface]["*"], true)
+      ? setJsoncDefaultFirst(nextText, ["permission", surface, "*"], nextPermission[surface]["*"])
       : setJsoncValue(nextText, ["permission", surface], nextPermission[surface]);
   }
 
   const existingPath = existingPermission.path;
   if (!isPatternMap(existingPath)) return setJsoncValue(nextText, ["permission", "path"], nextPermission.path);
 
-  nextText = setJsoncValue(nextText, ["permission", "path", "*"], nextPermission.path["*"], true);
+  nextText = setJsoncDefaultFirst(nextText, ["permission", "path", "*"], nextPermission.path["*"]);
   for (const [pattern, value] of Object.entries(existingPath)) {
     if (isGeneratedBlacklistRule(value)) {
-      nextText = setJsoncValue(nextText, ["permission", "path", pattern], undefined);
+      nextText = removeJsoncProperty(nextText, ["permission", "path", pattern]);
     }
   }
   for (const [pattern, value] of Object.entries(nextPermission.path)) {
     if (isGeneratedBlacklistRule(value)) {
-      nextText = setJsoncValue(nextText, ["permission", "path", pattern], value);
+      nextText = setJsoncAfterDefault(nextText, ["permission", "path", pattern], value);
     }
   }
   return nextText;

@@ -5,7 +5,7 @@ import { DEFAULT_ACTIVE_WINDOW, isWindowSpec } from "./settings.mjs";
 
 export const DEFAULT_SKILL_POLICY = Object.freeze({ mode: "owner-operator", allowlist: [] });
 export const DEFAULT_TOOL_POSTURE = Object.freeze(["read", "grep", "find", "ls", "bash", "edit", "write"]);
-export const DEFAULT_PERMISSION_MODE = "ask";
+export const DEFAULT_PERMISSION_MODE = "read-only";
 
 const SKILL_MODES = new Set(["owner-operator", "all-personal", "allowlist"]);
 const TOOL_NAMES = new Set(DEFAULT_TOOL_POSTURE);

@@ -79,7 +79,7 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     `Transcript stores: ${transcriptStores}`,
     `Session host roots: ${hostRoots}`,
     `Tool posture: ${settings.toolPosture.join(", ")}`,
-    `Default permissions: ${permissionMode}`,
+    `Permission mode: ${permissionMode}`,
     "Reload: new headless/scheduled sessions reload workspace resources; interactive uses /reload or a new session; extension changes require restart.",
   ].join("\n") + "\n";
 }
