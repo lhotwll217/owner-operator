@@ -1,3 +1,11 @@
+---
+title: "Inspiration"
+summary: "Accepted open source borrows with pinned sources; check before designing anything new"
+read_when:
+  - Before building a new system, feature, or integration (don't reinvent)
+  - Recording an accepted or rejected borrow
+---
+
 # Inspiration
 
 Borrow battle-tested, maintained patterns. Check here before designing anything new; hunt

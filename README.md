@@ -74,9 +74,8 @@ composed Pi rules, or `/onboarding` to revisit setup.
 
 ## The widget
 
-The main surface: a floating macOS panel that always shows every session ranked by what needs
-you, so you can see what's working, what's waiting, and what you left open. With the daemon
-running:
+A floating macOS panel that always shows every session ranked by what needs you, so you can
+see what's working, what's waiting, and what you left open. With the daemon running:
 
 ```bash
 cd apps/widget && make run
@@ -92,44 +91,27 @@ cd apps/widget && make run
 ./oo doctor            # effective harness configuration, no model call
 ```
 
-The terminal starts the background daemon when it needs state. The widget is the always-on UI
-surface for the ranked session list.
+The terminal starts the background daemon when it needs state. Full flag, session, and
+provenance reference: [docs/cli.md](docs/cli.md).
 
 ## The daemon
 
 `oo daemon` is the long-lived local process hosting the state, session monitor, scheduler,
-and loopback Gateway. Terminal clients ensure the current daemon is ready. The widget installer
-installs daemon + widget LaunchAgents together; the widget itself never spawns processes.
+and loopback Gateway. Lifecycle, discovery, and LaunchAgents: [docs/daemon.md](docs/daemon.md).
 
 ## How it works
 
 Built on the [pi coding agent](https://github.com/earendil-works/pi). Embedded Pi uses
 Owner Operator-owned auth, model settings, workspace resources, and sessions under
-`~/.owner-operator`; standalone Pi keeps its own defaults. `oo` reads session
-files through application-owned scan/search modules and only sends bounded transcript samples to
-the model. Supported harnesses and their transcript formats live in
-[`AGENT_HARNESS_DESCRIPTORS`](packages/core/src/session-sources.mjs); apps and CLIs live separately
-in [`SESSION_HOST_DESCRIPTORS`](packages/core/src/session-hosts.mjs). Agents drive it headless
-with `oo "question"`: a single turn that prints its session id on stderr, with `--continue`
-/ `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
-saved under `~/.owner-operator/sessions` (never mixed with your coding sessions), labeled
-with its surface and caller repo; agents pass `--from-session <id>` so the audit trail
-records who called. Codex callers are detected from `CODEX_THREAD_ID`; other harnesses pass
-`--from-session` or `OO_FROM_SESSION`. Transcript discovery excludes that caller session to
-avoid prompt-echo retrieval. Owner Operator's own saved conversations remain outside normal
-coding-session search and are searched only through the explicit `--owner-operator` scope.
+`~/.owner-operator`; standalone Pi keeps its own defaults. Supported harnesses and their
+transcript formats live in
+[`AGENT_HARNESS_DESCRIPTORS`](packages/core/src/session-sources.mjs); apps and CLIs live
+separately in [`SESSION_HOST_DESCRIPTORS`](packages/core/src/session-hosts.mjs).
 
-Model-free calls for scripts and agents: `oo --session-state` prints the current state
-rows as JSON, and `oo --done <id...>` marks threads done (ids come from `--session-state`;
-explicit only — no environment guessing, so parallel agents in one repo can't mark each
-other). A coding harness that knows its own session id (e.g. a session-end hook) can
-self-mark with `oo --done <that id>`.
+Everything else lives next to what it documents:
 
-Durable prompt schedules use the typed `schedule_prompt` tool. Each run gets a fresh isolated
-Owner Operator transcript; failures and output are inspectable through `query_database` over
-`schedules` and `schedule_runs`. Scheduled prompts inherit the global permission baseline;
-per-schedule tool availability and task-repository overrides are defined in the
-[scheduler contract](docs/architecture.md#scheduler).
-
-Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,
-standards): [CONTRIBUTING.md](CONTRIBUTING.md).
+- [docs/cli.md](docs/cli.md): driving `oo` headless, session provenance, model-free calls
+- [docs/scheduler.md](docs/scheduler.md): durable prompt schedules and run history
+- [docs/daemon.md](docs/daemon.md): daemon lifecycle and LaunchAgents
+- [docs/architecture.md](docs/architecture.md): module ownership and boundaries
+- [docs/testing.md](docs/testing.md): test tiers and the checks CI runs

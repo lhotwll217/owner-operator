@@ -1,3 +1,11 @@
+---
+title: "Architecture"
+summary: "Module ownership, harness boundary, session inventory, agent capabilities, state/events"
+read_when:
+  - Deciding where new code belongs
+  - Tracing which module owns a behavior or boundary
+---
+
 # Architecture
 
 Owner Operator is one local daemon with several clients. The daemon is a process boundary,
@@ -130,6 +138,8 @@ After a transaction commits, `State` publishes a rich typed event on a fail-isol
 The bus wakes consumers; clients refetch truth rather than consuming event payloads. The Gateway maps domain events to three typed SSE
 invalidations—state, schedule, or schedule-run changed—and clients refetch SQLite-backed truth.
 
+Enrichment sends only bounded transcript samples to the model, read through
+application-owned scan/search modules.
 Enrichment is eligible when the current state is `needs-you` and `last_message_at` differs from
 `enriched_through_message_at`. This catches first discovery, a new assistant message without a state
 transition, and daemon restart. The monitor never awaits the model in its scan hot path.
@@ -138,74 +148,8 @@ cannot block Gateway health, SSE, or widget requests. Periodic scan failures are
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use
 the same logged background seam and leave the durable watermark eligible for a later retry.
 
-## Scheduler
+## Scheduler and daemon lifecycle
 
-The daemon composes one scheduler. Schedule definitions, next-run timestamps, execution
-history, and needs-you watermarks persist through `State`; the scheduler owns calendar
-evaluation, wakeups, and execution. The typed vocabulary is:
-
-- Trigger: `at`, `every`, `cron` with an explicit IANA time zone, or `needs-you`.
-- Payload: `prompt` or direct `argv` command.
-- Prompt tools: concrete `AgentToolId[]`; presets are resolved upstream.
-- Run context: absolute `cwd`, timeout, immutable payload snapshot, and trigger context.
-
-Cron evaluation uses pinned `croner@10.0.1`, following OpenClaw's proven
-[Croner adapter](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/schedule.ts#L1-L55).
-Our small public scheduler seam mirrors OpenClaw's explicit
-[cron service contract](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/service-contract.ts#L27-L45)
-without copying its product-specific delivery system.
-
-Prompt runs create a fresh Pi `SessionManager` and transcript under
-`~/.owner-operator/sessions`; `oo-provenance` records job/run identity. This follows OpenClaw's
-isolated-job rule: [a new transcript/session id per run](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/docs/automation/cron-jobs.md#L203-L220).
-Commands execute exact `argv` without a shell unless a caller deliberately supplies
-`["/bin/sh", "-lc", command]`.
-
-Scheduler policy:
-
-- Prompt schedules are headless and inherit the global permission baseline. `ask` calls that require
-  confirmation are denied because no human authority is present; `allow` permits unattended calls
-  unless Pi floors a shell pattern to `ask`; `read-only` defaults shell commands and changes to deny.
-  Specific Pi rules may override a baseline. `toolsAllow` independently narrows tool availability.
-- The scheduled task cwd activates repository `.pi` permission rules. Task repositories are trusted
-  policy sources and may override Owner Operator's global defaults.
-- Global concurrency starts at one; the same job never overlaps.
-- Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
-- Timer occurrences advance and create their running row in one transaction before external work starts.
-- Manual triggers return their durable `running` row immediately; clients inspect run completion through `schedule_runs`.
-- A daemon crash marks running rows `interrupted`; no automatic job retry occurs.
-- Commands and prompt runs have bounded timeouts and bounded stdout/stderr tails.
-- Shutdown aborts active runs, terminates command process groups, and drains the queue before State closes.
-- Disabling/deleting prevents future triggers but does not cancel an active run.
-- A monotonic schedule revision prevents an active run from overwriting a concurrent edit.
-- Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit atomically.
-
-Users inspect `schedules` and `schedule_runs` through the existing read-only `query_database` tool.
-The table intent and columns live once in `src/state/schema-docs.ts`.
-
-## Daemon and clients
-
-The daemon binds only `127.0.0.1`. Its mode-`0600` discovery file carries a fresh bearer token;
-every HTTP/SSE request authenticates with it. `/health` reports PID, start time, fingerprint, and
-staleness; `/ready` reports module initialization. Clients require readiness. Production clients
-never open SQLite and there is no `OO_DAEMON=0` mode.
-
-The runtime fingerprint hashes `src`, `packages/core`, package metadata, and Pi settings, including
-uncommitted changes. A mismatch marks the daemon stale and exits it gracefully; launchd or the
-terminal ensure path starts the current runtime. This adapts OpenClaw's installed service-version
-stamp ([source](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/daemon/service-env.ts#L430-L446))
-to a development checkout where source content—not package version—is authoritative.
-
-When the daemon LaunchAgent is installed, launchd is the only process supervisor and terminal
-clients request replacement through `launchctl kickstart`. Without the LaunchAgent, terminal clients
-may start one detached daemon directly. Before replacement, the client authenticates the stale or
-unready daemon identity and waits for it to release the Gateway; it never signals an unverified PID.
-LaunchAgent ownership is verified against `launchctl print`; if an authenticated detached daemon
-predates installation, the client stops it and waits for the port before handing ownership to launchd.
-An ambiguous launchctl result fails closed and never authorizes direct signaling.
-Long-lived Node clients invalidate cached discovery after authentication or connection failure, and
-their SSE subscriptions reread `daemon.json` before reconnecting.
-
-The widget installer installs both LaunchAgents. The widget itself remains a pure Gateway client
-and never spawns a process. Owner Operator's own scheduled-session transcripts are searchable
-but excluded from coding-session monitoring, preventing automation loops.
+Each has its own page: the scheduler's typed vocabulary, isolated runs, and
+policy in [scheduler.md](scheduler.md); daemon auth, readiness, staleness, and
+LaunchAgent supervision in [daemon.md](daemon.md).

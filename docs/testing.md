@@ -1,3 +1,11 @@
+---
+title: "Testing"
+summary: "Test tiers, hermetic rule, coverage map, and the checks CI runs"
+read_when:
+  - Adding or placing a test
+  - Running checks locally before a PR
+---
+
 # Testing
 
 Guards the four public seams: state, session monitor, scheduler, and Gateway/daemon end to end.
@@ -73,7 +81,12 @@ Committed fixtures must be sanitized: no personal paths, repos, or names.
 ```sh
 npm test                                              # hermetic: unit + integration + e2e
 npm run typecheck                                     # tsc: root src + workspaces
+npm run lint                                          # oxlint
 npm run test:integration                              # one tier
 npm run poll:smoke                                    # smoke — reads your live sessions
 npm run test:agent                                    # live — needs model auth, paid
+cd apps/widget && swift test                          # widget (Swift)
 ```
+
+CI runs typecheck, lint, and `npm test` on every PR and landing on `main`
+(`ci.yml`); the widget suite runs on macOS, path-filtered (`widget.yml`).
