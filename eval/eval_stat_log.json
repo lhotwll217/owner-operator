@@ -1,5 +1,55 @@
 [
   {
+    "timestamp": "2026-07-14T21:31:39.074Z",
+    "label": "prompt-shannon-pass",
+    "commit": "a2f938b",
+    "branch": "docs/readme-update",
+    "eval_folder": "2026-07-14T21-31-39-074Z",
+    "subject": "owner-operator",
+    "model": "openai-codex/gpt-5.6-sol",
+    "reasoning_level": "medium",
+    "grader_model": "openai-codex/gpt-5.4",
+    "grader_reasoning": "minimal",
+    "cases": 14,
+    "repeat": 1,
+    "total_tests": 14,
+    "summary": {
+      "total_pass": 14,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": false
+    },
+    "tool_calls": {
+      "mean": 3.43,
+      "median": 3,
+      "min": 1,
+      "max": 7,
+      "stdev": 2.1
+    },
+    "tokens": {
+      "mean": 13162,
+      "median": 12264.5,
+      "min": 3760,
+      "max": 25354,
+      "stdev": 6324.39
+    },
+    "cost_usd": {
+      "mean": 0.049372,
+      "median": 0.051142,
+      "min": 0.013738,
+      "max": 0.081833,
+      "stdev": 0.018312
+    },
+    "latency_ms": {
+      "mean": 21278,
+      "median": 18144,
+      "min": 11876,
+      "max": 42730,
+      "stdev": 9774
+    }
+  },
+  {
     "timestamp": "2026-07-13T10:01:18.133Z",
     "label": "pr53-enrichment-smoke",
     "commit": "5cc542d",

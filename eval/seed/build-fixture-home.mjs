@@ -17,8 +17,9 @@
 // Timestamps come from fixtures/sessions.mjs offsets, materialized relative to NOW — so
 // "active today" behaves identically on every run. Run again to re-stamp before an eval.
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { markOnboarded, ownerOperatorPaths, savePermissionMode } from "@owner-operator/core";
 import { assertEvalSandboxPath, evalSandboxPath } from "../sandbox.mjs";
 import { SESSIONS } from "../fixtures/sessions.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
@@ -85,6 +86,22 @@ writeFileSync(join(HOME, "session_sources.json"), JSON.stringify({
 }, null, 2));
 writeFileSync(join(HOME, "settings.json"), JSON.stringify({ activeWindow: "14d" }, null, 2));
 writeFileSync(join(HOME, "blacklist.json"), JSON.stringify({ paths: [join(repoRoot, "eval")], repos: [] }, null, 2));
+markOnboarded(HOME, { via: "eval-fixture" });
+
+// Embedded Pi roots auth and model settings under OO_HOME/pi; seed them from the
+// developer's real home so eval subjects can call the model.
+const real = ownerOperatorPaths();
+const sandboxPi = ownerOperatorPaths(HOME);
+for (const key of ["piAuth", "piSettings", "piModels"]) {
+  if (!existsSync(real[key])) continue;
+  mkdirSync(sandboxPi.piAgentDir, { recursive: true });
+  cpSync(real[key], sandboxPi[key]);
+}
+
+// The default permission mode is read-only, which denies shell commands; eval subjects
+// need bash for transcript search, and the sandbox is already read-only at the tool
+// roster and cwd level.
+savePermissionMode(HOME, "allow");
 
 // Details history first (versions with real created_at spacing), then the final transcript
 // observation so current state matches the fixture.

@@ -1,43 +1,75 @@
 # Owner Operator
 
-You run coding agents in parallel across several tools and lose track of what each one is
-doing. Owner Operator pulls every session onto one surface, ranked by what needs you, so you
-can see them all at once and drop into the right one.
+> **Status:** macOS only. A Codex subscription is the only tested model backend; others are
+> unverified. If you're trying it, it is best you have both.
+
+Agents are becoming capable of long-term work, and running many of them in parallel is now the
+norm. For the first time, one person can manage multiple workstreams and converge on multiple
+outcomes at once.
+
+But this also creates new problems:
+
+1. **Keeping track of multiple agents is hard.** The state of their work is spread across
+   different threads and tools, which creates cognitive overload and friction. Understanding
+   which agents need attention, what decisions need to be made, and whether work is converging
+   on the intended outcomes becomes increasingly difficult. Things slip through the cracks, and
+   valuable work stalls when an agent just needs a nudge.
+
+2. **Valuable information is buried in threads and sessions.** It is isolated, noisy, and hard
+   to locate. Each tool, each thread, becomes an information silo.
+
+3. **Most harnesses want to lock you in.** Work should be as uncoupled from specific harnesses
+   as possible. Core primitives like schedules, triggers, and loops should exist outside of any
+   one product.
+
+4. **Long-running threads get poisoned.** Context accumulates, the thread becomes biased, and
+   there is no effective mechanism to pull the valuable work out and start fresh.
+
+Sessions and threads are at the core of any agentic workflow. Take them away, and an agent
+becomes an amnesiac. They hold all the history and context of work done and serve as an
+incredibly detailed ledger of actions, reasoning, and outcomes. Never before has work been so
+auditable.
+
+Owner Operator builds on that ledger. It maintains a durable system of record of every session,
+past and present, across every harness. Specialized tools search across all of it and pull the
+signal from the noise.
+
+The harness knows every running session at any point in time and assigns each a priority. A
+floating widget keeps every session in view at all times, so nothing slips through the cracks.
+
+The end goal is a harness fully aligned with the goal, task, and outcome of each thread, an
+intelligent layer above them that helps you achieve optimal outcomes.
 
 Today the widget is for live triage: read every coding-agent session in one place, rename a
 thread, or mark it done without opening its harness. The Owner Operator agent can inspect durable
 history and create prompt schedules that run in fresh isolated sessions.
 
+## Who this is for
+
+- Most of your agent work runs locally, on your own machine.
+- You use more than one harness and want to keep it that way.
+- You run many sessions at once and want to stay on top of all of them.
+
 ## Install
 
 ```bash
-npm install            # once, from the repo root
+npm install            # once, from the repo root; needs Node 22+
 ./oo                   # guided first-run setup
 ```
 
-Setup creates `~/.owner-operator/workspace`, asks which coding projects are off-limits, offers to
-copy existing standalone Pi authorizations and model settings, then shows every supported harness
-and recognized app or CLI on one review surface. Setup also asks whether shell commands and changes
-should ask, run automatically, or remain unavailable. Standalone Pi is optional; fresh installs use
-Owner Operator's built-in provider login and store credentials under `~/.owner-operator/pi`.
-Harnesses start included; mark any to ignore. It then configures macOS always-on services, the
-active window, and skills. The copy does not change standalone Pi. Until setup finishes, headless
-calls and transcript/model processing fail closed.
-
-`./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
-credentials/model source, transcript stores, session host roots, skills, tools, and permission mode without printing
-secrets. Use `/permissions` to change the mode, `/permission-system show` to inspect the
-composed Pi rules, or `/onboarding` to revisit setup.
+Setup walks privacy boundaries, credentials, the supported-harness review, permission mode,
+and macOS always-on services: [docs/onboarding.md](docs/onboarding.md).
 
 ## The widget
 
-The main surface: a floating macOS panel that always shows every session ranked by what needs
-you, so you can see what's working, what's waiting, and what you left open. With the daemon
-running:
+A floating macOS panel that shows your sessions, the ones needing attention first, so you can
+see what's working, what's waiting, and what you left open. With the daemon running:
 
 ```bash
 cd apps/widget && make run
 ```
+
+Behavior and boundaries: [docs/widget.md](docs/widget.md).
 
 ## The terminal
 
@@ -49,47 +81,20 @@ cd apps/widget && make run
 ./oo doctor            # effective harness configuration, no model call
 ```
 
-The terminal starts the background daemon when it needs state. The widget is the always-on UI
-surface for the ranked session list.
+The terminal starts the background daemon when it needs state. Flags, sessions, and
+provenance: [docs/cli.md](docs/cli.md).
 
 ## The daemon
 
 `oo daemon` is the long-lived local process hosting the state, session monitor, scheduler,
-and loopback Gateway. Terminal clients ensure the current daemon is ready. The widget installer
-installs daemon + widget LaunchAgents together; the widget itself never spawns processes.
+and loopback Gateway. Lifecycle, discovery, and LaunchAgents: [docs/daemon.md](docs/daemon.md).
 
 ## How it works
 
-Built on the [pi coding agent](https://github.com/earendil-works/pi). Embedded Pi uses
-Owner Operator-owned auth, model settings, workspace resources, and sessions under
-`~/.owner-operator`; standalone Pi keeps its own defaults. `oo` reads session
-files through application-owned scan/search modules and only sends bounded transcript samples to
-the model. Supported harnesses and their transcript formats live in
-[`AGENT_HARNESS_DESCRIPTORS`](packages/core/src/session-sources.mjs); apps and CLIs live separately
-in [`SESSION_HOST_DESCRIPTORS`](packages/core/src/session-hosts.mjs). Agents drive it headless
-with `oo "question"`: a single turn that prints its session id on stderr, with `--continue`
-/ `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
-saved under `~/.owner-operator/sessions` (never mixed with your coding sessions), labeled
-with its surface and caller repo; agents pass `--from-session <id>` so the audit trail
-records who called. Codex callers are detected from `CODEX_THREAD_ID`; other harnesses pass
-`--from-session` or `OO_FROM_SESSION`. Transcript discovery excludes that caller session to
-avoid prompt-echo retrieval. Owner Operator's own saved conversations remain outside normal
-coding-session search and are searched only through the explicit `--owner-operator` scope.
+Built on the [pi coding agent](https://github.com/earendil-works/pi); how Owner Operator
+uses it is [docs/agent.md](docs/agent.md). Every surface has its own page in
+[docs/](docs/):
 
-Model-free calls for scripts and agents: `oo --session-state` prints the current state
-rows as JSON, and `oo --done <id...>` marks threads done (ids come from `--session-state`;
-explicit only — no environment guessing, so parallel agents in one repo can't mark each
-other). A coding harness that knows its own session id (e.g. a session-end hook) can
-self-mark with `oo --done <that id>`.
-
-Durable prompt schedules use the typed `schedule_prompt` tool. Each run gets a fresh isolated
-Owner Operator transcript; failures and output are inspectable through `query_database` over
-`schedules` and `schedule_runs`. Scheduled prompts inherit the global permission baseline;
-per-schedule tool availability and task-repository overrides are defined in the
-[scheduler contract](docs/architecture.md#scheduler).
-
-So far this has only been tested with a Codex subscription as the driver for the embedded Pi
-agent. Other model backends should work but are unverified.
-
-Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,
-standards): [CONTRIBUTING.md](CONTRIBUTING.md).
+```sh
+npm run docs:list      # every page with its summary and read-when hints
+```

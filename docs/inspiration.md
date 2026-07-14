@@ -1,3 +1,11 @@
+---
+title: "Inspiration"
+summary: "Adopted open source borrows with pinned sources"
+read_when:
+  - Before building a new system, feature, or integration
+  - Recording an adopted borrow
+---
+
 # Inspiration
 
 Borrow battle-tested, maintained patterns. Check here before designing anything new; hunt
@@ -11,7 +19,9 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
   [Croner time-zone evaluation](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/schedule.ts#L13-L55),
   [fresh isolated sessions](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/docs/automation/cron-jobs.md#L203-L220),
   an installed [service version stamp](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/daemon/service-env.ts#L430-L446),
-  and LaunchAgent [enable → kickstart → bootstrap recovery](https://github.com/openclaw/openclaw/blob/d4e93e791bc5/src/daemon/launchd.ts#L656-L684).
+  LaunchAgent [enable → kickstart → bootstrap recovery](https://github.com/openclaw/openclaw/blob/d4e93e791bc5/src/daemon/launchd.ts#L656-L684),
+  and the [docs-list script](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/scripts/docs-list.js#L1-L179)
+  behind `npm run docs:list`.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven
   patterns at viral scale: skills grown from experience, persistent memory, one gateway
   process serving many chat surfaces. Pattern source for skills, memory, and surface design.
@@ -25,14 +35,14 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
 - **Agent Deck** — borrowed one canonical, ordered tool registry and exact-set regression tests
   ([registry contract](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry.go#L15-L33),
   [canonical test](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry_test.go#L8-L27)).
-  Its combined instance record was rejected because it embeds separate fields for each upstream
+  Its combined instance record is not borrowed: it embeds separate fields for each upstream
   agent session instead of one extensible reference
   ([fields](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/instance.go#L184-L220)).
 - **Herdr** — borrowed the separation of host workspace/pane identity from an opaque upstream
   agent-session reference
   ([snapshot](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/persist/snapshot.rs#L11-L29),
   [reference](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/persist/snapshot.rs#L97-L116)).
-  Its separate detection and integration enums were rejected because their membership drifts
+  Its separate detection and integration enums are not borrowed: their membership drifts
   ([detection](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/detect/mod.rs#L41-L89),
   [integration](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/api/schema/integrations.rs#L13-L30)).
   Herdr is AGPL-3.0-or-later/commercial, so no code was copied
@@ -41,11 +51,11 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
   versioned parser boundary
   ([Pi codec](https://github.com/paperclipai/paperclip/blob/ce7dedf33d2689673826ffdcfd6af7ee06be39af/packages/adapters/pi-local/src/server/index.ts#L7-L49),
   [parser contract](https://github.com/paperclipai/paperclip/blob/ce7dedf33d2689673826ffdcfd6af7ee06be39af/server/src/adapters/plugin-loader.ts#L82-L109)).
-  Its dynamic adapter/plugin system was rejected; a closed local catalog is enough here.
+  Its dynamic adapter/plugin system is not borrowed; a closed local catalog is enough here.
 - **Harnss** — borrowed the distinction between an engine ID and a concrete installed agent
   ([types](https://github.com/OpenSource03/harnss/blob/dc1dfd8a33caa46a1eefcfe9e14697b27ac4c33d/shared/types/engine.ts#L19-L28),
   [installed record](https://github.com/OpenSource03/harnss/blob/dc1dfd8a33caa46a1eefcfe9e14697b27ac4c33d/shared/types/registry.ts#L8-L25)).
-  Its remote agent store was rejected because Owner Operator does not install or update harnesses.
+  Its remote agent store is not borrowed: Owner Operator does not install or update harnesses.
 - **Conductor** — validated that a workspace host and the harness running inside it are separate:
   one workspace may run Claude Code, Codex, Cursor, or OpenCode
   ([workspace guide](https://www.conductor.build/docs/first-workspace),
@@ -62,45 +72,15 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 
 | pi piece | Where it runs here |
 |---|---|
-| `@earendil-works/pi-coding-agent` (pinned in `package.json`) | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
-| `@earendil-works/pi-ai` (pinned in `package.json`) | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
-| [`croner`](https://github.com/Hexagon/croner) `10.0.1` | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
-| `jsonc-parser` `3.3.1` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
+| `@earendil-works/pi-coding-agent` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
+| `@earendil-works/pi-ai` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
+| [`croner`](https://github.com/Hexagon/croner) | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
+| `jsonc-parser` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
-[`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) was considered and rejected
-for daemon scheduling: it is a Pi-session timer, while Owner Operator needs SQLite-owned job
-intent/history and a fresh isolated Pi session per prompt run. The local scheduler is deliberately
-limited to time evaluation, durable claims through `State`, and execution lifecycle.
-
-Permissions use `@gotgenes/pi-permission-system` `20.7.1`. It already provides deterministic
-allow/ask/deny rules, Bash decomposition, cross-tool path gates, and once/session approval prompts
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/README.md#L12-L47)).
-Its global config respects `PI_CODING_AGENT_DIR`
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L5-L12)),
-so Owner Operator roots it under `OO_HOME/pi`. Owner Operator writes only three baseline modes and
-marker-owned blacklist path rules for each lexical and filesystem-resolved identity because the
-extension matches both access forms
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/access-intent/access-path.ts#L87-L115)).
-The package exports only its service entry point
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/package.json#L1-L8)),
-so core's small `pathIdentities` adapter follows its best-effort existing-ancestor resolution
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/path/canonicalize-path.ts#L5-L36))
-without importing an unsupported internal path.
-Targeted JSONC edits preserve comments, specific user rules, and extension settings. Owner Operator does
-not maintain executable or shell-subcommand classifiers. Pattern maps use the extension's broad-first,
-last-match-wins contract
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/config-schema.ts#L55-L87)).
-Its Bash safety floors can raise opaque or execution-wrapper commands from `allow` to `ask`
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L319-L331));
-headless calls cannot approve those prompts.
-Project rules still resolve from the task cwd
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/permission-manager.ts#L388-L401));
-project rules are therefore trusted task policy and may override the global baseline and generated
-Pi path rules. The direct file-tool privacy guard remains authoritative for explicit paths,
-repository names, symlink resolution, and traversal that could reach a blacklisted descendant.
-OS enforcement for Bash
-process-internal access, non-literal paths, POSIX case variants, and repository-name entries is scoped
-to [#61](https://github.com/lhotwll217/owner-operator/issues/61), which starts from Anthropic Sandbox Runtime and an existing Pi adapter.
+Permission gating is adopted wholesale from
+[`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system). The full
+contract, with every claim pinned to the extension's source, lives in
+[agent.md — Permissions](agent.md#permissions).
 
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in
