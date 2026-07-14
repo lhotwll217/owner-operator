@@ -74,8 +74,8 @@ composed Pi rules, or `/onboarding` to revisit setup.
 
 ## The widget
 
-A floating macOS panel that always shows every session ranked by what needs you, so you can
-see what's working, what's waiting, and what you left open. With the daemon running:
+A floating macOS panel that always shows every session, ordered by priority, so you can see
+what's working, what's waiting, and what you left open. With the daemon running:
 
 ```bash
 cd apps/widget && make run
