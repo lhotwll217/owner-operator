@@ -6,8 +6,6 @@ Improve the headless user experience by locating the right session or widget row
 recovering the needed evidence, preserving chronology/provenance, and spending less context
 on irrelevant candidates. A call-count instruction is not a tool improvement.
 
-Primary research and prior art are captured in
-[`docs/session-transcript-retrieval-research.md`](../../docs/session-transcript-retrieval-research.md).
 Compact run outcomes stay in [`history.jsonl`](../history.jsonl). Raw trajectory-linked findings
 stay local in the ignored `findings.jsonl`; accepted, sanitized conclusions are recorded here.
 
