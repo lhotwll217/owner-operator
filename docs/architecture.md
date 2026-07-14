@@ -111,10 +111,14 @@ read-only without shell. `/permissions` changes it later. `@gotgenes/pi-permissi
 evaluation, prompts, and session grants; Owner Operator does not classify executables or shell
 subcommands. The concrete core adapter reconciles only the selected defaults and marker-owned
 blacklist rules into Pi's global config; it preserves advanced Pi settings and specific rules.
-Blacklist paths feed Pi's cross-tool path policy and the direct file-tool guards. Process-internal
-access and parent-directory traversal require separate [sandbox work](https://github.com/lhotwll217/owner-operator/issues/61).
-Specific global and task-repository `.pi` rules use Pi's standard precedence and may override these
-defaults. Pi also floors opaque or execution-wrapper shell commands to `ask`, including in `allow` mode.
+Blacklist paths feed Pi's cross-tool path policy as lexical and filesystem-resolved identities.
+Direct `grep`, `find`, and `ls` also reject a parent whose traversal could reach a blacklisted
+descendant. Bash process-internal access, non-literal paths, POSIX case variants, and repository-name
+entries require separate [sandbox work](https://github.com/lhotwll217/owner-operator/issues/61).
+Specific global and trusted task-repository `.pi` rules use Pi's standard precedence and may
+deliberately override these defaults and generated Pi path rules; direct file-tool privacy guards
+remain authoritative. Pi also floors opaque or execution-wrapper shell commands to `ask`, including
+in `allow` mode.
 Adoption is recorded with pinned sources in [docs/inspiration.md](inspiration.md).
 
 ## State and events

@@ -1,7 +1,7 @@
 // Owner Operator privacy tool layer. The session scanner/store already enforce the
 // blacklist; these wrappers close the raw pi file-tool gap at the tool boundary.
 
-import { existsSync, realpathSync, statSync, readFileSync } from "node:fs";
+import { existsSync, statSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -16,7 +16,7 @@ import {
   type ExtensionFactory,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { isBlacklisted, loadBlacklist, type Blacklist } from "@owner-operator/core";
+import { isBlacklisted, loadBlacklist, pathIdentities, type Blacklist } from "@owner-operator/core";
 import { ooRenderCall } from "../shared/oo-presentation";
 import { repoRoot } from "../shared/repo-root";
 
@@ -103,22 +103,24 @@ function repoName(abs: string): string | null {
   return path.basename(root) || null;
 }
 
-function resolvedPathCandidate(abs: string): string | null {
-  try {
-    return realpathSync.native(abs);
-  } catch {
-    const ancestor = existingAncestor(abs);
-    try {
-      return path.resolve(realpathSync.native(ancestor), path.relative(ancestor, abs));
-    } catch {
-      return null;
-    }
-  }
+const stripTrailingSep = (p: string): string => {
+  const root = path.parse(p).root;
+  return p === root ? p : p.replace(/[\\/]+$/, "");
+};
+
+const foldPath = (p: string): string => stripTrailingSep(p).toLowerCase();
+
+function sameOrDescendant(parent: string, child: string): boolean {
+  const p = foldPath(parent);
+  const c = foldPath(child);
+  if (p === c) return true;
+  const root = path.parse(parent).root;
+  return parent === root ? c.startsWith(foldPath(root)) : c.startsWith(p + path.sep.toLowerCase());
 }
 
 function blacklistWithRealPaths(bl: Blacklist): Blacklist {
   return {
-    paths: [...new Set(bl.paths.flatMap((p) => [p, resolvedPathCandidate(p)].filter((v): v is string => !!v)))],
+    paths: [...new Set(bl.paths.flatMap(pathIdentities))],
     repos: bl.repos,
   };
 }
@@ -131,7 +133,7 @@ export function blacklistedPathVerdict(rawPath: string, cwd: string, bl: Blackli
   | { blacklisted: false; path: string }
   | { blacklisted: true; path: string } {
   const lexical = normalizeInputPath(rawPath, cwd);
-  const candidates = [lexical, resolvedPathCandidate(lexical)].filter((p): p is string => !!p);
+  const candidates = pathIdentities(lexical);
   for (const candidate of candidates) {
     if (isBlacklisted(bl, { cwd: candidate, repo: repoName(candidate) })) {
       return { blacklisted: true, path: candidate };
@@ -140,14 +142,34 @@ export function blacklistedPathVerdict(rawPath: string, cwd: string, bl: Blackli
   return { blacklisted: false, path: lexical };
 }
 
-function assertAllowed(rawPath: string, cwd: string): void {
+export function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: Blacklist = toolBlacklist()):
+  | { blacklisted: false }
+  | { blacklisted: true; path: string; root: string } {
+  const lexical = normalizeInputPath(rawPath, cwd);
+  const roots = pathIdentities(lexical);
+  const blocked = [...new Set(bl.paths.flatMap(pathIdentities))];
+  for (const root of roots) {
+    for (const blockedPath of blocked) {
+      if (sameOrDescendant(root, blockedPath)) return { blacklisted: true, path: blockedPath, root };
+    }
+  }
+  return { blacklisted: false };
+}
+
+function assertAllowed(rawPath: string, cwd: string, opts: { mayTraverse?: boolean } = {}): void {
   const verdict = blacklistedPathVerdict(rawPath, cwd);
   if (verdict.blacklisted) {
     throw new Error(`Access denied: ${verdict.path} is blacklisted by ${path.join(ooHome(), "blacklist.json")}`);
   }
+  if (opts.mayTraverse) {
+    const descendant = blacklistedDescendantVerdict(rawPath, cwd);
+    if (descendant.blacklisted) {
+      throw new Error(`Access denied: ${descendant.root} would traverse blacklisted path ${descendant.path}`);
+    }
+  }
 }
 
-function wrapFileTool(name: FileToolName, defaultPath: (params: any) => string): AnyTool {
+function wrapFileTool(name: FileToolName, defaultPath: (params: any) => string, opts: { mayTraverse?: boolean } = {}): AnyTool {
   const seed = builtIns(process.cwd())[name];
   return {
     ...seed,
@@ -157,7 +179,7 @@ function wrapFileTool(name: FileToolName, defaultPath: (params: any) => string):
     renderCall: ooRenderCall(name, (p) => defaultPath(p)),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
-      assertAllowed(defaultPath(params), cwd);
+      assertAllowed(defaultPath(params), cwd, opts);
       return builtIns(cwd)[name].execute(toolCallId, params, signal, onUpdate, ctx);
     },
   };
@@ -166,9 +188,9 @@ function wrapFileTool(name: FileToolName, defaultPath: (params: any) => string):
 export function createBlacklistAwareFileTools(): AnyTool[] {
   return [
     wrapFileTool("read", (p) => p.path),
-    wrapFileTool("grep", (p) => p.path ?? "."),
-    wrapFileTool("find", (p) => p.path ?? "."),
-    wrapFileTool("ls", (p) => p.path ?? "."),
+    wrapFileTool("grep", (p) => p.path ?? ".", { mayTraverse: true }),
+    wrapFileTool("find", (p) => p.path ?? ".", { mayTraverse: true }),
+    wrapFileTool("ls", (p) => p.path ?? ".", { mayTraverse: true }),
     wrapFileTool("edit", (p) => p.path),
     wrapFileTool("write", (p) => p.path),
   ];

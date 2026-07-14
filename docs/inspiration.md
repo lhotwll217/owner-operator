@@ -78,7 +78,15 @@ allow/ask/deny rules, Bash decomposition, cross-tool path gates, and once/sessio
 Its global config respects `PI_CODING_AGENT_DIR`
 ([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L5-L12)),
 so Owner Operator roots it under `OO_HOME/pi`. Owner Operator writes only three baseline modes and
-marker-owned blacklist path rules, preserving specific user rules and extension settings; it does
+marker-owned blacklist path rules for each lexical and filesystem-resolved identity because the
+extension matches both access forms
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/access-intent/access-path.ts#L87-L115)).
+The package exports only its service entry point
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/package.json#L1-L8)),
+so core's small `pathIdentities` adapter follows its best-effort existing-ancestor resolution
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/path/canonicalize-path.ts#L5-L36))
+without importing an unsupported internal path.
+Targeted JSONC edits preserve comments, specific user rules, and extension settings. Owner Operator does
 not maintain executable or shell-subcommand classifiers. Pattern maps use the extension's broad-first,
 last-match-wins contract
 ([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/config-schema.ts#L55-L87)).
@@ -87,10 +95,12 @@ Its Bash safety floors can raise opaque or execution-wrapper commands from `allo
 headless calls cannot approve those prompts.
 Project rules still resolve from the task cwd
 ([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/permission-manager.ts#L388-L401));
-project rules are therefore trusted task policy and may override the global baseline. The separate
-raw direct-file-tool guard enforces explicit paths, repository names, and symlink resolution. OS
-enforcement for process-internal access and recursive traversal from a parent directory is scoped to
-[#61](https://github.com/lhotwll217/owner-operator/issues/61), which starts from Anthropic Sandbox Runtime and an existing Pi adapter.
+project rules are therefore trusted task policy and may override the global baseline and generated
+Pi path rules. The direct file-tool privacy guard remains authoritative for explicit paths,
+repository names, symlink resolution, and traversal that could reach a blacklisted descendant.
+OS enforcement for Bash
+process-internal access, non-literal paths, POSIX case variants, and repository-name entries is scoped
+to [#61](https://github.com/lhotwll217/owner-operator/issues/61), which starts from Anthropic Sandbox Runtime and an existing Pi adapter.
 
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in

@@ -25,6 +25,8 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.SchedulePrompt,
 ];
 
+// packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.
+// A new tool remains safe if this list grows first: Pi falls back to the selected global mode.
 export const ownerOperatorTools: readonly AgentToolId[] = [
   ...DEFAULT_TOOL_POSTURE as AgentToolId[],
   ...ownerOperatorTypedTools,

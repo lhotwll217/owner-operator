@@ -52,6 +52,8 @@ export interface OnboardingFlowOptions {
   ooHome?: string;
   piAgentDir?: string;
   platform?: NodeJS.Platform;
+  sessionSourceHome?: string;
+  sessionSourceEnv?: NodeJS.ProcessEnv;
   detectCandidates?: (deep: boolean) => SessionSourceCandidate[];
   detectHosts?: () => Promise<SessionHostCandidate[]> | SessionHostCandidate[];
   reviewCatalog?: (catalog: SessionCatalogReview) => Promise<SessionCatalogReviewResult | undefined>;
@@ -192,7 +194,11 @@ export async function runOnboarding(
 
     if (needs("session-sources")) {
       const detect = options.detectCandidates ?? ((deep: boolean) =>
-        detectSessionSourceCandidates(paths.home, { deep }));
+        detectSessionSourceCandidates(paths.home, {
+          deep,
+          ...(options.sessionSourceHome ? { home: options.sessionSourceHome } : {}),
+          ...(options.sessionSourceEnv ? { env: options.sessionSourceEnv } : {}),
+        }));
       const sourceCandidates = detect(false);
       const hostCandidates = await (options.detectHosts?.() ?? detectSessionHostCandidates(paths.home));
       const access = loadTranscriptAccess(paths.home);

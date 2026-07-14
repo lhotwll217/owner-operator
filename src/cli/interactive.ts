@@ -43,6 +43,9 @@ if (!process.stdout.isTTY) {
 }
 
 const prompt = ownerOperatorPrompt();
+// Permission-system initialization points Pi at OO_HOME. Preserve standalone Pi discovery inputs
+// first so onboarding never offers Owner Operator's own sessions as an external transcript source.
+const standalonePiEnvironment = { ...process.env };
 const standalonePiAgentDir = getAgentDir();
 const { authStorage, paths } = ownerOperatorPiServices();
 configurePermissionSystemEnvironment(paths);
@@ -72,6 +75,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
           factory: createOnboardingExtension({
             ooHome: paths.home,
             piAgentDir: standalonePiAgentDir,
+            sessionSourceEnv: standalonePiEnvironment,
             refreshConfiguration: async () => {
               authStorage.reload();
               await settingsManager.reload();

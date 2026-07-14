@@ -10,10 +10,12 @@ import {
   loadBlacklist,
   loadHarnessSettings,
   loadSessionSources,
+  markOnboardingStep,
   pendingOnboardingSteps,
   type SessionSourceCandidate,
 } from "@owner-operator/core";
 import { runOnboarding } from "./onboarding";
+import type { SessionCatalogReview } from "./session-catalog-review";
 
 const root = mkdtempSync(join(tmpdir(), "oo-onboarding-flow-"));
 const ooHome = join(root, "oo-home");
@@ -104,6 +106,49 @@ try {
     "Agent session access",
   ], "privacy, model, and permissions precede the single catalog review");
   assert.ok(asked.indexOf("Keep Owner Operator running?") < asked.indexOf("How far back counts as active?"), "always-on precedes the active window");
+
+  const detectionHome = join(root, "source-environment-home");
+  const standaloneSourcePi = join(root, "standalone-source-pi");
+  const standaloneSessions = join(standaloneSourcePi, "custom-sessions");
+  const ownedSourcePi = join(detectionHome, "pi");
+  mkdirSync(standaloneSessions, { recursive: true });
+  mkdirSync(ownedSourcePi, { recursive: true });
+  writeFileSync(join(standaloneSourcePi, "settings.json"), JSON.stringify({ sessionDir: "custom-sessions" }));
+  for (const step of ["intro", "privacy", "auth", "permissions"] as const) markOnboardingStep(detectionHome, step);
+  const priorPiDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = ownedSourcePi;
+  try {
+    await runOnboarding({
+      hasUI: true,
+      ui: {
+        async confirm(): Promise<boolean> { return false; },
+        async input(): Promise<string> { return ""; },
+        async select(title: string): Promise<string> {
+          return title === "How far back counts as active?" ? "1d" : "Owner Operator only (recommended)";
+        },
+        notify(): void {},
+      },
+    } as any, {
+      ooHome: detectionHome,
+      platform: "linux",
+      sessionSourceHome: root,
+      sessionSourceEnv: { PI_CODING_AGENT_DIR: standaloneSourcePi },
+      detectHosts: () => [],
+      reviewCatalog: async (catalog: SessionCatalogReview) => {
+        const pi = catalog.harnesses.find(({ id }) => id === "pi");
+        assert.ok(pi?.roots.includes(standaloneSessions), "source detection keeps the standalone Pi environment");
+        assert.ok(!pi?.roots.includes(join(ownedSourcePi, "sessions")), "source detection never offers Owner Operator's own Pi sessions");
+        return {
+          selectedFormats: [...KNOWN_TRANSCRIPT_FORMATS],
+          defaultFormats: [...KNOWN_TRANSCRIPT_FORMATS],
+          roots: [],
+        };
+      },
+    } as any);
+  } finally {
+    if (priorPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = priorPiDir;
+  }
 
   const cancelledHome = join(root, "cancelled-permissions-home");
   const cancelledPi = join(cancelledHome, "pi");

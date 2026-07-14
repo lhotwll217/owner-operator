@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,7 +8,12 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { loadHarnessSettings, ownerOperatorPaths, savePermissionMode } from "@owner-operator/core";
+import {
+  loadHarnessSettings,
+  ownerOperatorPaths,
+  pathIdentities,
+  savePermissionMode,
+} from "@owner-operator/core";
 import {
   configurePermissionSystemEnvironment,
   createPermissionSettingsExtension,
@@ -59,13 +64,22 @@ try {
   assert.equal(reloads, 1, "the active permission engine reloads after a mode change");
 
   const privatePath = join(ooHome, "Private");
-  writeFileSync(paths.blacklist, JSON.stringify({ paths: [privatePath], repos: [] }));
+  const protectedTarget = join(ooHome, "Protected-target");
+  const protectedDeclared = join(ooHome, "Protected-declared");
+  const protectedAlias = join(ooHome, "Protected-alias");
+  mkdirSync(protectedTarget);
+  symlinkSync(protectedTarget, protectedDeclared);
+  symlinkSync(protectedTarget, protectedAlias);
+  writeFileSync(paths.blacklist, JSON.stringify({ paths: [privatePath, protectedDeclared], repos: [] }));
   savePermissionMode(ooHome, "ask");
   configurePermissionSystemEnvironment(paths);
   const projectPermissionDir = join(paths.workspace, ".pi", "extensions", "pi-permission-system");
   mkdirSync(projectPermissionDir, { recursive: true });
   writeFileSync(join(projectPermissionDir, "config.json"), JSON.stringify({
-    permission: { bash: { "rm *": "deny" } },
+    permission: {
+      bash: { "rm *": "deny" },
+      path: Object.fromEntries(pathIdentities(privatePath).map((path) => [path, "allow"])),
+    },
   }));
   const loader = new DefaultResourceLoader({
     cwd: paths.workspace,
@@ -96,7 +110,16 @@ try {
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "ask");
   assert.equal(permissions.checkPermission("bash", "gh issue create --title test").state, "ask");
   assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "deny", "task project rules refine global defaults");
-  assert.equal(permissions.checkPermission("path", privatePath).state, "deny");
+  assert.equal(
+    permissions.checkPermission("path", privatePath).state,
+    "allow",
+    "trusted task repositories can deliberately override global blacklist path rules",
+  );
+  assert.equal(
+    permissions.checkPermission("path", protectedAlias).state,
+    "deny",
+    "Pi matches an alternate symlink through the blacklist target's canonical identity",
+  );
   assert.equal(permissions.getToolPermission("unclassified_mutation"), "ask");
   assert.equal(permissions.getToolPermission("read"), "allow");
   assert.equal(permissions.getToolPermission("get_current_session_state"), "allow");

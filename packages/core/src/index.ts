@@ -6,7 +6,7 @@
 
 // The privacy blacklist: repos/paths the owner declared off-limits — enforced at the
 // scan (discovery), the store seam (writes), and the open-time purge. See blacklist.mjs.
-export { loadBlacklist, isBlacklisted, pathSlugs } from "./blacklist.mjs";
+export { loadBlacklist, isBlacklisted, pathIdentities, pathSlugs } from "./blacklist.mjs";
 export type { Blacklist } from "./blacklist.mjs";
 
 // Where local agent sessions live — the (source, root) dirs the scan and monitor share, with

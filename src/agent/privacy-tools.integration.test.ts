@@ -98,6 +98,21 @@ try {
     /blacklisted/,
     "write resolves an existing symlink ancestor before creating a file",
   );
+  await assert.rejects(
+    () => tools.get("grep")!.execute("grep-2", { pattern: "SECRET", path: root }, undefined, undefined, ctx),
+    /would traverse blacklisted path/,
+    "grep blocks a parent search root that would recurse into a blacklisted tree",
+  );
+  await assert.rejects(
+    () => tools.get("find")!.execute("find-2", { pattern: "*", path: root }, undefined, undefined, ctx),
+    /would traverse blacklisted path/,
+    "find blocks a parent search root that would recurse into a blacklisted tree",
+  );
+  await assert.rejects(
+    () => tools.get("ls")!.execute("ls-2", { path: root }, undefined, undefined, ctx),
+    /would traverse blacklisted path/,
+    "ls blocks a parent directory that would expose a blacklisted child",
+  );
   process.stdout.write("ok — privacy tools: Pi file primitives reject blacklisted paths\n");
 } finally {
   rmSync(root, { recursive: true, force: true });

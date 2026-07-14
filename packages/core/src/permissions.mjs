@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { parse } from "jsonc-parser";
-import { loadBlacklist } from "./blacklist.mjs";
+import { applyEdits, modify, parse } from "jsonc-parser";
+import { loadBlacklist, pathIdentities } from "./blacklist.mjs";
 import {
   DEFAULT_PERMISSION_MODE,
   ensureOwnerOperatorWorkspace,
@@ -12,28 +12,32 @@ import {
 } from "./harness.mjs";
 
 const BLACKLIST_REASON = "Owner Operator privacy blacklist";
+// Keep these explicit defaults aligned with src/agent/tools/index.ts. Unlisted tools safely fall
+// back to the selected mode; the lists only identify known read and change surfaces.
 const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_session_state", "query_database"];
 const CHANGE_SURFACES = ["edit", "write", "mark_thread_done", "schedule_prompt"];
+const MANAGED_SURFACES = [...READ_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
+const JSON_FORMAT = { insertSpaces: true, tabSize: 2, eol: "\n" };
 
-function readJson(path) {
+function readDocument(path) {
   let raw;
   try {
     raw = readFileSync(path, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") return {};
+    if (error?.code === "ENOENT") return { raw: "{}\n", value: {} };
     throw new Error(`cannot read Pi permission config at ${path}`, { cause: error });
   }
   const errors = [];
   const value = parse(raw, errors);
   if (errors.length || !isRecord(value)) throw new Error(`invalid Pi permission config at ${path}`);
-  return value;
+  return { raw, value };
 }
 
-function writeJsonAtomic(path, value) {
+function writeTextAtomic(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n");
+    writeFileSync(temporary, value.endsWith("\n") ? value : `${value}\n`);
     renameSync(temporary, path);
   } catch (error) {
     try { unlinkSync(temporary); } catch { /* no temporary file to remove */ }
@@ -47,6 +51,10 @@ function isRecord(value) {
 
 function patternMap(value) {
   return isRecord(value) && !("action" in value) ? { ...value } : {};
+}
+
+function isPatternMap(value) {
+  return isRecord(value) && !("action" in value);
 }
 
 function withDefault(value, action) {
@@ -79,20 +87,60 @@ function permissionPolicy(existing, ooHome, mode) {
   const generatedRule = { action: "deny", reason: BLACKLIST_REASON };
   const pathRules = { "*": "allow", ...ownerPathRules };
   for (const blocked of loadBlacklist(ooHome).paths) {
-    pathRules[blocked] = generatedRule;
-    pathRules[`${blocked}/*`] = generatedRule;
+    for (const identity of pathIdentities(blocked)) {
+      pathRules[identity] = generatedRule;
+      pathRules[`${identity}/*`] = generatedRule;
+    }
   }
   next.path = pathRules;
   return next;
 }
 
+function setJsoncValue(text, path, value, first = false) {
+  return applyEdits(text, modify(text, path, value, {
+    formattingOptions: JSON_FORMAT,
+    ...(first ? { getInsertionIndex: () => 0 } : {}),
+  }));
+}
+
+function reconcilePermissionDocument(text, existingPermission, nextPermission) {
+  if (!isRecord(existingPermission)) return setJsoncValue(text, ["permission"], nextPermission);
+
+  let nextText = setJsoncValue(text, ["permission", "*"], nextPermission["*"], true);
+  for (const surface of MANAGED_SURFACES) {
+    nextText = isPatternMap(existingPermission[surface])
+      ? setJsoncValue(nextText, ["permission", surface, "*"], nextPermission[surface]["*"], true)
+      : setJsoncValue(nextText, ["permission", surface], nextPermission[surface]);
+  }
+
+  const existingPath = existingPermission.path;
+  if (!isPatternMap(existingPath)) return setJsoncValue(nextText, ["permission", "path"], nextPermission.path);
+
+  nextText = setJsoncValue(nextText, ["permission", "path", "*"], nextPermission.path["*"], true);
+  for (const [pattern, value] of Object.entries(existingPath)) {
+    if (isGeneratedBlacklistRule(value)) {
+      nextText = setJsoncValue(nextText, ["permission", "path", pattern], undefined);
+    }
+  }
+  for (const [pattern, value] of Object.entries(nextPermission.path)) {
+    if (isGeneratedBlacklistRule(value)) {
+      nextText = setJsoncValue(nextText, ["permission", "path", pattern], value);
+    }
+  }
+  return nextText;
+}
+
 export function reconcilePermissionSettings(ooHome) {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
-  const existing = readJson(paths.piPermissionConfig);
+  const { raw, value: existing } = readDocument(paths.piPermissionConfig);
   const existingPermission = isRecord(existing.permission) ? existing.permission : {};
   const mode = loadHarnessSettings(paths.home).permissionMode;
-  const next = { ...existing, permission: permissionPolicy(existingPermission, paths.home, mode) };
-  writeJsonAtomic(paths.piPermissionConfig, next);
+  const nextPermission = permissionPolicy(existingPermission, paths.home, mode);
+  const next = { ...existing, permission: nextPermission };
+  writeTextAtomic(
+    paths.piPermissionConfig,
+    reconcilePermissionDocument(raw, existing.permission, nextPermission),
+  );
   return next;
 }
 
