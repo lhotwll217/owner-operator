@@ -24,8 +24,8 @@ an unknown flag. The recognized set lives in
 | `oo daemon` | the long-lived daemon process: [daemon.md](daemon.md) |
 | `oo --help` / `-h` | usage |
 
-Removed spellings (`--json`, the old one-shot subcommand) fail fast with guidance instead of
-being treated as a prompt.
+`--json` and one-shot spellings are rejected with guidance instead of being treated as a
+prompt.
 
 ## Sessions and provenance
 

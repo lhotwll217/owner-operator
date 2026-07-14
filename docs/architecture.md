@@ -68,5 +68,5 @@ the same logged background seam and leave the durable watermark eligible for a l
 
 ## Surface pages
 
-Behavior lives with its surface: [agent.md](agent.md), [sessions.md](sessions.md),
-[cli.md](cli.md), [scheduler.md](scheduler.md), [daemon.md](daemon.md).
+Behavior lives with its surface; `npm run docs:list` prints every page with its
+routing frontmatter.

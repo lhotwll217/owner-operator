@@ -62,8 +62,8 @@ and macOS always-on services: [docs/onboarding.md](docs/onboarding.md).
 
 ## The widget
 
-A floating macOS panel that always shows every session, ordered by priority, so you can see
-what's working, what's waiting, and what you left open. With the daemon running:
+A floating macOS panel that shows your sessions, the ones needing attention first, so you can
+see what's working, what's waiting, and what you left open. With the daemon running:
 
 ```bash
 cd apps/widget && make run

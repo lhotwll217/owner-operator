@@ -8,11 +8,10 @@ read_when:
 
 # Widget
 
-A floating macOS panel that always shows every session, ordered by priority: what's working,
-what's waiting, what you left open. Triage happens in place: read a session, rename a thread,
-or mark it done without opening its harness.
+A floating macOS panel that shows your sessions, the ones needing attention first: what's
+working, what's waiting, what you left open. Triage happens in place: see each session's state
+and summary, rename a thread, or mark it done without opening its harness.
 
-The widget is a pure Gateway client: it renders daemon state and never spawns a process. The
-widget installer installs the daemon and widget LaunchAgents together; daemon lifecycle and
-client auth live in [daemon.md](daemon.md). Until onboarding completes it displays
-setup-required ([onboarding.md](onboarding.md)).
+The widget is a pure Gateway client: it renders daemon state and never spawns a process.
+Install, lifecycle, and client auth live with the daemon ([daemon.md](daemon.md)); until
+onboarding completes it displays setup-required ([onboarding.md](onboarding.md)).

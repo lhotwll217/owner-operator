@@ -18,7 +18,8 @@ is:
 - Prompt tools: concrete `AgentToolId[]`; presets are resolved upstream.
 - Run context: absolute `cwd`, timeout, immutable payload snapshot, and trigger context.
 
-Cron evaluation uses pinned `croner@10.0.1`, following OpenClaw's proven
+Cron evaluation uses [`croner`](https://github.com/Hexagon/croner) (pinned in
+`package.json`), following OpenClaw's proven
 [Croner adapter](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/schedule.ts#L1-L55).
 Our small public scheduler seam mirrors OpenClaw's explicit
 [cron service contract](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/service-contract.ts#L27-L45)
