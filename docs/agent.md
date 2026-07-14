@@ -56,16 +56,37 @@ printing credential values.
 
 The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. The owner
 selects a permission mode during onboarding and changes it later with `/permissions`.
-`@gotgenes/pi-permission-system` owns rule
-evaluation, prompts, and session grants; Owner Operator does not classify executables or shell
-subcommands. The concrete core adapter reconciles only the selected defaults and marker-owned
-blacklist rules into Pi's global config; it preserves advanced Pi settings and specific rules.
-Blacklist paths feed Pi's cross-tool path policy as lexical and filesystem-resolved identities.
-Direct `grep`, `find`, and `ls` also reject a parent whose traversal could reach a blacklisted
-descendant. Bash process-internal access, non-literal paths, POSIX case variants, and repository-name
-entries require separate [sandbox work](https://github.com/lhotwll217/owner-operator/issues/61).
-Specific global and trusted task-repository `.pi` rules use Pi's standard precedence and may
-deliberately override these defaults and generated Pi path rules; direct file-tool privacy guards
-remain authoritative. Pi also floors opaque or execution-wrapper shell commands to `ask`, including
-in `allow` mode.
-Adoption is recorded with pinned sources in [docs/inspiration.md](inspiration.md).
+
+Permission gating is
+[`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system) (pinned exact in
+`package.json`), not local code. It already provides deterministic allow/ask/deny rules, Bash
+decomposition, cross-tool path gates, and once/session approval prompts
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/README.md#L12-L47)).
+Its global config respects `PI_CODING_AGENT_DIR`
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L5-L12)),
+so Owner Operator roots it under `OO_HOME/pi`. Owner Operator writes only three baseline modes and
+marker-owned blacklist path rules for each lexical and filesystem-resolved identity because the
+extension matches both access forms
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/access-intent/access-path.ts#L87-L115)).
+The package exports only its service entry point
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/package.json#L1-L8)),
+so core's small `pathIdentities` adapter follows its best-effort existing-ancestor resolution
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/path/canonicalize-path.ts#L5-L36))
+without importing an unsupported internal path.
+Targeted JSONC edits preserve comments, specific user rules, and extension settings. Owner Operator does
+not maintain executable or shell-subcommand classifiers. Pattern maps use the extension's broad-first,
+last-match-wins contract
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/config-schema.ts#L55-L87)).
+Its Bash safety floors can raise opaque or execution-wrapper commands from `allow` to `ask`
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L319-L331));
+headless calls cannot approve those prompts.
+Project rules still resolve from the task cwd
+([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/permission-manager.ts#L388-L401));
+project rules are therefore trusted task policy and may override the global baseline and generated
+Pi path rules.
+
+The direct file-tool privacy guard remains authoritative for explicit paths, repository names,
+symlink resolution, and traversal that could reach a blacklisted descendant. OS enforcement for Bash
+process-internal access, non-literal paths, POSIX case variants, and repository-name entries is scoped
+to [#61](https://github.com/lhotwll217/owner-operator/issues/61), which starts from Anthropic Sandbox
+Runtime and an existing Pi adapter.
