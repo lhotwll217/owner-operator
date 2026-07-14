@@ -1,8 +1,8 @@
 ---
 title: "Inspiration"
-summary: "Accepted open source borrows with pinned sources; check before designing anything new"
+summary: "Adopted open source borrows with pinned sources"
 read_when:
-  - Before building a new system, feature, or integration (don't reinvent)
+  - Before building a new system, feature, or integration
   - Recording an adopted borrow
 ---
 
