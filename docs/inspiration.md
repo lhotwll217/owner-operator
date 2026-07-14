@@ -78,9 +78,8 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `jsonc-parser` `3.3.1` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
 [`pi-schedule-prompt`](https://pi.dev/packages/pi-schedule-prompt) was considered and rejected
-for daemon scheduling: it is a Pi-session timer, while Owner Operator needs SQLite-owned job
-intent/history and a fresh isolated Pi session per prompt run. The local scheduler is deliberately
-limited to time evaluation, durable claims through `State`, and execution lifecycle.
+for daemon scheduling (2026-07): as evaluated then, it was a timer inside one Pi session, and
+daemon jobs must outlive any session. What we built instead: [scheduler.md](scheduler.md).
 
 Permission gating is adopted wholesale from
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system) instead of local
