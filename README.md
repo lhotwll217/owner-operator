@@ -1,12 +1,55 @@
 # Owner Operator
 
-You run coding agents in parallel across several tools and lose track of what each one is
-doing. Owner Operator pulls every session onto one surface, ranked by what needs you, so you
-can see them all at once and drop into the right one.
+> **Status:** macOS only, and so far only tested with a Codex subscription driving the embedded
+> Pi agent. Other model backends should work but are unverified. If you're interested in trying
+> it, it is best you have both.
+
+Agents are becoming capable of long-term work, and running many of them in parallel is now the
+norm. For the first time, one person can manage multiple workstreams and converge on multiple
+outcomes at once.
+
+But this also creates new problems:
+
+1. **Keeping track of multiple agents is hard.** The state of their work is spread across
+   different threads and tools, which creates cognitive overload and friction. Understanding
+   which agents need attention, what decisions need to be made, and whether work is converging
+   on the intended outcomes becomes increasingly difficult. Things slip through the cracks, and
+   valuable work stalls when an agent just needs a nudge.
+
+2. **Valuable information is buried in threads and sessions.** It is isolated, noisy, and hard
+   to locate. Each tool, each thread, becomes an information silo.
+
+3. **Most harnesses want to lock you in.** Work should be as uncoupled from specific harnesses
+   as possible. Core primitives like schedules, triggers, and loops should exist outside of any
+   one product.
+
+4. **Long-running threads get poisoned.** Context accumulates, the thread becomes biased, and
+   there is no effective mechanism to pull the valuable work out and start fresh.
+
+Sessions and threads are at the core of any agentic workflow. Take them away, and an agent
+becomes an amnesiac. They hold all the history and context of work done and serve as an
+incredibly detailed ledger of actions, reasoning, and outcomes. Never before has work been so
+auditable.
+
+Owner Operator builds on that ledger. It maintains a durable system of record of every session,
+past and present, across every harness. Specialized tools search across all of it and pull the
+signal from the noise.
+
+The harness knows every running session at any point in time and assigns each a priority. A
+floating widget keeps every session in view at all times, so nothing slips through the cracks.
+
+The end goal is a harness fully aligned with the goal, task, and outcome of each thread, an
+intelligent layer above them that helps you achieve optimal outcomes.
 
 Today the widget is for live triage: read every coding-agent session in one place, rename a
 thread, or mark it done without opening its harness. The Owner Operator agent can inspect durable
 history and create prompt schedules that run in fresh isolated sessions.
+
+## Who this is for
+
+- Most of your agent work runs locally, on your own machine.
+- You use more than one harness and want to keep it that way.
+- You run many sessions at once and want to stay on top of all of them.
 
 ## Install
 
@@ -87,9 +130,6 @@ Owner Operator transcript; failures and output are inspectable through `query_da
 `schedules` and `schedule_runs`. Scheduled prompts inherit the global permission baseline;
 per-schedule tool availability and task-repository overrides are defined in the
 [scheduler contract](docs/architecture.md#scheduler).
-
-So far this has only been tested with a Codex subscription as the driver for the embedded Pi
-agent. Other model backends should work but are unverified.
 
 Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,
 standards): [CONTRIBUTING.md](CONTRIBUTING.md).
