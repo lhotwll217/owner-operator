@@ -1,17 +1,66 @@
-// Unit: Owner Operator session tool allowlists.
+// Integration: Owner Operator session configuration over isolated harness files.
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
 import {
   evalSettingsOverrides,
   lastAssistantError,
   ownerOperatorPrompt,
+  ownerOperatorPiServices,
   ownerOperatorTools,
   ownerOperatorCustomTools,
   repoRoot,
+  runScheduledPrompt,
 } from "./agent";
 
+const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
+try {
+  const ooHome = join(configRoot, "oo-home");
+  const task = join(configRoot, "task");
+  mkdirSync(join(ooHome, "pi"), { recursive: true });
+  mkdirSync(join(task, ".pi"), { recursive: true });
+  writeFileSync(join(ooHome, "pi", "auth.json"), JSON.stringify({ owned: { type: "api_key", key: "secret" } }));
+  writeFileSync(join(ooHome, "pi", "settings.json"), JSON.stringify({ defaultProvider: "owned", defaultModel: "owned-model" }));
+  writeFileSync(join(task, ".pi", "settings.json"), JSON.stringify({ defaultProvider: "ambient", defaultModel: "ambient-model" }));
+  const services = ownerOperatorPiServices(ooHome);
+  assert.deepEqual(services.authStorage.list(), ["owned"], "embedded runtime reads only owned credentials");
+  assert.equal(services.settingsManager.getDefaultProvider(), "owned");
+  assert.equal(services.settingsManager.getDefaultModel(), "owned-model");
+  assert.equal(services.settingsManager.isProjectTrusted(), false, "project Pi settings cannot alter harness policy");
+} finally {
+  rmSync(configRoot, { recursive: true, force: true });
+}
+
 assert.deepEqual(evalSettingsOverrides({}), {}, "product sessions keep their configured transport");
+
+const priorOoHome = process.env.OO_HOME;
+const setupGateHome = join(configRoot, "setup-gate-home");
+process.env.OO_HOME = setupGateHome;
+const setupGateResult = await runScheduledPrompt({
+  cwd: configRoot,
+  runId: "run-before-setup",
+  schedule: {
+    id: "schedule-before-setup",
+    name: "before setup",
+    enabled: true,
+    trigger: { kind: ScheduleKind.At, at: new Date().toISOString() },
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt: "must not run", toolsAllow: [] },
+    cwd: configRoot,
+    timeoutSeconds: 30,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nextRunAt: null,
+  },
+  payload: { kind: ScheduledPayloadKind.Prompt, prompt: "must not run", toolsAllow: [] },
+  signal: new AbortController().signal,
+});
+assert.equal(setupGateResult.exitCode, 1);
+assert.match(setupGateResult.stderr, /setup required/i, "scheduled model work fails closed before consent");
+if (priorOoHome === undefined) delete process.env.OO_HOME;
+else process.env.OO_HOME = priorOoHome;
 assert.deepEqual(
   evalSettingsOverrides({ OO_EVAL_READ_ONLY: "1", OO_EVAL_TRANSPORT: "sse" }),
   { transport: "sse" },
@@ -41,14 +90,8 @@ assert.throws(
   /unsupported eval transport/i,
 );
 
-// Mutation and broad file traversal stay out. The same-name bash override only executes
-// the session-search skill helper; privacy-tools.integration.test proves arbitrary commands are rejected.
-for (const forbidden of ["edit", "write", "grep", "find", "ls"]) {
-  assert.ok(!ownerOperatorTools.some((tool) => tool === forbidden), `owner tools must NOT include ${forbidden}`);
-}
-
-// The tools it needs are present.
-for (const t of ["bash", "read", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt"]) {
+// Posture keeps every standard file/shell tool present; the permission mode decides each operation.
+for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 

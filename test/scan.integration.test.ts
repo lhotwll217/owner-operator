@@ -22,8 +22,12 @@ const ooHome = mkdtempSync(join(tmpdir(), "oo-scan-store-"));
 
 const sid = "11111111-2222-3333-4444-555555555555";
 const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
-// Claude session, spawned in a (fake) Superset worktree → App resolves to "Superset App".
-const claudeCwd = join(home, ".superset", "worktrees", "sb", "demo-repo");
+// Claude session under a configured Superset worktree home → App resolves to "Superset App".
+const supersetWorktreeHome = join(home, "custom-superset-home");
+const claudeCwd = join(supersetWorktreeHome, "sb", "demo-repo");
+writeFileSync(join(ooHome, "session_hosts.json"), JSON.stringify({
+  roots: [{ host: "superset", root: supersetWorktreeHome }],
+}));
 const sessionFile = join(home, ".claude", "projects", "demo", `${sid}.jsonl`);
 const msg = (type: "user" | "assistant", content: string, ts: string) =>
   JSON.stringify({ type, sessionId: sid, cwd: claudeCwd, timestamp: ts, message: { content, ...(type === "assistant" ? { stop_reason: "end_turn" } : {}) } }) + "\n";
@@ -368,14 +372,14 @@ try {
 
   // The pi finder: header cwd → repo, blocks-or-string content, stopReason "stop" = yielded.
   const pi = byId(fresh, piId)!;
-  assert.equal(pi.ui, "pi", "pi source → pi app");
+  assert.equal(pi.ui, "Pi", "pi source → Pi app");
   assert.equal(pi.repo, "pi-app", "repo from the session header cwd");
   assert.equal(pi.state, "needs-you", "assistant yielded (stopReason stop) → needs-you");
   assert.ok(pi.topic.includes("retry backoff"), "topic from the first user turn");
 
   // The opencode finder: info record → thread; message + part files join into turns.
   const oc = byId(fresh, ocId)!;
-  assert.equal(oc.ui, "opencode", "opencode source → opencode app");
+  assert.equal(oc.ui, "OpenCode", "opencode source → OpenCode app");
   assert.equal(oc.repo, "oc-app", "repo from the info record's directory");
   assert.equal(oc.state, "needs-you", "assistant time.completed present → yielded");
   assert.equal(oc.working, false, "completed assistant turn → not working");

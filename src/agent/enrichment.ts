@@ -1,7 +1,7 @@
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { AuthStorage, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ThreadDetails } from "@owner-operator/core";
-import { repoRoot } from "../shared/repo-root";
+import { ownerOperatorPiServices } from "./agent";
 
 // Enrichment is a one-shot extraction, not a conversation: prefer a fast model over
 // the interactive default, cap reasoning, and never let a call outlive the poll cadence.
@@ -46,8 +46,7 @@ async function resolveModel(registry: ModelRegistry, settings: SettingsManager) 
 
 /** One typed completion for a needs-you message; no tools and no agent loop. */
 export async function enrichThread(sample: string): Promise<ThreadDetails> {
-  const settings = SettingsManager.create(repoRoot);
-  const registry = ModelRegistry.create(AuthStorage.create());
+  const { settingsManager: settings, modelRegistry: registry } = ownerOperatorPiServices();
   const { model, auth } = await resolveModel(registry, settings);
 
   const response = await completeSimple(model, {

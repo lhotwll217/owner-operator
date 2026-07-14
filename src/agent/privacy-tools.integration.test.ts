@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBlacklistAwareFileTools, createOwnerOperatorBashTool } from "./privacy-tools";
+import { blacklistedPathVerdict, createBlacklistAwareFileTools, createOwnerOperatorBashTool } from "./privacy-tools";
 
 const root = mkdtempSync(join(tmpdir(), "oo-privacy-tools-"));
 const ooHome = join(root, "oo-home");
@@ -31,16 +31,39 @@ try {
   const tools = new Map(createBlacklistAwareFileTools().map((tool) => [tool.name, tool]));
   const ctx = { cwd: publicDir } as any;
 
-  await assert.rejects(
-    () => createOwnerOperatorBashTool().execute(
-      "bash-1",
-      { command: "cat", args: [privateFile] },
+  const bash = createOwnerOperatorBashTool();
+  const pwd = await bash.execute("bash-1", { command: "pwd" }, undefined, undefined, ctx);
+  assert.match((pwd.content[0] as { text: string }).text, new RegExp(publicDir), "bash executes in the task cwd");
+
+  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [], repos: ["Private"] }));
+  const privatePwd = await bash.execute(
+    "bash-2",
+    { command: "pwd" },
+    undefined,
+    undefined,
+    { cwd: privateDir } as any,
+  );
+  assert.match(
+    (privatePwd.content[0] as { text: string }).text,
+    new RegExp(privateDir),
+    "repository-name exclusions do not gate Bash without the OS sandbox",
+  );
+  await assert.doesNotReject(
+    () => tools.get("grep")!.execute(
+      "grep-repo-parent",
+      { pattern: "SECRET", path: root },
       undefined,
       undefined,
       ctx,
     ),
-    /only runs the session-search skill helper/,
-    "bash cannot execute arbitrary commands or read paths directly",
+    "repository-name exclusions do not gate traversal from an allowed parent",
+  );
+  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [privateDir], repos: [] }));
+
+  assert.equal(
+    blacklistedPathVerdict(privateFile, publicDir, { paths: [], repos: ["Private"] }).blacklisted,
+    true,
+    "direct tool guards enforce repository-name exclusions without path rules",
   );
 
   await assert.rejects(
@@ -116,7 +139,6 @@ try {
     /would traverse blacklisted path/,
     "ls blocks a parent directory that would expose a blacklisted child",
   );
-
   process.stdout.write("ok — privacy tools: Pi file primitives reject blacklisted paths\n");
 } finally {
   rmSync(root, { recursive: true, force: true });

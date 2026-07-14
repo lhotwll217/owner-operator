@@ -7,12 +7,12 @@
 // `paths` block a directory TREE — the repo and every lower-level repo nested beneath it.
 // `repos` block by resolved repo name (case-insensitive) — the safety net for worktrees of
 // a blacklisted repo that live elsewhere (Superset/Conductor checkouts resolve to the real
-// repo name). Enforced in three layers: the scan (discovery), the store seam (writes), and
-// an open-time purge (history). Plain ESM (not TS) so the zero-install scan skill runs the
-// exact code the gateway uses (re-exported via @owner-operator/core). Types: blacklist.d.mts.
+// repo name). Enforced at the scan, store, purge, and agent file-tool boundaries. Plain ESM
+// (not TS) so the zero-install scan skill runs the exact code the gateway uses (re-exported via
+// @owner-operator/core). Types: blacklist.d.mts.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 
 /** Load <ooHome>/blacklist.json. Missing or invalid → an empty (block-nothing) list. */
 export function loadBlacklist(ooHome) {
@@ -29,6 +29,22 @@ export function loadBlacklist(ooHome) {
 }
 
 const fold = (s) => String(s ?? "").toLowerCase();
+
+/** Lexical and filesystem-resolved identities for one privacy path. */
+export function pathIdentities(path) {
+  let ancestor = path;
+  for (;;) {
+    try {
+      const canonical = resolve(realpathSync.native(ancestor), relative(ancestor, path));
+      return canonical === path ? [path] : [path, canonical];
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") return [path];
+    }
+    const parent = dirname(ancestor);
+    if (parent === ancestor) return [path];
+    ancestor = parent;
+  }
+}
 
 /**
  * Is a session off-limits? True when its cwd sits inside any blacklisted tree, or its

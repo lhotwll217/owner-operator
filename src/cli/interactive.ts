@@ -1,4 +1,4 @@
-// Owner Operator — pi's stock interactive mode, wired to our agent config. This is the
+// Owner Operator — Pi's interactive mode, wired to Owner Operator-owned config. This is the
 // default terminal surface; the widget owns the always-visible session list.
 //
 //   ./oo    (bare — this is the default surface)
@@ -10,18 +10,30 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  AuthStorage,
-  SettingsManager,
-  getAgentDir,
   createAgentSessionServices,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
+  getAgentDir,
   InteractiveMode,
   initTheme,
 } from "@earendil-works/pi-coding-agent";
 import { getCapabilities } from "@earendil-works/pi-tui";
-import { createOoSession, ooProvenance, ownerOperatorPrompt, ownerOperatorCustomTools, ownerOperatorTools, repoRoot } from "../agent/agent";
+import {
+  createOoSession,
+  configuredOwnerOperatorTools,
+  ooProvenance,
+  ownerOperatorCustomTools,
+  ownerOperatorPiServices,
+  ownerOperatorPrompt,
+  repoRoot,
+} from "../agent/agent";
 import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
+import {
+  configurePermissionSystemEnvironment,
+  createPermissionSettingsExtension,
+  permissionSystemExtensionPath,
+} from "../agent/permission-settings";
+import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
 
@@ -31,39 +43,63 @@ if (!process.stdout.isTTY) {
 }
 
 const prompt = ownerOperatorPrompt();
-const authStorage = AuthStorage.create();
+// Permission-system initialization points Pi at OO_HOME. Preserve standalone Pi discovery inputs
+// first so onboarding never offers Owner Operator's own sessions as an external transcript source.
+const standalonePiEnvironment = { ...process.env };
+const standalonePiAgentDir = getAgentDir();
+const { authStorage, paths } = ownerOperatorPiServices();
+configurePermissionSystemEnvironment(paths);
+const interactiveTools = configuredOwnerOperatorTools(paths.home);
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
-// whatever cwd it hands us (always repoRoot here) so those flows keep our prompt and tools.
-const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+// whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
+const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
+  const { settingsManager } = ownerOperatorPiServices(paths.home);
+  let refreshRegistry = (): void => undefined;
   const services = await createAgentSessionServices({
     cwd,
-    agentDir,
+    agentDir: paths.piAgentDir,
     authStorage,
-    settingsManager: SettingsManager.create(cwd), // model from .pi/settings.json
+    settingsManager,
     resourceLoaderOptions: {
       ...ownerOperatorResourceLoaderOptions(),
       systemPromptOverride: () => prompt,          // our owner-operator prompt, verbatim
       appendSystemPromptOverride: () => [],
+      additionalExtensionPaths: [permissionSystemExtensionPath()],
       extensionFactories: [
-        blacklistAwareFileToolsExtension,           // same-name read privacy override (only read is in the allowlist)
-        ooPresentationExtension,                    // OO look: theme, single status line, tamed spinner
+        { name: "owner-operator-privacy-tools", factory: blacklistAwareFileToolsExtension },
+        { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
+        { name: "owner-operator-presentation", factory: ooPresentationExtension },
+        {
+          name: "owner-operator-onboarding",
+          factory: createOnboardingExtension({
+            ooHome: paths.home,
+            piAgentDir: standalonePiAgentDir,
+            sessionSourceEnv: standalonePiEnvironment,
+            refreshConfiguration: async () => {
+              authStorage.reload();
+              await settingsManager.reload();
+              refreshRegistry();
+            },
+          }),
+        },
       ],
     },
   });
+  refreshRegistry = () => services.modelRegistry.refresh();
   const created = await createAgentSessionFromServices({
     services,
     sessionManager,
     sessionStartEvent,
-    tools: [...ownerOperatorTools],
+    tools: [...interactiveTools],
     customTools: ownerOperatorCustomTools,
   });
   return { ...created, services, diagnostics: services.diagnostics };
 };
 
 const runtime = await createAgentSessionRuntime(createRuntime, {
-  cwd: repoRoot,
-  agentDir: getAgentDir(),
+  cwd: process.cwd(),
+  agentDir: paths.piAgentDir,
   sessionManager: createOoSession(ooProvenance("interactive")), // saved + labeled like every oo surface
 });
 

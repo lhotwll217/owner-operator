@@ -7,6 +7,10 @@ export interface GuiHost {
   ui: string;
   /** Substring of the session cwd that identifies the GUI's worktree dir. */
   cwdMarker?: string;
+  /** Absolute configured roots (v3 canonical representation). */
+  roots?: readonly string[];
+  /** Legacy substring markers retained for gui_hosts.json compatibility. */
+  cwdMarkers?: readonly string[];
   /** Session source this GUI owns (e.g. "posthog-code"). */
   source?: string;
   /** Surface even with zero conversation (e.g. PostHog Code cloud tasks still provisioning). */

@@ -25,7 +25,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/gateway` | Loopback HTTP/SSE translation and client SDK | SQLite, child processes, polling, model calls |
 | `src/daemon` | Composition, process lifecycle, readiness, discovery, source fingerprint | Domain decisions |
-| `src/agent` | Pi session factory, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
+| `src/agent` | Owned Pi runtime, onboarding, diagnostics, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
 
 Dependencies point toward the owning seam:
 
@@ -38,11 +38,61 @@ The Gateway server receives module interfaces from the daemon. It does not impor
 scheduler implementations. `src/gateway/gateway.boundaries.test.ts` enforces that transport owns no
 process/model runtime and that application code never loads from development-skill directories.
 
+## Harness boundary
+
+Code and agent state have separate roots:
+
+| Scope | Path | Responsibility |
+|---|---|---|
+| Install root | checkout/package | executable code and bundled prompt, tools, and skills |
+| Harness home | `OO_HOME` or `~/.owner-operator` | config, copied credentials/model settings, SQLite, transcripts, logs, daemon files |
+| Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
+| Task cwd | caller or scheduled-run cwd | file and command target for that run |
+
+Every entry point creates missing workspace files without overwriting owner edits. Embedded Pi uses
+`OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not change standalone
+Pi. The resource loader disables ambient context, extensions, skills, prompts, and themes, then
+adds only the product prompt, bundled skills, workspace `AGENTS.md`, workspace skills, and personal
+skills explicitly selected during onboarding, plus the pinned permission-system extension. This follows Pi's existing independent cwd/resource
+loader seams and OpenClaw's bounded embedded-agent loader; provenance is recorded in
+[the boundary research](harness-resource-boundaries-research.md).
+
+The core config API is authoritative; onboarding is its first-run TTY client. Before the versioned
+consent marker is complete,
+the daemon does not scan or enrich transcripts, headless model calls return setup-required, and the
+widget displays setup-required. `oo doctor` and `oo status` report the effective boundary without
+printing credential values.
+
+## Session inventory
+
+Four identities stay separate:
+
+| Identity | Example | Owns |
+|---|---|---|
+| Agent harness | Claude Code | Agent runtime the owner used |
+| Transcript format | `claude` | Record shape the scanner parses |
+| Transcript store | `~/.claude/projects` | Directory containing that format |
+| Session host | Claude App, Claude CLI, Superset App | Owner-facing app or CLI used to open the session |
+
+`AGENT_HARNESS_DESCRIPTORS` is the canonical supported-harness catalog. Each harness names one
+implemented transcript format and its store candidates. `SESSION_HOST_DESCRIPTORS` separately
+names apps, CLIs, and internal SDK transports. Rooted hosts win over transcript metadata, so a
+Codex or Claude session inside a Superset worktree belongs to Superset. Superset roots are read
+from its legacy and current settings databases because the worktree home is configurable.
+
+Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
+ignore. Host detection supplies attribution only and does not grant transcript access. The marker
+records the reviewed stable IDs and an access contract hash. Harness identity, transcript format,
+standard-store scope, or host attribution changes reopen only this review; labels and detection hints do not. The scanner asserts
+that every catalog format has an implementation and the integration suite exercises every parser.
+The same review can run the bounded deep search or accept an explicit absolute transcript-store
+path; neither adds a mandatory onboarding screen.
+
 ## Agent capabilities
 
-- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`; same-name
-  safety overrides for Pi file/bash primitives live at the Agent boundary. Explicitly enabled
-  `edit` and `write` tools enforce the same blacklist, including symlinked parent directories.
+- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`. Same-name direct
+  file-tool guards at the Agent boundary enforce explicit path, repository-name, and symlinked-path
+  blacklists. The Bash wrapper supplies the task cwd and Owner Operator provenance environment.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
@@ -54,6 +104,22 @@ process/model runtime and that application code never loads from development-ski
   groups the complete ranked match set by stable session ID before applying limits or output
   budgets; literal/IDF ranking remains unchanged.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
+
+The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. The owner
+selects the canonical [permission mode](../CONTEXT.md) during onboarding and changes it later with
+`/permissions`. `@gotgenes/pi-permission-system` owns rule
+evaluation, prompts, and session grants; Owner Operator does not classify executables or shell
+subcommands. The concrete core adapter reconciles only the selected defaults and marker-owned
+blacklist rules into Pi's global config; it preserves advanced Pi settings and specific rules.
+Blacklist paths feed Pi's cross-tool path policy as lexical and filesystem-resolved identities.
+Direct `grep`, `find`, and `ls` also reject a parent whose traversal could reach a blacklisted
+descendant. Bash process-internal access, non-literal paths, POSIX case variants, and repository-name
+entries require separate [sandbox work](https://github.com/lhotwll217/owner-operator/issues/61).
+Specific global and trusted task-repository `.pi` rules use Pi's standard precedence and may
+deliberately override these defaults and generated Pi path rules; direct file-tool privacy guards
+remain authoritative. Pi also floors opaque or execution-wrapper shell commands to `ask`, including
+in `allow` mode.
+Adoption is recorded with pinned sources in [docs/inspiration.md](inspiration.md).
 
 ## State and events
 
@@ -99,6 +165,12 @@ Commands execute exact `argv` without a shell unless a caller deliberately suppl
 
 Scheduler policy:
 
+- Prompt schedules are headless and inherit the global permission baseline. `ask` calls that require
+  confirmation are denied because no human authority is present; `allow` permits unattended calls
+  unless Pi floors a shell pattern to `ask`; `read-only` defaults shell commands and changes to deny.
+  Specific Pi rules may override a baseline. `toolsAllow` independently narrows tool availability.
+- The scheduled task cwd activates repository `.pi` permission rules. Task repositories are trusted
+  policy sources and may override Owner Operator's global defaults.
 - Global concurrency starts at one; the same job never overlaps.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
 - Timer occurrences advance and create their running row in one transaction before external work starts.

@@ -2,6 +2,7 @@ import { watch as fsWatch, type FSWatcher } from "node:fs";
 import {
   loadActiveWindow,
   loadSessionSources,
+  isOnboarded,
   type ScanRow,
   type SessionStateRow,
   type ThreadDetails,
@@ -17,6 +18,7 @@ export interface SessionMonitorOptions {
   debounceMs?: number;
   scan?: (since: string, limit: number) => Promise<ScanRow[]>;
   enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadDetails>;
+  canEnrich?: () => boolean;
   logger?: (record: SessionMonitorLogRecord) => void;
 }
 
@@ -31,9 +33,8 @@ export interface SessionMonitorLogRecord {
   error: string;
 }
 
-const SESSION_ROOTS = loadSessionSources().map((source) => source.root);
-
 async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]> {
+  if (!isOnboarded()) return [];
   const parsed = await runTranscriptScan([
     "--since", since, "--limit", String(limit), "--sample", "0",
   ]);
@@ -62,6 +63,8 @@ export class SessionMonitor {
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
   private watchers: FSWatcher[] = [];
+  private watching = false;
+  private watchRoots: readonly string[] | undefined;
   private polling = false;
   private enriching = false;
   private readonly logger: (record: SessionMonitorLogRecord) => void;
@@ -75,6 +78,7 @@ export class SessionMonitor {
     if (this.polling) return this.current;
     this.polling = true;
     try {
+      this.armWatchers();
       const rows = await (this.options.scan ?? scanTranscripts)(
         this.options.since ?? loadActiveWindow(),
         this.options.limit ?? 50,
@@ -95,8 +99,16 @@ export class SessionMonitor {
     this.timer.unref?.();
   }
 
-  watch(roots: readonly string[] = SESSION_ROOTS): void {
-    for (const root of roots) {
+  watch(roots?: readonly string[]): void {
+    this.watching = true;
+    this.watchRoots = roots ? [...roots] : undefined;
+    this.armWatchers();
+  }
+
+  private armWatchers(): void {
+    if (!this.watching || this.watchers.length > 0) return;
+    const watchedRoots = this.watchRoots ?? (isOnboarded() ? loadSessionSources().map((source) => source.root) : []);
+    for (const root of watchedRoots) {
       try {
         const watcher = fsWatch(root, { recursive: true }, (_event, file) => {
           if (typeof file === "string" && /\.(?:jsonl|ndjson|json)$/.test(file)) this.scheduleReconcile();
@@ -128,12 +140,14 @@ export class SessionMonitor {
     if (this.debounce) clearTimeout(this.debounce);
     this.timer = null;
     this.debounce = null;
+    this.watching = false;
+    this.watchRoots = undefined;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
   }
 
   private scheduleEnrichment(): void {
-    if (!this.options.enrich || this.enriching) return;
+    if (this.options.canEnrich?.() === false || !this.options.enrich || this.enriching) return;
     this.enriching = true;
     queueMicrotask(() => this.runEnrichmentInBackground());
   }

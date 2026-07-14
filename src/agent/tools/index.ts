@@ -1,4 +1,4 @@
-import { AgentToolId } from "@owner-operator/core";
+import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
 import { withOoRenderers } from "../../shared/oo-presentation";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
@@ -18,13 +18,23 @@ export const ownerOperatorCustomTools = [
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
 ];
 
-// `read` is a blacklist-aware override. `bash` is a same-name argv-only override that can
-// run only the session-search skill helper; it is not a general shell.
-export const ownerOperatorTools: readonly AgentToolId[] = [
-  AgentToolId.Bash,
-  AgentToolId.Read,
+const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.GetCurrentSessionState,
   AgentToolId.MarkThreadDone,
   AgentToolId.QueryDatabase,
   AgentToolId.SchedulePrompt,
 ];
+
+// packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.
+// A new tool remains safe if this list grows first: Pi falls back to the selected global mode.
+export const ownerOperatorTools: readonly AgentToolId[] = [
+  ...DEFAULT_TOOL_POSTURE as AgentToolId[],
+  ...ownerOperatorTypedTools,
+];
+
+export function configuredOwnerOperatorTools(ooHome?: string): readonly AgentToolId[] {
+  return [
+    ...loadHarnessSettings(ooHome).toolPosture as AgentToolId[],
+    ...ownerOperatorTypedTools,
+  ];
+}

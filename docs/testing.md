@@ -24,7 +24,8 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 
 | File | Tier | Covers |
 |------|------|--------|
-| `packages/core/src/*.test.ts` | unit | resolve, status, session-state, blacklist, session-sources, gui-hosts, settings |
+| `packages/core/src/*.test.ts` | unit | resolve, status, session-state, blacklist, harness/format catalog, session hosts, settings |
+| `packages/core/src/*.integration.test.ts` | integration | owned harness files, catalog re-entry, source detection, and Superset host roots |
 | `src/state/event-bus.test.ts` | unit | fail-isolated in-memory post-commit wake-ups |
 | `src/state/state.integration.test.ts` | integration | SQLite sole writer, projections, and watermarks |
 | `src/state/query.integration.test.ts` | integration | State-owned read-only progressive SQL surface |
@@ -36,6 +37,7 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 | `src/gateway/client.integration.test.ts` | integration | long operations and daemon replacement/reconnect behavior |
 | `src/agent/skills.integration.test.ts` | integration | product skill discovery from the Agent directory |
 | `src/agent/privacy-tools.integration.test.ts` | integration | blacklist enforcement across Pi file primitives |
+| `src/agent/*.integration.test.ts` | integration | owned Pi config, onboarding, doctor, permissions, and privacy tools |
 | `src/daemon/fingerprint.integration.test.ts` | integration | runtime fingerprint changes with source/settings content |
 | `test/eval-daemon.integration.test.ts` | integration | managed eval daemon readiness and shutdown cleanup |
 | `test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
@@ -62,8 +64,8 @@ Tests stay colocated with their source; root `test/` holds cross-cutting integra
 Tiers are discovered by suffix — drop a `*.integration.test.ts` under the runner's roots and
 `run.mjs` picks it up.
 
-**Fixtures.** Built inline today; promote into `fixtures/<source>/` once reused across ≥2
-tests. Split by source (each a distinct parser) — Conductor/Superset are hosts, not sources.
+**Fixtures.** Built inline today; promote into `fixtures/<format>/` once reused across ≥2
+tests. Split by transcript format (each a distinct parser) — Conductor/Superset are hosts.
 Committed fixtures must be sanitized: no personal paths, repos, or names.
 
 ## Running

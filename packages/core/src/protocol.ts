@@ -23,6 +23,7 @@ export interface DaemonHealth {
 
 export interface DaemonReady {
   ready: boolean;
+  setupRequired: boolean;
   modules: {
     state: boolean;
     sessionMonitor: boolean;

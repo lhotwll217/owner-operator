@@ -8,6 +8,10 @@ import Foundation
 @Suite("session-state")
 struct SessionStateTests {
 
+    @Test func customHarnessHomeDrivesDiscovery() {
+        #expect(DaemonClient.harnessHome(environment: ["OO_HOME": "/tmp/custom-oo"]) == "/tmp/custom-oo")
+    }
+
     private func row(
         id: String,
         repo: String = "repo",

@@ -8,10 +8,15 @@ import { basename, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 process.env.OO_HOME = join(process.cwd(), ".oo-home-fixture"); // set before importing the module
-const { ooSessionsDir, ooProvenance, stampProvenance } = await import("./agent");
+const { ooSessionsDir, ooProvenance, ownerOperatorTaskCwd, stampProvenance } = await import("./agent");
 
 assert.equal(ooSessionsDir(), join(process.env.OO_HOME, "sessions"), "dir is <OO_HOME>/sessions");
 assert.ok(!ooSessionsDir().includes(`${".pi"}/`), "never under pi's session dir");
+
+const originalCwd = process.cwd();
+process.chdir(join(originalCwd, "src"));
+assert.equal(ownerOperatorTaskCwd(), process.cwd(), "embedded tools default to the caller's current directory");
+process.chdir(originalCwd);
 
 // The invoking checkout may be a worktree with any name — derive the expectation like git does.
 const toplevel = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });

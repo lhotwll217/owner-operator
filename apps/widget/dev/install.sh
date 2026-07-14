@@ -10,12 +10,13 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DAEMON_LABEL="com.owner-operator.daemon"
 DAEMON_PLIST="$HOME/Library/LaunchAgents/$DAEMON_LABEL.plist"
 BIN="$DIR/.build/release/oo-widget"
+OO_HOME="${OO_HOME:-$HOME/.owner-operator}"
 
 echo "building release…"
 ( cd "$DIR" && swift build -c release >/dev/null )
 
 mkdir -p "$HOME/Library/LaunchAgents"
-mkdir -p "$HOME/.owner-operator"
+mkdir -p "$OO_HOME"
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -26,6 +27,8 @@ cat > "$PLIST" <<EOF
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>OO_HOME</key><string>$OO_HOME</string></dict>
 </dict>
 </plist>
 EOF
@@ -44,11 +47,13 @@ cat > "$DAEMON_PLIST" <<EOF
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OO_HOME</key>
+    <string>$OO_HOME</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$HOME/.owner-operator/daemon.log</string>
-  <key>StandardErrorPath</key><string>$HOME/.owner-operator/daemon.log</string>
+  <key>StandardOutPath</key><string>$OO_HOME/daemon.log</string>
+  <key>StandardErrorPath</key><string>$OO_HOME/daemon.log</string>
 </dict>
 </plist>
 EOF

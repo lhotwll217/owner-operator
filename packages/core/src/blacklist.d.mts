@@ -1,5 +1,5 @@
 // Hand-written declarations for blacklist.mjs (plain ESM so the scan skill can import it
-// without a build step). Keep in lockstep with blacklist.mjs — it's 3 small functions.
+// without a build step). Keep in lockstep with blacklist.mjs.
 
 /** The parsed blacklist: directory trees and repo names the owner declared off-limits. */
 export interface Blacklist {
@@ -9,6 +9,9 @@ export interface Blacklist {
 
 /** Load <ooHome>/blacklist.json. Missing or invalid → an empty (block-nothing) list. */
 export function loadBlacklist(ooHome: string): Blacklist;
+
+/** Lexical and filesystem-resolved identities for one privacy path. */
+export function pathIdentities(path: string): string[];
 
 /** Is a session off-limits? cwd inside any `paths` tree, or repo name in `repos`. */
 export function isBlacklisted(

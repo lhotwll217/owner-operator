@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // scan-active-transcripts — deterministic, zero-install scan of local CLI agent sessions.
 //
-// Reads KNOWN_SESSION_SOURCES (canonical list in packages/core/src/session-sources.mjs),
-// finds recently-active threads,
+// Reads transcript stores derived from the canonical harness catalog, finds recently-active
+// threads,
 // and prints a COMPACT digest: topic, light metadata (resolved state, origin app, git
 // delta), and a sample of each thread's messages (its opening few + most-recent few) so
 // an agent can triage "what's ongoing" WITHOUT loading full transcripts into a model.
@@ -25,10 +25,24 @@ import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { resolveCandidates } from "../../packages/core/src/resolve.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src/blacklist.mjs";
-import { loadSessionSources } from "../../packages/core/src/session-sources.mjs";
-import { loadGuiHosts, guiHostForCwd, interactiveHost } from "../../packages/core/src/gui-hosts.mjs";
+import {
+  assertTranscriptFormatCoverage,
+  loadTranscriptStores,
+} from "../../packages/core/src/session-sources.mjs";
+import {
+  loadSessionHosts,
+  sessionHostFor,
+  sessionHostForCwd,
+} from "../../packages/core/src/session-hosts.mjs";
 import { loadActiveWindow, parseWindowMs } from "../../packages/core/src/settings.mjs";
 import { isSessionBoilerplate } from "../../packages/core/src/session-text.mjs";
+
+// Every catalog format must be named here and exercised by its parser fixture. A catalog-only
+// addition fails on module load rather than appearing as a selectable but unreadable harness.
+export const IMPLEMENTED_TRANSCRIPT_FORMATS = Object.freeze([
+  "claude", "codex", "cursor", "posthog-code", "pi", "opencode", "antigravity", "grok-build",
+]);
+assertTranscriptFormatCoverage(IMPLEMENTED_TRANSCRIPT_FORMATS);
 
 export function scanActiveTranscripts(args = process.argv.slice(2), emit = false) {
 const val = (name, def) => {
@@ -39,7 +53,7 @@ const val = (name, def) => {
 };
 const has = (name) => args.includes(`--${name}`);
 
-// ooHome holds the owner's config (settings, blacklist, session sources, GUI hosts).
+// ooHome holds the owner's config (settings, blacklist, transcript stores, session hosts).
 const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 // Default window comes from owner settings (a rolling "1d" unless configured) — NOT calendar
 // "today", so a thread used late last night is still active this morning. Configurable in
@@ -67,9 +81,8 @@ const cutoff = parseWindowMs(sinceArg, Date.now())
 // files under a blacklisted tree are skipped by their project-dir slug BEFORE a byte is
 // read; everything else (Codex/Cursor/worktrees) is dropped post-parse by cwd + repo name.
 const blacklist = loadBlacklist(ooHome);
-// Interactive GUI hosts (Conductor/Superset/PostHog Code, + owner overrides) — one source of
-// truth shared by app detection and the launch-mode classifier (see below). Loaded once.
-const guiHosts = loadGuiHosts(ooHome);
+// Owner-facing session hosts drive attribution and the interactive-host exception. Loaded once.
+const sessionHosts = loadSessionHosts(ooHome);
 const blockedSlugs = pathSlugs(blacklist);
 const slugBlocked = (dirName) => blockedSlugs.some((s) => dirName === s || dirName.startsWith(s + "-"));
 
@@ -94,9 +107,9 @@ const opencodeInfoFile = (root, f) => {
 };
 // Built-in defaults + owner overrides (<ooHome>/session_sources.json). Same list the monitor
 // watches — one source of truth in @owner-operator/core.
-const roots = loadSessionSources(ooHome);
+const roots = loadTranscriptStores(ooHome);
 const candidates = [];
-for (const { root, source } of roots) {
+for (const { root, format: source } of roots) {
   if (!existsSync(root)) continue;
   const files = [];
   walk(root, files);
@@ -135,23 +148,13 @@ function claudeText(content) {
 // worktree lives — even if Codex/Claude/Cursor is the agent, so the worktree hosts are
 // checked FIRST, before the source. Codex refines by its session_meta provenance.
 function detectUi(source, cwd, entrypoint, meta = {}) {
-  // Worktree GUIs (Superset/Conductor) and source-owned GUIs (PostHog Code) come from the
-  // shared host table — cwd marker wins over source, so a worktree's GUI beats its agent.
-  const host = interactiveHost(cwd, source, guiHosts);
-  if (host) return host.ui;
-  if (source === "cursor") return "Cursor";
-  if (source === "pi") return "pi";
-  if (source === "opencode") return "opencode";
-  if (source === "antigravity") return "Antigravity";
-  if (source === "grok-build") return "Grok Build";
-  if (source === "codex") {
-    if (meta.srcHint === "vscode") return "Codex App";
-    if (meta.originator === "codex_sdk_ts") return "Codex SDK";
-    return "Codex CLI"; // codex_cli_rs and unknown provenance both read as the CLI
-  }
-  if (entrypoint === "claude-desktop") return "Claude App";
-  if (entrypoint === "sdk-ts" || entrypoint === "sdk-cli") return "Claude SDK";
-  return source === "claude" ? "Claude CLI" : source;
+  return sessionHostFor({
+    format: source,
+    cwd,
+    entrypoint,
+    originator: meta.originator,
+    sourceHint: meta.srcHint,
+  }, sessionHosts)?.label ?? source;
 }
 
 // GUI deep-link — ONLY when it opens the GUI the session actually lives in:
@@ -160,7 +163,7 @@ function detectUi(source, cwd, entrypoint, meta = {}) {
 //    deep-link), so a codex:// link would point at the wrong GUI → no link.
 //  - Claude (desktop/Conductor)           → no confirmed deep-link → no link.
 function guiLink(source, id, cwd) {
-  if (guiHostForCwd(cwd, guiHosts)) return null; // worktree-hosted (Conductor/Superset) → ties to that GUI, not Codex
+  if (sessionHostForCwd(cwd, sessionHosts)) return null; // rooted host owns the worktree, not Codex
   if (source === "codex") return `codex://threads/${id}`;
   return null;
 }
@@ -553,13 +556,13 @@ function parseSession({ file, source, mtime, btime }) {
   // hidden this way until now). A host short-circuits to interactive; `surfaceEmpty` hosts
   // (PostHog Code cloud tasks, no turns yet) surface even empty. The host list lives in
   // @owner-operator/core (gui-hosts) — a new GUI is one entry there, never a per-source patch here.
-  const SDK_ENTRYPOINTS = new Set(["sdk-ts", "sdk-cli"]);
   const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
-  const host = interactiveHost(project, source, guiHosts);
-  const automated = host
-    ? (host.surfaceEmpty ? false : userTurns.length === 0)
+  const host = sessionHostFor({ format: source, cwd: project, entrypoint, originator, sourceHint: srcHint }, sessionHosts);
+  const interactiveHost = host?.overridesAutomation ? host : null;
+  const automated = interactiveHost
+    ? (interactiveHost.surfaceEmpty ? false : userTurns.length === 0)
     : userTurns.length === 0 ||
-      SDK_ENTRYPOINTS.has(entrypoint) ||
+      host?.automatedTransport ||
       (cliLike && userTurns.length < 2);
 
   const lastMsg = convo[convo.length - 1];

@@ -1,5 +1,7 @@
 import assert from "node:assert";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { markOnboarded, saveSessionRoots } from "@owner-operator/core";
 import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { State } from "../state/state";
 import { SessionMonitor } from "./monitor";
@@ -26,6 +28,38 @@ try {
     "asynchronous enrichment",
   );
   assert.deepEqual(state.listEnrichmentCandidates(), [], "worker advances the enrichment watermark");
+
+  const watchedRoot = join(dir, "sessions");
+  mkdirSync(watchedRoot, { recursive: true });
+  saveSessionRoots(dir, [{ source: "claude", root: watchedRoot }]);
+  let watcherScanCalls = 0;
+  const watcherMonitor = new SessionMonitor(state, {
+    debounceMs: 10,
+    scan: async () => {
+      watcherScanCalls += 1;
+      return [];
+    },
+  });
+  watcherMonitor.watch();
+  markOnboarded(dir, { via: "test" });
+  await watcherMonitor.poll();
+  writeFileSync(join(watchedRoot, "new-session.jsonl"), "{}\n");
+  await waitFor(() => watcherScanCalls > 1, 1_000, "watcher to arm after onboarding");
+  watcherMonitor.stop();
+
+  let gatedEnrichmentCalls = 0;
+  const gatedMonitor = new SessionMonitor(state, {
+    scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:05:00.000Z" })],
+    enrich: async () => {
+      gatedEnrichmentCalls += 1;
+      return { topic: "should not run", nextSteps: "should not run" };
+    },
+    canEnrich: () => false,
+  });
+  await gatedMonitor.poll();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  gatedMonitor.stop();
+  assert.equal(gatedEnrichmentCalls, 0, "setup gate prevents model enrichment before consent");
 
   const backgroundErrors: string[] = [];
   const failingMonitor = new SessionMonitor(state, {

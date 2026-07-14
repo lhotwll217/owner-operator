@@ -9,7 +9,6 @@ import { basename, join } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
-  getAgentDir,
   SessionManager,
   SettingsManager,
   AuthStorage,
@@ -17,17 +16,26 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentToolId,
+  ensureOwnerOperatorWorkspace,
+  isOnboarded,
+  ownerOperatorPaths,
   type ScheduleExecutionResult,
   type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
 import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
+import {
+  configurePermissionSystemEnvironment,
+  createPermissionSettingsExtension,
+  permissionSystemExtensionPath,
+} from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import { ownerOperatorCustomTools, ownerOperatorTools } from "./tools";
+import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
 
 export { repoRoot };
 export {
   getCurrentSessionStateTool,
+  configuredOwnerOperatorTools,
   markThreadDoneTool,
   ownerOperatorCustomTools,
   ownerOperatorTools,
@@ -38,6 +46,7 @@ export {
 export interface OwnerOperatorSession {
   session: Awaited<ReturnType<typeof createAgentSession>>["session"];
   modelLabel: string;
+  toolNames: readonly string[];
 }
 
 export interface OwnerOperatorSessionOptions {
@@ -79,6 +88,22 @@ export function evalSettingsOverrides(
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "src", "prompts", "owner-operator.md"), "utf8");
 
+export function ownerOperatorPiServices(ooHome?: string): {
+  paths: ReturnType<typeof ownerOperatorPaths>;
+  authStorage: AuthStorage;
+  modelRegistry: ModelRegistry;
+  settingsManager: SettingsManager;
+} {
+  const paths = ensureOwnerOperatorWorkspace(ooHome);
+  const authStorage = AuthStorage.create(paths.piAuth);
+  return {
+    paths,
+    authStorage,
+    modelRegistry: ModelRegistry.create(authStorage, paths.piModels),
+    settingsManager: SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false }),
+  };
+}
+
 // Every owner chat is saved (and labeled with its surface) like any other oo thread;
 // `ephemeral` is the opt-out for tests that shouldn't leave files in OO_HOME.
 export async function createOwnerOperatorSession(
@@ -91,6 +116,9 @@ export async function createOwnerOperatorSession(
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
+  const { authStorage, modelRegistry, paths, settingsManager } = ownerOperatorPiServices();
+  configurePermissionSystemEnvironment(paths);
+  const configuredTools = configuredOwnerOperatorTools(paths.home);
   const readOnlyCustomToolNames = new Set<string>([
     AgentToolId.GetCurrentSessionState,
     AgentToolId.QueryDatabase,
@@ -103,7 +131,7 @@ export async function createOwnerOperatorSession(
   const tools = baselinePrompt
     ? ["read", "bash"]
     : opts.toolsAllow
-      ? [...opts.toolsAllow]
+      ? opts.toolsAllow.filter((tool) => configuredTools.includes(tool))
       : evalReadOnly
         ? [
             AgentToolId.Bash,
@@ -111,26 +139,35 @@ export async function createOwnerOperatorSession(
             AgentToolId.GetCurrentSessionState,
             AgentToolId.QueryDatabase,
           ]
-        : [...ownerOperatorTools];
-  const cwd = opts.cwd ?? runtimeCwd();
+        : [...configuredTools];
+  const cwd = opts.cwd ?? ownerOperatorTaskCwd();
 
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const settingsManager = SettingsManager.create(repoRoot); // model from .pi/settings.json
   settingsManager.applyOverrides(evalSettingsOverrides(process.env));
 
   const loader = new DefaultResourceLoader({
     cwd,
-    agentDir: getAgentDir(),
+    agentDir: paths.piAgentDir,
+    settingsManager,
     ...ownerOperatorResourceLoaderOptions(),
     systemPromptOverride: () => prompt,
     appendSystemPromptOverride: () => [],
-    extensionFactories: [createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId })],
+    additionalExtensionPaths: [permissionSystemExtensionPath()],
+    extensionFactories: [
+      {
+        name: "owner-operator-privacy-tools",
+        factory: createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId }),
+      },
+      {
+        name: "owner-operator-permission-settings",
+        factory: createPermissionSettingsExtension({ ooHome: paths.home }),
+      },
+    ],
   });
   await loader.reload();
 
   const { session } = await createAgentSession({
     cwd,
+    agentDir: paths.piAgentDir,
     resourceLoader: loader,
     settingsManager,
     sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(cwd) : createOoSession(ooProvenance(surface))),
@@ -150,7 +187,7 @@ export async function createOwnerOperatorSession(
   const modelLabel = session.model
     ? `${session.model.provider}/${session.model.id}`
     : configuredModel || "model unavailable";
-  return { session, modelLabel };
+  return { session, modelLabel, toolNames: tools };
 }
 
 /** Pi modes emit extension teardown on quit; raw-session surfaces must do it before dispose. */
@@ -168,7 +205,8 @@ export async function shutdownSessionExtensions(session: OwnerOperatorSession["s
 // This module owns that policy: callers build managers through the helpers below, which bake
 // the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
 // manager isn't given one). Same OO_HOME base as the durable state database. Product threads
-// use repoRoot; isolated eval threads use their sandbox cwd consistently for create/list/resume.
+// use one stable identity cwd; isolated eval threads use their sandbox cwd consistently for
+// create/list/resume. Tool execution is separate: it defaults to the caller's cwd.
 //
 // Every invocation stamps an `oo-provenance` custom entry (never sent to the LLM): WHICH
 // surface, owner vs agent origin, the caller's cwd + repo, and — the audit trail — the
@@ -216,23 +254,28 @@ export function stampProvenance(sm: SessionManager, p: OoProvenance): void {
 
 /** A fresh oo thread, stamped with its surface + caller provenance. */
 export function createOoSession(provenance: OoProvenance): SessionManager {
-  const sm = SessionManager.create(runtimeCwd(), ooSessionsDir());
+  const sm = SessionManager.create(sessionIdentityCwd(), ooSessionsDir());
   stampProvenance(sm, provenance);
   return sm;
 }
 
-/** Eval subjects run outside the checkout so answer-key files are not their ambient cwd. */
-function runtimeCwd(): string {
+/** Task tools operate where `oo` was invoked; evals override this with their isolated sandbox. */
+export function ownerOperatorTaskCwd(): string {
+  return process.env.OO_EVAL_CWD || process.cwd();
+}
+
+/** Keep OO thread lookup stable across caller directories; evals remain sandbox-scoped. */
+function sessionIdentityCwd(): string {
   return process.env.OO_EVAL_CWD || repoRoot;
 }
 /** Resume the most recent oo thread (or a fresh one if none); each resume re-stamps. */
 export function continueOoSession(provenance: OoProvenance): SessionManager {
-  const sm = SessionManager.continueRecent(runtimeCwd(), ooSessionsDir());
+  const sm = SessionManager.continueRecent(sessionIdentityCwd(), ooSessionsDir());
   stampProvenance(sm, provenance);
   return sm;
 }
 /** List oo threads — for resolving a `--session <id>` reference. */
-export const listOoSessions = () => SessionManager.list(runtimeCwd(), ooSessionsDir());
+export const listOoSessions = () => SessionManager.list(sessionIdentityCwd(), ooSessionsDir());
 /** Open a specific oo thread file (re-stamped by the caller), keeping oo's dir for /new or /fork. */
 export function openOoSession(path: string, provenance: OoProvenance): SessionManager {
   const sm = SessionManager.open(path, ooSessionsDir());
@@ -260,6 +303,10 @@ export function lastAssistantError(session: OwnerOperatorSession["session"]): st
 
 /** Fresh persisted session per scheduled run; never attaches to an active Pi conversation. */
 export async function runScheduledPrompt(request: ScheduledPromptRunRequest): Promise<ScheduleExecutionResult> {
+  const paths = ensureOwnerOperatorWorkspace();
+  if (!isOnboarded(paths.home)) {
+    return { exitCode: 1, stdout: "", stderr: "Owner Operator setup required; run `oo` interactively." };
+  }
   const sessionManager = SessionManager.create(request.cwd, ooSessionsDir());
   const provenance: OoProvenance = {
     surface: "schedule",

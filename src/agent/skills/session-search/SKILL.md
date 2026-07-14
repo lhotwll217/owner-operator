@@ -5,10 +5,10 @@ description: Search coding-agent or Owner Operator session transcripts through O
 
 # Session search
 
-Run the bundled privacy-aware helper through `bash`. Owner Operator's bash capability accepts the fixed command `session-search` and an explicit argument array. Do not read transcript files directly or call the vendored primitive.
+Run the bundled privacy-aware helper through `bash`. `OO_INSTALL_ROOT` points at the active Owner Operator installation. Do not read transcript files directly or call the vendored primitive.
 
 ```json
-{"command":"session-search","args":["--query","TEXT","--since","7d"]}
+{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'TEXT' --since 7d"}
 ```
 
 Discovery queries exclude the calling coding-agent session when its stable ID is available
@@ -79,29 +79,29 @@ Use one primary mode: `--query`, `--skim ID`, or `--session ID --at IDX`. A quer
 Known id supplied by the caller:
 
 ```json
-{"command":"session-search","args":["--skim","SESSION_ID","--max-chars","12000"]}
+{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --skim 'SESSION_ID' --max-chars 12000"}
 ```
 
 Distinctive anchor whose first hit may answer the question:
 
 ```json
-{"command":"session-search","args":["--query","ERR_PACKAGE_PATH_NOT_EXPORTED","--before","2","--after","5","--since","7d"]}
+{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'ERR_PACKAGE_PATH_NOT_EXPORTED' --before 2 --after 5 --since 7d"}
 ```
 
 Paraphrased question without an id; let rarity rank the candidate terms:
 
 ```json
-{"command":"session-search","args":["--query","rollout checkpoint reconciliation","--any","--candidates","--limit","8","--since","7d"]}
+{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'rollout checkpoint reconciliation' --any --candidates --limit 8 --since 7d"}
 ```
 
 Fuller context around a returned `id=... idx=...` pointer:
 
 ```json
-{"command":"session-search","args":["--session","SESSION_ID","--at","MESSAGE_INDEX","--before","3","--after","5"]}
+{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --session 'SESSION_ID' --at MESSAGE_INDEX --before 3 --after 5"}
 ```
 
 Find another fact inside an already selected session:
 
 ```json
-{"command":"session-search","args":["--query","checkpoint reconciliation","--session","SESSION_ID"]}
+{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'checkpoint reconciliation' --session 'SESSION_ID'"}
 ```

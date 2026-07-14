@@ -12,7 +12,22 @@ history and create prompt schedules that run in fresh isolated sessions.
 
 ```bash
 npm install            # once, from the repo root
+./oo                   # guided first-run setup
 ```
+
+Setup creates `~/.owner-operator/workspace`, asks which coding projects are off-limits, offers to
+copy existing standalone Pi authorizations and model settings, then shows every supported harness
+and recognized app or CLI on one review surface. Setup also asks whether shell commands and changes
+should ask, run automatically, or remain unavailable. Standalone Pi is optional; fresh installs use
+Owner Operator's built-in provider login and store credentials under `~/.owner-operator/pi`.
+Harnesses start included; mark any to ignore. It then configures macOS always-on services, the
+active window, and skills. The copy does not change standalone Pi. Until setup finishes, headless
+calls and transcript/model processing fail closed.
+
+`./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
+credentials/model source, transcript stores, session host roots, skills, tools, and permission mode without printing
+secrets. Use `/permissions` to change the mode, `/permission-system show` to inspect the
+composed Pi rules, or `/onboarding` to revisit setup.
 
 ## The widget
 
@@ -27,10 +42,11 @@ cd apps/widget && make run
 ## The terminal
 
 ```bash
-./oo                   # pi's stock interactive mode
+./oo                   # embedded Pi interactive mode; starts setup when needed
 ./oo "what's ongoing?" # headless single-turn question, prose on stdout
 ./oo --continue "more" # resume the most recent oo thread
 ./oo --session-state   # current widget/gateway state, no model call
+./oo doctor            # effective harness configuration, no model call
 ```
 
 The terminal starts the background daemon when it needs state. The widget is the always-on UI
@@ -44,10 +60,13 @@ installs daemon + widget LaunchAgents together; the widget itself never spawns p
 
 ## How it works
 
-Built on the [pi coding agent](https://github.com/earendil-works/pi). `oo` reads session
+Built on the [pi coding agent](https://github.com/earendil-works/pi). Embedded Pi uses
+Owner Operator-owned auth, model settings, workspace resources, and sessions under
+`~/.owner-operator`; standalone Pi keeps its own defaults. `oo` reads session
 files through application-owned scan/search modules and only sends bounded transcript samples to
-the model. Supported agents live in
-[`KNOWN_SESSION_SOURCES`](packages/core/src/session-sources.mjs). Agents drive it headless
+the model. Supported harnesses and their transcript formats live in
+[`AGENT_HARNESS_DESCRIPTORS`](packages/core/src/session-sources.mjs); apps and CLIs live separately
+in [`SESSION_HOST_DESCRIPTORS`](packages/core/src/session-hosts.mjs). Agents drive it headless
 with `oo "question"`: a single turn that prints its session id on stderr, with `--continue`
 / `--session <id>` resuming that thread on the next call. Every oo chat, human or agent, is
 saved under `~/.owner-operator/sessions` (never mixed with your coding sessions), labeled
@@ -65,10 +84,12 @@ self-mark with `oo --done <that id>`.
 
 Durable prompt schedules use the typed `schedule_prompt` tool. Each run gets a fresh isolated
 Owner Operator transcript; failures and output are inspectable through `query_database` over
-`schedules` and `schedule_runs`.
+`schedules` and `schedule_runs`. Scheduled prompts inherit the global permission baseline;
+per-schedule tool availability and task-repository overrides are defined in the
+[scheduler contract](docs/architecture.md#scheduler).
 
-So far this has only been tested with a Codex subscription as the driver for the pi agent.
-Other model backends should work but are unverified.
+So far this has only been tested with a Codex subscription as the driver for the embedded Pi
+agent. Other model backends should work but are unverified.
 
 Architecture: [docs/architecture.md](docs/architecture.md). Contributing (workflow, checks,
 standards): [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -2,10 +2,11 @@
 // model session is built, so this stays hermetic and fast.
 import assert from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
+import { markOnboarded } from "@owner-operator/core";
 
 const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
@@ -32,6 +33,13 @@ try {
   assert.match(help.stdout, /oo --session-state/, "top-level help advertises --session-state");
   assert.doesNotMatch(help.stdout, /oo --json/, "top-level help does not advertise old --json name");
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
+  assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
+
+  const setupRequired = spawnSync(ooBin, ["what is happening?"], opts);
+  assert.equal(setupRequired.status, 2, "fresh headless runs fail closed before model or daemon work");
+  assert.match(setupRequired.stderr, /setup required.*run `oo`/is);
+  assert.equal(setupRequired.stdout, "");
+  markOnboarded(ooHome, { via: "e2e" });
 
   const oldJson = spawnSync(ooBin, ["--json"], opts);
   assert.equal(oldJson.status, 2, `old --json exits 2 (got ${oldJson.status}; stderr: ${oldJson.stderr})`);

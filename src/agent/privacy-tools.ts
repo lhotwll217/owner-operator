@@ -1,41 +1,29 @@
 // Owner Operator privacy tool layer. The session scanner/store already enforce the
 // blacklist; these wrappers close the raw pi file-tool gap at the tool boundary.
 
-import { existsSync, realpathSync, statSync, readFileSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { existsSync, statSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import {
+  createBashToolDefinition,
   createFindToolDefinition,
   createGrepToolDefinition,
   createLsToolDefinition,
   createReadToolDefinition,
   createEditToolDefinition,
   createWriteToolDefinition,
-  defineTool,
   type ExtensionAPI,
   type ExtensionFactory,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "@earendil-works/pi-ai";
-import { isBlacklisted, loadBlacklist, type Blacklist } from "@owner-operator/core";
+import { isBlacklisted, loadBlacklist, pathIdentities, type Blacklist } from "@owner-operator/core";
 import { ooRenderCall } from "../shared/oo-presentation";
+import { repoRoot } from "../shared/repo-root";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type FileToolName = "read" | "grep" | "find" | "ls" | "edit" | "write";
 
 const ooHome = (): string => process.env.OO_HOME ?? path.join(homedir(), ".owner-operator");
-const execFileAsync = promisify(execFile);
-const sessionSearchScript = (): string => path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "skills", "session-search", "scripts", "session-search.mjs",
-);
-
-export enum OwnerOperatorBashCommand {
-  SessionSearch = "session-search",
-}
 export interface OwnerOperatorBashToolOptions {
   callerSessionId?: string;
 }
@@ -115,19 +103,6 @@ function repoName(abs: string): string | null {
   return path.basename(root) || null;
 }
 
-function resolvedPathCandidate(abs: string): string | null {
-  try {
-    return realpathSync.native(abs);
-  } catch {
-    const ancestor = existingAncestor(abs);
-    try {
-      return path.resolve(realpathSync.native(ancestor), path.relative(ancestor, abs));
-    } catch {
-      return null;
-    }
-  }
-}
-
 const stripTrailingSep = (p: string): string => {
   const root = path.parse(p).root;
   return p === root ? p : p.replace(/[\\/]+$/, "");
@@ -145,7 +120,7 @@ function sameOrDescendant(parent: string, child: string): boolean {
 
 function blacklistWithRealPaths(bl: Blacklist): Blacklist {
   return {
-    paths: [...new Set(bl.paths.flatMap((p) => [p, resolvedPathCandidate(p)].filter((v): v is string => !!v)))],
+    paths: [...new Set(bl.paths.flatMap(pathIdentities))],
     repos: bl.repos,
   };
 }
@@ -158,7 +133,7 @@ export function blacklistedPathVerdict(rawPath: string, cwd: string, bl: Blackli
   | { blacklisted: false; path: string }
   | { blacklisted: true; path: string } {
   const lexical = normalizeInputPath(rawPath, cwd);
-  const candidates = [lexical, resolvedPathCandidate(lexical)].filter((p): p is string => !!p);
+  const candidates = pathIdentities(lexical);
   for (const candidate of candidates) {
     if (isBlacklisted(bl, { cwd: candidate, repo: repoName(candidate) })) {
       return { blacklisted: true, path: candidate };
@@ -167,12 +142,12 @@ export function blacklistedPathVerdict(rawPath: string, cwd: string, bl: Blackli
   return { blacklisted: false, path: lexical };
 }
 
-function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: Blacklist = toolBlacklist()):
+export function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: Blacklist = toolBlacklist()):
   | { blacklisted: false }
   | { blacklisted: true; path: string; root: string } {
   const lexical = normalizeInputPath(rawPath, cwd);
-  const roots = [lexical, resolvedPathCandidate(lexical)].filter((p): p is string => !!p);
-  const blocked = [...new Set(bl.paths.flatMap((p) => [p, resolvedPathCandidate(p)].filter((v): v is string => !!v)))];
+  const roots = pathIdentities(lexical);
+  const blocked = [...new Set(bl.paths.flatMap(pathIdentities))];
   for (const root of roots) {
     for (const blockedPath of blocked) {
       if (sameOrDescendant(root, blockedPath)) return { blacklisted: true, path: blockedPath, root };
@@ -221,43 +196,26 @@ export function createBlacklistAwareFileTools(): AnyTool[] {
   ];
 }
 
-/** Same-name Pi override: skills keep the standard bash tool name, but product policy
- * narrows it to one exact argv-based helper. No shell ever interprets model input. */
-export function createOwnerOperatorBashTool(opts: OwnerOperatorBashToolOptions = {}): AnyTool {
-  return defineTool({
-    name: "bash",
-    label: "Run session search",
-    description: "Run the bundled session-search skill helper with an explicit argument array. No other command is available.",
-    parameters: Type.Object({
-      command: Type.Literal(OwnerOperatorBashCommand.SessionSearch),
-      args: Type.Array(Type.String(), { description: "Arguments passed verbatim to session-search.mjs." }),
-      timeout: Type.Optional(Type.Number({ minimum: 1, maximum: 120, description: "Timeout in seconds. Default 30." })),
-    }),
-    async execute(_id, params, signal) {
-      if (params.command !== OwnerOperatorBashCommand.SessionSearch) {
-        throw new Error("Owner Operator bash only runs the session-search skill helper");
-      }
-      const { stdout, stderr } = await execFileAsync(
-        process.execPath,
-        [sessionSearchScript(), ...params.args],
-        {
-          cwd: path.dirname(sessionSearchScript()),
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            ...(opts.callerSessionId ? { OO_CALLER_SESSION_ID: opts.callerSessionId } : {}),
-          },
-          maxBuffer: 64 * 1024 * 1024,
-          signal,
-          timeout: (params.timeout ?? 30) * 1_000,
-        },
-      );
-      return {
-        content: [{ type: "text" as const, text: `${stdout}${stderr}`.trim() || "(no output)" }],
-        details: undefined,
-      };
+export function createOwnerOperatorBashTool(
+  opts: OwnerOperatorBashToolOptions = {},
+): ReturnType<typeof createBashToolDefinition> {
+  const spawnHook = (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => ({
+    ...context,
+    env: {
+      ...context.env,
+      OO_INSTALL_ROOT: repoRoot,
+      ...(opts.callerSessionId ? { OO_CALLER_SESSION_ID: opts.callerSessionId } : {}),
     },
   });
+  const seed = createBashToolDefinition(process.cwd(), { spawnHook });
+  const tool: ReturnType<typeof createBashToolDefinition> = {
+    ...seed,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const cwd = ctx?.cwd ?? process.cwd();
+      return createBashToolDefinition(cwd, { spawnHook }).execute(toolCallId, params, signal, onUpdate, ctx);
+    },
+  };
+  return tool;
 }
 
 export function registerBlacklistAwareFileTools(
