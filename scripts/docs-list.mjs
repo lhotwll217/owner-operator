@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Lists every docs page with its routing frontmatter (summary, read_when).
+// Lists every docs page with its routing frontmatter and fails if any page is
+// missing title, summary, or read_when. AGENTS.md files are rules, not pages.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,12 +13,16 @@ function extractMetadata(fullPath) {
   const end = content.indexOf("\n---", 3);
   if (end === -1) return { error: "unterminated frontmatter" };
 
+  let title = null;
   let summary = null;
   const readWhen = [];
   let collecting = false;
   for (const rawLine of content.slice(3, end).split("\n")) {
     const line = rawLine.trim();
-    if (line.startsWith("summary:")) {
+    if (line.startsWith("title:")) {
+      title = line.slice("title:".length).trim().replace(/^['"]|['"]$/g, "");
+      collecting = false;
+    } else if (line.startsWith("summary:")) {
       summary = line.slice("summary:".length).trim().replace(/^['"]|['"]$/g, "");
       collecting = false;
     } else if (line.startsWith("read_when:")) {
@@ -28,20 +33,25 @@ function extractMetadata(fullPath) {
       collecting = false;
     }
   }
+  if (!title) return { error: "title missing" };
   if (!summary) return { error: "summary missing" };
-  return { summary, readWhen };
+  if (readWhen.length === 0) return { error: "read_when missing or empty" };
+  return { title, summary, readWhen };
 }
 
 const pages = readdirSync(DOCS_DIR)
   .filter((name) => name.endsWith(".md") && name !== "AGENTS.md")
   .sort();
 
+let failed = false;
 for (const name of pages) {
   const { summary, readWhen, error } = extractMetadata(join(DOCS_DIR, name));
   if (error) {
-    console.log(`docs/${name} - [${error}]`);
+    console.error(`docs/${name} - INVALID: ${error}`);
+    failed = true;
     continue;
   }
   console.log(`docs/${name} - ${summary}`);
-  if (readWhen.length > 0) console.log(`  Read when: ${readWhen.join("; ")}`);
+  console.log(`  Read when: ${readWhen.join("; ")}`);
 }
+process.exit(failed ? 1 : 0);

@@ -1,8 +1,7 @@
 # Owner Operator
 
-> **Status:** macOS only, and so far only tested with a Codex subscription driving the embedded
-> Pi agent. Other model backends should work but are unverified. If you're interested in trying
-> it, it is best you have both.
+> **Status:** macOS only. A Codex subscription is the only tested model backend; others are
+> unverified. If you're trying it, it is best you have both.
 
 Agents are becoming capable of long-term work, and running many of them in parallel is now the
 norm. For the first time, one person can manage multiple workstreams and converge on multiple
@@ -58,19 +57,8 @@ npm install            # once, from the repo root
 ./oo                   # guided first-run setup
 ```
 
-Setup creates `~/.owner-operator/workspace`, asks which coding projects are off-limits, offers to
-copy existing standalone Pi authorizations and model settings, then shows every supported harness
-and recognized app or CLI on one review surface. Setup also asks whether shell commands and changes
-should ask, run automatically, or remain unavailable. Standalone Pi is optional; fresh installs use
-Owner Operator's built-in provider login and store credentials under `~/.owner-operator/pi`.
-Harnesses start included; mark any to ignore. It then configures macOS always-on services, the
-active window, and skills. The copy does not change standalone Pi. Until setup finishes, headless
-calls and transcript/model processing fail closed.
-
-`./oo doctor` (or `./oo status`) prints the effective home, workspace, task directory,
-credentials/model source, transcript stores, session host roots, skills, tools, and permission mode without printing
-secrets. Use `/permissions` to change the mode, `/permission-system show` to inspect the
-composed Pi rules, or `/onboarding` to revisit setup.
+Setup walks privacy boundaries, credentials, the supported-harness review, permission mode,
+and macOS always-on services: [docs/onboarding.md](docs/onboarding.md).
 
 ## The widget
 
@@ -80,6 +68,8 @@ what's working, what's waiting, and what you left open. With the daemon running:
 ```bash
 cd apps/widget && make run
 ```
+
+Behavior and boundaries: [docs/widget.md](docs/widget.md).
 
 ## The terminal
 
@@ -91,8 +81,8 @@ cd apps/widget && make run
 ./oo doctor            # effective harness configuration, no model call
 ```
 
-The terminal starts the background daemon when it needs state. Full flag, session, and
-provenance reference: [docs/cli.md](docs/cli.md).
+The terminal starts the background daemon when it needs state. Flags, sessions, and
+provenance: [docs/cli.md](docs/cli.md).
 
 ## The daemon
 

@@ -22,6 +22,10 @@ an unknown flag. The recognized set lives in
 | `oo -i` / `--interactive` | force interactive |
 | `oo doctor` / `oo status` | effective harness configuration, no model call |
 | `oo daemon` | the long-lived daemon process: [daemon.md](daemon.md) |
+| `oo --help` / `-h` | usage |
+
+Removed spellings (`--json`, the old one-shot subcommand) fail fast with guidance instead of
+being treated as a prompt.
 
 ## Sessions and provenance
 

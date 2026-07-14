@@ -27,13 +27,9 @@ Code and agent state have separate roots:
 | Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
 | Task cwd | caller or scheduled-run cwd | file and command target for that run |
 
-Every entry point creates missing workspace files without overwriting owner edits.
-
-The core config API is authoritative; onboarding is its first-run TTY client. Before the versioned
-consent marker is complete,
-the daemon does not scan or enrich transcripts, headless model calls return setup-required, and the
-widget displays setup-required. `oo doctor` and `oo status` report the effective boundary without
-printing credential values.
+Every entry point creates missing workspace files without overwriting owner edits. The core
+config API is authoritative; onboarding is its first-run TTY client, and incomplete setup
+fails closed ([onboarding.md](onboarding.md)).
 
 ## Tools and skills
 
@@ -43,19 +39,17 @@ printing credential values.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
-  the pinned upstream `session-grep` CLI. The wrapper—not application runtime code—owns local
-  source mapping, blacklist policy, and the decision to exclude the caller during discovery.
-  Caller identity comes from provenance. Owner Operator's own saved conversations remain a
-  separate, explicit wrapper scope rather than entering default coding-session discovery.
-  The vendored primitive owns canonical-ID exclusion and its opt-in candidate aperture, which
-  groups the complete ranked match set by stable session ID before applying limits or output
-  budgets; literal/IDF ranking remains unchanged.
+  the pinned upstream `session-grep` CLI. The wrapper owns local source mapping, blacklist
+  policy, and caller exclusion; caller identity comes from provenance, and the caller-visible
+  behavior is in [cli.md](cli.md). Search internals live with the vendored primitive under
+  `src/agent/skills/session-search/vendor/`.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
 
 ## Permissions
 
-The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. The owner
-selects a permission mode during onboarding and changes it later with `/permissions`.
+The built-in tool posture is defined by
+[`DEFAULT_TOOL_POSTURE`](../packages/core/src/harness.mjs). The owner selects a permission
+mode during onboarding and changes it later with `/permissions`.
 
 Permission gating is
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system) (pinned exact in
@@ -88,5 +82,4 @@ Pi path rules.
 The direct file-tool privacy guard remains authoritative for explicit paths, repository names,
 symlink resolution, and traversal that could reach a blacklisted descendant. OS enforcement for Bash
 process-internal access, non-literal paths, POSIX case variants, and repository-name entries is scoped
-to [#61](https://github.com/lhotwll217/owner-operator/issues/61), which starts from Anthropic Sandbox
-Runtime and an existing Pi adapter.
+to [#61](https://github.com/lhotwll217/owner-operator/issues/61).

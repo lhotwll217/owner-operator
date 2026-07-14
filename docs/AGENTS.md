@@ -10,3 +10,6 @@ point here; they do not restate.
   content merges or points.
 - **Point at in-code contracts instead of restating them.** Catalogs, schema
   docs, and flag parsers document themselves; pages link to them.
+- **Write only the current contract.** Before saving, ask: what context am I
+  assuming, what code change would falsify this silently, and where else have I
+  already said this?

@@ -17,8 +17,9 @@ Four identities stay separate:
 | Transcript store | `~/.claude/projects` | Directory containing that format |
 | Session host | Claude App, Claude CLI, Superset App | Owner-facing app or CLI used to open the session |
 
-`AGENT_HARNESS_DESCRIPTORS` is the canonical supported-harness catalog. Each harness names one
-implemented transcript format and its store candidates. `SESSION_HOST_DESCRIPTORS` separately
+[`AGENT_HARNESS_DESCRIPTORS`](../packages/core/src/session-sources.mjs) is the canonical
+supported-harness catalog. Each harness names one implemented transcript format and its store
+candidates. [`SESSION_HOST_DESCRIPTORS`](../packages/core/src/session-hosts.mjs) separately
 names apps, CLIs, and internal SDK transports. Rooted hosts win over transcript metadata, so a
 Codex or Claude session inside a Superset worktree belongs to Superset. Superset roots are read
 from its legacy and current settings databases because the worktree home is configurable.

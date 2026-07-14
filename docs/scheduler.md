@@ -30,16 +30,16 @@ Prompt runs create a fresh Pi `SessionManager` and transcript under
 follows OpenClaw's isolated-job rule:
 [a new transcript/session id per run](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/docs/automation/cron-jobs.md#L203-L220).
 Commands execute exact `argv` without a shell unless a caller deliberately
-supplies `["/bin/sh", "-lc", command]`.
+supplies `["/bin/sh", "-lc", command]`. Scheduled-run transcripts are searchable but excluded
+from coding-session monitoring, preventing automation loops.
 
 ## Policy
 
-- Prompt schedules are headless and inherit the global permission baseline. `ask` calls that require
-  confirmation are denied because no human authority is present; `allow` permits unattended calls
-  unless Pi floors a shell pattern to `ask`; `read-only` defaults shell commands and changes to deny.
-  Specific Pi rules may override a baseline. `toolsAllow` independently narrows tool availability.
-- The scheduled task cwd activates repository `.pi` permission rules. Task repositories are trusted
-  policy sources and may override Owner Operator's global defaults.
+- Prompt schedules are headless and inherit the global permission baseline
+  ([agent.md — Permissions](agent.md#permissions)); calls that would prompt are denied because
+  no human authority is present. `toolsAllow` independently narrows tool availability.
+- The scheduled task cwd activates repository `.pi` permission rules
+  ([agent.md — Permissions](agent.md#permissions)).
 - Global concurrency starts at one; the same job never overlaps.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
 - Timer occurrences advance and create their running row in one transaction before external work starts.

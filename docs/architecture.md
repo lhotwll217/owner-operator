@@ -51,7 +51,6 @@ process/model runtime and that application code never loads from development-ski
 SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its only production
 writer. The active `/session-state` response is a projection over `threads` and the latest dense
 `thread_details` version; there is no stored snapshot or embedded client store.
-On first creation, `state.db` does not import the retired `threads.db`.
 
 After a transaction commits, `State` publishes a rich typed event on a fail-isolated in-memory bus.
 The bus wakes consumers; clients refetch truth rather than consuming event payloads. The Gateway maps domain events to three typed SSE

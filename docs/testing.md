@@ -45,7 +45,7 @@ Tests stay colocated with their source; root `test/` holds cross-cutting integra
 Tiers are discovered by suffix — drop a `*.integration.test.ts` under the runner's roots and
 `run.mjs` picks it up.
 
-**Fixtures.** Built inline today; promote into `fixtures/<format>/` once reused across ≥2
+**Fixtures.** Built inline; promote into `fixtures/<format>/` once reused across ≥2
 tests. Split by transcript format (each a distinct parser) — Conductor/Superset are hosts.
 Committed fixtures must be sanitized: no personal paths, repos, or names.
 
@@ -61,5 +61,5 @@ npm run test:agent                                    # live — needs model aut
 cd apps/widget && swift test                          # widget (Swift)
 ```
 
-CI runs typecheck, lint, and `npm test` on every PR and landing on `main`
-(`ci.yml`); the widget suite runs on macOS, path-filtered (`widget.yml`).
+CI runs on every PR and every landing on `main`: [`ci.yml`](../.github/workflows/ci.yml);
+the widget suite: [`widget.yml`](../.github/workflows/widget.yml) (macOS, path-filtered).
