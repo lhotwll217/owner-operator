@@ -1,34 +1,19 @@
 # Owner Operator — Development
 
-## Communication style
+This file owns policy. Skills own workflows. Read a subtree's `AGENTS.md` before
+working in it.
 
-- Be concise. Jargon, fluff, and filler words do not help. Make information digestible so it promotes decision making and minimizes cognitive load.
-- Do not leave artifacts of conversations in durable artifacts. This is noise as well.
-- Hand waving or drawing conclusions is dangerous. Cite your sources as granularly as possible when explaining causal relationships. I WILL ASK ANYWAY :)
-
-## Development conventions
-
-- **Don't reinvent.** Reuse proven, maintained open source before writing your own — start at
-  [docs/inspiration.md](docs/inspiration.md); when it's thin, or a design is contested and you need
-  real examples, find them with [gh-search](.claude/skills/gh-search) and cite what you keep to
-  pinned lines (`…/blob/<SHA>/path#L10-L40`, not a repo or branch). Reinventing the wheel is the most
-  criminal thing you can do in this repo: reach for existing pi packages/extensions and proven code open source libraries
-  unless concise local code is the documented better fit. CITE YOUR SOURCES.
-- **Issues preferred, links always.** An issue first for non-trivial work; PRs link theirs
-  when one exists. Keep a chain of custody of decisions and intent in issues and FOLLOW THE TEMPLATE. Workflow and checks: [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Single-source doc** Documentation should live in one place and be pointed to.
-- **Concise.** High-signal, low-noise — in the product, the docs, and your output.
-- **KISS** Keep It Simple Stupid. It's almost always better to build up than tear down. Complexity must earn it's keep. CHALLENGE COMPLEXITY.
-
-## Durable docs and comments
-
-Reread cold as a stranger before saving. Checks:
-
-- Prefer stating what to do over cataloging what not to do.
-- Point at self-documenting code instead of restating it.
-- No decision residue from the thread that produced it. Rationale docs
-  ([docs/inspiration.md](docs/inspiration.md), `eval/hypotheses/`) record accepted/rejected
-  borrows — that content is their job.
-- No context a fresh reader doesn't need.
-- Most literal wording; no jargon, fluff, or coined nouns.
-- Prompts/skills: state the goal; leave the model room to work.
+- **Be concise.** High signal, low noise, always. Digestible information promotes
+  decision-making.
+- **Cite causal claims granularly.** Hand-waved conclusions are dangerous, and
+  the reader will ask for sources anyway.
+- **Don't reinvent.** Proven, maintained open source beats local code. Start at
+  [docs/inspiration.md](docs/inspiration.md), then search (gh-search skill);
+  cite what you keep to pinned lines (`…/blob/<SHA>/path#L10-L40`).
+- **Documentation lives in one place.** Pointers survive change; restated
+  behavior silently goes stale.
+- **Complexity must earn its keep.** It's almost always better to build up than
+  tear down. Challenge complexity.
+- **Durable text must make sense without prior context.** Docs, comments, and
+  prompts outlive the conversation that produced them; reread as a stranger
+  before saving.
