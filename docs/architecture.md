@@ -53,9 +53,7 @@ Every entry point creates missing workspace files without overwriting owner edit
 `OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not change standalone
 Pi. The resource loader disables ambient context, extensions, skills, prompts, and themes, then
 adds only the product prompt, bundled skills, workspace `AGENTS.md`, workspace skills, and personal
-skills explicitly selected during onboarding, plus the pinned permission-system extension. This follows Pi's existing independent cwd/resource
-loader seams and OpenClaw's bounded embedded-agent loader; provenance is recorded in
-[the boundary research](harness-resource-boundaries-research.md).
+skills explicitly selected during onboarding, plus the pinned permission-system extension.
 
 The core config API is authoritative; onboarding is its first-run TTY client. Before the versioned
 consent marker is complete,
