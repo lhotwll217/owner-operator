@@ -5,7 +5,8 @@ point here; they do not restate.
 
 - **Every page starts with routing frontmatter.** `title`, a one-line `summary`,
   and `read_when` triggers let a reader or agent pick the right page without
-  reading bodies.
+  reading bodies. The summary says what the page is; `read_when` alone owns when
+  to read it.
 - **One page per surface.** A page owns its surface's behavior; overlapping
   content merges or points.
 - **Point at in-code contracts instead of restating them.** Catalogs, schema
