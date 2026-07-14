@@ -135,7 +135,6 @@ const runValidity = validateStatsRun(records, cases, {
   expectedIds: scope === "full" ? knownIds : new Set(ids),
   manifest,
   repeat,
-  evalStatus,
 });
 const detail = path.join(iterationsDir, `${runId}.json`);
 const record = {
@@ -169,7 +168,6 @@ if (scope === "full" && runValidity.valid) {
 } else if (scope === "full") {
   // A full run that cannot publish is a broken measurement, not a quiet skip.
   statsStatus = `INVALID-NOT-PUBLISHED:${runValidity.reasons.join(",")}`;
-  process.exitCode = 2;
 }
 
 console.log(`\n[loop] ${subject} trajectory metrics`);
@@ -203,7 +201,9 @@ console.log(
   `[loop] history=${path.relative(repoRoot, historyFile)} stats=${statsStatus} ` +
   `detail=${path.relative(repoRoot, detail)}`,
 );
-if (evalStatus !== 0) process.exitCode = 2;
+// Exit reflects instrument health, not score: failed grades are measurements; missing or
+// broken records are not.
+if (!runValidity.valid) process.exitCode = 2;
 
 function toRecord(result) {
   const providerLabel = result.provider?.label ?? result.provider?.id ?? "unknown";
@@ -284,9 +284,8 @@ function summarize(cases) {
   };
 }
 
-function validateStatsRun(records, cases, { expectedIds, manifest, repeat, evalStatus }) {
+function validateStatsRun(records, cases, { expectedIds, manifest, repeat }) {
   const reasons = [];
-  if (evalStatus !== 0) reasons.push("promptfoo-failed");
   if (!manifest) reasons.push("missing-manifest");
   if (!manifest?.gitHead) reasons.push("missing-git-commit");
   if (!manifest?.gitBranch || manifest.gitBranch === "HEAD") reasons.push("missing-git-branch");
