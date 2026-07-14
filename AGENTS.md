@@ -1,7 +1,9 @@
 # Owner Operator — Development
 
-This file owns policy. Skills own workflows. Read a subtree's `AGENTS.md` before
-working in it.
+This file owns policy. Skills own workflows. Behavior knowledge lives in
+[docs/](docs/): route by each page's frontmatter (`summary`, `read_when`) and
+read the relevant pages before working on a surface. Read a subtree's
+`AGENTS.md` before working in it.
 
 - **Be concise.** High signal, low noise, always. Digestible information promotes
   decision-making.
