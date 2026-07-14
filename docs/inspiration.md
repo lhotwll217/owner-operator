@@ -78,9 +78,9 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `jsonc-parser` `3.3.1` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
 Permission gating is adopted wholesale from
-[`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system) instead of local
-executable/shell classifiers. The full contract, with every claim pinned to the extension's source,
-lives in [agent.md — Permissions](agent.md#permissions).
+[`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system). The full
+contract, with every claim pinned to the extension's source, lives in
+[agent.md — Permissions](agent.md#permissions).
 
 For pi-facing behavior, search the live [pi package catalog](https://pi.dev/packages) plus
 npm/GitHub before building local behavior; cite the adopted package or rejection reason in
