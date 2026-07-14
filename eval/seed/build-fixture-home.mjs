@@ -19,6 +19,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { markOnboarded } from "@owner-operator/core";
 import { assertEvalSandboxPath, evalSandboxPath } from "../sandbox.mjs";
 import { SESSIONS } from "../fixtures/sessions.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
@@ -85,6 +86,7 @@ writeFileSync(join(HOME, "session_sources.json"), JSON.stringify({
 }, null, 2));
 writeFileSync(join(HOME, "settings.json"), JSON.stringify({ activeWindow: "14d" }, null, 2));
 writeFileSync(join(HOME, "blacklist.json"), JSON.stringify({ paths: [join(repoRoot, "eval")], repos: [] }, null, 2));
+markOnboarded(HOME, { via: "eval-fixture" });
 
 // Details history first (versions with real created_at spacing), then the final transcript
 // observation so current state matches the fixture.
