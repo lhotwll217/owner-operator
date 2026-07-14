@@ -104,8 +104,8 @@ path; neither adds a mandatory onboarding screen.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
 
 The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. The owner
-selects the canonical [permission mode](../CONTEXT.md) during onboarding and changes it later with
-`/permissions`. `@gotgenes/pi-permission-system` owns rule
+selects a permission mode during onboarding and changes it later with `/permissions`.
+`@gotgenes/pi-permission-system` owns rule
 evaluation, prompts, and session grants; Owner Operator does not classify executables or shell
 subcommands. The concrete core adapter reconciles only the selected defaults and marker-owned
 blacklist rules into Pi's global config; it preserves advanced Pi settings and specific rules.
