@@ -1,6 +1,6 @@
 ---
 title: "Testing"
-summary: "Test tiers, hermetic rule, coverage map, and the checks CI runs"
+summary: "Test tiers, hermetic rule, and the checks CI runs"
 read_when:
   - Adding or placing a test
   - Running checks locally before a PR
@@ -27,33 +27,6 @@ Tier = filename suffix, colocated with the code it covers. Cross-cutting tests l
 **Hermetic rule.** Default `npm test` never makes a paid call, hits a live model, or reads
 your real sessions — each default tier points `HOME`/`OO_HOME` at a fresh `mkdtemp` and tears
 it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
-
-## What's covered today
-
-| File | Tier | Covers |
-|------|------|--------|
-| `packages/core/src/*.test.ts` | unit | resolve, status, session-state, blacklist, harness/format catalog, session hosts, settings |
-| `packages/core/src/*.integration.test.ts` | integration | owned harness files, catalog re-entry, source detection, and Superset host roots |
-| `src/state/event-bus.test.ts` | unit | fail-isolated in-memory post-commit wake-ups |
-| `src/state/state.integration.test.ts` | integration | SQLite sole writer, projections, and watermarks |
-| `src/state/query.integration.test.ts` | integration | State-owned read-only progressive SQL surface |
-| `src/scheduler/schedule.test.ts` | unit | calendar math |
-| `src/scheduler/scheduler.integration.test.ts` | integration | job lifecycle and durable outcomes |
-| `src/scheduler/*.integration.test.ts` | integration | needs-you batching and durable dedupe |
-| `src/session-monitor/*.integration.test.ts` | integration | scan reconciliation and async enrichment |
-| `src/gateway/gateway.boundaries.test.ts` | unit | transport owns no process/model runtime; no app code in skills |
-| `src/gateway/client.integration.test.ts` | integration | long operations and daemon replacement/reconnect behavior |
-| `src/agent/skills.integration.test.ts` | integration | product skill discovery from the Agent directory |
-| `src/agent/privacy-tools.integration.test.ts` | integration | blacklist enforcement across Pi file primitives |
-| `src/agent/*.integration.test.ts` | integration | owned Pi config, onboarding, doctor, permissions, and privacy tools |
-| `src/daemon/fingerprint.integration.test.ts` | integration | runtime fingerprint changes with source/settings content |
-| `test/eval-daemon.integration.test.ts` | integration | managed eval daemon readiness and shutdown cleanup |
-| `test/scan.integration.test.ts` | integration | real `scan-active-transcripts.mjs` subprocess over session files + git |
-| `test/sessions-grep.integration.test.ts` | integration | vendored session search, privacy filtering, and Owner Operator transcript targeting |
-| `src/daemon/runtime.e2e.test.ts` | e2e | daemon composition, readiness, Gateway, SSE, schedules, query routing |
-| `src/daemon/ensure.e2e.test.ts` | e2e | stale-daemon replacement through the installed process supervisor |
-| `src/session-monitor/monitor.smoke.ts` | smoke | "today" digest against the live machine |
-| `src/agent/agent.behavior.ts` | live | real agent; asserts it returns prose |
 
 ## Layout
 

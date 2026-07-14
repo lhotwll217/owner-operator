@@ -101,17 +101,10 @@ and loopback Gateway. Lifecycle, discovery, and LaunchAgents: [docs/daemon.md](d
 
 ## How it works
 
-Built on the [pi coding agent](https://github.com/earendil-works/pi). Embedded Pi uses
-Owner Operator-owned auth, model settings, workspace resources, and sessions under
-`~/.owner-operator`; standalone Pi keeps its own defaults. Supported harnesses and their
-transcript formats live in
-[`AGENT_HARNESS_DESCRIPTORS`](packages/core/src/session-sources.mjs); apps and CLIs live
-separately in [`SESSION_HOST_DESCRIPTORS`](packages/core/src/session-hosts.mjs).
+Built on the [pi coding agent](https://github.com/earendil-works/pi); how Owner Operator
+uses it is [docs/agent.md](docs/agent.md). Every surface has its own page in
+[docs/](docs/):
 
-Everything else lives next to what it documents:
-
-- [docs/cli.md](docs/cli.md): driving `oo` headless, session provenance, model-free calls
-- [docs/scheduler.md](docs/scheduler.md): durable prompt schedules and run history
-- [docs/daemon.md](docs/daemon.md): daemon lifecycle and LaunchAgents
-- [docs/architecture.md](docs/architecture.md): module ownership and boundaries
-- [docs/testing.md](docs/testing.md): test tiers and the checks CI runs
+```sh
+npm run docs:list      # every page with its summary and read-when hints
+```

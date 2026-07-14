@@ -1,6 +1,6 @@
 ---
 title: "Architecture"
-summary: "Module ownership, harness boundary, session inventory, agent capabilities, state/events"
+summary: "The code map: module ownership, dependency direction, state and events"
 read_when:
   - Deciding where new code belongs
   - Tracing which module owns a behavior or boundary
@@ -46,87 +46,6 @@ The Gateway server receives module interfaces from the daemon. It does not impor
 scheduler implementations. `src/gateway/gateway.boundaries.test.ts` enforces that transport owns no
 process/model runtime and that application code never loads from development-skill directories.
 
-## Harness boundary
-
-Code and agent state have separate roots:
-
-| Scope | Path | Responsibility |
-|---|---|---|
-| Install root | checkout/package | executable code and bundled prompt, tools, and skills |
-| Harness home | `OO_HOME` or `~/.owner-operator` | config, copied credentials/model settings, SQLite, transcripts, logs, daemon files |
-| Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
-| Task cwd | caller or scheduled-run cwd | file and command target for that run |
-
-Every entry point creates missing workspace files without overwriting owner edits. Embedded Pi uses
-`OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not change standalone
-Pi. The resource loader disables ambient context, extensions, skills, prompts, and themes, then
-adds only the product prompt, bundled skills, workspace `AGENTS.md`, workspace skills, and personal
-skills explicitly selected during onboarding, plus the pinned permission-system extension.
-
-The core config API is authoritative; onboarding is its first-run TTY client. Before the versioned
-consent marker is complete,
-the daemon does not scan or enrich transcripts, headless model calls return setup-required, and the
-widget displays setup-required. `oo doctor` and `oo status` report the effective boundary without
-printing credential values.
-
-## Session inventory
-
-Four identities stay separate:
-
-| Identity | Example | Owns |
-|---|---|---|
-| Agent harness | Claude Code | Agent runtime the owner used |
-| Transcript format | `claude` | Record shape the scanner parses |
-| Transcript store | `~/.claude/projects` | Directory containing that format |
-| Session host | Claude App, Claude CLI, Superset App | Owner-facing app or CLI used to open the session |
-
-`AGENT_HARNESS_DESCRIPTORS` is the canonical supported-harness catalog. Each harness names one
-implemented transcript format and its store candidates. `SESSION_HOST_DESCRIPTORS` separately
-names apps, CLIs, and internal SDK transports. Rooted hosts win over transcript metadata, so a
-Codex or Claude session inside a Superset worktree belongs to Superset. Superset roots are read
-from its legacy and current settings databases because the worktree home is configurable.
-
-Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
-ignore. Host detection supplies attribution only and does not grant transcript access. The marker
-records the reviewed stable IDs and an access contract hash. Harness identity, transcript format,
-standard-store scope, or host attribution changes reopen only this review; labels and detection hints do not. The scanner asserts
-that every catalog format has an implementation and the integration suite exercises every parser.
-The same review can run the bounded deep search or accept an explicit absolute transcript-store
-path; neither adds a mandatory onboarding screen.
-
-## Agent capabilities
-
-- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`. Same-name direct
-  file-tool guards at the Agent boundary enforce explicit path, repository-name, and symlinked-path
-  blacklists. The Bash wrapper supplies the task cwd and Owner Operator provenance environment.
-- **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
-  scripts and private vendored dependencies needed to follow its workflow.
-- `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
-  the pinned upstream `session-grep` CLI. The wrapper—not application runtime code—owns local
-  source mapping, blacklist policy, and the decision to exclude the caller during discovery.
-  Caller identity comes from provenance. Owner Operator's own saved conversations remain a
-  separate, explicit wrapper scope rather than entering default coding-session discovery.
-  The vendored primitive owns canonical-ID exclusion and its opt-in candidate aperture, which
-  groups the complete ranked match set by stable session ID before applying limits or output
-  budgets; literal/IDF ranking remains unchanged.
-- `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
-
-The built-in posture exposes `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. The owner
-selects a permission mode during onboarding and changes it later with `/permissions`.
-`@gotgenes/pi-permission-system` owns rule
-evaluation, prompts, and session grants; Owner Operator does not classify executables or shell
-subcommands. The concrete core adapter reconciles only the selected defaults and marker-owned
-blacklist rules into Pi's global config; it preserves advanced Pi settings and specific rules.
-Blacklist paths feed Pi's cross-tool path policy as lexical and filesystem-resolved identities.
-Direct `grep`, `find`, and `ls` also reject a parent whose traversal could reach a blacklisted
-descendant. Bash process-internal access, non-literal paths, POSIX case variants, and repository-name
-entries require separate [sandbox work](https://github.com/lhotwll217/owner-operator/issues/61).
-Specific global and trusted task-repository `.pi` rules use Pi's standard precedence and may
-deliberately override these defaults and generated Pi path rules; direct file-tool privacy guards
-remain authoritative. Pi also floors opaque or execution-wrapper shell commands to `ask`, including
-in `allow` mode.
-Adoption is recorded with pinned sources in [docs/inspiration.md](inspiration.md).
-
 ## State and events
 
 SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its only production
@@ -148,8 +67,7 @@ cannot block Gateway health, SSE, or widget requests. Periodic scan failures are
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use
 the same logged background seam and leave the durable watermark eligible for a later retry.
 
-## Scheduler and daemon lifecycle
+## Surface pages
 
-Each has its own page: the scheduler's typed vocabulary, isolated runs, and
-policy in [scheduler.md](scheduler.md); daemon auth, readiness, staleness, and
-LaunchAgent supervision in [daemon.md](daemon.md).
+Behavior lives with its surface: [agent.md](agent.md), [sessions.md](sessions.md),
+[cli.md](cli.md), [scheduler.md](scheduler.md), [daemon.md](daemon.md).

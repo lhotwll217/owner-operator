@@ -17,6 +17,7 @@
   "scripts": {
     "oo": "tsx src/cli/oo.ts",
     "interactive": "tsx src/cli/interactive.ts",
+    "docs:list": "node scripts/docs-list.mjs",
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test --workspaces --if-present",
     "test:unit": "node test/run.mjs unit",
     "test:integration": "node test/run.mjs integration",
