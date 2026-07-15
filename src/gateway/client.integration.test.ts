@@ -17,8 +17,10 @@ const fingerprint = "client-test-fingerprint";
 const pid = 41_001;
 const streams = new Set<ServerResponse>();
 let retired = false;
+let healthRequests = 0;
 let boundPort = 0;
 const server = createServer((request, response) => {
+  if (request.url === "/health") healthRequests += 1;
   if (retired || request.headers.authorization !== `Bearer ${token}`) {
     response.writeHead(401).end();
     return;
@@ -55,6 +57,15 @@ try {
   const events: GatewayEvent[] = [];
   const unsubscribe = memoized.subscribe((event) => events.push(event));
   await waitFor(() => streams.size === 1, 1_000, "initial event subscription");
+
+  const healthRequestsBefore401 = healthRequests;
+  retired = true;
+  try {
+    await assert.rejects(() => memoized.health(), /gateway \/health: 401/, "same-identity unauthorized response is preserved");
+  } finally {
+    retired = false;
+  }
+  assert.equal(healthRequests, healthRequestsBefore401 + 1, "same-identity unauthorized response is not retried");
 
   const replacementToken = "replacement-token";
   const replacementPid = 41_002;
@@ -98,7 +109,7 @@ try {
     retired = true;
     for (const stream of streams) stream.end();
     streams.clear();
-    await assert.rejects(() => memoized.health(), /401/, "the retired client observes daemon replacement");
+    assert.equal((await memoized.health()).pid, replacementPid, "the original request follows daemon replacement");
     const replacement = await resolveBackend();
     assert.equal((await replacement.health()).pid, replacementPid, "the next tool call resolves fresh discovery");
     await waitFor(

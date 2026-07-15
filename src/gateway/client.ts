@@ -31,6 +31,14 @@ function readDaemonInfo(): DaemonInfo | null {
   try { return JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
 }
 
+function daemonIdentityOrCredentialChanged(current: DaemonInfo, next: DaemonInfo): boolean {
+  return current.port !== next.port
+    || current.pid !== next.pid
+    || current.startedAt !== next.startedAt
+    || current.fingerprint !== next.fingerprint
+    || current.authToken !== next.authToken;
+}
+
 interface GatewayJsonOptions {
   init?: RequestInit;
   timeoutMs?: number;
@@ -43,23 +51,32 @@ async function gatewayJson<T>(
   path: string,
   options: GatewayJsonOptions = {},
 ): Promise<T> {
-  const headers = new Headers(options.init?.headers);
-  headers.set("authorization", `Bearer ${info.authToken}`);
-  let response: Response;
-  try {
-    response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
-      ...options.init,
-      headers,
-      signal: options.init?.signal ?? AbortSignal.timeout(options.timeoutMs ?? FAST_REQUEST_MS),
-    });
-  } catch (error) {
+  const request = async (requestInfo: DaemonInfo): Promise<Response> => {
+    const headers = new Headers(options.init?.headers);
+    headers.set("authorization", `Bearer ${requestInfo.authToken}`);
+    try {
+      return await fetch(`http://127.0.0.1:${requestInfo.port}${path}`, {
+        ...options.init,
+        headers,
+        signal: options.init?.signal ?? AbortSignal.timeout(options.timeoutMs ?? FAST_REQUEST_MS),
+      });
+    } catch (error) {
+      options.onUnavailable?.();
+      throw error;
+    }
+  };
+  const accepted = (response: Response): boolean => response.ok || options.acceptStatuses?.includes(response.status) === true;
+
+  let response = await request(info);
+  if (!accepted(response) && response.status === 401) {
     options.onUnavailable?.();
-    throw error;
+    const next = readDaemonInfo();
+    if (next?.authToken && daemonIdentityOrCredentialChanged(info, next)) {
+      response = await request(next);
+      if (!accepted(response) && response.status === 401) options.onUnavailable?.();
+    }
   }
-  if (!response.ok && !options.acceptStatuses?.includes(response.status)) {
-    if (response.status === 401) options.onUnavailable?.();
-    throw new Error(`gateway ${path}: ${response.status}`);
-  }
+  if (!accepted(response)) throw new Error(`gateway ${path}: ${response.status}`);
   return await response.json() as T;
 }
 
