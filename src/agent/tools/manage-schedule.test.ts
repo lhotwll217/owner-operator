@@ -46,7 +46,7 @@ assert.deepEqual(updated, {
   },
 });
 assert.equal(disabled.action, "disable");
-assert.equal(disabled.schedule.enabled, false);
+assert.equal("schedule" in disabled && disabled.schedule.enabled, false);
 
 const deleted = await manageSchedule(backend, { action: "delete", id: schedule.id });
 assert.equal(deletedId, "schedule-1");

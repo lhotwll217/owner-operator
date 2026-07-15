@@ -5,28 +5,18 @@ import { resolveBackend } from "../../gateway/client";
 
 type ManageScheduleBackend = Pick<GatewayApi, "listSchedules" | "updateSchedule" | "deleteSchedule">;
 
-export interface DisableScheduleRequest {
-  action: "disable";
+export interface ManageScheduleRequest {
+  action: "disable" | "delete";
   id: string;
 }
 
-export interface DeleteScheduleRequest {
-  action: "delete";
-  id: string;
-}
-
-export function manageSchedule(
-  backend: ManageScheduleBackend,
-  request: DisableScheduleRequest,
-): Promise<{ action: "disable"; schedule: ScheduleDefinition }>;
-export function manageSchedule(
-  backend: ManageScheduleBackend,
-  request: DeleteScheduleRequest,
-): Promise<{ action: "delete"; id: string; deleted: true }>;
 export async function manageSchedule(
   backend: ManageScheduleBackend,
-  request: DisableScheduleRequest | DeleteScheduleRequest,
-) {
+  request: ManageScheduleRequest,
+): Promise<
+  | { action: "disable"; schedule: ScheduleDefinition }
+  | { action: "delete"; id: string; deleted: true }
+> {
   if (request.action === "delete") {
     await backend.deleteSchedule(request.id);
     return { action: request.action, id: request.id, deleted: true } as const;
@@ -52,8 +42,7 @@ export const manageScheduleTool = defineTool({
   label: "Manage schedule",
   description:
     "Disable or delete one durable Owner Operator schedule by its exact stable id. " +
-    "Use query_database on schedules to find the id; names are not accepted. " +
-    "Disabling or deleting prevents future triggers but does not cancel an active run, and run history is preserved.",
+    "Use query_database on schedules to find the id; names are not accepted.",
   parameters: Type.Object({
     action: Type.Union([
       Type.Literal("disable"),
@@ -63,9 +52,7 @@ export const manageScheduleTool = defineTool({
   }),
   async execute(_id, params) {
     const backend = await resolveBackend();
-    const result = params.action === "disable"
-      ? await manageSchedule(backend, { action: "disable", id: params.id })
-      : await manageSchedule(backend, { action: "delete", id: params.id });
+    const result = await manageSchedule(backend, params);
     return {
       content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       details: result,
