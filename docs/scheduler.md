@@ -24,7 +24,8 @@ Our small public scheduler seam mirrors OpenClaw's explicit
 [cron service contract](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/service-contract.ts#L27-L45)
 without copying its product-specific delivery system.
 
-The agent creates durable schedules through the typed `schedule_prompt` tool.
+The agent creates durable schedules through `schedule_prompt` and disables or deletes them by
+exact stable ID through `manage_schedule`.
 Prompt runs create a fresh Pi `SessionManager` and transcript under
 `~/.owner-operator/sessions`; `oo-provenance` records job/run identity. This
 follows OpenClaw's isolated-job rule:

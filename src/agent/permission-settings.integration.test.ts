@@ -200,6 +200,7 @@ try {
       mark_thread_done: "allow",
       query_database: "allow",
       schedule_prompt: "ask",
+      manage_schedule: "ask",
     },
     "every registered tool has an explicit permission classification",
   );
