@@ -30,8 +30,9 @@ unready daemon identity and waits for it to release the Gateway; it never signal
 LaunchAgent ownership is verified against `launchctl print`; if an authenticated detached daemon
 predates installation, the client stops it and waits for the port before handing ownership to launchd.
 An ambiguous launchctl result fails closed and never authorizes direct signaling.
-Long-lived Node clients invalidate cached discovery after authentication or connection failure, and
-their SSE subscriptions reread `daemon.json` before reconnecting.
+Long-lived Node clients invalidate cached discovery after authentication or connection failure.
+After a 401, an ordinary Gateway request rereads discovery and replays once only when the daemon
+identity or credential changed. SSE subscriptions reread `daemon.json` before reconnecting.
 
 The widget installer installs the daemon and widget LaunchAgents together; the widget itself
 is a pure Gateway client ([widget.md](widget.md)).
