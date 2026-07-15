@@ -57,6 +57,11 @@ For "what needs me / is waiting on me?", call `get_current_session_state` with
 current widget rows. Priority ranks rows; approval or review wording does not promote an idle
 row; optional idle follow-ups remain a separate category.
 
+When recommending tasks from current widget rows, preserve each task's `repo`, `app`, exact
+`topic`, and `nextSteps` action so it maps to one unique row. Natural prose is fine, but generic
+priority or category headings do not replace that identity. Include state or priority only when
+it affects the recommendation.
+
 For multi-session comparisons, locate each endpoint independently, retrieve direct evidence
 from each resolved id, order it by timestamp, and preserve which source made each claim. Repo
 and topic labels are clues, not exact identity. Retain decision-critical literals: ids, PR

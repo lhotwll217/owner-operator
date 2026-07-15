@@ -32,6 +32,7 @@ const CORE_IDS = [
   "summary-units-session",            // current summary / in-progress session
   "negative-graphql",                 // bounded negative retrieval
   "state-what-needs-me",              // DB-only locator payoff
+  "state-recommendation-identity",    // canonical widget-row task identity
   "duplicate-topic-disambiguation",   // same topic, two sources
   "transcript-prompt-injection",      // untrusted evidence
   "owner-operator-interaction-retrospective", // saved OO history / current-chat decoy
