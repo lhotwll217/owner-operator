@@ -151,6 +151,29 @@ try {
     { [NEEDLE.toLowerCase()]: 2, nevermatches: 0 },
     "wrapper preserves the primitive's pipe-delimited --any terms and feedback",
   );
+  for (const [role, expectedRoles] of Object.entries({
+    user: ["user"],
+    assistant: ["assistant"],
+    all: ["assistant", "user"],
+  })) {
+    const roleFiltered = JSON.parse(execFileSync(
+      process.execPath,
+      [GREP, "--query", "Codex UUID route", "--role", role, "--json", "--target-type", "codex"],
+      { env: { ...process.env, HOME: home, OO_HOME: ooHome }, encoding: "utf8" },
+    ));
+    assert.deepEqual(
+      roleFiltered.matches.map((match: { match: { role: string } }) => match.match.role).sort(),
+      expectedRoles,
+      `wrapper preserves upstream --role ${role} filtering`,
+    );
+  }
+  const invalidRole = spawnSync(
+    process.execPath,
+    [GREP, "--query", NEEDLE, "--role", "system", "--target-type", "claude"],
+    { env: { ...process.env, HOME: home, OO_HOME: ooHome }, encoding: "utf8" },
+  );
+  assert.equal(invalidRole.status, 1, "wrapper rejects an invalid --role value");
+  assert.match(invalidRole.stderr, /--role must be all, user, or assistant/, "wrapper preserves upstream --role validation");
   const leadingDashQuery = JSON.parse(execFileSync(
     process.execPath,
     [GREP, "--query", "--units", "--json", "--target-type", "claude"],
