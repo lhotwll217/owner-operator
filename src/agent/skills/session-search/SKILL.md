@@ -45,6 +45,8 @@ query → candidate → skim → window sequence.
 ## Find transcript evidence
 
 - `--query TEXT` performs literal search, including values that begin with dashes such as `--units`; add `--regex` only when the user needs a pattern. Regex matching is case-insensitive by default; a leading `(?i)` is accepted for grep compatibility.
+- Add `--role user` or `--role assistant` to search only that side of the conversation;
+  `--role all` is the default.
 - Multi-word text is still one literal phrase. Use `--any` when several independent terms
   should match; the rarest hits rank first.
 - For ambiguous discovery, add `--candidates --limit 8`. It groups the complete ranked match set by

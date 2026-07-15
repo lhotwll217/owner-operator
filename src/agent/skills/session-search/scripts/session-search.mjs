@@ -35,7 +35,7 @@ for (let index = 0; index < input.length; index += 1) {
   else if (arg === "--target-root") targetRoot = takeValue(arg, ++index);
   else if (arg === "--limit") limit = Number(takeValue(arg, ++index));
   else if (arg === "--max-chars") maxChars = Number(takeValue(arg, ++index));
-  else if (["--query", "--skim", "--session", "--at", "--since", "--sort", "--before", "--after"].includes(arg)) {
+  else if (["--query", "--skim", "--session", "--at", "--since", "--sort", "--before", "--after", "--role"].includes(arg)) {
     if (arg === "--query") hasQuery = true;
     if (arg === "--session") hasSession = true;
     if (arg === "--skim") hasSkim = true;
