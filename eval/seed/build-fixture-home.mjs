@@ -10,6 +10,7 @@
 //   transcripts/claude/<project-slug>/<id>.jsonl    claude-format sessions
 //   transcripts/codex/<id>.jsonl                    codex-format sessions
 //   home/                                           OO_HOME for the subject under eval:
+//     sessions/<id>.jsonl                           saved Owner Operator sessions
 //     session_sources.json                          defaults disabled, fixture roots added
 //     settings.json                                 activeWindow wide enough for the fixtures
 //     state.db                                      versioned state + details history
@@ -21,7 +22,7 @@ import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { markOnboarded, ownerOperatorPaths, savePermissionMode } from "@owner-operator/core";
 import { assertEvalSandboxPath, evalSandboxPath } from "../sandbox.mjs";
-import { SESSIONS } from "../fixtures/sessions.mjs";
+import { OWNER_OPERATOR_SESSIONS, SESSIONS } from "../fixtures/sessions.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
 import { repoRoot } from "../../src/shared/repo-root.ts";
 
@@ -74,6 +75,23 @@ for (const s of SESSIONS) {
     writeFileSync(file, lines.join("\n") + "\n");
     transcriptPaths.set(s.id, file);
   }
+}
+
+const ownerOperatorSessions = join(HOME, "sessions");
+mkdirSync(ownerOperatorSessions, { recursive: true });
+for (const s of OWNER_OPERATOR_SESSIONS) {
+  const first = Math.max(...s.messages.map((message) => message.offsetMin));
+  const lines = [
+    JSON.stringify({ type: "session", version: 3, id: s.id, timestamp: at(first + 1), cwd: s.cwd }),
+    ...s.messages.map((message, index) => JSON.stringify({
+      type: "message",
+      id: `m${index + 1}`,
+      parentId: index === 0 ? null : `m${index}`,
+      timestamp: at(message.offsetMin),
+      message: { role: message.role, content: [{ type: "text", text: message.text }] },
+    })),
+  ];
+  writeFileSync(join(ownerOperatorSessions, `${s.id}.jsonl`), lines.join("\n") + "\n");
 }
 
 // ---- OO_HOME: sources, settings, seeded db ------------------------------------------

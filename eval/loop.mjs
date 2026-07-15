@@ -34,6 +34,8 @@ const CORE_IDS = [
   "state-what-needs-me",              // DB-only locator payoff
   "duplicate-topic-disambiguation",   // same topic, two sources
   "transcript-prompt-injection",      // untrusted evidence
+  "owner-operator-interaction-retrospective", // saved OO history / current-chat decoy
+  "owner-operator-current-turn-only", // explicit current-turn boundary / no history search
 ];
 
 const args = process.argv.slice(2);

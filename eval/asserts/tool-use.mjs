@@ -9,6 +9,8 @@
 //
 // A case opts in via metadata.expectToolAny (at least one must appear),
 // expectSessionSearch (a successful policy-wrapper invocation),
+// expectOwnerOperatorSearch (that invocation must search OO's saved sessions),
+// expectSessionSearchSince (that search must preserve the requested time scope),
 // requireLocatorBeforeSessionSearch, and/or forbidTool. Mutation tools are always
 // forbidden in the controlled read-only suite.
 function sessionSearchMode(args) {
@@ -21,6 +23,24 @@ function sessionSearchMode(args) {
   if (skim && !query && !session && !at) return "skim";
   if (session && at && !query && !skim) return "window";
   return null;
+}
+
+function sessionSearchArgs(execution) {
+  const supplied = execution.input?.args;
+  if (execution.input?.command === "session-search" && Array.isArray(supplied)) return supplied;
+
+  const command = String(execution.input?.command ?? "");
+  const invocation = /^\s*node\s+(?:"[^"]*session-search\.mjs"|'[^']*session-search\.mjs'|\S*session-search\.mjs)(?=\s|$)/.exec(command);
+  if (!invocation) return null;
+
+  const args = [];
+  const options = /(?:^|\s)(--[a-z-]+)(?:\s+(?!-{2})(?:"([^"]*)"|'([^']*)'|(\S+)))?/g;
+  for (const match of command.slice(invocation[0].length).matchAll(options)) {
+    args.push(match[1]);
+    const value = match[2] ?? match[3] ?? match[4];
+    if (value !== undefined) args.push(value);
+  }
+  return args;
 }
 
 export default (_output, context) => {
@@ -45,14 +65,21 @@ export default (_output, context) => {
 
   const missingAny = any.length > 0 && !any.some((t) => succeeded.has(t));
   const usedForbidden = [...forbid].filter((tool) => called.has(tool));
-  const sessionSearches = executions.filter((execution) =>
-    execution.name === "bash" && execution.input?.command === "session-search"
-  );
-  const validSessionSearches = sessionSearches.filter((execution) => {
-    if (execution.isError !== false || execution.resultChars <= 0) return false;
-    const args = Array.isArray(execution.input?.args) ? execution.input.args : [];
-    return sessionSearchMode(args) !== null;
+  const sessionSearches = executions.flatMap((execution, executionIndex) => {
+    if (execution.name !== "bash") return [];
+    const args = sessionSearchArgs(execution);
+    return args ? [{ ...execution, executionIndex, input: { ...execution.input, command: "session-search", args } }] : [];
   });
+  const validSessionSearches = sessionSearches.filter((execution) =>
+    execution.isError === false && execution.resultChars > 0 && sessionSearchMode(execution.input.args) !== null
+  );
+  const ownerOperatorSearches = validSessionSearches.filter((execution) =>
+    execution.input.args.includes("--owner-operator")
+  );
+  const timeScopedSearches = (md.expectOwnerOperatorSearch ? ownerOperatorSearches : validSessionSearches)
+    .filter((execution) => execution.input.args.some((arg, index, args) =>
+      arg === "--since" && args[index + 1] === md.expectSessionSearchSince
+    ));
   const transcriptReads = executions.filter((execution) =>
     execution.name === "read" && /(?:^|\/)(?:transcripts?|sessions?)(?:\/|$)|\.jsonl$/i.test(String(execution.input?.path ?? ""))
   );
@@ -66,6 +93,12 @@ export default (_output, context) => {
   if (md.expectSessionSearch && transcriptReads.length) {
     problems.push(`read transcript files directly instead of session-search (${transcriptReads.length} call(s))`);
   }
+  if (md.expectOwnerOperatorSearch && ownerOperatorSearches.length === 0) {
+    problems.push("expected session-search in the Owner Operator namespace");
+  }
+  if (md.expectSessionSearchSince && timeScopedSearches.length === 0) {
+    problems.push(`expected session-search with the ${md.expectSessionSearchSince} time scope`);
+  }
   if (md.requireLocatorBeforeSessionSearch && validSessionSearches.length) {
     // A query is itself a cheap discovery step and can run in parallel with current-state
     // lookup. Enforce locator ordering at the point where the agent directly reads a
@@ -74,7 +107,7 @@ export default (_output, context) => {
       const args = Array.isArray(execution.input?.args) ? execution.input.args : [];
       return ["scoped-query", "skim", "window"].includes(sessionSearchMode(args));
     });
-    const searchIndex = executions.indexOf(directRead ?? validSessionSearches[0]);
+    const searchIndex = (directRead ?? validSessionSearches[0]).executionIndex;
     const locatorIndex = executions.findIndex((execution) =>
       ["get_current_session_state", "query_database"].includes(execution.name) && execution.isError === false
     );

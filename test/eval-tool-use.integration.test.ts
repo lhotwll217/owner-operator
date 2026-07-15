@@ -89,4 +89,87 @@ const discoveryOnly = toolUseAssertion("", {
 });
 assert.equal(discoveryOnly.pass, true, discoveryOnly.reason);
 
-process.stdout.write("ok — eval tool gate: discovery may precede locator; scoped/direct reads may not\n");
+const wrongHistoryNamespace = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: { metadata: { expectSessionSearch: true, expectOwnerOperatorSearch: true } },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [search(["--query", "recurring feedback", "--any"])],
+    },
+  },
+});
+assert.equal(wrongHistoryNamespace.pass, false);
+assert.match(wrongHistoryNamespace.reason, /Owner Operator namespace/);
+
+const unboundedOwnerOperatorHistory = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: {
+    metadata: {
+      expectSessionSearch: true,
+      expectOwnerOperatorSearch: true,
+      expectSessionSearchSince: "7d",
+    },
+  },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [search(["--query", "recurring feedback", "--any", "--owner-operator"])],
+    },
+  },
+});
+assert.equal(unboundedOwnerOperatorHistory.pass, false);
+assert.match(unboundedOwnerOperatorHistory.reason, /7d time scope/);
+
+const ownerOperatorHistory = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: {
+    metadata: {
+      expectSessionSearch: true,
+      expectOwnerOperatorSearch: true,
+      expectSessionSearchSince: "7d",
+    },
+  },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [search(["--query", "recurring feedback", "--any", "--since", "7d", "--owner-operator"])],
+    },
+  },
+});
+assert.equal(ownerOperatorHistory.pass, true, ownerOperatorHistory.reason);
+
+const tracedOwnerOperatorHistory = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: {
+    metadata: {
+      expectSessionSearch: true,
+      expectOwnerOperatorSearch: true,
+      expectSessionSearchSince: "7d",
+    },
+  },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [{
+        name: "bash",
+        input: {
+          command: "node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'recurring feedback' --any --since 7d --owner-operator",
+        },
+        isError: false,
+        resultChars: 100,
+      }],
+    },
+  },
+});
+assert.equal(tracedOwnerOperatorHistory.pass, true, tracedOwnerOperatorHistory.reason);
+
+const currentTurnOnly = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: { metadata: { forbidTool: ["bash"] } },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [search(["--query", "narrate every step", "--owner-operator"])],
+    },
+  },
+});
+assert.equal(currentTurnOnly.pass, false);
+assert.match(currentTurnOnly.reason, /used forbidden \[bash\]/);
+
+process.stdout.write("ok — eval tool gate: discovery ordering and Owner Operator history scope hold\n");

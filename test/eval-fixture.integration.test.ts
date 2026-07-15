@@ -2,7 +2,7 @@
 // locator has a transcript path. These are harness invariants, not model-scored behavior.
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +48,11 @@ try {
   db.close();
   assert.ok(counts.total > 0, "fixture DB contains threads");
   assert.equal(counts.with_paths, counts.total, "every fixture thread has a transcript path");
+
+  const ownerOperatorSessions = readdirSync(join(sandbox, "home", "sessions"))
+    .filter((file) => file.endsWith(".jsonl"));
+  assert.equal(ownerOperatorSessions.length, 4, "fixture includes in-window evidence plus an older scope decoy");
+  assert.equal(counts.total, 10, "saved Owner Operator sessions stay out of the coding-thread index");
 
   const blacklist = JSON.parse(readFileSync(join(sandbox, "home", "blacklist.json"), "utf8")) as { paths?: string[] };
   assert.ok(blacklist.paths?.includes(join(repoRoot, "eval")), "eval subjects cannot read the answer key");

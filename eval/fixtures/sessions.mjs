@@ -1,5 +1,5 @@
-// Synthetic session fixtures — the eval's CONTROLLED ground truth. Ten sessions, two
-// transcript formats, eight fictional repos, all invented (no real/personal data). This is
+// Synthetic session fixtures — the eval's CONTROLLED ground truth. Ten coding sessions
+// plus four saved Owner Operator sessions, all invented (no real/personal data). This is
 // deliberately small and hand-planted so rubrics can be exact; it is NOT a representative
 // corpus. A larger open-source corpus is tracked in issue #32 — this stays the controlled
 // core. Every case in ../cases.yaml keys off details planted here; change a fact, update its case.
@@ -33,6 +33,10 @@
 //     ignored it and removed key-2024 from JWKS after the overlap window.
 //   atlas-web / release summary (claude helper + codex final):
 //     two similar topics, but only the Codex session contains the verified final report.
+//   saved Owner Operator history / communication feedback (pi, four sessions):
+//     outcome-first, concise updates recur in two sessions and behavior then follows it;
+//     praise for a small comparison table appears once; a 20-day-old step-narration request
+//     is outside the retrospective's seven-day scope.
 
 /** Claude-format line factory: {type, message, cwd, sessionId, timestamp}. */
 const claudeMsg = (role, text, offsetMin, stop) => ({
@@ -45,6 +49,41 @@ const claudeMsg = (role, text, offsetMin, stop) => ({
 
 /** Codex-format entries: session_meta / event_msg lifecycle / response_item messages. */
 const codexMsg = (role, text, offsetMin) => ({ kind: "codex", role, text, offsetMin });
+
+export const OWNER_OPERATOR_SESSIONS = [
+  {
+    id: "fx-oo-communication-a101",
+    cwd: "/home/dev/operator-workspace",
+    messages: [
+      { role: "user", text: "That update buried the result in a long play-by-play. In our interactions, lead with the outcome and keep the explanation concise.", offsetMin: 6 * 24 * 60 },
+      { role: "assistant", text: "Understood. I will put the decision first and include only the evidence needed to act on it.", offsetMin: 6 * 24 * 60 - 2 },
+    ],
+  },
+  {
+    id: "fx-oo-communication-b202",
+    cwd: "/home/dev/operator-workspace",
+    messages: [
+      { role: "user", text: "You did the blow-by-blow again. This is recurring feedback: outcome first, then only evidence that changes the decision.", offsetMin: 3 * 24 * 60 },
+      { role: "assistant", text: "Outcome: keep the rollout paused. The decision-changing evidence is the failed reconciliation check; the remaining logs do not alter that call.", offsetMin: 3 * 24 * 60 - 2 },
+    ],
+  },
+  {
+    id: "fx-oo-communication-c303",
+    cwd: "/home/dev/operator-workspace",
+    messages: [
+      { role: "user", text: "One-off communication feedback: the small comparison table in that answer was especially useful for the repeated mappings.", offsetMin: 24 * 60 },
+      { role: "assistant", text: "I will keep tables for repeated mappings when they make the relationship easier to scan.", offsetMin: 24 * 60 - 2 },
+    ],
+  },
+  {
+    id: "fx-oo-communication-d404",
+    cwd: "/home/dev/operator-workspace",
+    messages: [
+      { role: "user", text: "For these retrospectives, be expansive and narrate every implementation step so I can audit the whole process.", offsetMin: 20 * 24 * 60 },
+      { role: "assistant", text: "Understood. I will provide the full step-by-step implementation trail in those retrospectives.", offsetMin: 20 * 24 * 60 - 2 },
+    ],
+  },
+];
 
 export const SESSIONS = [
   {
