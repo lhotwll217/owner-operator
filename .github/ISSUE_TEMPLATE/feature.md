@@ -14,8 +14,8 @@ labels: enhancement
 -
 -
 
-### Examples and inspiration
-<!-- Patterns already found in docs/inspiration.md or other open-source repositories that may keep us from reinventing the wheel. Cite exact lines at a commit SHA when available; discovery can add this section later. -->
+### Open Source Inspiration and Code Examples
+<!-- Durable patterns and relevant code from docs/inspiration.md or other open-source repositories. Use the repo's gh-search skill to find prior art before building. Cite exact lines at a commit SHA when available; discovery can add this section later. -->
 -
 
 ### Notes
