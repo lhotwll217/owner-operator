@@ -1,6 +1,6 @@
 ---
 title: "Agent"
-summary: "How Owner Operator uses Pi: embedded runtime, workspace roots, tools, skills, permissions"
+summary: "How Owner Operator uses Pi: embedded runtime, state freshness, workspace roots, tools, skills, permissions"
 read_when:
   - Changing the product prompt, tools, skills, or permission posture
   - Tracing what the embedded agent can reach and why
@@ -44,6 +44,14 @@ fails closed ([onboarding.md](onboarding.md)).
   behavior is in [cli.md](cli.md). Search internals live with the vendored primitive under
   `src/agent/skills/session-search/vendor/`.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
+
+## Current-state freshness
+
+Every answer that reports ongoing or current session state starts by calling
+`get_current_session_state` in that turn. Conversation context and earlier state results are not
+current truth. When the answer also needs exact changes, reasons, artifacts, or proof, the fresh
+state lookup precedes transcript retrieval through the `session-search` skill. Historical transcript
+questions and local-file questions can go directly to their relevant evidence source.
 
 ## Permissions
 

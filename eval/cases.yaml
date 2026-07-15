@@ -3,9 +3,9 @@
 # case; the control greps transcripts, OO may shortcut through its state DB. Ground truth
 # is planted in fixtures/sessions.mjs — change a fact there, change its rubric here.
 #
-# qtype tags where the DB earns its keep: state/stale/audit/handoff cases are the ones OO
-# should locate via query_database before (if needed) reading transcripts with
-# the session-search skill. locator/evidence/summary/negative lean on search.
+# qtype tags where the DB earns its keep: state/stale and current handoff cases start with
+# get_current_session_state; audit cases may locate through query_database. Transcript details
+# still come from the session-search skill. locator/evidence/summary/negative lean on search.
 
 # ── search-led: a fact only the transcript holds ────────────────────────────────────
 - description: evidence-flaky-error
@@ -132,7 +132,13 @@
     question: "For the thread that needs me: what exactly did the agent say it changed, and how do you know?"
   # The #31 regression gate: OO must reach transcripts for the evidence, not answer from the
   # state summary alone. Skill execution through bash is REQUIRED even though the DB locates the thread.
-  metadata: { qtype: handoff, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, requireLocatorBeforeSessionSearch: true }
+  metadata:
+    qtype: handoff
+    difficulty: hard
+    expectToolAny: [bash]
+    expectSessionSearch: true
+    expectFreshSessionState: true
+    requireLocatorBeforeSessionSearch: true
   assert:
     - type: llm-rubric
       value: >-

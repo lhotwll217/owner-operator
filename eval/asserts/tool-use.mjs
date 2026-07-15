@@ -11,6 +11,7 @@
 // expectSessionSearch (a successful policy-wrapper invocation),
 // expectOwnerOperatorSearch (that invocation must search OO's saved sessions),
 // expectSessionSearchSince (that search must preserve the requested time scope),
+// expectFreshSessionState (a successful state call before any transcript search),
 // requireLocatorBeforeSessionSearch, and/or forbidTool. Mutation tools are always
 // forbidden in the controlled read-only suite.
 function sessionSearchMode(args) {
@@ -83,6 +84,9 @@ export default (_output, context) => {
   const transcriptReads = executions.filter((execution) =>
     execution.name === "read" && /(?:^|\/)(?:transcripts?|sessions?)(?:\/|$)|\.jsonl$/i.test(String(execution.input?.path ?? ""))
   );
+  const freshStateIndex = executions.findIndex((execution) =>
+    execution.name === "get_current_session_state" && execution.isError === false
+  );
 
   const problems = [];
   if (missingAny) problems.push(`expected one of [${any.join(", ")}], got [${[...called].join(", ") || "none"}]`);
@@ -98,6 +102,17 @@ export default (_output, context) => {
   }
   if (md.expectSessionSearchSince && timeScopedSearches.length === 0) {
     problems.push(`expected session-search with the ${md.expectSessionSearchSince} time scope`);
+  }
+  if (md.expectFreshSessionState && freshStateIndex < 0) {
+    problems.push("expected a successful fresh get_current_session_state call");
+  }
+  if (
+    md.expectFreshSessionState &&
+    freshStateIndex >= 0 &&
+    sessionSearches.length > 0 &&
+    freshStateIndex > sessionSearches[0].executionIndex
+  ) {
+    problems.push("expected fresh session state before transcript search");
   }
   if (md.requireLocatorBeforeSessionSearch && validSessionSearches.length) {
     // A query is itself a cheap discovery step and can run in parallel with current-state

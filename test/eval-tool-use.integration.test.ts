@@ -172,4 +172,48 @@ const currentTurnOnly = toolUseAssertion("", {
 assert.equal(currentTurnOnly.pass, false);
 assert.match(currentTurnOnly.reason, /used forbidden \[bash\]/);
 
-process.stdout.write("ok — eval tool gate: discovery ordering and Owner Operator history scope hold\n");
+const freshStateThenEvidence = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: { metadata: { expectSessionSearch: true, expectFreshSessionState: true } },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [
+        locator,
+        search(["--query", "what changed", "--session", "session-1"]),
+      ],
+    },
+  },
+});
+assert.equal(freshStateThenEvidence.pass, true, freshStateThenEvidence.reason);
+
+const evidenceWithoutFreshState = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: { metadata: { expectSessionSearch: true, expectFreshSessionState: true } },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [
+        { name: "query_database", input: {}, isError: false, resultChars: 100 },
+        search(["--query", "what changed", "--session", "session-1"]),
+      ],
+    },
+  },
+});
+assert.equal(evidenceWithoutFreshState.pass, false);
+assert.match(evidenceWithoutFreshState.reason, /fresh get_current_session_state/);
+
+const evidenceBeforeFreshState = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: { metadata: { expectSessionSearch: true, expectFreshSessionState: true } },
+  providerResponse: {
+    metadata: {
+      toolExecutions: [
+        search(["--query", "what changed", "--session", "session-1"]),
+        locator,
+      ],
+    },
+  },
+});
+assert.equal(evidenceBeforeFreshState.pass, false);
+assert.match(evidenceBeforeFreshState.reason, /fresh session state before transcript search/);
+
+process.stdout.write("ok — eval tool gate: discovery, freshness, and Owner Operator history scope hold\n");

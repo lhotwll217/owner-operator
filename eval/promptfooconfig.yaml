@@ -31,11 +31,11 @@ defaultTest:
     provider: file://providers/codex-grader.mjs
   assert:
     # Correctness is graded per case (llm-rubric in cases.yaml).
-    # Soundness gate (#31 criterion 3): evidence answers must be read from a transcript,
-    # not an AI-written summary row. Fires ONLY on cases that declare expectToolAny, and
-    # ONLY on the owner-operator arm. Cases may additionally require a state/DB locator
-    # before direct session retrieval when the question supplies a state-backed identity;
-    # open-ended discovery is allowed to locate stable IDs through session-search itself.
+    # Soundness gates: current-state answers fetch fresh state (#38), and evidence answers
+    # read transcripts rather than an AI-written summary row (#31). They fire only for cases
+    # with matching tool-expectation metadata and only on the owner-operator arm. Cases may
+    # additionally require fresh state or a state/DB locator before direct session retrieval;
+    # open-ended discovery may locate stable IDs through session-search itself.
     # javascript-over-metadata: the documented path for a prose CLI that can't emit OTLP.
     - type: javascript
       value: file://asserts/tool-use.mjs

@@ -67,7 +67,7 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
 | `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not a subject) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; every subject attempts all of them |
-| `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator subject, opt-in per case) |
+| `asserts/tool-use.mjs` | soundness gate — current-state answers fetch fresh state; evidence answers read transcripts after any required fresh lookup (owner-operator subject, opt-in per case) |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |
 | `compare.mjs` | downstream: pairs two published runs per case; optional A≥B correctness gate; qtype breakdown |
 | `loop.mjs` | attested one-case/probe/core/holdout runner; writes every run to history and per-run detail |
@@ -83,7 +83,8 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
 - **Correctness** — `llm-rubric` per case, graded by a pinned provider.
 - **Tool behavior** — a `javascript` assertion over the provider's ordered `OO_TRACE`
   metadata ([docs](https://www.promptfoo.dev/docs/providers/custom-api/)): require a
-  `session-search`, require a DB/state locator before it, reject direct transcript reads.
+  `session-search`, require fresh state or a DB/state locator before it when declared, and reject
+  direct transcript reads.
   Mutation tools are absent from every subject; the denylist is defense in depth.
 - **Cross-run comparison** — `compare.mjs` post-processes two runs' `outputPath` JSON: per-case pairing, spend deltas, and the A≥B correctness gate (promptfoo's viewer compares evals visually, without a gate).
 
