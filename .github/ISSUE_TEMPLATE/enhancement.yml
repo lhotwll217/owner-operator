@@ -14,18 +14,22 @@ body:
     id: scope
     attributes:
       label: Scope
-      description: What's in — concrete, checkable outcomes. Name the seams to change (KNOWN_SESSION_SOURCES, the scan skill, docs that enumerate sources, …).
+      description: >-
+        Describe the desired outcome and known boundaries in 3–5 bullets. Name implementation
+        seams only when already decided. For discovery-needed issues, list the questions to answer
+        and the decision artifact instead of prescribing the implementation.
     validations:
       required: true
   - type: textarea
     id: examples
     attributes:
-      label: Code examples — chain of custody
+      label: Examples and inspiration
       description: >-
-        Code you borrowed, cited to exact lines at a commit SHA (…/blob/<SHA>/path#L10-L40) —
-        not a repo or branch. Find examples with the gh-search skill; see docs/inspiration.md.
+        Patterns already found in docs/inspiration.md or other open-source repositories that may
+        keep us from reinventing the wheel. Cite exact lines at a commit SHA when available;
+        discovery can add this section later.
       placeholder: |
-        - <what you kept>: <source> — https://github.com/owner/repo/blob/<sha>/path/to/file.ts#L51-L65
+        - <pattern worth considering>: <source> — https://github.com/owner/repo/blob/<sha>/path/to/file.ts#L51-L65
     validations:
       required: false
   - type: textarea

@@ -10,12 +10,12 @@ labels: enhancement
 <!-- The current gap or friction, and why it matters. Reference the code/files involved. -->
 
 ### Scope
-<!-- Bullets: what to do. Point at the source of truth (e.g. KNOWN_SESSION_SOURCES) so work starts in the right place. -->
+<!-- Describe the desired outcome and known boundaries in 3–5 bullets. Name implementation seams only when already decided. For discovery-needed issues, list the questions to answer and the decision artifact instead of prescribing the implementation. -->
 -
 -
 
-### Code examples — chain of custody
-<!-- Code you borrowed, cited to exact lines at a commit SHA (…/blob/<SHA>/path#L10-L40), not a repo/branch. Find examples with the gh-search skill; see docs/inspiration.md. -->
+### Examples and inspiration
+<!-- Patterns already found in docs/inspiration.md or other open-source repositories that may keep us from reinventing the wheel. Cite exact lines at a commit SHA when available; discovery can add this section later. -->
 -
 
 ### Notes
