@@ -22,7 +22,7 @@ import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { markOnboarded, ownerOperatorPaths, savePermissionMode } from "@owner-operator/core";
 import { assertEvalSandboxPath, evalSandboxPath } from "../sandbox.mjs";
-import { OWNER_OPERATOR_SESSIONS, SESSIONS } from "../fixtures/sessions.mjs";
+import { fixtureApp, OWNER_OPERATOR_SESSIONS, SESSIONS } from "../fixtures/sessions.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
 import { repoRoot } from "../../src/shared/repo-root.ts";
 
@@ -133,7 +133,7 @@ for (const s of SESSIONS) {
     id: s.id,
     repo: s.repo,
     project: s.cwd,
-    app: s.source === "claude" ? "Claude CLI" : "Codex CLI",
+    app: fixtureApp(s),
     source: s.source,
     transcriptPath: transcriptPaths.get(s.id),
     state: "working",
@@ -154,7 +154,7 @@ for (const s of SESSIONS) {
     id: s.id,
     repo: s.repo,
     project: s.cwd,
-    app: s.source === "claude" ? "Claude CLI" : "Codex CLI",
+    app: fixtureApp(s),
     source: s.source,
     transcriptPath: transcriptPaths.get(s.id),
     state: s.state,

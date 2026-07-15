@@ -107,9 +107,19 @@
     question: >-
       What should I do with the rest of my day? Recommend exactly these three current
       widget tasks: the Aurora item that needs me, the Nova approval, and the Cipher
-      review.
-  metadata: { qtype: state }
+      review. Use one list item per recommendation.
+  metadata:
+    qtype: state
+    recommendationIds:
+      - fx-aurora-flaky-4b21
+      - fx-nova-queue-codex-b222
+      - fx-cipher-injection-c333
+    stateRelevantIds: [fx-aurora-flaky-4b21]
+    priorityRelevantIds: []
   assert:
+    - type: javascript
+      value: file://asserts/recommendation-identity.mjs
+      metric: recommendation_identity
     - type: llm-rubric
       value: >-
         The answer must list exactly three task recommendations, each preserving all four
@@ -118,10 +128,13 @@
         app Claude CLI, exact topic "Flaky forecast cache test", action review and merge
         PR #42; (2) repo nova-events, app Codex CLI, exact topic "Event backbone decision",
         action approve the NATS JetStream implementation plan; (3) repo cipher-auth, app
-        Codex CLI, exact topic "Signing-key rotation", action review PR #90. Prose and
-        layout may be natural, and state or priority is optional. Fail if any task omits
-        repo or app, paraphrases its topic, substitutes a generic heading such as "First
-        priority" for row identity, mismatches fields across rows, or omits its action.
+        Codex CLI, exact topic "Signing-key rotation", action review PR #90. Prose within
+        each list item may be natural. State is relevant only for the Aurora item because
+        the question asks for the item that needs the owner; priority does not affect this
+        selection. Fail if any task omits repo or app, paraphrases its topic, substitutes a
+        generic heading such as "First priority" for row identity, mismatches fields across
+        rows, omits its action, includes state on Nova or Cipher, or includes priority on any
+        item.
 
 - description: stale-abandoned
   vars:

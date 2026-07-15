@@ -67,6 +67,7 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
 | `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not a subject) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; every subject attempts all of them |
+| `asserts/recommendation-identity.mjs` | deterministic widget-row identity gate for task recommendations |
 | `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator subject, opt-in per case) |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |
 | `compare.mjs` | downstream: pairs two published runs per case; optional A≥B correctness gate; qtype breakdown |
@@ -80,7 +81,8 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
 
 - **Provider** — a [custom JS provider](https://www.promptfoo.dev/docs/providers/custom-api/) spawning the CLI, returning `{ output, tokenUsage, cost, metadata }` (`exec:` returns only stdout, no metadata).
 - **Subjects** — two labeled providers over one `tests` set; a run filters to one with `--filter-providers`.
-- **Correctness** — `llm-rubric` per case, graded by a pinned provider.
+- **Correctness** — `llm-rubric` per case for prose semantics, with deterministic
+  `javascript` gates where an exact fixture contract can be checked directly.
 - **Tool behavior** — a `javascript` assertion over the provider's ordered `OO_TRACE`
   metadata ([docs](https://www.promptfoo.dev/docs/providers/custom-api/)): require a
   `session-search`, require a DB/state locator before it, reject direct transcript reads.

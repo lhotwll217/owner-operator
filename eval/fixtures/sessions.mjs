@@ -50,6 +50,8 @@ const claudeMsg = (role, text, offsetMin, stop) => ({
 /** Codex-format entries: session_meta / event_msg lifecycle / response_item messages. */
 const codexMsg = (role, text, offsetMin) => ({ kind: "codex", role, text, offsetMin });
 
+export const fixtureApp = (session) => session.source === "claude" ? "Claude CLI" : "Codex CLI";
+
 export const OWNER_OPERATOR_SESSIONS = [
   {
     id: "fx-oo-communication-a101",

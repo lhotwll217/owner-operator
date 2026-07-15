@@ -111,11 +111,6 @@ const sessionSearchSkill = readFileSync(
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
 }
-assert.match(
-  harnessPrompt,
-  /preserve each task's `repo`, `app`, exact\s+`topic`, and `nextSteps` action/,
-  "task recommendations preserve canonical widget-row identity",
-);
 for (const flag of ["--query", "--candidates", "--skim", "--session"]) {
   assert.doesNotMatch(harnessPrompt, new RegExp(flag), `the harness delegates ${flag} mechanics to the skill`);
   assert.match(sessionSearchSkill, new RegExp(flag), `the session-search skill owns ${flag} mechanics`);
