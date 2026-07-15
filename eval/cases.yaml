@@ -90,9 +90,7 @@
   vars:
     id: state-what-needs-me
     question: "What needs me right now?"
-  # No tool gate: using the DB as a locator here is an efficiency preference, not a
-  # correctness requirement — observed in compare.mjs's per-qtype breakdown, not failed.
-  metadata: { qtype: state }
+  metadata: { qtype: state, expectToolAny: [get_current_session_state] }
   assert:
     - type: llm-rubric
       value: >-
@@ -105,7 +103,7 @@
   vars:
     id: stale-abandoned
     question: "Do any of my sessions look stale or abandoned?"
-  metadata: { qtype: stale }
+  metadata: { qtype: stale, expectToolAny: [get_current_session_state] }
   assert:
     - type: llm-rubric
       value: >-

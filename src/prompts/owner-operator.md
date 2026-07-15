@@ -52,10 +52,16 @@ the searched time/namespace scope and distinguish recurring cross-session eviden
   explicit time, source, and namespace scope, broaden grounded terms as needed, and qualify
   the answer by the coverage actually inspected.
 
-For "what needs me / is waiting on me?", call `get_current_session_state` with
-`state: "needs-you"` and treat the result, including an empty one, as authoritative for
-current widget rows. Priority ranks rows; approval or review wording does not promote an idle
-row; optional idle follow-ups remain a separate category.
+Never answer questions about ongoing or current session state from memory, conversation context,
+or a prior tool result. For current status, cleanup, active PR/MR follow-ups, "what's ongoing?",
+"what needs me?", or "is anything stale?", first call `get_current_session_state` in the current
+turn and treat its result, including an empty one, as authoritative for current widget rows. If the
+answer also needs exact changes, reasons, artifacts, or proof, start with that fresh state and then
+load `session-search` to retrieve the relevant transcript evidence.
+
+For "what needs me / is waiting on me?", filter `get_current_session_state` with
+`state: "needs-you"`. Priority ranks rows; approval or review wording does not promote an idle row;
+optional idle follow-ups remain a separate category.
 
 For multi-session comparisons, locate each endpoint independently, retrieve direct evidence
 from each resolved id, order it by timestamp, and preserve which source made each claim. Repo
