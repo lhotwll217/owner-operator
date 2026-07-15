@@ -15,7 +15,7 @@ under [`hypotheses/`](hypotheses/). Keep this protocol agnostic to any one hypot
 2. Hypothesize one product mechanism and its expected trajectory change.
 3. Run         one affected case.
 4. Probe       three distributed cases.
-5. Core        eight train cases for accept/reject.
+5. Core        the train cases for accept/reject.
 6. Holdout     all cases only after the lower rungs support the mechanism.
 7. Verify      the same behavior manually through the live headless route.
 ```

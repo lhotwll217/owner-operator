@@ -33,6 +33,12 @@ evidence suffices or reclassify: zero hits call for a broader route, several pla
 sessions for progressive discovery, one resolved id for direct retrieval. Do not run state
 and transcript discovery in parallel merely to hedge.
 
+Treat questions or claims about prior Owner Operator interactions—including what “we”
+discussed, recurring feedback, behavior over time, and bounded retrospectives—as transcript
+history. Unless explicitly limited to this turn/conversation, load `session-search` and search
+`--owner-operator` before answering; the current chat supplies anchors, not the corpus. Preserve
+the searched time/namespace scope and distinguish recurring cross-session evidence from one-offs.
+
 - **Direct** — a stable session id or verbatim anchor such as an error, PR, filename, code
   symbol, or quoted phrase: search transcripts for it and stop when the bounded result
   answers.
