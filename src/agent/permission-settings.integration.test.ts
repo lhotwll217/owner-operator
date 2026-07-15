@@ -21,7 +21,7 @@ import {
   permissionSystemExtensionPath,
 } from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import { ownerOperatorTools } from "./tools";
+import { ownerOperatorCustomTools, ownerOperatorTools } from "./tools";
 
 const permissionPackage = "@gotgenes/pi-permission-system";
 const { getPermissionsService } = await import(permissionPackage) as {
@@ -117,11 +117,47 @@ try {
     settingsManager: SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false }),
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(paths.workspace),
-    noTools: "all",
+    noTools: "builtin",
+    customTools: ownerOperatorCustomTools,
   });
-  await session.bindExtensions({});
+  let approvalPrompts = 0;
+  const extensionErrors: unknown[] = [];
+  await session.bindExtensions({
+    mode: "print",
+    uiContext: {
+      async select(): Promise<string> {
+        approvalPrompts += 1;
+        return "No";
+      },
+      async input(): Promise<undefined> { return undefined; },
+      notify(): void {},
+      setStatus(): void {},
+    } as any,
+    onError(error): void { extensionErrors.push(error); },
+  });
+  assert.deepEqual(extensionErrors, [], "permission extensions start without runtime errors");
   const permissions = getPermissionsService();
   assert.ok(permissions, "the permission service is published when a session starts");
+  const markDoneGate = await session.extensionRunner.emitToolCall({
+    type: "tool_call",
+    toolName: "mark_thread_done",
+    toolCallId: "mark-done-after-owner-cleanup-request",
+    input: { ids: ["thread-1"] },
+  });
+  assert.equal(
+    markDoneGate?.block,
+    undefined,
+    `bounded native cleanup passes the interactive tool gate: ${JSON.stringify(markDoneGate)}`,
+  );
+  assert.equal(approvalPrompts, 0, "bounded native cleanup does not open Pi's generic approval dialog");
+  const scheduleGate = await session.extensionRunner.emitToolCall({
+    type: "tool_call",
+    toolName: "schedule_prompt",
+    toolCallId: "schedule-remains-risky",
+    input: { name: "test" },
+  });
+  assert.equal(scheduleGate?.block, true, "risky native scheduling still asks and respects a denial");
+  assert.equal(approvalPrompts, 1, "risky native scheduling still opens Pi's approval dialog");
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "ask");
   assert.equal(
     permissions.checkPermission("bash", "gh issue create --title test").state,
@@ -161,7 +197,7 @@ try {
       edit: "ask",
       write: "ask",
       get_current_session_state: "allow",
-      mark_thread_done: "ask",
+      mark_thread_done: "allow",
       query_database: "allow",
       schedule_prompt: "ask",
     },
@@ -176,6 +212,7 @@ try {
   savePermissionMode(ooHome, "read-only");
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "deny");
   assert.equal(permissions.checkPermission("bash", "find . -delete").state, "deny");
+  await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
   session.dispose();
   process.stdout.write("ok — /permissions changes the durable default through the shared config API\n");
 } finally {

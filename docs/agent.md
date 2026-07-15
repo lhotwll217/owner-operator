@@ -50,6 +50,9 @@ fails closed ([onboarding.md](onboarding.md)).
 The built-in tool posture is defined by
 [`DEFAULT_TOOL_POSTURE`](../packages/core/src/harness.mjs). The owner selects a permission
 mode during onboarding and changes it later with `/permissions`.
+Known read surfaces are always allowed. Bounded Owner Operator state cleanup through
+`mark_thread_done` is allowed in Ask and Allow modes but denied in Read-only mode; generic file,
+shell, scheduling, and unclassified mutations keep the selected mode's allow/ask/deny default.
 
 Permission gating is
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system), not local code. It already provides deterministic allow/ask/deny rules, Bash

@@ -21,10 +21,12 @@ import {
 
 const BLACKLIST_REASON = "Owner Operator privacy blacklist";
 // Keep these explicit defaults aligned with src/agent/tools/index.ts. Unlisted tools safely fall
-// back to the selected mode; the lists only identify known read and change surfaces.
+// back to the selected mode; the lists identify known reads, bounded OO state changes, and risky
+// generic changes separately.
 const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_session_state", "query_database"];
-const CHANGE_SURFACES = ["edit", "write", "mark_thread_done", "schedule_prompt"];
-const MANAGED_SURFACES = [...READ_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
+const NATIVE_STATE_SURFACES = ["mark_thread_done"];
+const CHANGE_SURFACES = ["edit", "write", "schedule_prompt"];
+const MANAGED_SURFACES = [...READ_SURFACES, ...NATIVE_STATE_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
 const JSON_FORMAT = { insertSpaces: true, tabSize: 2, eol: "\n" };
 
 function readDocument(path) {
@@ -79,10 +81,17 @@ function changeAction(mode) {
   return mode === "allow" ? "allow" : mode === "read-only" ? "deny" : "ask";
 }
 
+function nativeStateAction(mode) {
+  return mode === "read-only" ? "deny" : "allow";
+}
+
 function permissionPolicy(existing, ooHome, mode) {
   const action = changeAction(mode);
   const next = { ...existing, "*": action };
   for (const surface of READ_SURFACES) next[surface] = withDefault(existing[surface], "allow");
+  for (const surface of NATIVE_STATE_SURFACES) {
+    next[surface] = withDefault(existing[surface], nativeStateAction(mode));
+  }
   for (const surface of CHANGE_SURFACES) next[surface] = withDefault(existing[surface], action);
   next.external_directory = withDefault(existing.external_directory, "allow");
   next.bash = withDefault(existing.bash, action);
