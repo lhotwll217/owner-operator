@@ -37,6 +37,7 @@ export {
   getCurrentSessionStateTool,
   configuredOwnerOperatorTools,
   markThreadDoneTool,
+  manageScheduleTool,
   ownerOperatorCustomTools,
   ownerOperatorTools,
   queryDatabaseTool,

@@ -1,10 +1,12 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
 import { withOoRenderers } from "../../shared/oo-presentation";
+import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
 import { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 
 export { queryDatabaseTool } from "./query-database";
+export { manageScheduleTool } from "./manage-schedule";
 export { schedulePromptTool } from "./schedule-prompt";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 
@@ -16,6 +18,7 @@ export const ownerOperatorCustomTools = [
   }),
   withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (args) => args.action ?? "" }),
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
+  withOoRenderers(manageScheduleTool, "manage schedule", { summarizeCall: (args) => args.id ?? "" }),
 ];
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
@@ -23,6 +26,7 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.MarkThreadDone,
   AgentToolId.QueryDatabase,
   AgentToolId.SchedulePrompt,
+  AgentToolId.ManageSchedule,
 ];
 
 // packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.

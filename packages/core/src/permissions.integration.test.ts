@@ -60,6 +60,7 @@ try {
   assert.deepEqual(ask.permission.edit, { "*": "ask", "*.md": "allow" });
   assert.deepEqual(ask.permission.mark_thread_done, { "*": "allow" });
   assert.deepEqual(ask.permission.schedule_prompt, { "*": "ask" });
+  assert.deepEqual(ask.permission.manage_schedule, { "*": "ask" });
   assert.equal(ask.permission.path["*.env"], "deny", "owner-authored path rules are preserved");
   assert.equal(ask.permission.path["/previous/private"], undefined, "obsolete generated rules are removed");
   assert.equal(ask.permission.path["/previous/last"], undefined);
@@ -97,6 +98,7 @@ try {
   assert.equal(readOnly.permission.edit["*.md"], "allow", "advanced project/user rules remain user-owned");
   assert.equal(readOnly.permission.mark_thread_done["*"], "deny");
   assert.equal(readOnly.permission.schedule_prompt["*"], "deny");
+  assert.equal(readOnly.permission.manage_schedule["*"], "deny");
   assert.equal(readOnly.permission.bash["*"], "deny");
   assert.deepEqual(parse(readFileSync(paths.piPermissionConfig, "utf8")), readOnly);
 

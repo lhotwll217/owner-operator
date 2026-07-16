@@ -158,6 +158,14 @@ try {
   });
   assert.equal(scheduleGate?.block, true, "risky native scheduling still asks and respects a denial");
   assert.equal(approvalPrompts, 1, "risky native scheduling still opens Pi's approval dialog");
+  const manageScheduleGate = await session.extensionRunner.emitToolCall({
+    type: "tool_call",
+    toolName: "manage_schedule",
+    toolCallId: "schedule-management-remains-risky",
+    input: { action: "disable", id: "schedule-1" },
+  });
+  assert.equal(manageScheduleGate?.block, true, "schedule management asks and respects a denial");
+  assert.equal(approvalPrompts, 2, "schedule management opens Pi's generic approval dialog");
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "ask");
   assert.equal(
     permissions.checkPermission("bash", "gh issue create --title test").state,
@@ -200,6 +208,7 @@ try {
       mark_thread_done: "allow",
       query_database: "allow",
       schedule_prompt: "ask",
+      manage_schedule: "ask",
     },
     "every registered tool has an explicit permission classification",
   );
