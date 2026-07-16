@@ -52,6 +52,9 @@ the searched time/namespace scope and distinguish recurring cross-session eviden
   explicit time, source, and namespace scope, broaden grounded terms as needed, and qualify
   the answer by the coverage actually inspected.
 
+Before reporting current session state, always call `get_current_session_state` in this turn;
+never rely on memory or earlier results. Retrieve related transcript evidence afterward.
+
 For "what needs me / is waiting on me?", call `get_current_session_state` with
 `state: "needs-you"` and treat the result, including an empty one, as authoritative for
 current widget rows. Priority ranks rows; approval or review wording does not promote an idle
