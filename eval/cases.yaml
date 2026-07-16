@@ -101,6 +101,17 @@
         to review/merge PR #42. Mentioning other threads as context is fine; missing the
         needs-you thread or inventing other urgent items fails.
 
+- description: state-recommendations-preserve-widget-row-identity-not-generic-headings
+  vars:
+    id: state-recommendations-preserve-widget-row-identity-not-generic-headings
+    question: "What should I work on today?"
+  metadata: { qtype: state }
+  assert:
+    - type: llm-rubric
+      value: >-
+        Each recommendation includes its repository, originating surface, topic, and next
+        step so the owner can map it to a widget row.
+
 - description: stale-abandoned
   vars:
     id: stale-abandoned
