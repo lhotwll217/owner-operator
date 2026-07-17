@@ -138,16 +138,19 @@ export class AgentRunExecutor {
     return run;
   }
 
-  /** Cancel cascades to the child process through the abort signal. A queued run is
-   * finalized immediately; a terminal run is returned unchanged (monotonic). */
-  cancel(id: string): AgentRun {
+  /** Cancel cascades to the child process through the abort signal, then resolves with the
+   * finalized row. A queued run is finalized immediately; a terminal run is returned unchanged
+   * (monotonic). The abort fires synchronously before the first await, so a fire-and-forget
+   * caller still propagates the cancel. */
+  async cancel(id: string): Promise<AgentRun> {
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
     const entry = this.active.get(id);
     if (entry) {
       entry.intent ??= AbortIntent.Cancel;
       entry.controller.abort(new Error("run cancelled"));
-      return this.state.agentRunById(id)!;
+      // Bounded wait for the launcher's rejection to finalize the row.
+      return this.wait(id, 5_000);
     }
     if (run.status === AgentRunStatus.Pending) {
       return this.state.finishAgentRun(id, {

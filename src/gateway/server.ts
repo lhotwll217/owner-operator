@@ -39,7 +39,7 @@ export interface GatewayAgentRuns {
   list(parentThreadId?: string): AgentRun[];
   get(id: string): AgentRun | undefined;
   launch(input: AgentRunCreateInput): AgentRun;
-  cancel(id: string): AgentRun;
+  cancel(id: string): Promise<AgentRun>;
   resume(id: string): AgentRun;
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
 }
@@ -176,7 +176,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return run ? respond(200, run) : respond(404, { error: "no such agent run" });
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/cancel`) {
-        return respond(200, options.agentRuns.cancel(agentRunId));
+        return respond(200, await options.agentRuns.cancel(agentRunId));
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/resume`) {
         return respond(201, options.agentRuns.resume(agentRunId));

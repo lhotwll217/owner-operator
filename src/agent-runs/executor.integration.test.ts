@@ -107,15 +107,17 @@ try {
   // --- cancel: running run aborts and records cancelled ------------------------------------
   const third = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "third", cwd: dir });
   await waitFor(() => launches.length === 3, "third run to start");
-  executor.cancel(third.id);
-  await waitFor(() => state.agentRunById(third.id)?.status === AgentRunStatus.Cancelled, "cancel lands");
+  const cancelledThird = await executor.cancel(third.id);
+  assert.equal(cancelledThird.status, AgentRunStatus.Cancelled, "cancel resolves with the finalized row");
+  assert.equal(state.agentRunById(third.id)?.status, AgentRunStatus.Cancelled, "cancel lands");
 
   // --- cancel a queued run without it ever starting ----------------------------------------
   const fourth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "fourth", cwd: dir });
   const fifth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "fifth", cwd: dir });
   await waitFor(() => launches.length === 4, "fourth run to start");
-  executor.cancel(fifth.id);
-  assert.equal(state.agentRunById(fifth.id)?.status, AgentRunStatus.Cancelled, "pending cancel is immediate");
+  const cancelledFifth = await executor.cancel(fifth.id);
+  assert.equal(cancelledFifth.status, AgentRunStatus.Cancelled, "pending cancel is immediate");
+  assert.equal(state.agentRunById(fifth.id)?.status, AgentRunStatus.Cancelled);
 
   // --- timeout: OO owns the deadline; late results never resurrect the row ----------------
   const timed = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "slow", cwd: dir, timeoutSeconds: 1 });
