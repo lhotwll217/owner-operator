@@ -20,7 +20,7 @@ export const delegateAgentTool = defineTool({
     "Launch a child coding agent (Claude Code or Codex) as a durable, daemon-owned delegated run. " +
     "Returns immediately with the run row; the child keeps running even if this session is " +
     "interrupted or closed, and its result is recorded in the agent_runs ledger. Set waitSeconds " +
-    "to block up to that long for the result; otherwise inspect or steer the run later with " +
+    "to block up to that long for the result; otherwise inspect or control the run later with " +
     "manage_agent_run, or read agent_runs via query_database.",
   parameters: Type.Object({
     harness: HarnessSchema,
