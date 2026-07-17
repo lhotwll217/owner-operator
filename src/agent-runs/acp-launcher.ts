@@ -5,9 +5,15 @@ import {
   AgentRunStatus,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
+  type ChildIdentity,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import type { AgentRunLauncher } from "./executor";
+
+/** Cap on the in-memory result buffer the launcher retains while a turn streams. The executor
+ * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
+ * verbose child while still covering everything that gets persisted. */
+const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
 
 /** Where acpx persists its per-child session records. Relocated out of the system tmpdir
  * (acpx's default) into OO_HOME per the issue #69 hardening note, so restart reconciliation
@@ -54,10 +60,7 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
       ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
       ...(request.run.model ? { sessionOptions: { model: request.run.model } } : {}),
     });
-    request.onActivity({
-      ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
-      ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),
-    });
+    request.onActivity(identityOf(handle));
 
     // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
     // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
@@ -69,11 +72,20 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
       signal: request.signal,
     });
 
+    // Bound daemon memory: a verbose child could emit unbounded output, but only a tail is ever
+    // persisted (the executor truncates to RESULT_TAIL_BYTES). Keep a rolling byte-bounded window
+    // of the newest chunks — sized to cover that persisted tail — evicting the oldest.
     const chunks: string[] = [];
+    let bufferedBytes = 0;
     for await (const event of turn.events) {
       if (request.signal.aborted) break;
       if (event.type === "text_delta" && event.stream !== "thought") {
         chunks.push(event.text);
+        bufferedBytes += Buffer.byteLength(event.text);
+        while (chunks.length > 1 && bufferedBytes > MAX_BUFFERED_RESULT_BYTES) {
+          const removed = chunks.shift();
+          if (removed !== undefined) bufferedBytes -= Buffer.byteLength(removed);
+        }
         request.onActivity({ activity: previewOf(event.text) });
       } else if (event.type === "status" && event.text) {
         request.onActivity({ activity: previewOf(event.text) });
@@ -101,10 +113,7 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
 
 /** The child identity carried on a run row: the harness's own session id (resume + monitor
  * join key) and the acpx record id (reconciliation). Absent fields are omitted, not nulled. */
-function identityOf(handle: { agentSessionId?: string; acpxRecordId?: string }): {
-  childSessionId?: string;
-  acpxRecordId?: string;
-} {
+function identityOf(handle: { agentSessionId?: string; acpxRecordId?: string }): ChildIdentity {
   return {
     ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
     ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),

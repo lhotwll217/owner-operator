@@ -45,8 +45,11 @@ const startOnce = () => startDaemon({
 });
 
 let daemon = await startOnce();
+type GatewayConn = NonNullable<Awaited<ReturnType<typeof connectGateway>>>;
+let gateway: GatewayConn | undefined;
+let gateway2: GatewayConn | undefined;
 try {
-  const gateway = (await connectGateway())!;
+  gateway = (await connectGateway())!;
   assert.ok(gateway, "ready daemon is discoverable");
 
   const sseEvents: GatewayEvent[] = [];
@@ -81,7 +84,7 @@ try {
 
   // --- restart on the same state: the run reconciled to interrupted, its result not lost --
   daemon = await startOnce();
-  const gateway2 = (await connectGateway())!;
+  gateway2 = (await connectGateway())!;
   const afterRestart = await gateway2.agentRun(launched.id);
   assert.equal(afterRestart.status, AgentRunStatus.Interrupted, "the interrupted run survives restart");
   assert.ok(afterRestart.childSessionId, "the child identity survives for resume");
@@ -117,10 +120,10 @@ try {
     "the daemon pushed agent-run invalidations over SSE",
   );
 
-  gateway.close();
-  gateway2.close();
   process.stdout.write("ok — delegated run drives launch → interrupt → resume → result → cancel over the daemon HTTP surface\n");
 } finally {
+  gateway?.close();
+  gateway2?.close();
   await daemon.close();
   cleanup();
 }

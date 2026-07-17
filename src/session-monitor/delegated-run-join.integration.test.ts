@@ -11,6 +11,7 @@ import { InMemoryEventBus } from "../state/event-bus";
 import { State } from "../state/state";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-delegated-join-"));
+const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
 
 const scanRow = (id: string): ScanRow => ({
@@ -28,12 +29,14 @@ const scanRow = (id: string): ScanRow => ({
   working: true,
 });
 
+let closeState: (() => void) | undefined;
 try {
   const state = new State(join(dir, "state.db"), {
     bus: new InMemoryEventBus(),
     now: () => "2026-07-17T10:06:00.000Z",
     activeWindow: "1d",
   });
+  closeState = () => state.close();
 
   // The Operator delegates; the executor records the run and the launcher reports the child's
   // ACP session identity. That identity is what the child's transcript will surface under.
@@ -63,5 +66,8 @@ try {
 
   process.stdout.write("ok — delegated child transcript nests under its parent through the monitor path\n");
 } finally {
+  closeState?.();
+  if (previousOoHome === undefined) delete process.env.OO_HOME;
+  else process.env.OO_HOME = previousOoHome;
   rmSync(dir, { recursive: true, force: true });
 }

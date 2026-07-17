@@ -39,7 +39,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 Dependencies point toward the owning seam:
 
 ```text
-core ← state ← { session-monitor, scheduler, gateway } ← daemon
+core ← state ← { session-monitor, scheduler, agent-runs, gateway } ← daemon
 core ← gateway client ← { agent, CLI, widget }
 ```
 

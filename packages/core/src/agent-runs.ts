@@ -75,16 +75,22 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
   },
 };
 
-/** Only the Operator delegates through the ledger (depth 1). Children needing helpers use
- * their harness's native subagents, which never touch the ledger. */
+/** Delegation-depth cap: only the Operator delegates through the ledger (depth 1). Why the cap is
+ * 1, and how a child gets a helper instead, is documented on the behavior page
+ * (docs/delegated-runs.md, Execution). */
 export const AGENT_RUN_MAX_DEPTH = 1;
 
 export const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 3_600;
 export const MAX_AGENT_RUN_TIMEOUT_SECONDS = 86_400;
 
+/** Bounds for a caller's optional blocking wait on a run (delegate_agent's waitSeconds,
+ * manage_agent_run's wait, and the gateway wait route). */
+export const DEFAULT_AGENT_RUN_WAIT_SECONDS = 60;
+export const MAX_AGENT_RUN_WAIT_SECONDS = 3_600;
+
 export interface AgentRunCreateInput {
   harness: AgentRunHarness;
-  /** The task prompt handed to the child agent. */
+  /** The task the child agent is asked to carry out. */
   task: string;
   /** Absolute working directory the child runs in. */
   cwd: string;
@@ -123,6 +129,19 @@ export interface AgentRun {
   timeoutSeconds: number;
 }
 
+/** The two ids a delegated child carries — captured together from the acpx handle and flowed
+ * together everywhere: the harness's own session id (resume + monitor-join key) and the acpx
+ * record id (reconciliation). Fields are omitted, not nulled, until known. */
+export interface ChildIdentity {
+  childSessionId?: string;
+  acpxRecordId?: string;
+}
+
+/** An explicit activity update from the child's runtime: a progress line and/or its identity. */
+export interface AgentRunActivityUpdate extends ChildIdentity {
+  activity?: string;
+}
+
 /** Runtime request passed from the executor to the injected launcher seam. */
 export interface AgentRunLaunchRequest {
   run: AgentRun;
@@ -130,20 +149,14 @@ export interface AgentRunLaunchRequest {
   resumeSessionId: string | null;
   signal: AbortSignal;
   /** Explicit-activity channel: the launcher reports progress and identity as soon as known. */
-  onActivity(update: {
-    activity?: string;
-    childSessionId?: string;
-    acpxRecordId?: string;
-  }): void;
+  onActivity(update: AgentRunActivityUpdate): void;
 }
 
 /** Protocol-level outcome. A turn result finalizes a run — never process exit alone. */
-export interface AgentRunLaunchResult {
+export interface AgentRunLaunchResult extends ChildIdentity {
   status: AgentRunStatus.Completed | AgentRunStatus.Cancelled | AgentRunStatus.Failed;
   resultText: string;
   error: string | null;
-  childSessionId?: string;
-  acpxRecordId?: string;
 }
 
 /** The terminal statuses a finalized run may land in — pending/running are excluded because a
@@ -155,10 +168,8 @@ export type AgentRunFinalStatus =
   | AgentRunStatus.Interrupted;
 
 /** How a run is finalized in the ledger. Shared by the executor, the State seam, and the DB. */
-export interface AgentRunOutcome {
+export interface AgentRunOutcome extends ChildIdentity {
   status: AgentRunFinalStatus;
   resultTail: string | null;
   error: string | null;
-  childSessionId?: string;
-  acpxRecordId?: string;
 }

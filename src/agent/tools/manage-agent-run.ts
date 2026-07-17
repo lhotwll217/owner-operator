@@ -3,13 +3,18 @@ import { Type } from "@earendil-works/pi-ai";
 import type { AgentRun, GatewayApi } from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
 
+/** The manage_agent_run actions, declared once so the runtime schema and the request type can't
+ * drift. The compile-time `action` type and the model-facing Type.Union both derive from this. */
+const MANAGE_AGENT_RUN_ACTIONS = ["status", "cancel", "resume", "wait"] as const;
+type ManageAgentRunAction = (typeof MANAGE_AGENT_RUN_ACTIONS)[number];
+
 type ManageAgentRunBackend = Pick<
   GatewayApi,
   "agentRun" | "cancelAgentRun" | "resumeAgentRun" | "waitAgentRun"
 >;
 
 export interface ManageAgentRunRequest {
-  action: "status" | "cancel" | "resume" | "wait";
+  action: ManageAgentRunAction;
   id: string;
   waitSeconds?: number;
 }
@@ -38,12 +43,10 @@ export const manageAgentRunTool = defineTool({
     "cancel (abort a running or queued run), resume (start a new run continuing an interrupted/lost/failed " +
     "run's child session), or wait (block for the result). Use query_database on agent_runs to find ids.",
   parameters: Type.Object({
-    action: Type.Union([
-      Type.Literal("status"),
-      Type.Literal("cancel"),
-      Type.Literal("resume"),
-      Type.Literal("wait"),
-    ], { description: "status | cancel | resume | wait." }),
+    action: Type.Union(
+      MANAGE_AGENT_RUN_ACTIONS.map((action) => Type.Literal(action)),
+      { description: "status | cancel | resume | wait." },
+    ),
     id: Type.String({ minLength: 1, description: "Exact stable run id from the agent_runs table." }),
     waitSeconds: Type.Optional(Type.Integer({
       minimum: 1,

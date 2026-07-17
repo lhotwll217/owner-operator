@@ -8,6 +8,7 @@ import {
   parseWindowMs,
   resolveState,
   type AgentRun,
+  type AgentRunActivityUpdate,
   type AgentRunOutcome,
   type DomainEvent,
   type ScheduleDefinition,
@@ -293,10 +294,7 @@ export class State {
     return run;
   }
 
-  recordAgentRunActivity(
-    id: string,
-    update: { activity?: string; childSessionId?: string; acpxRecordId?: string },
-  ): AgentRun | null {
+  recordAgentRunActivity(id: string, update: AgentRunActivityUpdate): AgentRun | null {
     const run = this.db.recordAgentRunActivity(id, update);
     if (run) this.publishAgentRun(run);
     return run;
@@ -330,6 +328,10 @@ export class State {
 
   agentRunByChildSession(childSessionId: string): AgentRun | undefined {
     return this.db.agentRunByChildSession(childSessionId);
+  }
+
+  nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
+    return this.db.nonterminalAgentRunByChildSession(childSessionId);
   }
 
   listAgentRuns(filter: { parentThreadId?: string } = {}): AgentRun[] {

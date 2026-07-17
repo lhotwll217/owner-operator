@@ -24,11 +24,8 @@ export const delegateAgentTool = defineTool({
     "manage_agent_run, or read agent_runs via query_database.",
   parameters: Type.Object({
     harness: HarnessSchema,
-    task: Type.String({ minLength: 1, description: "The task prompt handed to the child agent." }),
+    task: Type.String({ minLength: 1, description: "The task the child agent is asked to carry out." }),
     cwd: Type.Optional(Type.String({ description: "Absolute working directory. Defaults to the caller's cwd." })),
-    parentThreadId: Type.Optional(Type.String({
-      description: "Owner Operator thread id of the delegating session, so the run nests under it.",
-    })),
     model: Type.Optional(Type.String({
       description: "Pin the child's model. Omit to let the harness pick its default.",
     })),
@@ -46,11 +43,13 @@ export const delegateAgentTool = defineTool({
   async execute(_id, params) {
     const cwd = params.cwd ? (isAbsolute(params.cwd) ? params.cwd : resolve(params.cwd)) : process.cwd();
     const backend = await resolveBackend();
+    // Lineage is not model-controlled: a spoofed parentThreadId could misattribute nesting or
+    // reset the depth guard. The Operator delegates unattributed (depth 1); parentThreadId stays
+    // on the gateway API for trusted lower-level clients that carry a real delegating-thread id.
     let run = await backend.delegateAgent({
       harness: params.harness,
       task: params.task,
       cwd,
-      ...(params.parentThreadId ? { parentThreadId: params.parentThreadId } : {}),
       ...(params.model ? { model: params.model } : {}),
       ...(params.timeoutSeconds ? { timeoutSeconds: params.timeoutSeconds } : {}),
     });

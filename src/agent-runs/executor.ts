@@ -196,6 +196,12 @@ export class AgentRunExecutor {
     if (!run.childSessionId) {
       throw new Error("agent run has no child session identity to resume");
     }
+    // Guard concurrent resumes of one child: two resume calls for the same source must not both
+    // start turns on that child session. resume()/createAgentRun() are synchronous over
+    // DatabaseSync, so this check-then-create is atomic in the single-process daemon — if a prior
+    // resume is already pending or running for this child, return it instead of duplicating.
+    const inflight = this.state.nonterminalAgentRunByChildSession(run.childSessionId);
+    if (inflight) return inflight;
     const resumed = this.state.createAgentRun({
       harness: run.harness,
       task: run.task,
@@ -271,31 +277,25 @@ export class AgentRunExecutor {
           this.state.recordAgentRunActivity(run.id, update);
         },
       });
-      // An abort intent always wins over the launcher's own outcome. Launchers differ on how
-      // they report an abort — the acpx bridge resolves with `cancelled`, a throwing launcher
-      // rejects — so a timed-out or stopped run must not be mislabeled `cancelled` just because
-      // the launcher resolved that way. Only a non-aborted turn keeps the launcher's status.
-      if (entry.intent) {
-        this.finish(run.id, {
-          status: this.statusForIntent(entry.intent),
-          resultTail: result.resultText ? tail(result.resultText) : null,
-          error: result.error ?? `run ${entry.intent}`,
-          ...(result.childSessionId ? { childSessionId: result.childSessionId } : {}),
-          ...(result.acpxRecordId ? { acpxRecordId: result.acpxRecordId } : {}),
-        });
-        return;
-      }
+      // An abort intent always wins over the launcher's own outcome — status AND reason. Launchers
+      // differ on how they report an abort (the acpx bridge resolves with `cancelled`, a throwing
+      // launcher rejects), so a timed-out or stopped run must be recorded with the executor's
+      // intent and its own explanation, never the launcher's `cancelled`. A non-aborted turn keeps
+      // the launcher's status and error.
       this.finish(run.id, {
-        status: result.status,
+        status: entry.intent ? this.statusForIntent(entry.intent) : result.status,
         resultTail: result.resultText ? tail(result.resultText) : null,
-        error: result.error,
+        error: entry.intent ? this.errorForIntent(entry.intent) : result.error,
         ...(result.childSessionId ? { childSessionId: result.childSessionId } : {}),
         ...(result.acpxRecordId ? { acpxRecordId: result.acpxRecordId } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status = entry.intent ? this.statusForIntent(entry.intent) : AgentRunStatus.Failed;
-      this.finish(run.id, { status, resultTail: null, error: message });
+      this.finish(run.id, {
+        status: entry.intent ? this.statusForIntent(entry.intent) : AgentRunStatus.Failed,
+        resultTail: null,
+        error: entry.intent ? this.errorForIntent(entry.intent) : message,
+      });
     } finally {
       clearTimeout(timeout);
       this.active.delete(run.id);
@@ -307,6 +307,14 @@ export class AgentRunExecutor {
     if (intent === AbortIntent.Cancel) return AgentRunStatus.Cancelled;
     if (intent === AbortIntent.Timeout) return AgentRunStatus.Failed;
     return AgentRunStatus.Interrupted; // Stop
+  }
+
+  /** The executor-owned explanation for an aborted run, so a timeout or daemon stop is recorded
+   * with its real reason rather than the launcher's `cancelled`. */
+  private errorForIntent(intent: AbortIntent): string {
+    if (intent === AbortIntent.Cancel) return "run cancelled";
+    if (intent === AbortIntent.Timeout) return "run timed out";
+    return "daemon stopped during run"; // Stop
   }
 
   private finish(runId: string, outcome: AgentRunOutcome): void {

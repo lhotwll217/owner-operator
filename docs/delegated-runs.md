@@ -62,11 +62,11 @@ Operator (delegate_agent / manage_agent_run tool)
 
 Each child honors its **own harness's** permission system, exactly as any other session of that
 harness on the owner's machine. Owner Operator builds no cross-harness permission layer and never
-escalates: `acpx` runs `permissionMode: "approve-reads"` (deny-by-default for non-read asks, per
-the decision record) with `nonInteractivePermissions: "fail"`, so a headless child that hits an
-unapprovable change ask fails the turn (recorded as a run failure) rather than continuing
-degraded. The owner's harness config is the real gate. (Privacy blacklist enforcement for foreign-harness
-children is a separate OS-sandbox concern, not a permission-seam concern.)
+escalates: the ACP launcher is deny-by-default for non-read asks and fails a turn on the first
+unapprovable change ask (recorded as a run failure) rather than continuing degraded, so the
+owner's harness config stays the real gate. The exact `acpx` permission settings live in
+[`src/agent-runs/acp-launcher.ts`](../src/agent-runs/acp-launcher.ts). (Privacy blacklist enforcement
+for foreign-harness children is a separate OS-sandbox concern, not a permission-seam concern.)
 
 ## Lineage and presentation
 

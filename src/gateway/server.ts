@@ -2,9 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   DatabaseQueryAction,
+  DEFAULT_AGENT_RUN_WAIT_SECONDS,
   DEFAULT_DAEMON_PORT,
   DomainEventKind,
   GatewayEventKind,
+  MAX_AGENT_RUN_WAIT_SECONDS,
   type AgentRun,
   type AgentRunCreateInput,
   type DaemonHealth,
@@ -183,7 +185,12 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/wait`) {
         const body = await readBody(request) as { timeoutSeconds?: unknown };
-        const timeoutSeconds = typeof body.timeoutSeconds === "number" ? body.timeoutSeconds : 60;
+        const raw = body.timeoutSeconds;
+        if (raw !== undefined &&
+            (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0 || raw > MAX_AGENT_RUN_WAIT_SECONDS)) {
+          return respond(400, { error: `timeoutSeconds must be an integer in 0..${MAX_AGENT_RUN_WAIT_SECONDS}` });
+        }
+        const timeoutSeconds = typeof raw === "number" ? raw : DEFAULT_AGENT_RUN_WAIT_SECONDS;
         return respond(200, await options.agentRuns.wait(agentRunId, timeoutSeconds));
       }
 

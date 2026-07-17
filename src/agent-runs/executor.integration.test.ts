@@ -18,6 +18,7 @@ import { State } from "../state/state";
 import { AgentRunExecutor } from "./executor";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-agent-runs-"));
+const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
 
 const waitFor = async (predicate: () => boolean, label: string, timeoutMs = 5_000): Promise<void> => {
@@ -32,8 +33,10 @@ const events: DomainEvent[] = [];
 const bus = new InMemoryEventBus();
 bus.subscribe((event) => { events.push(event); });
 
+let closeState: (() => void) | undefined;
 try {
   const state = new State(join(dir, "state.db"), { bus });
+  closeState = () => state.close();
 
   // A controllable fake launcher: each launch parks until the test resolves it or the
   // executor aborts it. Activity/identity are reported the way the acpx launcher would.
@@ -207,5 +210,8 @@ try {
 
   process.stdout.write("ok — delegated-run executor lifecycle over real state\n");
 } finally {
+  closeState?.();
+  if (previousOoHome === undefined) delete process.env.OO_HOME;
+  else process.env.OO_HOME = previousOoHome;
   rmSync(dir, { recursive: true, force: true });
 }

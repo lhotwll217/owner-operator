@@ -8,6 +8,7 @@ import {
   formatRelative,
   isSessionBoilerplate,
   type AgentRun,
+  type AgentRunActivityUpdate,
   type AgentRunHarness,
   type AgentRunOutcome,
   type ScheduleDefinition,
@@ -185,6 +186,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_status_created
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_child_session
   ON agent_runs(child_session_id) WHERE child_session_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_parent_created
+  ON agent_runs(parent_thread_id, created_at DESC) WHERE parent_thread_id IS NOT NULL;
 `;
 
 const AGENT_RUN_COLUMNS = `
@@ -694,6 +698,15 @@ export class ThreadDb {
     ).get(childSessionId) as unknown as AgentRun | undefined;
   }
 
+  /** A pending-or-running run for this child session, if any — the resume-duplication guard. */
+  nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
+    return this.db.prepare(
+      `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs
+       WHERE child_session_id = ? AND status IN (?, ?)
+       ORDER BY created_at DESC LIMIT 1`,
+    ).get(childSessionId, AgentRunStatus.Pending, AgentRunStatus.Running) as unknown as AgentRun | undefined;
+  }
+
   /** Start the oldest pending run iff fewer than `maxRunning` rows are running — one transaction,
    * so a concurrent claim can never overshoot the cap. */
   claimNextPendingAgentRun(maxRunning: number): AgentRun | null {
@@ -725,11 +738,7 @@ export class ThreadDb {
   }
 
   /** Explicit activity from the child's runtime; rejected once the row is terminal. */
-  recordAgentRunActivity(id: string, update: {
-    activity?: string;
-    childSessionId?: string;
-    acpxRecordId?: string;
-  }): AgentRun | null {
+  recordAgentRunActivity(id: string, update: AgentRunActivityUpdate): AgentRun | null {
     const changed = Number(this.db.prepare(
       `UPDATE agent_runs SET
          activity = COALESCE(?, activity),
