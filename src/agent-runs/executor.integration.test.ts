@@ -112,7 +112,8 @@ try {
   assert.equal(state.agentRunById(third.id)?.status, AgentRunStatus.Cancelled, "cancel lands");
 
   // --- cancel a queued run without it ever starting ----------------------------------------
-  const fourth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "fourth", cwd: dir });
+  // The fourth run occupies the single slot (maxConcurrent 1), so the fifth stays pending.
+  executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "fourth", cwd: dir });
   const fifth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "fifth", cwd: dir });
   await waitFor(() => launches.length === 4, "fourth run to start");
   const cancelledFifth = await executor.cancel(fifth.id);

@@ -12,7 +12,9 @@ import {
   OO_TOOL_LINGER_TICKS,
   OoWorkingLine,
   buildOoTheme,
+  elapsedLabel,
   foldWorkingLine,
+  formatAgentRunRow,
   isAssistantMessageRow,
   isToolExecutionRow,
   ooInteractiveOptions,
@@ -223,5 +225,36 @@ assert.equal(shimmedChildren.length, 3, "assistant components still pass through
 
 // 9. Silent start: no initialMessage is fired by default.
 assert.equal(ooInteractiveOptions().initialMessage, undefined, "no auto model turn on launch");
+
+// 10. Delegated-run row: a compact agent line, not a generic tool call. Running rows show the
+// latest activity; terminal rows show the outcome (error preferred over result); elapsed derives
+// from created→finished (or created→now while live).
+assert.equal(elapsedLabel("2026-07-17T10:00:00.000Z", "2026-07-17T10:02:03.000Z"), "2m 3s");
+assert.equal(elapsedLabel("2026-07-17T10:00:00.000Z", "2026-07-17T10:00:09.000Z"), "9s");
+assert.equal(elapsedLabel(undefined, "2026-07-17T10:00:09.000Z"), "", "elapsed needs both stamps");
+assert.equal(
+  formatAgentRunRow({
+    harness: "claude-code",
+    task: "research the flaky retry logic in the scheduler",
+    status: "running",
+    activity: "reading src/scheduler",
+    createdAt: "2026-07-17T10:00:00.000Z",
+  }, "2026-07-17T10:00:30.000Z"),
+  "claude-code · research the flaky retry logic in the scheduler · running · reading src/scheduler · 30s",
+);
+assert.equal(
+  formatAgentRunRow({
+    harness: "codex", task: "audit deps", status: "completed",
+    activity: "still going", resultTail: "no vulnerable deps found",
+    createdAt: "2026-07-17T10:00:00.000Z", finishedAt: "2026-07-17T10:01:00.000Z",
+  }),
+  "codex · audit deps · completed · no vulnerable deps found · 1m 0s",
+  "a terminal row shows the outcome, not the stale activity",
+);
+assert.equal(
+  formatAgentRunRow({ harness: "codex", task: "x", status: "failed", error: "turn failed: tool error", resultTail: "partial" }),
+  "codex · x · failed · turn failed: tool error",
+  "a failed row prefers the error over partial output",
+);
 
 process.stdout.write("ok — oo presentation: de-branded marker, OO palette, single working line, cycle words + tool linger, zero-dump shim (tool rows + thinking), silent start\n");

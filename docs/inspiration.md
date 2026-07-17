@@ -21,7 +21,31 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
   an installed [service version stamp](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/daemon/service-env.ts#L430-L446),
   LaunchAgent [enable → kickstart → bootstrap recovery](https://github.com/openclaw/openclaw/blob/d4e93e791bc5/src/daemon/launchd.ts#L656-L684),
   and the [docs-list script](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/scripts/docs-list.js#L1-L179)
-  behind `npm run docs:list`.
+  behind `npm run docs:list`. For delegated runs
+  ([#69](https://github.com/lhotwll217/owner-operator/issues/69)), its ACP control-plane
+  patterns (studied, MIT, pinned at `6bd9e5f158f7b5dcb54491425ee54135abecc825`): a
+  runtime-agnostic durable task ledger with per-runtime adapters and monotonic terminal states
+  ([tasks](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/docs/automation/tasks.md)),
+  liveness as an in-process active-turn set plus durable rows — never persisted metadata alone
+  ([active-turns](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/src/acp/control-plane/active-turns.ts#L1-L47)),
+  the control plane owning its own turn deadline because a launcher timeout after partial output
+  reads as completion
+  ([runtime](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/runtime.ts#L80-L87)),
+  and two-level resume identity (harness session id + acpx record id)
+  ([handle-ensure](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/src/acp/control-plane/manager.runtime-handle-ensure.ts#L95-L154)).
+  Its gateway control plane and product delivery are not borrowed: Owner Operator's daemon
+  already owns durable runs (the scheduler substrate), so delegated runs extend that rather than
+  adopt OpenClaw's.
+- **[pi-subagents](https://github.com/nicobailon/pi-subagents/tree/c940fe20e86d9ba429eebcac809ec79d478ef206)**
+  (design donor, not a dependency) — its versioned lifecycle-artifact contract and lifecycle
+  state names informed the `agent_runs` shape
+  ([types](https://github.com/nicobailon/pi-subagents/blob/c940fe20e86d9ba429eebcac809ec79d478ef206/src/shared/types.ts#L34),
+  [README](https://github.com/nicobailon/pi-subagents/blob/c940fe20e86d9ba429eebcac809ec79d478ef206/README.md#L257-L279)).
+  Not adopted as an execution layer: it orchestrates pi children only, while
+  [#69](https://github.com/lhotwll217/owner-operator/issues/69) spans pi, Codex, and Claude.
+  The [Pi bundled subagent example](https://github.com/earendil-works/pi/blob/f4e9ca7466b5576090d1093c27fe38d73909f3d2/packages/coding-agent/examples/extensions/subagent/README.md)
+  is a further design donor (spawn-and-parse is a few hundred lines) but foreground-only with no
+  persistence, so it is not vendored.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven
   patterns at viral scale: skills grown from experience, persistent memory, one gateway
   process serving many chat surfaces. Pattern source for skills, memory, and surface design.
@@ -75,6 +99,7 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `@earendil-works/pi-coding-agent` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
 | `@earendil-works/pi-ai` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`croner`](https://github.com/Hexagon/croner) | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
+| [`acpx`](https://github.com/openclaw/acpx) (MIT, pinned `0.11.2`) | `src/agent-runs/acp-launcher.ts` — the Agent Client Protocol wire runtime for delegated children (spawn, handshake, per-harness launch registry, resume, typed event stream) on the official ACP SDK; Owner Operator keeps the control plane (the `agent_runs` executor) |
 | `jsonc-parser` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
 Permission gating is adopted wholesale from

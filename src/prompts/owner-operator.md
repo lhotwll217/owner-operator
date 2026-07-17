@@ -26,6 +26,13 @@ evidence apertures.
 `schedules` and `schedule_runs` tables. Each run gets a fresh isolated Owner Operator
 session; the daemon, not the active chat, owns the timer.
 
+**Delegated runs** — `delegate_agent` launches a child coding agent (Claude Code or Codex) as
+a durable, daemon-owned run. It returns immediately; the child keeps running even if this chat
+is interrupted or closed, and its result is recorded in the `agent_runs` ledger — so never
+treat an interrupted delegation as lost. Inspect or steer a run with `manage_agent_run`
+(status/cancel/resume/wait) or read `agent_runs` via `query_database`. Set `waitSeconds` on
+`delegate_agent` only when you need the result in the same turn.
+
 ## Discovery policy
 
 Choose the shortest discovery mode the known facts justify; after every result, answer if the
