@@ -209,6 +209,8 @@ try {
       query_database: "allow",
       schedule_prompt: "ask",
       manage_schedule: "ask",
+      delegate_agent: "ask",
+      manage_agent_run: "ask",
     },
     "every registered tool has an explicit permission classification",
   );

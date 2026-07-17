@@ -1,0 +1,106 @@
+import { join } from "node:path";
+import { createAcpRuntime, createRuntimeStore, createAgentRegistry, type AcpRuntime } from "acpx/runtime";
+import {
+  AGENT_RUN_CAPABILITIES,
+  AgentRunStatus,
+  type AgentRunLaunchRequest,
+  type AgentRunLaunchResult,
+} from "@owner-operator/core";
+import { ownerOperatorHome } from "../shared/paths";
+import type { AgentRunLauncher } from "./executor";
+
+/** Where acpx persists its per-child session records. Relocated out of the system tmpdir
+ * (acpx's default) into OO_HOME per the issue #69 hardening note, so restart reconciliation
+ * and resume can find child identities across daemon restarts. */
+export function agentRunStateDir(): string {
+  return join(ownerOperatorHome(), "agent-runs");
+}
+
+export interface AcpLauncherOptions {
+  /** Injectable for tests; production builds the real acpx runtime. */
+  runtimeFactory?: () => AcpRuntime;
+}
+
+/** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
+ * event stream mirrored into the ledger as explicit activity, and the protocol turn result
+ * mapped to a terminal run status. Permissions stay in-harness and non-escalating: OO forces
+ * `nonInteractivePermissions: "fail"`, so a headless child that hits an unapprovable ask fails
+ * loudly into the run row rather than silently degrading. */
+export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLauncher {
+  const runtime = options.runtimeFactory
+    ? options.runtimeFactory()
+    : createAcpRuntime({
+        cwd: ownerOperatorHome(),
+        sessionStore: createRuntimeStore({ stateDir: agentRunStateDir() }),
+        agentRegistry: createAgentRegistry(),
+        // Deny-by-default for any ask the child's own harness config didn't pre-approve; the
+        // owner's harness settings remain the real gate. OO never loosens this.
+        permissionMode: "approve-reads",
+        // Fail-closed: an unapprovable ask fails the turn (recorded as a run failure) rather
+        // than continuing degraded. Owner decision on issue #69.
+        nonInteractivePermissions: "fail",
+      });
+
+  return async (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> => {
+    const capability = AGENT_RUN_CAPABILITIES[request.run.harness];
+    if (!capability) throw new Error(`unknown delegation harness: ${request.run.harness}`);
+
+    const handle = await runtime.ensureSession({
+      sessionKey: request.run.id,
+      agent: capability.acpAgent,
+      mode: "persistent",
+      cwd: request.run.cwd,
+      ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
+    });
+    request.onActivity({
+      ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
+      ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),
+    });
+
+    // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
+    // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
+    const turn = runtime.startTurn({
+      handle,
+      text: request.run.task,
+      mode: "prompt",
+      requestId: request.run.id,
+      signal: request.signal,
+    });
+
+    const chunks: string[] = [];
+    for await (const event of turn.events) {
+      if (request.signal.aborted) break;
+      if (event.type === "text_delta" && event.stream !== "thought") {
+        chunks.push(event.text);
+        request.onActivity({ activity: previewOf(event.text) });
+      } else if (event.type === "status" && event.text) {
+        request.onActivity({ activity: event.text });
+      } else if (event.type === "tool_call" && (event.title || event.text)) {
+        request.onActivity({ activity: (event.title ?? event.text).slice(0, 200) });
+      }
+    }
+
+    const result = await turn.result;
+    const identity = {
+      ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
+      ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),
+    };
+    if (result.status === "completed") {
+      return { status: AgentRunStatus.Completed, resultText: chunks.join(""), error: null, ...identity };
+    }
+    if (result.status === "cancelled") {
+      return { status: AgentRunStatus.Cancelled, resultText: chunks.join(""), error: result.stopReason ?? "cancelled", ...identity };
+    }
+    return {
+      status: AgentRunStatus.Failed,
+      resultText: chunks.join(""),
+      error: result.error.message,
+      ...identity,
+    };
+  };
+}
+
+function previewOf(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > 200 ? `${collapsed.slice(0, 197)}…` : collapsed;
+}

@@ -12,6 +12,8 @@ import { startGateway, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
 import { sampleTranscript } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
+import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
+import { createAcpLauncher } from "../agent-runs/acp-launcher";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
 import { daemonInfoPath, stateDatabasePath } from "../shared/paths";
@@ -22,6 +24,7 @@ export interface DaemonOptions {
   dbPath?: string;
   monitor?: SessionMonitorOptions;
   scheduler?: SchedulerOptions;
+  agentRuns?: AgentRunExecutorOptions;
   watch?: boolean;
   fingerprintIntervalMs?: number;
   enableEnrichment?: boolean;
@@ -34,6 +37,7 @@ export interface RunningDaemon {
   state: State;
   monitor: SessionMonitor;
   scheduler: Scheduler;
+  agentRuns: AgentRunExecutor;
   close(): Promise<void>;
 }
 
@@ -72,6 +76,13 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       (await import("../agent/agent")).runScheduledPrompt(request)),
   });
   modules.scheduler = true;
+  const agentRuns = new AgentRunExecutor(state, {
+    ...options.agentRuns,
+    launcher: options.agentRuns?.launcher ?? createAcpLauncher(),
+    logger: options.agentRuns?.logger ?? ((record) => {
+      process.stderr.write(`${JSON.stringify({ component: "agent-runs", ...record })}\n`);
+    }),
+  });
 
   const health = (): DaemonHealth => ({
     ok: true, port: gateway.port, pid: process.pid, startedAt, fingerprint, stale,
@@ -88,6 +99,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     state,
     monitor,
     scheduler,
+    agentRuns: {
+      list: (parentThreadId) => state.listAgentRuns(parentThreadId ? { parentThreadId } : {}),
+      get: (id) => state.agentRunById(id),
+      launch: (input) => agentRuns.launch(input),
+      cancel: (id) => agentRuns.cancel(id),
+      resume: (id) => agentRuns.resume(id),
+      wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
+    },
     port: options.port,
     health,
     ready,
@@ -105,6 +124,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   chmodSync(daemonInfoPath(), 0o600);
 
   scheduler.start();
+  agentRuns.start();
   monitor.start();
   if (options.watch !== false) monitor.watch();
 
@@ -122,12 +142,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     state,
     monitor,
     scheduler,
+    agentRuns,
     async close() {
       if (closed) return;
       closed = true;
       clearInterval(fingerprintTimer);
       monitor.stop();
       await scheduler.stop();
+      await agentRuns.stop();
       await gateway.close();
       state.close();
       try { rmSync(daemonInfoPath(), { force: true }); } catch { /* best effort */ }

@@ -178,6 +178,10 @@ export function statusLabelFor(toolName: string): string {
       return "querying the session database…";
     case "schedule_prompt":
       return "scheduling…";
+    case "delegate_agent":
+      return "delegating to an agent…";
+    case "manage_agent_run":
+      return "managing a delegated run…";
     case "bash":
       return "running a command…";
     case "read":

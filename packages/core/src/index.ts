@@ -127,6 +127,9 @@ export * from "./session-state";
 
 // Typed schedules, payloads, tool ids, and durable run outcomes.
 export * from "./scheduling";
+
+// Delegated runs: lifecycle, per-harness capability records, and the launcher seam.
+export * from "./agent-runs";
 export * from "./events";
 
 // The daemon wire protocol: endpoints, schedules/triggers, and push events — the contract

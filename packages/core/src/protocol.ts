@@ -1,3 +1,4 @@
+import type { AgentRun, AgentRunCreateInput } from "./agent-runs";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
 import type { ThreadState } from "./status";
@@ -53,6 +54,8 @@ export interface SessionStateRow {
   lastMessageAt: string | null;
   diffAdded: number | null;
   diffDeleted: number | null;
+  /** Set when this thread is a delegated run's child session: the delegating thread's id. */
+  parentThreadId: string | null;
 }
 
 export interface EnrichmentCandidate extends SessionStateRow {
@@ -90,6 +93,12 @@ export interface GatewayApi {
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<ScheduleRun>;
+  listAgentRuns(parentThreadId?: string): Promise<AgentRun[]>;
+  agentRun(id: string): Promise<AgentRun>;
+  delegateAgent(input: AgentRunCreateInput): Promise<AgentRun>;
+  cancelAgentRun(id: string): Promise<AgentRun>;
+  resumeAgentRun(id: string): Promise<AgentRun>;
+  waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
   subscribe(listener: (event: GatewayEvent) => void): () => void;
   close(): void;

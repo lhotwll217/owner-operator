@@ -2,10 +2,13 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AgentRunStatus,
   ScheduleRunStatus,
   ScheduleRunTrigger,
   formatRelative,
   isSessionBoilerplate,
+  type AgentRun,
+  type AgentRunHarness,
   type ScheduleDefinition,
   type ScheduleRun,
   type ScheduleTriggerContext,
@@ -151,7 +154,56 @@ CREATE TABLE IF NOT EXISTS schedule_event_watermarks (
   last_message_at TEXT NOT NULL,
   PRIMARY KEY (schedule_id, thread_id)
 );
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  harness TEXT NOT NULL,
+  task TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  parent_thread_id TEXT,
+  depth INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN (
+    'pending', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'lost'
+  )),
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  activity TEXT,
+  last_activity_at TEXT,
+  child_session_id TEXT,
+  acpx_record_id TEXT,
+  result_tail TEXT,
+  error TEXT,
+  resume_of_run_id TEXT REFERENCES agent_runs(id),
+  timeout_seconds INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status_created
+  ON agent_runs(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_child_session
+  ON agent_runs(child_session_id) WHERE child_session_id IS NOT NULL;
 `;
+
+const AGENT_RUN_COLUMNS = `
+  id, harness, task, cwd, parent_thread_id AS parentThreadId, depth, status,
+  created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt,
+  activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
+  acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
+  resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
+
+export interface AgentRunInsert {
+  id: string;
+  harness: AgentRunHarness;
+  task: string;
+  cwd: string;
+  parentThreadId?: string | null;
+  depth: number;
+  timeoutSeconds: number;
+  resumeOfRunId?: string | null;
+  childSessionId?: string | null;
+  acpxRecordId?: string | null;
+}
 
 type DetailsPatch = Partial<{
   state: ThreadState;
@@ -364,7 +416,10 @@ export class ThreadDb {
               detail.state_reason AS stateReason, detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
               t.created_at AS createdAt, t.last_message_at AS lastMessageAt,
-              t.diff_added AS diffAdded, t.diff_deleted AS diffDeleted
+              t.diff_added AS diffAdded, t.diff_deleted AS diffDeleted,
+              (SELECT run.parent_thread_id FROM agent_runs run
+                WHERE run.child_session_id = t.id AND run.parent_thread_id IS NOT NULL
+                ORDER BY run.created_at DESC LIMIT 1) AS parentThreadId
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        ${where}
@@ -610,6 +665,144 @@ export class ThreadDb {
     return Number(this.db.prepare(
       "UPDATE schedule_runs SET status = ?, finished_at = ?, error = ? WHERE status = ?",
     ).run(ScheduleRunStatus.Interrupted, this.now(), reason, ScheduleRunStatus.Running).changes);
+  }
+
+  createAgentRun(insert: AgentRunInsert): AgentRun {
+    this.db.prepare(
+      `INSERT INTO agent_runs (
+         id, harness, task, cwd, parent_thread_id, depth, status, created_at,
+         child_session_id, acpx_record_id, resume_of_run_id, timeout_seconds
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
+      insert.depth, AgentRunStatus.Pending, this.now(), insert.childSessionId ?? null,
+      insert.acpxRecordId ?? null, insert.resumeOfRunId ?? null, insert.timeoutSeconds,
+    );
+    return this.agentRunById(insert.id)!;
+  }
+
+  /** Start the oldest pending run iff fewer than `maxRunning` rows are running — one transaction,
+   * so a concurrent claim can never overshoot the cap. */
+  claimNextPendingAgentRun(maxRunning: number): AgentRun | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const { running } = this.db.prepare(
+        "SELECT COUNT(*) AS running FROM agent_runs WHERE status = ?",
+      ).get(AgentRunStatus.Running) as { running: number };
+      if (running >= maxRunning) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const next = this.db.prepare(
+        "SELECT id FROM agent_runs WHERE status = ? ORDER BY created_at ASC, rowid ASC LIMIT 1",
+      ).get(AgentRunStatus.Pending) as { id: string } | undefined;
+      if (!next) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      this.db.prepare(
+        "UPDATE agent_runs SET status = ?, started_at = ? WHERE id = ?",
+      ).run(AgentRunStatus.Running, this.now(), next.id);
+      this.db.exec("COMMIT");
+      return this.agentRunById(next.id)!;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** Explicit activity from the child's runtime; rejected once the row is terminal. */
+  recordAgentRunActivity(id: string, update: {
+    activity?: string;
+    childSessionId?: string;
+    acpxRecordId?: string;
+  }): AgentRun | null {
+    const changed = Number(this.db.prepare(
+      `UPDATE agent_runs SET
+         activity = COALESCE(?, activity),
+         last_activity_at = ?,
+         child_session_id = COALESCE(?, child_session_id),
+         acpx_record_id = COALESCE(?, acpx_record_id)
+       WHERE id = ? AND status = ?`,
+    ).run(
+      update.activity ?? null, this.now(), update.childSessionId ?? null,
+      update.acpxRecordId ?? null, id, AgentRunStatus.Running,
+    ).changes) > 0;
+    return changed ? this.agentRunById(id)! : null;
+  }
+
+  /** Finalize a run. Terminal states are monotonic: only pending/running rows can finish. */
+  finishAgentRun(id: string, outcome: {
+    status:
+      | AgentRunStatus.Completed
+      | AgentRunStatus.Failed
+      | AgentRunStatus.Cancelled
+      | AgentRunStatus.Interrupted;
+    resultTail: string | null;
+    error: string | null;
+    childSessionId?: string;
+    acpxRecordId?: string;
+  }): AgentRun | null {
+    const changed = Number(this.db.prepare(
+      `UPDATE agent_runs SET status = ?, finished_at = ?, result_tail = ?, error = ?,
+         child_session_id = COALESCE(?, child_session_id),
+         acpx_record_id = COALESCE(?, acpx_record_id)
+       WHERE id = ? AND status IN (?, ?)`,
+    ).run(
+      outcome.status, this.now(), outcome.resultTail, outcome.error,
+      outcome.childSessionId ?? null, outcome.acpxRecordId ?? null,
+      id, AgentRunStatus.Pending, AgentRunStatus.Running,
+    ).changes) > 0;
+    return changed ? this.agentRunById(id)! : null;
+  }
+
+  markRunningAgentRunsInterrupted(reason: string): string[] {
+    const ids = (this.db.prepare(
+      "SELECT id FROM agent_runs WHERE status = ? ORDER BY created_at ASC",
+    ).all(AgentRunStatus.Running) as Array<{ id: string }>).map((row) => row.id);
+    if (ids.length) {
+      this.db.prepare(
+        "UPDATE agent_runs SET status = ?, finished_at = ?, error = ? WHERE status = ?",
+      ).run(AgentRunStatus.Interrupted, this.now(), reason, AgentRunStatus.Running);
+    }
+    return ids;
+  }
+
+  /** Reconciliation sweep: a running row with no live in-process turn and no activity since
+   * the cutoff is lost. Liveness comes from the executor's active-turn set — persisted rows
+   * alone never keep a run alive, and a live turn is never reclaimed. */
+  markAgentRunsLost(liveRunIds: readonly string[], activityCutoffIso: string): string[] {
+    const live = new Set(liveRunIds);
+    const stale = (this.db.prepare(
+      `SELECT id FROM agent_runs WHERE status = ?
+        AND COALESCE(last_activity_at, started_at, created_at) < ?
+       ORDER BY created_at ASC`,
+    ).all(AgentRunStatus.Running, activityCutoffIso) as Array<{ id: string }>)
+      .map((row) => row.id)
+      .filter((id) => !live.has(id));
+    const mark = this.db.prepare(
+      "UPDATE agent_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = ?",
+    );
+    for (const id of stale) {
+      mark.run(AgentRunStatus.Lost, this.now(), "run lost: no live turn and no recent activity", id, AgentRunStatus.Running);
+    }
+    return stale;
+  }
+
+  agentRunById(id: string): AgentRun | undefined {
+    return this.db.prepare(
+      `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs WHERE id = ?`,
+    ).get(id) as unknown as AgentRun | undefined;
+  }
+
+  listAgentRuns(filter: { parentThreadId?: string } = {}): AgentRun[] {
+    const sql = `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs
+                 ${filter.parentThreadId !== undefined ? "WHERE parent_thread_id = ?" : ""}
+                 ORDER BY created_at DESC, rowid DESC`;
+    const statement = this.db.prepare(sql);
+    return (
+      filter.parentThreadId !== undefined ? statement.all(filter.parentThreadId) : statement.all()
+    ) as unknown as AgentRun[];
   }
 
   listNeedsYouMessageVersions(): Array<{ threadId: string; lastMessageAt: string }> {

@@ -36,6 +36,7 @@
     "@earendil-works/pi-tui": "0.80.6",
     "@gotgenes/pi-permission-system": "20.7.1",
     "@owner-operator/core": "*",
+    "acpx": "0.11.2",
     "croner": "10.0.1",
     "jsonc-parser": "3.3.1"
   },

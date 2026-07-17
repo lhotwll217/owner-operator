@@ -1,5 +1,7 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
 import { withOoRenderers } from "../../shared/oo-presentation";
+import { delegateAgentTool } from "./delegate-agent";
+import { manageAgentRunTool } from "./manage-agent-run";
 import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
@@ -8,6 +10,8 @@ import { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state"
 export { queryDatabaseTool } from "./query-database";
 export { manageScheduleTool } from "./manage-schedule";
 export { schedulePromptTool } from "./schedule-prompt";
+export { delegateAgentTool } from "./delegate-agent";
+export { manageAgentRunTool } from "./manage-agent-run";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 
 export const ownerOperatorCustomTools = [
@@ -19,6 +23,8 @@ export const ownerOperatorCustomTools = [
   withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (args) => args.action ?? "" }),
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
   withOoRenderers(manageScheduleTool, "manage schedule", { summarizeCall: (args) => args.id ?? "" }),
+  withOoRenderers(delegateAgentTool, "delegate", { summarizeCall: (args) => args.harness ?? "" }),
+  withOoRenderers(manageAgentRunTool, "manage run", { summarizeCall: (args) => `${args.action ?? ""} ${args.id ?? ""}`.trim() }),
 ];
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
@@ -27,6 +33,8 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.QueryDatabase,
   AgentToolId.SchedulePrompt,
   AgentToolId.ManageSchedule,
+  AgentToolId.DelegateAgent,
+  AgentToolId.ManageAgentRun,
 ];
 
 // packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.
