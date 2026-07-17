@@ -28,9 +28,9 @@ zero — every harness gets a durable run row, activity, inspect/cancel/result.
 
 **Delegation depth**:
 How many **Delegated runs** deep a run sits, stamped at spawn. The Operator's
-own session is depth 0. Cap: 2 — a child may delegate (e.g. a review agent),
-a grandchild may not. Harness-native subagents inside a child do not count;
-depth only counts runs launched through the ledger.
+own session is depth 0. Cap: 1 — only the Operator delegates through the
+ledger; children needing helpers (e.g. a review agent) use their harness's
+native subagents, which never touch the ledger and do not count as depth.
 
 **Schedule run**:
 One execution of a durable schedule (scheduler subsystem). Shares lifecycle
