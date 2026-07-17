@@ -33,8 +33,9 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
         cwd: ownerOperatorHome(),
         sessionStore: createRuntimeStore({ stateDir: agentRunStateDir() }),
         agentRegistry: createAgentRegistry(),
-        // Deny-by-default for any ask the child's own harness config didn't pre-approve; the
-        // owner's harness settings remain the real gate. OO never loosens this.
+        // Per the issue #69 decision record: deny-by-default for non-read asks — reads pass, any
+        // change ask the child's own harness config didn't already approve does not. The owner's
+        // harness settings remain the real gate; OO never loosens this and never escalates.
         permissionMode: "approve-reads",
         // Fail-closed: an unapprovable ask fails the turn (recorded as a run failure) rather
         // than continuing degraded. Owner decision on issue #69.
@@ -51,6 +52,7 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
       mode: "persistent",
       cwd: request.run.cwd,
       ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
+      ...(request.run.model ? { sessionOptions: { model: request.run.model } } : {}),
     });
     request.onActivity({
       ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
@@ -74,17 +76,14 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
         chunks.push(event.text);
         request.onActivity({ activity: previewOf(event.text) });
       } else if (event.type === "status" && event.text) {
-        request.onActivity({ activity: event.text });
+        request.onActivity({ activity: previewOf(event.text) });
       } else if (event.type === "tool_call" && (event.title || event.text)) {
-        request.onActivity({ activity: (event.title ?? event.text).slice(0, 200) });
+        request.onActivity({ activity: previewOf(event.title ?? event.text) });
       }
     }
 
     const result = await turn.result;
-    const identity = {
-      ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
-      ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),
-    };
+    const identity = identityOf(handle);
     if (result.status === "completed") {
       return { status: AgentRunStatus.Completed, resultText: chunks.join(""), error: null, ...identity };
     }
@@ -100,7 +99,19 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
   };
 }
 
+/** The child identity carried on a run row: the harness's own session id (resume + monitor
+ * join key) and the acpx record id (reconciliation). Absent fields are omitted, not nulled. */
+function identityOf(handle: { agentSessionId?: string; acpxRecordId?: string }): {
+  childSessionId?: string;
+  acpxRecordId?: string;
+} {
+  return {
+    ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
+    ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),
+  };
+}
+
 function previewOf(text: string): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
-  return collapsed.length > 200 ? `${collapsed.slice(0, 197)}…` : collapsed;
+  return collapsed.length > 200 ? `${collapsed.slice(0, 199)}…` : collapsed;
 }

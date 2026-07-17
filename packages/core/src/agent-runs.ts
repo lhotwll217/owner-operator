@@ -90,6 +90,8 @@ export interface AgentRunCreateInput {
   cwd: string;
   /** Owner Operator thread id of the delegating session, when known. */
   parentThreadId?: string | null;
+  /** Model the child should run, when the owner pins one; null lets the harness pick. */
+  model?: string | null;
   timeoutSeconds?: number;
 }
 
@@ -99,6 +101,7 @@ export interface AgentRun {
   task: string;
   cwd: string;
   parentThreadId: string | null;
+  model: string | null;
   depth: number;
   status: AgentRunStatus;
   createdAt: string;
@@ -138,6 +141,23 @@ export interface AgentRunLaunchRequest {
 export interface AgentRunLaunchResult {
   status: AgentRunStatus.Completed | AgentRunStatus.Cancelled | AgentRunStatus.Failed;
   resultText: string;
+  error: string | null;
+  childSessionId?: string;
+  acpxRecordId?: string;
+}
+
+/** The terminal statuses a finalized run may land in — pending/running are excluded because a
+ * run is never *finished* into them. */
+export type AgentRunFinalStatus =
+  | AgentRunStatus.Completed
+  | AgentRunStatus.Failed
+  | AgentRunStatus.Cancelled
+  | AgentRunStatus.Interrupted;
+
+/** How a run is finalized in the ledger. Shared by the executor, the State seam, and the DB. */
+export interface AgentRunOutcome {
+  status: AgentRunFinalStatus;
+  resultTail: string | null;
   error: string | null;
   childSessionId?: string;
   acpxRecordId?: string;

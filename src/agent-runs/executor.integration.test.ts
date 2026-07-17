@@ -132,6 +132,7 @@ try {
   assert.throws(() => executor.launch({ harness: AgentRunHarness.Codex, task: "  ", cwd: dir }), /task/);
   assert.throws(() => executor.launch({ harness: AgentRunHarness.Codex, task: "x", cwd: "relative/path" }), /absolute/);
 
+
   // --- stop: active runs are interrupted, not lost -----------------------------------------
   const sixth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "sixth", cwd: dir });
   await waitFor(() => launches.length === 6, "sixth run to start");
@@ -186,6 +187,23 @@ try {
     runEvents.some((event) => event.kind === DomainEventKind.AgentRunChanged && event.runId === first.id && event.status === AgentRunStatus.Completed),
     "completion events reach the bus",
   );
+
+  // --- depth cap: delegating from a thread that is itself a delegated child is rejected -----
+  // Isolated so the never-started executor's pump can't disturb the positional launches above.
+  const depthState = new State(join(dir, "depth.db"), { bus: new InMemoryEventBus() });
+  const depthExecutor = new AgentRunExecutor(depthState, { launcher, logger: () => undefined });
+  depthState.createAgentRun({
+    harness: AgentRunHarness.ClaudeCode, task: "a delegated child", cwd: dir, depth: 1,
+    timeoutSeconds: 60, childSessionId: "delegated-child-session",
+  });
+  assert.throws(
+    () => depthExecutor.launch({
+      harness: AgentRunHarness.Codex, task: "grandchild", cwd: dir, parentThreadId: "delegated-child-session",
+    }),
+    /depth/,
+    "a run whose parent is itself a delegated child exceeds the depth cap",
+  );
+  depthState.close();
 
   process.stdout.write("ok — delegated-run executor lifecycle over real state\n");
 } finally {

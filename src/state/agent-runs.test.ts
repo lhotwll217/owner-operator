@@ -122,6 +122,15 @@ assert.equal(all[0].id, "run-6", "newest first");
 assert.equal(db.listAgentRuns({ parentThreadId: "parent-thread" }).length, 6);
 assert.equal(db.listAgentRuns({ parentThreadId: "other" }).length, 0);
 
+// --- child-session lookup underpins the depth guard and monitor join ---------------------
+assert.equal(db.agentRunByChildSession("child-session-1")?.id, "run-1", "a child session resolves to its run");
+assert.equal(db.agentRunByChildSession("no-such-child"), undefined, "an unknown child session resolves to nothing");
+
+// --- model is persisted and returned -----------------------------------------------------
+const withModel = db.createAgentRun(input("run-7", { model: "claude-opus-4-8" }));
+assert.equal(withModel.model, "claude-opus-4-8", "a pinned model round-trips");
+assert.equal(db.createAgentRun(input("run-8")).model, null, "an unpinned model is null");
+
 // --- projection join: a scanned child thread carries its parent --------------------------
 db.recordScan({
   id: "child-session-1",

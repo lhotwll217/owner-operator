@@ -52,16 +52,20 @@ Operator (delegate_agent / manage_agent_run tool)
   transaction so a race can never overshoot.
 - **Owner Operator owns the deadline.** The executor aborts on its own per-run timeout so a
   launcher-side timeout after partial output can never read as success.
-- **Depth is 1.** Only the Operator delegates through the ledger; a child needing a helper (e.g. a
-  review agent) uses its harness's native subagents, which never touch the ledger.
+- **Depth is 1**, enforced not just structurally. The executor rejects a launch whose parent
+  thread is itself a delegated run's child (`AGENT_RUN_MAX_DEPTH`). A child needing a helper (e.g.
+  a review agent) uses its harness's native subagents, which never touch the ledger.
+- **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
+  session options; omitting it lets the harness pick its default.
 
 ## Permissions
 
 Each child honors its **own harness's** permission system, exactly as any other session of that
 harness on the owner's machine. Owner Operator builds no cross-harness permission layer and never
-escalates: `acpx` runs with `nonInteractivePermissions: "fail"`, so a headless child that hits an
-unapprovable ask fails the turn (recorded as a run failure) rather than continuing degraded. The
-owner's harness config is the real gate. (Privacy blacklist enforcement for foreign-harness
+escalates: `acpx` runs `permissionMode: "approve-reads"` (deny-by-default for non-read asks, per
+the decision record) with `nonInteractivePermissions: "fail"`, so a headless child that hits an
+unapprovable change ask fails the turn (recorded as a run failure) rather than continuing
+degraded. The owner's harness config is the real gate. (Privacy blacklist enforcement for foreign-harness
 children is a separate OS-sandbox concern, not a permission-seam concern.)
 
 ## Lineage and presentation
@@ -91,3 +95,6 @@ the system tmpdir so restart reconciliation and resume find child identities acr
   `pi --mode json` is the fallback.
 - **Additional harnesses** (Gemini, OpenCode) — `acpx` ships adapters; each needs a capability
   record and end-to-end verification before registration.
+- **Repo on the run row / in the terminal panel.** A run stores `cwd`; the repo surfaces only once
+  the child thread is observed (the two-entity join), so it reaches the panel through the same
+  joined-thread path as the widget nesting above, not the run row directly.

@@ -29,6 +29,9 @@ export const delegateAgentTool = defineTool({
     parentThreadId: Type.Optional(Type.String({
       description: "Owner Operator thread id of the delegating session, so the run nests under it.",
     })),
+    model: Type.Optional(Type.String({
+      description: "Pin the child's model. Omit to let the harness pick its default.",
+    })),
     timeoutSeconds: Type.Optional(Type.Integer({
       minimum: 1,
       maximum: MAX_AGENT_RUN_TIMEOUT_SECONDS,
@@ -48,6 +51,7 @@ export const delegateAgentTool = defineTool({
       task: params.task,
       cwd,
       ...(params.parentThreadId ? { parentThreadId: params.parentThreadId } : {}),
+      ...(params.model ? { model: params.model } : {}),
       ...(params.timeoutSeconds ? { timeoutSeconds: params.timeoutSeconds } : {}),
     });
     if (params.waitSeconds && params.waitSeconds > 0) {

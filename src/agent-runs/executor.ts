@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import {
   AGENT_RUN_CAPABILITIES,
+  AGENT_RUN_MAX_DEPTH,
   AGENT_RUN_RESUMABLE_STATUSES,
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
@@ -8,8 +9,10 @@ import {
   isTerminalAgentRunStatus,
   type AgentRun,
   type AgentRunCreateInput,
+  type AgentRunFinalStatus,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
+  type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
 
@@ -126,16 +129,32 @@ export class AgentRunExecutor {
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > MAX_AGENT_RUN_TIMEOUT_SECONDS) {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
     }
+    // Enforce the delegation-depth cap, not just structurally: if the delegating thread is
+    // itself some run's child, this launch would sit one level deeper. A child needing a helper
+    // uses its harness's native subagents, which never touch the ledger.
+    const depth = this.depthFor(input.parentThreadId ?? null);
+    if (depth > AGENT_RUN_MAX_DEPTH) {
+      throw new Error(`delegation depth ${depth} exceeds the cap of ${AGENT_RUN_MAX_DEPTH}`);
+    }
     const run = this.state.createAgentRun({
       harness: input.harness,
       task: input.task,
       cwd: input.cwd,
       parentThreadId: input.parentThreadId ?? null,
-      depth: 1,
+      model: input.model ?? null,
+      depth,
       timeoutSeconds,
     });
     this.pump();
     return run;
+  }
+
+  /** The depth a run launched under `parentThreadId` would sit at. Depth 1 when the parent is
+   * the Operator (or unattributed); one deeper when the parent thread is itself a run's child. */
+  private depthFor(parentThreadId: string | null): number {
+    if (!parentThreadId) return 1;
+    const parentRun = this.state.agentRunByChildSession(parentThreadId);
+    return (parentRun?.depth ?? 0) + 1;
   }
 
   /** Cancel cascades to the child process through the abort signal, then resolves with the
@@ -182,6 +201,7 @@ export class AgentRunExecutor {
       task: run.task,
       cwd: run.cwd,
       parentThreadId: run.parentThreadId,
+      model: run.model,
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
       resumeOfRunId: run.id,
@@ -251,6 +271,20 @@ export class AgentRunExecutor {
           this.state.recordAgentRunActivity(run.id, update);
         },
       });
+      // An abort intent always wins over the launcher's own outcome. Launchers differ on how
+      // they report an abort — the acpx bridge resolves with `cancelled`, a throwing launcher
+      // rejects — so a timed-out or stopped run must not be mislabeled `cancelled` just because
+      // the launcher resolved that way. Only a non-aborted turn keeps the launcher's status.
+      if (entry.intent) {
+        this.finish(run.id, {
+          status: this.statusForIntent(entry.intent),
+          resultTail: result.resultText ? tail(result.resultText) : null,
+          error: result.error ?? `run ${entry.intent}`,
+          ...(result.childSessionId ? { childSessionId: result.childSessionId } : {}),
+          ...(result.acpxRecordId ? { acpxRecordId: result.acpxRecordId } : {}),
+        });
+        return;
+      }
       this.finish(run.id, {
         status: result.status,
         resultTail: result.resultText ? tail(result.resultText) : null,
@@ -260,11 +294,7 @@ export class AgentRunExecutor {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status = entry.intent === AbortIntent.Cancel
-        ? AgentRunStatus.Cancelled
-        : entry.intent === AbortIntent.Stop || this.stopping
-          ? AgentRunStatus.Interrupted
-          : AgentRunStatus.Failed;
+      const status = entry.intent ? this.statusForIntent(entry.intent) : AgentRunStatus.Failed;
       this.finish(run.id, { status, resultTail: null, error: message });
     } finally {
       clearTimeout(timeout);
@@ -273,17 +303,13 @@ export class AgentRunExecutor {
     }
   }
 
-  private finish(runId: string, outcome: {
-    status:
-      | AgentRunStatus.Completed
-      | AgentRunStatus.Failed
-      | AgentRunStatus.Cancelled
-      | AgentRunStatus.Interrupted;
-    resultTail: string | null;
-    error: string | null;
-    childSessionId?: string;
-    acpxRecordId?: string;
-  }): void {
+  private statusForIntent(intent: AbortIntent): AgentRunFinalStatus {
+    if (intent === AbortIntent.Cancel) return AgentRunStatus.Cancelled;
+    if (intent === AbortIntent.Timeout) return AgentRunStatus.Failed;
+    return AgentRunStatus.Interrupted; // Stop
+  }
+
+  private finish(runId: string, outcome: AgentRunOutcome): void {
     const finished = this.state.finishAgentRun(runId, outcome);
     if (finished) {
       this.logger({

@@ -9,6 +9,7 @@ import {
   isSessionBoilerplate,
   type AgentRun,
   type AgentRunHarness,
+  type AgentRunOutcome,
   type ScheduleDefinition,
   type ScheduleRun,
   type ScheduleTriggerContext,
@@ -161,6 +162,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   task TEXT NOT NULL,
   cwd TEXT NOT NULL,
   parent_thread_id TEXT,
+  model TEXT,
   depth INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN (
     'pending', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'lost'
@@ -186,7 +188,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_child_session
 `;
 
 const AGENT_RUN_COLUMNS = `
-  id, harness, task, cwd, parent_thread_id AS parentThreadId, depth, status,
+  id, harness, task, cwd, parent_thread_id AS parentThreadId, model, depth, status,
   created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt,
   activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
   acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
@@ -198,6 +200,7 @@ export interface AgentRunInsert {
   task: string;
   cwd: string;
   parentThreadId?: string | null;
+  model?: string | null;
   depth: number;
   timeoutSeconds: number;
   resumeOfRunId?: string | null;
@@ -670,15 +673,25 @@ export class ThreadDb {
   createAgentRun(insert: AgentRunInsert): AgentRun {
     this.db.prepare(
       `INSERT INTO agent_runs (
-         id, harness, task, cwd, parent_thread_id, depth, status, created_at,
+         id, harness, task, cwd, parent_thread_id, model, depth, status, created_at,
          child_session_id, acpx_record_id, resume_of_run_id, timeout_seconds
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
-      insert.depth, AgentRunStatus.Pending, this.now(), insert.childSessionId ?? null,
-      insert.acpxRecordId ?? null, insert.resumeOfRunId ?? null, insert.timeoutSeconds,
+      insert.model ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
+      insert.childSessionId ?? null, insert.acpxRecordId ?? null,
+      insert.resumeOfRunId ?? null, insert.timeoutSeconds,
     );
     return this.agentRunById(insert.id)!;
+  }
+
+  /** The most recent run whose child session equals this id — the depth-guard and monitor-join
+   * lookup. A thread that is some run's child cannot itself be a delegating parent at depth 1. */
+  agentRunByChildSession(childSessionId: string): AgentRun | undefined {
+    return this.db.prepare(
+      `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs
+       WHERE child_session_id = ? ORDER BY created_at DESC LIMIT 1`,
+    ).get(childSessionId) as unknown as AgentRun | undefined;
   }
 
   /** Start the oldest pending run iff fewer than `maxRunning` rows are running — one transaction,
@@ -732,17 +745,7 @@ export class ThreadDb {
   }
 
   /** Finalize a run. Terminal states are monotonic: only pending/running rows can finish. */
-  finishAgentRun(id: string, outcome: {
-    status:
-      | AgentRunStatus.Completed
-      | AgentRunStatus.Failed
-      | AgentRunStatus.Cancelled
-      | AgentRunStatus.Interrupted;
-    resultTail: string | null;
-    error: string | null;
-    childSessionId?: string;
-    acpxRecordId?: string;
-  }): AgentRun | null {
+  finishAgentRun(id: string, outcome: AgentRunOutcome): AgentRun | null {
     const changed = Number(this.db.prepare(
       `UPDATE agent_runs SET status = ?, finished_at = ?, result_tail = ?, error = ?,
          child_session_id = COALESCE(?, child_session_id),

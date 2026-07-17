@@ -104,6 +104,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "task", description: "Prompt handed to the child agent." },
       { name: "cwd", description: "Absolute working directory the child ran in." },
       { name: "parent_thread_id", description: "Delegating session's thread id; NULL if unattributed. Children nest under this." },
+      { name: "model", description: "Model the child runs, when the owner pinned one; NULL lets the harness pick." },
       { name: "depth", description: "Delegation depth; 1 for Operator-launched runs (cap is 1)." },
       { name: "status", description: "pending | running | completed | failed | cancelled | interrupted | lost. Terminal states are monotonic." },
       { name: "created_at", description: "ISO time the run was queued." },
