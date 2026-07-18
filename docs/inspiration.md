@@ -13,9 +13,9 @@ beyond this list when it comes up short; cite the borrow in the issue/PR.
 
 ## Sources
 
-One entry per source: a one-line identity, then bulleted **Borrowed** patterns (each pinned to
-source) and, where useful, a **Not borrowed** bullet with the reason. Add a source once and grow
-its bullets; do not open a second entry for the same project.
+One entry per source: a one-line identity, then bulleted **Borrowed** patterns, each pinned to
+source. Add a source once and grow its bullets; do not open a second entry for the same project.
+Why something was *not* adopted belongs in the issue/PR where that call was made, not here.
 
 - **[OpenClaw](https://github.com/openclaw/openclaw/tree/372b527da4a1cee5b819e7852f6e26ef11160e85)** —
   local coding-agent daemon; both the scheduler and the delegated-run substrate borrow from it.
@@ -38,20 +38,15 @@ its bullets; do not open a second entry for the same project.
     ([runtime](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/runtime.ts#L80-L87));
     and two-level resume identity — harness session id + acpx record id
     ([handle-ensure](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/src/acp/control-plane/manager.runtime-handle-ensure.ts#L95-L154)).
-  - Not borrowed: its gateway control plane and product delivery — Owner Operator's daemon already
-    owns durable runs (the scheduler substrate), so delegated runs extend that rather than adopt
-    OpenClaw's.
 - **[pi-subagents](https://github.com/nicobailon/pi-subagents/tree/c940fe20e86d9ba429eebcac809ec79d478ef206)** —
   pi-only subagent framework; a design donor, not a dependency.
   - Borrowed: its versioned lifecycle-artifact contract and lifecycle state names informed the
     `agent_runs` shape
     ([types](https://github.com/nicobailon/pi-subagents/blob/c940fe20e86d9ba429eebcac809ec79d478ef206/src/shared/types.ts#L34),
     [README](https://github.com/nicobailon/pi-subagents/blob/c940fe20e86d9ba429eebcac809ec79d478ef206/README.md#L257-L279)).
-  - Not borrowed as an execution layer: it orchestrates pi children only, while
-    [#69](https://github.com/lhotwll217/owner-operator/issues/69) spans pi, Codex, and Claude.
-  - Related design donor: the
+  - Borrowed (design donor): the
     [Pi bundled subagent example](https://github.com/earendil-works/pi/blob/f4e9ca7466b5576090d1093c27fe38d73909f3d2/packages/coding-agent/examples/extensions/subagent/README.md)
-    (spawn-and-parse in a few hundred lines) — foreground-only with no persistence, so not vendored.
+    — spawn-and-parse in a few hundred lines.
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven patterns
   at viral scale.
   - Borrowed: skills grown from experience, persistent memory, and one gateway process serving many
@@ -68,29 +63,21 @@ its bullets; do not open a second entry for the same project.
   - Borrowed: one canonical, ordered tool registry and exact-set regression tests
     ([registry contract](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry.go#L15-L33),
     [canonical test](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry_test.go#L8-L27)).
-  - Not borrowed: its combined instance record embeds separate fields for each upstream agent
-    session instead of one extensible reference
-    ([fields](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/instance.go#L184-L220)).
 - **Herdr** — AGPL-3.0-or-later/commercial, so no code was copied
   ([license declaration](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/README.md#L81-L88)).
   - Borrowed: the separation of host workspace/pane identity from an opaque upstream agent-session
     reference
     ([snapshot](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/persist/snapshot.rs#L11-L29),
     [reference](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/persist/snapshot.rs#L97-L116)).
-  - Not borrowed: its separate detection and integration enums, whose membership drifts
-    ([detection](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/detect/mod.rs#L41-L89),
-    [integration](https://github.com/ogulcancelik/herdr/blob/3a8490f6515dfea13292ae28e34f1174d2f68af1/src/api/schema/integrations.rs#L13-L30)).
 - **Paperclip**
   - Borrowed: stable runtime identity, adapter-owned native session decoding, and a versioned parser
     boundary
     ([Pi codec](https://github.com/paperclipai/paperclip/blob/ce7dedf33d2689673826ffdcfd6af7ee06be39af/packages/adapters/pi-local/src/server/index.ts#L7-L49),
     [parser contract](https://github.com/paperclipai/paperclip/blob/ce7dedf33d2689673826ffdcfd6af7ee06be39af/server/src/adapters/plugin-loader.ts#L82-L109)).
-  - Not borrowed: its dynamic adapter/plugin system; a closed local catalog is enough here.
 - **Harnss**
   - Borrowed: the distinction between an engine ID and a concrete installed agent
     ([types](https://github.com/OpenSource03/harnss/blob/dc1dfd8a33caa46a1eefcfe9e14697b27ac4c33d/shared/types/engine.ts#L19-L28),
     [installed record](https://github.com/OpenSource03/harnss/blob/dc1dfd8a33caa46a1eefcfe9e14697b27ac4c33d/shared/types/registry.ts#L8-L25)).
-  - Not borrowed: its remote agent store — Owner Operator does not install or update harnesses.
 - **Conductor**
   - Borrowed: validation that a workspace host and the harness running inside it are separate — one
     workspace may run Claude Code, Codex, Cursor, or OpenCode
