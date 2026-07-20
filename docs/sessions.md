@@ -4,6 +4,7 @@ summary: "Session identity model: harness, transcript format, store, host; catal
 read_when:
   - Adding or changing a supported harness, transcript format, or session host
   - Tracing why a session is attributed to a given app or CLI
+  - Determining why a transcript does or does not become a session-state or widget row
 ---
 
 # Sessions
@@ -16,6 +17,13 @@ Four identities stay separate:
 | Transcript format | `claude` | Record shape the scanner parses |
 | Transcript store | `~/.claude/projects` | Directory containing that format |
 | Session host | Claude App, Claude CLI, Superset App | Owner-facing app or CLI used to open the session |
+
+Session observation and execution ownership are orthogonal. The scanner decides whether a
+transcript becomes an ordinary `/session-state` row. Separately, the `agent_runs` ledger records
+whether Owner Operator issued and owns a child execution. An observed session need not be
+OO-delegated, and an OO-delegated run need not have an admitted transcript row. The canonical
+tracked-versus-untracked matrix, including native sub-agents, lives in
+[Sub-agents and delegated runs](delegated-runs.md#tracking-boundary).
 
 [`AGENT_HARNESS_DESCRIPTORS`](../packages/core/src/session-sources.mjs) is the canonical
 supported-harness catalog. Each harness names one implemented transcript format and its store

@@ -5,6 +5,11 @@ implementation live in [docs/](docs/).
 
 ## Language
 
+**Sub-agent**:
+Broad relationship term for an agent launched to help another agent. An
+OO-owned sub-agent is represented by a **Delegated run**; a harness-native
+sub-agent is not.
+
 **Delegated run**:
 One daemon-owned execution of a child agent, represented by a durable ledger row.
 _Avoid_: subagent run, background job (that is a **Schedule run**)
