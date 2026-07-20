@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AgentRunHarness,
   AgentRunStatus,
@@ -14,12 +15,30 @@ import {
   type DaemonInfo,
 } from "@owner-operator/core";
 
+if (process.env.OO_ACP_LIVE_DAEMON_WORKER === "1") {
+  const { startDaemon: startRuntimeDaemon } = await import("../daemon/runtime");
+  const running = await startRuntimeDaemon({
+    port: 0,
+    watch: false,
+    enableEnrichment: false,
+    monitor: { scan: async () => [], intervalMs: 60_000 },
+    scheduler: { tickMs: 60_000 },
+  });
+  await new Promise<void>((resolve) => {
+    process.once("SIGINT", resolve);
+    process.once("SIGTERM", resolve);
+  });
+  await running.close();
+  process.exit(0);
+}
+
 if (process.env.OO_RUN_LIVE_ACP_TEST !== "1") {
   process.stdout.write("skip — set OO_RUN_LIVE_ACP_TEST=1 to run the paid Claude ACP acceptance\n");
   process.exit(0);
 }
 
 const root = process.cwd();
+const liveTestPath = fileURLToPath(import.meta.url);
 const ooHome = mkdtempSync(join(tmpdir(), "oo-acp-live-"));
 const daemonInfoPath = join(ooHome, "daemon.json");
 let daemon: ChildProcess | undefined;
@@ -51,10 +70,10 @@ const startDaemon = async (): Promise<ChildProcess> => {
   daemonError = "";
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", join(root, "src/cli/oo.ts"), "daemon"],
+    ["--import", "tsx", liveTestPath],
     {
       cwd: root,
-      env: { ...process.env, OO_HOME: ooHome },
+      env: { ...process.env, OO_HOME: ooHome, OO_ACP_LIVE_DAEMON_WORKER: "1" },
       stdio: ["ignore", "ignore", "pipe"],
     },
   );
@@ -109,6 +128,9 @@ try {
     harness: AgentRunHarness.ClaudeCode,
     task: "Reply with exactly OO_ACP_LIVE_OK. Do not use tools.",
     cwd: root,
+    // Keep the acceptance off an owner's potentially paid extended-context default. Override
+    // explicitly when validating a particular model.
+    model: process.env.OO_ACP_LIVE_MODEL?.trim() || "sonnet",
     timeoutSeconds: 300,
   });
   const running = await waitFor(async () => {

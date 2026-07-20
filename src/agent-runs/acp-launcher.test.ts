@@ -57,4 +57,23 @@ assert.ok(Buffer.byteLength(result.resultText) <= 64 * 1024, "one oversized even
 assert.ok(result.resultText.endsWith("newest-tail"), "the rolling buffer preserves the newest bytes");
 assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "acpx-record" });
 
-process.stdout.write("ok — ACP launcher maps identity/outcome and bounds one oversized event\n");
+const backendOnlyRuntime = {
+  ensureSession: async () => ({ backendSessionId: "backend-session", acpxRecordId: "backend-record" }),
+  startTurn: () => ({
+    events: (async function* () {})(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+} as unknown as AcpRuntime;
+const backendIdentity = await createAcpLauncher({ runtimeFactory: () => backendOnlyRuntime })({
+  run,
+  resumeSessionId: null,
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(
+  backendIdentity.childSessionId,
+  "backend-session",
+  "ACP backends without a separate native id still retain their resumable session identity",
+);
+
+process.stdout.write("ok — ACP launcher maps native/backend identity, outcome, and bounded output\n");

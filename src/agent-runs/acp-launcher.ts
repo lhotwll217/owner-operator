@@ -209,11 +209,17 @@ function leasedAgentCommand(params: {
   ].join(" ");
 }
 
-/** The child identity carried on a run row: the harness's own session id (resume + monitor
- * join key) and the acpx record id (reconciliation). Absent fields are omitted, not nulled. */
-function identityOf(handle: { agentSessionId?: string; acpxRecordId?: string }): ChildIdentity {
+/** The child identity carried on a run row: prefer the harness-native session id, then the ACP
+ * backend session id used for resume when an adapter (currently Claude) exposes no separate
+ * native id. The acpx record id remains the reconciliation key. */
+function identityOf(handle: {
+  agentSessionId?: string;
+  backendSessionId?: string;
+  acpxRecordId?: string;
+}): ChildIdentity {
+  const childSessionId = handle.agentSessionId ?? handle.backendSessionId;
   return {
-    ...(handle.agentSessionId ? { childSessionId: handle.agentSessionId } : {}),
+    ...(childSessionId ? { childSessionId } : {}),
     ...(handle.acpxRecordId ? { acpxRecordId: handle.acpxRecordId } : {}),
   };
 }
