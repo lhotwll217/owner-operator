@@ -50,15 +50,19 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) — proven patterns
   at viral scale.
   - Borrowed: skills grown from experience, persistent memory, and one gateway process serving many
-    chat surfaces — the pattern source for skills, memory, and surface design.
+    chat surfaces — the pattern source for skills, memory, and surface design
+    ([overview](https://github.com/NousResearch/hermes-agent/blob/766c617e8356b9db7efd059c48156f68ff6b8fc0/README.md#L19-L28)).
 - **[opencode](https://github.com/sst/opencode)** — widely used local coding agent.
   - Borrowed: a session source to read
-    ([#16](https://github.com/lhotwll217/owner-operator/issues/16)) and a reference terminal-agent
-    codebase.
+    ([session model](https://github.com/sst/opencode/blob/4a81e8392b4c18cbcc0914527bdab8ff94b9a434/packages/opencode/src/session/session.ts#L57-L118),
+    [#16](https://github.com/lhotwll217/owner-operator/issues/16)) and a reference
+    [terminal-agent codebase](https://github.com/sst/opencode/blob/4a81e8392b4c18cbcc0914527bdab8ff94b9a434/packages/opencode/src/cli/cmd/tui.ts#L72-L103).
 - **[session-grep](https://github.com/lhotwll217/session-grep)** — the search primitive we vendor
   ([#20](https://github.com/lhotwll217/owner-operator/issues/20)).
   - Borrowed: the house vendoring model — the skill wrapper owns local policy (sources, blacklist),
-    and its private `vendor/` receives the pinned upstream primitive untouched.
+    and its private `vendor/` receives the
+    [pinned upstream primitive](https://github.com/lhotwll217/session-grep/blob/f786ca24440e72f93c63e7aded30a67170f9d41c/skills/session-grep/session-grep.mjs#L1-L5)
+    untouched.
 - **Agent Deck**
   - Borrowed: one canonical, ordered tool registry and exact-set regression tests
     ([registry contract](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry.go#L15-L33),

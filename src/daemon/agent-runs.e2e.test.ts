@@ -6,6 +6,7 @@
 // crash-vs-graceful reconciliation on start() is covered in executor.integration.test.ts.
 import assert from "node:assert";
 import {
+  type AgentRun,
   AgentRunHarness,
   AgentRunStatus,
   GatewayEventKind,
@@ -13,6 +14,7 @@ import {
   type AgentRunLaunchResult,
   type GatewayEvent,
 } from "@owner-operator/core";
+import { delegateAgentTool } from "../agent/tools/delegate-agent";
 import { connectGateway } from "../gateway/client";
 import { tempOoHome, waitFor } from "../gateway/test/helpers";
 import { startDaemon } from "./runtime";
@@ -46,6 +48,9 @@ const startOnce = () => startDaemon({
 
 let daemon = await startOnce();
 type GatewayConn = NonNullable<Awaited<ReturnType<typeof connectGateway>>>;
+const toolContext = {
+  sessionManager: { getSessionId: () => "operator-thread" },
+} as Parameters<typeof delegateAgentTool.execute>[4];
 let gateway: GatewayConn | undefined;
 let gateway2: GatewayConn | undefined;
 try {
@@ -55,15 +60,22 @@ try {
   const sseEvents: GatewayEvent[] = [];
   const unsubscribe = gateway.subscribe((event) => sseEvents.push(event));
 
-  // --- launch over HTTP: returns the durable row immediately (background default) ---------
-  const launched = await gateway.delegateAgent({
-    harness: AgentRunHarness.ClaudeCode,
-    task: "research flaky test",
-    cwd: process.cwd(),
-    parentThreadId: "operator-thread",
-  });
+  // --- launch through the Operator tool: trusted context supplies parent lineage -----------
+  const launchResult = await delegateAgentTool.execute(
+    "delegate-test",
+    {
+      harness: AgentRunHarness.ClaudeCode,
+      task: "research flaky test",
+      cwd: process.cwd(),
+    },
+    undefined,
+    undefined,
+    toolContext,
+  );
+  const launched = launchResult.details as AgentRun;
   assert.equal(launched.status, AgentRunStatus.Pending, "delegate returns before the child runs");
   assert.equal(launched.depth, 1);
+  assert.equal(launched.parentThreadId, "operator-thread", "the Operator tool binds trusted parent lineage");
 
   // The launcher records activity synchronously before parking, so once the child is parked
   // the ledger row is already running — parked.length is the real synchronization point.

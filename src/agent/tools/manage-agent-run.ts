@@ -1,6 +1,11 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import type { AgentRun, GatewayApi } from "@owner-operator/core";
+import {
+  DEFAULT_AGENT_RUN_WAIT_SECONDS,
+  MAX_AGENT_RUN_WAIT_SECONDS,
+  type AgentRun,
+  type GatewayApi,
+} from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
 
 /** The manage_agent_run actions, declared once so the runtime schema and the request type can't
@@ -31,7 +36,7 @@ export async function manageAgentRun(
     case "resume":
       return backend.resumeAgentRun(request.id);
     case "wait":
-      return backend.waitAgentRun(request.id, request.waitSeconds ?? 60);
+      return backend.waitAgentRun(request.id, request.waitSeconds ?? DEFAULT_AGENT_RUN_WAIT_SECONDS);
   }
 }
 
@@ -50,8 +55,8 @@ export const manageAgentRunTool = defineTool({
     id: Type.String({ minLength: 1, description: "Exact stable run id from the agent_runs table." }),
     waitSeconds: Type.Optional(Type.Integer({
       minimum: 1,
-      maximum: 3_600,
-      description: "For action=wait: how long to block for the result. Default 60.",
+      maximum: MAX_AGENT_RUN_WAIT_SECONDS,
+      description: `For action=wait: how long to block for the result. Default ${DEFAULT_AGENT_RUN_WAIT_SECONDS}.`,
     })),
   }),
   async execute(_id, params) {

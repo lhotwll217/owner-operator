@@ -86,6 +86,10 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
           const removed = chunks.shift();
           if (removed !== undefined) bufferedBytes -= Buffer.byteLength(removed);
         }
+        if (bufferedBytes > MAX_BUFFERED_RESULT_BYTES) {
+          chunks[0] = utf8Tail(chunks[0], MAX_BUFFERED_RESULT_BYTES);
+          bufferedBytes = Buffer.byteLength(chunks[0]);
+        }
         request.onActivity({ activity: previewOf(event.text) });
       } else if (event.type === "status" && event.text) {
         request.onActivity({ activity: previewOf(event.text) });
@@ -123,4 +127,12 @@ function identityOf(handle: { agentSessionId?: string; acpxRecordId?: string }):
 function previewOf(text: string): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
   return collapsed.length > 200 ? `${collapsed.slice(0, 199)}…` : collapsed;
+}
+
+function utf8Tail(text: string, maxBytes: number): string {
+  const bytes = Buffer.from(text);
+  if (bytes.length <= maxBytes) return text;
+  let start = bytes.length - maxBytes;
+  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start += 1;
+  return bytes.subarray(start).toString();
 }

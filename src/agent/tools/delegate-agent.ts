@@ -5,6 +5,7 @@ import {
   AgentRunHarness,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
+  MAX_AGENT_RUN_WAIT_SECONDS,
 } from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
 
@@ -36,20 +37,21 @@ export const delegateAgentTool = defineTool({
     })),
     waitSeconds: Type.Optional(Type.Integer({
       minimum: 0,
-      maximum: 3_600,
+      maximum: MAX_AGENT_RUN_WAIT_SECONDS,
       description: "Optionally block up to this many seconds for the run to finish. Default 0 (return immediately).",
     })),
   }),
-  async execute(_id, params) {
+  async execute(_id, params, _signal, _onUpdate, ctx) {
     const cwd = params.cwd ? (isAbsolute(params.cwd) ? params.cwd : resolve(params.cwd)) : process.cwd();
     const backend = await resolveBackend();
-    // Lineage is not model-controlled: a spoofed parentThreadId could misattribute nesting or
-    // reset the depth guard. The Operator delegates unattributed (depth 1); parentThreadId stays
-    // on the gateway API for trusted lower-level clients that carry a real delegating-thread id.
+    // Lineage comes from Pi's active session, never model arguments: a spoofed parent id could
+    // misattribute nesting or reset the depth guard. Lower-level Gateway clients may supply their
+    // own trusted parent identity.
     let run = await backend.delegateAgent({
       harness: params.harness,
       task: params.task,
       cwd,
+      parentThreadId: ctx.sessionManager.getSessionId(),
       ...(params.model ? { model: params.model } : {}),
       ...(params.timeoutSeconds ? { timeoutSeconds: params.timeoutSeconds } : {}),
     });

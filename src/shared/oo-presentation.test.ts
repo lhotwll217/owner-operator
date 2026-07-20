@@ -6,6 +6,7 @@
 // src/cli/oo-args.test.ts.
 import assert from "node:assert";
 import { initTheme } from "@earendil-works/pi-coding-agent";
+import { AgentRunStatus } from "@owner-operator/core";
 import {
   OO_CYCLE_WORDS,
   OO_NAME,
@@ -143,10 +144,10 @@ assert.ok(isAssistantMessageRow({ constructor: { name: "AssistantMessageComponen
 assert.ok(!isAssistantMessageRow({ constructor: { name: "ToolExecutionComponent" } }), "tool rows are not assistant rows");
 assert.ok(!isAssistantMessageRow(null), "null is not an assistant row");
 
-// 7. quietOoInteractiveMode wires the interception in place: tool rows are dropped from the
-//    chat, everything else passes through, and the startup update notices are silenced. A fake
-//    mode stands in for pi's InteractiveMode (structural, no pi import) — mirrors how pi calls
-//    `chatContainer.addChild(component)` and `showPackageUpdateNotification(...)`.
+// 7. quietOoInteractiveMode wires the interception in place: generic tool rows are dropped,
+//    delegated-run rows and non-tool content pass through, and startup notices are silenced.
+//    A fake mode stands in for pi's InteractiveMode (structural, no pi import) — mirrors how pi
+//    calls `chatContainer.addChild(component)` and `showPackageUpdateNotification(...)`.
 const children: unknown[] = [];
 let pkgNoticeShown = false;
 let verNoticeShown = false;
@@ -156,11 +157,17 @@ const fakeMode = {
   showNewVersionNotification: () => { verNoticeShown = true; },
 };
 quietOoInteractiveMode(fakeMode);
-fakeMode.chatContainer.addChild({ constructor: { name: "ToolExecutionComponent" } });
+const genericToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "read" };
+const delegateToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "delegate_agent" };
+const manageRunToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "manage_agent_run" };
+fakeMode.chatContainer.addChild(genericToolRow);
+fakeMode.chatContainer.addChild(delegateToolRow);
+fakeMode.chatContainer.addChild(manageRunToolRow);
 fakeMode.chatContainer.addChild({ constructor: { name: "AssistantMessageComponent" } });
 fakeMode.chatContainer.addChild({ constructor: { name: "Text" } });
-assert.equal(children.length, 2, "the tool row is dropped; assistant + text rows pass through");
-assert.ok(children.every((c) => !isToolExecutionRow(c)), "no tool row reaches the scrollback");
+assert.equal(children.length, 4, "generic tool rows are dropped; delegated runs and non-tool rows pass through");
+assert.ok(!children.includes(genericToolRow), "generic tool output stays out of scrollback");
+assert.ok(children.includes(delegateToolRow) && children.includes(manageRunToolRow), "delegated-run rows stay visible");
 fakeMode.showPackageUpdateNotification();
 fakeMode.showNewVersionNotification();
 assert.ok(!pkgNoticeShown && !verNoticeShown, "startup update notices are silenced");
@@ -236,7 +243,7 @@ assert.equal(
   formatAgentRunRow({
     harness: "claude-code",
     task: "research the flaky retry logic in the scheduler",
-    status: "running",
+    status: AgentRunStatus.Running,
     activity: "reading src/scheduler",
     createdAt: "2026-07-17T10:00:00.000Z",
   }, "2026-07-17T10:00:30.000Z"),
@@ -244,7 +251,7 @@ assert.equal(
 );
 assert.equal(
   formatAgentRunRow({
-    harness: "codex", task: "audit deps", status: "completed",
+    harness: "codex", task: "audit deps", status: AgentRunStatus.Completed,
     activity: "still going", resultTail: "no vulnerable deps found",
     createdAt: "2026-07-17T10:00:00.000Z", finishedAt: "2026-07-17T10:01:00.000Z",
   }),
@@ -252,7 +259,13 @@ assert.equal(
   "a terminal row shows the outcome, not the stale activity",
 );
 assert.equal(
-  formatAgentRunRow({ harness: "codex", task: "x", status: "failed", error: "turn failed: tool error", resultTail: "partial" }),
+  formatAgentRunRow({
+    harness: "codex",
+    task: "x",
+    status: AgentRunStatus.Failed,
+    error: "turn failed: tool error",
+    resultTail: "partial",
+  }),
   "codex · x · failed · turn failed: tool error",
   "a failed row prefers the error over partial output",
 );

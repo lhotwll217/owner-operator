@@ -71,13 +71,16 @@ struct SessionStateRow: Decodable, Identifiable {
     let stateSince: String
     let diffAdded: Int?
     let diffDeleted: Int?
+    let parentThreadId: String?
     /// Optimistic owner rename not yet confirmed by the daemon ("" = a pending clear).
     var pendingTitle: String? = nil
+    /// Presentation-only depth assigned after parent identities are joined.
+    var nestingDepth: Int = 0
 
     enum CodingKeys: String, CodingKey {
         case id, source, repo, app, topic, generatedTopic, ownerTitle, summary, nextSteps, priority
         case state, stateReason, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
-        case diffAdded, diffDeleted
+        case diffAdded, diffDeleted, parentThreadId
     }
 
     init(from decoder: Decoder) throws {
@@ -102,6 +105,7 @@ struct SessionStateRow: Decodable, Identifiable {
         stateSince = (try? c.decode(String.self, forKey: .stateSince)) ?? ""
         diffAdded = try? c.decode(Int.self, forKey: .diffAdded)
         diffDeleted = try? c.decode(Int.self, forKey: .diffDeleted)
+        parentThreadId = try? c.decode(String.self, forKey: .parentThreadId)
     }
 
     /// A pending rename previews immediately; a pending clear falls through to the generated title.
@@ -126,8 +130,8 @@ struct RepoGroup: Identifiable {
     var id: String { repo }
 }
 
-/// Group the gateway rows for rendering. State, title precedence, and enrichment are already in
-/// the row payload; this only applies local optimistic hides/renames and repo grouping.
+/// Group the gateway rows for rendering. State, title precedence, enrichment, and parent identity
+/// are already in the payload; this applies optimistic state and nests delegated children.
 func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], renames: [String: String] = [:]) -> (groups: [RepoGroup], counts: [ThreadState: Int]) {
     let rows = input.map { row -> SessionStateRow in
         var r = row
@@ -143,22 +147,48 @@ func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], 
 
     let visible = rows.filter { $0.state != .done && !hidden.contains($0.id) }
 
-    func attention(_ a: [SessionStateRow]) -> [SessionStateRow] {
-        a.sorted { l, r in
-            l.state.rank != r.state.rank
-                ? l.state.rank < r.state.rank
-                : l.lastMessageAt > r.lastMessageAt
+    func attentionBefore(_ l: SessionStateRow, _ r: SessionStateRow) -> Bool {
+        l.state.rank != r.state.rank
+            ? l.state.rank < r.state.rank
+            : l.lastMessageAt > r.lastMessageAt
+    }
+
+    func attention(_ rows: [SessionStateRow]) -> [SessionStateRow] {
+        rows.sorted(by: attentionBefore)
+    }
+
+    let visibleIds = Set(visible.map(\.id))
+    var rootsByRepo: [String: [SessionStateRow]] = [:]
+    var childrenByParent: [String: [SessionStateRow]] = [:]
+    for row in visible {
+        if let parent = row.parentThreadId, parent != row.id, visibleIds.contains(parent) {
+            childrenByParent[parent, default: []].append(row)
+        } else {
+            rootsByRepo[row.repo, default: []].append(row)
         }
     }
 
-    var byRepo: [String: [SessionStateRow]] = [:]
-    for r in visible { byRepo[r.repo, default: []].append(r) }
+    func loudestInTree(_ root: SessionStateRow) -> SessionStateRow {
+        attention([root] + (childrenByParent[root.id] ?? [])).first ?? root
+    }
 
-    var groups = byRepo.map { RepoGroup(repo: $0.key, rows: attention($0.value)) }
+    var groups = rootsByRepo.map { repo, roots -> RepoGroup in
+        let orderedRoots = roots.sorted { attentionBefore(loudestInTree($0), loudestInTree($1)) }
+        var flattened: [SessionStateRow] = []
+        for root in orderedRoots {
+            flattened.append(root)
+            flattened.append(contentsOf: attention(childrenByParent[root.id] ?? []).map { child in
+                var nested = child
+                nested.nestingDepth = 1
+                return nested
+            })
+        }
+        return RepoGroup(repo: repo, rows: flattened)
+    }
     groups.sort { a, b in
-        let la = a.rows[0], lb = b.rows[0]
-        if la.state.rank != lb.state.rank { return la.state.rank < lb.state.rank }
-        if la.lastMessageAt != lb.lastMessageAt { return la.lastMessageAt > lb.lastMessageAt }
+        let la = attention(a.rows)[0], lb = attention(b.rows)[0]
+        if attentionBefore(la, lb) { return true }
+        if attentionBefore(lb, la) { return false }
         return a.repo < b.repo
     }
     return (groups, counts)

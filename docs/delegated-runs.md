@@ -86,15 +86,3 @@ The `agent_runs` table is the durable ledger; its columns are documented once in
 [`src/state/schema-docs.ts`](../src/state/schema-docs.ts) and inspectable through `query_database`.
 `acpx` persists per-child session records under `~/.owner-operator/agent-runs/` (relocated out of
 the system tmpdir so restart reconciliation and resume find child identities across restarts).
-
-## Not yet built
-
-- **Live-updating terminal panel** (ticking elapsed, inline inspect/cancel/resume/steer actions)
-  and **widget parent/child nesting** — both consume the same ledger row over SSE.
-- **Pi children over ACP** — the pinned Pi fork ships no ACP server mode; a thin ACP shim over
-  `pi --mode json` is the fallback.
-- **Additional harnesses** (Gemini, OpenCode) — `acpx` ships adapters; each needs a capability
-  record and end-to-end verification before registration.
-- **Repo on the run row / in the terminal panel.** A run stores `cwd`; the repo surfaces only once
-  the child thread is observed (the two-entity join), so it reaches the panel through the same
-  joined-thread path as the widget nesting above, not the run row directly.
