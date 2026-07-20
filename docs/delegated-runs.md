@@ -57,6 +57,11 @@ Operator (delegate_agent / manage_agent_run tool)
   a review agent) uses its harness's native subagents, which never touch the ledger.
 - **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
   session options; omitting it lets the harness pick its default.
+- **Process ownership is explicit on POSIX.** Before `acpx` can spawn, the launcher persists a
+  lease and puts its unguessable id on a stable Owner Operator wrapper's command line. Normal
+  completion closes the ACP process tree and lease; daemon startup reaps only orphaned trees whose
+  live wrapper path and lease id both match. It fails closed on unavailable process listings and
+  never claims a bare Claude, Codex, or `acpx` process.
 
 ## Permissions
 
@@ -84,5 +89,6 @@ In the terminal, the `delegate_agent`/`manage_agent_run` tools render a compact 
 
 The `agent_runs` table is the durable ledger; its columns are documented once in
 [`src/state/schema-docs.ts`](../src/state/schema-docs.ts) and inspectable through `query_database`.
-`acpx` persists per-child session records under `~/.owner-operator/agent-runs/` (relocated out of
-the system tmpdir so restart reconciliation and resume find child identities across restarts).
+`acpx` session records and process leases live under `~/.owner-operator/agent-runs/` (relocated
+out of the system tmpdir so restart reconciliation, safe orphan reaping, and resume retain their
+identities across daemon restarts).

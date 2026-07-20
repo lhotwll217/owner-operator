@@ -1,5 +1,5 @@
-// Integration: a delegated run's child transcript, once observed by the monitor's normal
-// scan path, nests under its parent instead of appearing as an unexplained flat thread.
+// Integration: a delegated run's child transcript, once recorded in State, nests under its
+// parent instead of appearing as an unexplained flat thread.
 // The join key is identity — agent_runs.child_session_id == the observed thread id — never
 // inference from transcript-file growth (the pattern issue #69 bans).
 import assert from "node:assert";
@@ -7,8 +7,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness, type ScanRow } from "@owner-operator/core";
-import { InMemoryEventBus } from "../state/event-bus";
-import { State } from "../state/state";
+import { InMemoryEventBus } from "./event-bus";
+import { State } from "./state";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-delegated-join-"));
 const previousOoHome = process.env.OO_HOME;
@@ -51,8 +51,8 @@ try {
   const running = state.claimNextPendingAgentRun(3)!;
   state.recordAgentRunActivity(running.id, { childSessionId: "claude-child-abc" });
 
-  // The monitor observes the child's transcript through its ordinary scan path — the same
-  // entry point (recordObservation) it uses for every coding session.
+  // State receives the child's transcript through the same recordObservation entry point used
+  // for every coding session.
   state.recordObservation(scanRow("claude-child-abc"));
   state.recordObservation(scanRow("unrelated-session"));
 
@@ -64,7 +64,7 @@ try {
   assert.equal(unrelated?.parentThreadId, null, "an ordinary coding session has no parent");
   assert.equal(run.parentThreadId, "operator-thread");
 
-  process.stdout.write("ok — delegated child transcript nests under its parent through the monitor path\n");
+  process.stdout.write("ok — delegated child transcript nests under its parent in State\n");
 } finally {
   closeState?.();
   if (previousOoHome === undefined) delete process.env.OO_HOME;

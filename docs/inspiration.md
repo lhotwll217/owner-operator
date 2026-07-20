@@ -36,8 +36,12 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     the control plane owning its own turn deadline because a launcher timeout after partial output
     reads as completion
     ([runtime](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/runtime.ts#L80-L87));
-    and two-level resume identity — harness session id + acpx record id
-    ([handle-ensure](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/src/acp/control-plane/manager.runtime-handle-ensure.ts#L95-L154)).
+    two-level resume identity — harness session id + acpx record id
+    ([handle-ensure](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/src/acp/control-plane/manager.runtime-handle-ensure.ts#L95-L154));
+    and process ownership through a
+    [durable pre-spawn lease](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/runtime.ts#L967-L987)
+    plus a fail-closed
+    [startup orphan reaper](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/process-reaper.ts#L413-L446).
 - **[pi-subagents](https://github.com/nicobailon/pi-subagents/tree/c940fe20e86d9ba429eebcac809ec79d478ef206)** —
   pi-only subagent framework; a design donor, not a dependency.
   - Borrowed: its versioned lifecycle-artifact contract and lifecycle state names informed the

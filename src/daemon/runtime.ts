@@ -76,9 +76,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       (await import("../agent/agent")).runScheduledPrompt(request)),
   });
   modules.scheduler = true;
+  const agentRunLauncher = options.agentRuns?.launcher ?? createAcpLauncher();
+  // Reap crash-surviving harness trees before this daemon can claim or spawn a run.
+  await agentRunLauncher.reapOrphans?.();
   const agentRuns = new AgentRunExecutor(state, {
     ...options.agentRuns,
-    launcher: options.agentRuns?.launcher ?? createAcpLauncher(),
+    launcher: agentRunLauncher,
     logger: options.agentRuns?.logger ?? ((record) => {
       process.stderr.write(`${JSON.stringify({ component: "agent-runs", ...record })}\n`);
     }),

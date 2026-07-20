@@ -19,7 +19,11 @@ import type { State } from "../state/state";
 const RESULT_TAIL_BYTES = 32 * 1024;
 const WAIT_POLL_MS = 100;
 
-export type AgentRunLauncher = (request: AgentRunLaunchRequest) => Promise<AgentRunLaunchResult>;
+export interface AgentRunLauncher {
+  (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult>;
+  /** Production launchers may own crash-surviving child process trees. */
+  reapOrphans?(): Promise<void>;
+}
 
 export enum AgentRunExecutorLogEvent {
   RunFinished = "run-finished",

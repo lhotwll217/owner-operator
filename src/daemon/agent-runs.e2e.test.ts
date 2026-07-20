@@ -2,8 +2,8 @@
 // surface — launch, observe live state while the parent stays responsive, restart and
 // reconcile to a durable interrupted state, resume to the same child identity, receive the
 // durable result, and cancel a run. The child process itself is a controllable fake launcher;
-// the real ACP wire is the launcher seam (createAcpLauncher), typechecked against acpx. The
-// crash-vs-graceful reconciliation on start() is covered in executor.integration.test.ts.
+// the opt-in acp-launcher.live.test.ts drives the same path through real Claude/acpx. The
+// crash-vs-graceful reconciliation on start() is also covered in executor.integration.test.ts.
 import assert from "node:assert";
 import {
   type AgentRun,
@@ -15,6 +15,7 @@ import {
   type GatewayEvent,
 } from "@owner-operator/core";
 import { delegateAgentTool } from "../agent/tools/delegate-agent";
+import type { AgentRunLauncher } from "../agent-runs/executor";
 import { connectGateway } from "../gateway/client";
 import { tempOoHome, waitFor } from "../gateway/test/helpers";
 import { startDaemon } from "./runtime";
@@ -25,7 +26,8 @@ const { cleanup } = tempOoHome("oo-agent-runs-e2e");
 // the test resolves (or the executor aborts on stop/cancel). It reports the child's ACP
 // identity the way the real acpx bridge does.
 const parked: Array<{ request: AgentRunLaunchRequest; finish: (r: AgentRunLaunchResult) => void }> = [];
-const launcher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> =>
+let startupReaps = 0;
+const launcher: AgentRunLauncher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> =>
   new Promise((resolve, reject) => {
     request.onActivity({
       activity: "child started",
@@ -36,6 +38,7 @@ const launcher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult>
     request.signal.addEventListener("abort", abort, { once: true });
     parked.push({ request, finish: resolve });
   });
+launcher.reapOrphans = async () => { startupReaps += 1; };
 
 const startOnce = () => startDaemon({
   port: 0,
@@ -54,6 +57,7 @@ const toolContext = {
 let gateway: GatewayConn | undefined;
 let gateway2: GatewayConn | undefined;
 try {
+  assert.equal(startupReaps, 1, "daemon startup reaps stale delegated process trees before launch");
   gateway = (await connectGateway())!;
   assert.ok(gateway, "ready daemon is discoverable");
 
@@ -96,6 +100,7 @@ try {
 
   // --- restart on the same state: the run reconciled to interrupted, its result not lost --
   daemon = await startOnce();
+  assert.equal(startupReaps, 2, "every daemon incarnation performs startup reaping");
   gateway2 = (await connectGateway())!;
   const afterRestart = await gateway2.agentRun(launched.id);
   assert.equal(afterRestart.status, AgentRunStatus.Interrupted, "the interrupted run survives restart");
