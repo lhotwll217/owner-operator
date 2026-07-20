@@ -4,7 +4,7 @@
 // integration/e2e tiers; the others match their own suffix. Each file is a tsx script that
 // throws (→ nonzero exit) on failure, so we stop at the first that fails. Drop a new
 // *.integration.test.ts anywhere under src/ or test/ and it joins the tier automatically —
-// no script to edit. (Smoke/live tiers are not *.test.ts, so they never get swept in here.)
+// no script to edit. Live tests are explicitly excluded; smoke files do not use *.test.ts.
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -31,7 +31,10 @@ function walk(dir) {
 
 const matches = (f) =>
   tier === "unit"
-    ? f.endsWith(".test.ts") && !f.endsWith(".integration.test.ts") && !f.endsWith(".e2e.test.ts")
+    ? f.endsWith(".test.ts")
+      && !f.endsWith(".integration.test.ts")
+      && !f.endsWith(".e2e.test.ts")
+      && !f.endsWith(".live.test.ts")
     : f.endsWith(TIERS[tier]);
 
 const files = [join(root, "src"), join(root, "test")].flatMap(walk).filter(matches).sort();

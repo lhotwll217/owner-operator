@@ -26,6 +26,10 @@ evidence apertures.
 `schedules` and `schedule_runs` tables. Each run gets a fresh isolated Owner Operator
 session; the daemon, not the active chat, owns the timer.
 
+**Delegated runs** — use `delegate_agent`, `manage_agent_run`, and the documented `agent_runs`
+table. Tool schemas own invocation details; the runtime contract lives in
+`docs/delegated-runs.md`.
+
 ## Discovery policy
 
 Choose the shortest discovery mode the known facts justify; after every result, answer if the

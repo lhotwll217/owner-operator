@@ -117,10 +117,9 @@ struct CompactBar: View {
         .contentShape(Rectangle())
     }
 
-    /// The loudest thread overall is groups[0].rows[0]; surface it only when it needs you.
+    /// Surface the loudest needs-you row, including a delegated child nested below its parent.
     private var topNeedsYou: SessionStateRow? {
-        guard let r = client.groups.first?.rows.first, r.state == .needsYou else { return nil }
-        return r
+        client.groups.lazy.flatMap(\.rows).first { $0.state == .needsYou }
     }
 
     /// Threads whose turn finished in the last 5 min — what the soft pulse cycles through.
@@ -256,6 +255,7 @@ struct GroupView: View {
             }
             ForEach(group.rows) { row in
                 RowView(row: row, onDone: { onDone(row.id) }, onRename: { onRename(row.id, $0) })
+                    .padding(.leading, CGFloat(row.nestingDepth * 18))
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }

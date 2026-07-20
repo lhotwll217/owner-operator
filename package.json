@@ -23,6 +23,7 @@
     "test:integration": "node test/run.mjs integration",
     "test:e2e": "node test/run.mjs e2e",
     "test:agent": "tsx src/agent/agent.behavior.ts",
+    "test:agent-runs:live": "tsx src/agent-runs/acp-launcher.live.test.ts",
     "eval": "node eval/loop.mjs --full",
     "eval:loop": "node eval/loop.mjs",
     "eval:compare": "node eval/compare.mjs",
@@ -36,6 +37,7 @@
     "@earendil-works/pi-tui": "0.80.6",
     "@gotgenes/pi-permission-system": "20.7.1",
     "@owner-operator/core": "*",
+    "acpx": "0.11.2",
     "croner": "10.0.1",
     "jsonc-parser": "3.3.1"
   },

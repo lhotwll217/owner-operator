@@ -17,6 +17,7 @@
 // the chat scrollback — are handled by the `quietOoInteractiveMode` shim at the bottom.
 
 import { Text, type Component } from "@earendil-works/pi-tui";
+import { isTerminalAgentRunStatus, type AgentRunStatus } from "@owner-operator/core";
 import {
   Theme,
   type ExtensionAPI,
@@ -178,6 +179,10 @@ export function statusLabelFor(toolName: string): string {
       return "querying the session database…";
     case "schedule_prompt":
       return "scheduling…";
+    case "delegate_agent":
+      return "delegating to an agent…";
+    case "manage_agent_run":
+      return "managing a delegated run…";
     case "bash":
       return "running a command…";
     case "read":
@@ -191,6 +196,54 @@ export function statusLabelFor(toolName: string): string {
     default:
       return `${toolName.replace(/_/g, " ")}…`;
   }
+}
+
+// ---- Delegated-run row -------------------------------------------------------------------
+// Issue #69: a delegated run must not read as a generic tool call. The delegate/manage tools
+// render a compact agent row — harness · task · state · (activity / result / error) · elapsed —
+// so the terminal shows what the child is and where it stands.
+
+/** The wire AgentRun fields read by the compact terminal presentation. */
+export interface AgentRunRowView {
+  harness?: string;
+  task?: string;
+  status?: AgentRunStatus;
+  activity?: string | null;
+  resultTail?: string | null;
+  error?: string | null;
+  createdAt?: string | null;
+  finishedAt?: string | null;
+}
+
+/** Human elapsed between two ISO stamps, e.g. "2m 3s". Empty when either is missing. */
+export function elapsedLabel(fromIso?: string | null, toIso?: string | null): string {
+  if (!fromIso || !toIso) return "";
+  const seconds = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 1_000));
+  if (!Number.isFinite(seconds)) return "";
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+/** One compact line for a delegated run: "‹harness› · ‹task› · ‹state› · ‹detail› · ‹elapsed›".
+ * The detail is the terminal outcome (result/error) once finished, else the latest activity. */
+export function formatAgentRunRow(run: AgentRunRowView, nowIso?: string): string {
+  const parts: string[] = [];
+  if (run.harness) parts.push(run.harness);
+  if (run.task) parts.push(truncate(run.task, 60));
+  if (run.status) parts.push(run.status);
+  const isTerminal = run.status ? isTerminalAgentRunStatus(run.status) : false;
+  const detail = isTerminal
+    ? (run.error ?? run.resultTail ?? undefined)
+    : (run.activity ?? undefined);
+  if (detail) parts.push(truncate(detail.replace(/\s+/g, " ").trim(), 80));
+  const elapsed = elapsedLabel(run.createdAt, run.finishedAt ?? nowIso ?? null);
+  if (elapsed) parts.push(elapsed);
+  return parts.join(" · ");
+}
+
+function truncate(value: string, max: number): string {
+  const trimmed = value.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
 export type OoWorkEvent =
@@ -447,6 +500,7 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
 // components) rather than silently letting the dump back in.
 const TOOL_EXECUTION_COMPONENT = "ToolExecutionComponent";
 const ASSISTANT_MESSAGE_COMPONENT = "AssistantMessageComponent";
+const VISIBLE_TOOL_ROWS = new Set(["delegate_agent", "manage_agent_run"]);
 
 const className = (child: unknown): string | undefined =>
   (child as { constructor?: { name?: string } } | null)?.constructor?.name;
@@ -454,6 +508,13 @@ const className = (child: unknown): string | undefined =>
 /** True for the pi tool-row component we drop from the chat scrollback. */
 export function isToolExecutionRow(child: unknown): boolean {
   return className(child) === TOOL_EXECUTION_COMPONENT;
+}
+
+/** Delegated-run tools own compact presentation, so their rows survive the generic zero-dump
+ * filter. Pi stores the registered tool name on ToolExecutionComponent at runtime. */
+function isVisibleToolExecutionRow(child: unknown): boolean {
+  const toolName = (child as { toolName?: unknown } | null)?.toolName;
+  return typeof toolName === "string" && VISIBLE_TOOL_ROWS.has(toolName);
 }
 
 /** True for the pi assistant-message component whose thinking rendering we mute. */
@@ -496,7 +557,7 @@ export function quietOoInteractiveMode(mode: unknown): void {
   if (chat && typeof chat.addChild === "function") {
     const original = chat.addChild.bind(chat);
     chat.addChild = (child: unknown): void => {
-      if (isToolExecutionRow(child)) return; // never reaches scrollback; the working line shows it
+      if (isToolExecutionRow(child) && !isVisibleToolExecutionRow(child)) return;
       if (isAssistantMessageRow(child)) muteThinkingRendering(child); // reasoning renders nothing
       original(child);
     };

@@ -95,6 +95,31 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "last_message_at", description: "Latest message claimed by this schedule." },
     ],
   },
+  {
+    name: "agent_runs",
+    description: "Durable delegated-run ledger. One row per child agent run launched through Owner Operator. For a run's outcome, filter status and inspect result_tail, error, and activity.",
+    columns: [
+      { name: "id", description: "Stable run id." },
+      { name: "harness", description: "Child harness: claude-code | codex." },
+      { name: "task", description: "Prompt handed to the child agent." },
+      { name: "cwd", description: "Absolute working directory the child ran in." },
+      { name: "parent_thread_id", description: "Delegating session's thread id; NULL if unattributed. Children nest under this." },
+      { name: "model", description: "Model the child runs, when the owner pinned one; NULL lets the harness pick." },
+      { name: "depth", description: "Delegation depth; 1 for Operator-launched runs (cap is 1)." },
+      { name: "status", description: "pending | running | completed | failed | cancelled | interrupted | lost. Terminal states are monotonic." },
+      { name: "created_at", description: "ISO time the run was queued." },
+      { name: "started_at", description: "ISO time the run was claimed and started." },
+      { name: "finished_at", description: "ISO terminal time." },
+      { name: "activity", description: "Latest explicit activity line published by the child's runtime." },
+      { name: "last_activity_at", description: "ISO time of the latest activity; the lost-sweeper's liveness input." },
+      { name: "child_session_id", description: "Child harness's own session id: the resume identity and the monitor join key." },
+      { name: "acpx_record_id", description: "acpx session-record id; the second identity level for reconciliation." },
+      { name: "result_tail", description: "Bounded tail of the child's final report." },
+      { name: "error", description: "Terminal failure/interruption/loss explanation." },
+      { name: "resume_of_run_id", description: "Set when this run resumes an earlier run's child identity." },
+      { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
+    ],
+  },
 ];
 
 export function tableDoc(name: string): TableDoc | undefined {

@@ -37,6 +37,8 @@ export enum AgentToolId {
   QueryDatabase = "query_database",
   SchedulePrompt = "schedule_prompt",
   ManageSchedule = "manage_schedule",
+  DelegateAgent = "delegate_agent",
+  ManageAgentRun = "manage_agent_run",
 }
 
 export type ScheduleTrigger =

@@ -1,5 +1,7 @@
-import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
-import { withOoRenderers } from "../../shared/oo-presentation";
+import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings, type AgentRun } from "@owner-operator/core";
+import { formatAgentRunRow, withOoRenderers, type AgentRunRowView } from "../../shared/oo-presentation";
+import { delegateAgentTool } from "./delegate-agent";
+import { manageAgentRunTool } from "./manage-agent-run";
 import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
@@ -8,7 +10,24 @@ import { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state"
 export { queryDatabaseTool } from "./query-database";
 export { manageScheduleTool } from "./manage-schedule";
 export { schedulePromptTool } from "./schedule-prompt";
+export { delegateAgentTool } from "./delegate-agent";
+export { manageAgentRunTool } from "./manage-agent-run";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
+
+/** Map a wire AgentRun onto the presentation's structural row view. Explicit so a field rename on
+ * AgentRun is a compile error here, not a silently-undefined cast at the call sites. */
+function toAgentRunRowView(run: AgentRun): AgentRunRowView {
+  return {
+    harness: run.harness,
+    task: run.task,
+    status: run.status,
+    activity: run.activity,
+    resultTail: run.resultTail,
+    error: run.error,
+    createdAt: run.createdAt,
+    finishedAt: run.finishedAt,
+  };
+}
 
 export const ownerOperatorCustomTools = [
   withOoRenderers(getCurrentSessionStateTool, "session state"),
@@ -19,6 +38,14 @@ export const ownerOperatorCustomTools = [
   withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (args) => args.action ?? "" }),
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
   withOoRenderers(manageScheduleTool, "manage schedule", { summarizeCall: (args) => args.id ?? "" }),
+  withOoRenderers(delegateAgentTool, "delegate", {
+    summarizeCall: (args) => [args.harness, args.task].filter(Boolean).join(" · "),
+    summarizeResult: (result) => formatAgentRunRow(result?.details ? toAgentRunRowView(result.details) : {}),
+  }),
+  withOoRenderers(manageAgentRunTool, "manage run", {
+    summarizeCall: (args) => `${args.action ?? ""} ${args.id ?? ""}`.trim(),
+    summarizeResult: (result) => formatAgentRunRow(result?.details ? toAgentRunRowView(result.details) : {}),
+  }),
 ];
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
@@ -27,6 +54,8 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.QueryDatabase,
   AgentToolId.SchedulePrompt,
   AgentToolId.ManageSchedule,
+  AgentToolId.DelegateAgent,
+  AgentToolId.ManageAgentRun,
 ];
 
 // packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.

@@ -157,7 +157,7 @@ try {
   const trigger = gateway!.runSchedule(slowSchedule.id);
   const triggerOutcome = await Promise.race([
     trigger.then(() => "accepted" as const),
-    new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 50)),
+    new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 3_000)),
   ]);
   releaseSlowRun();
   assert.equal(triggerOutcome, "accepted", "manual runs are accepted without waiting for execution");

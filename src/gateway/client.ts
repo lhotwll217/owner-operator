@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
+  type AgentRun,
+  type AgentRunCreateInput,
   type DaemonHealth,
   type DaemonInfo,
   type DaemonReady,
@@ -131,6 +133,18 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       await json(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     runSchedule: (id: string) => post<ScheduleRun>(`/schedules/${encodeURIComponent(id)}/run`, {}),
+    listAgentRuns: (parentThreadId?: string) => json<AgentRun[]>(
+      `/agent-runs${parentThreadId ? `?parentThreadId=${encodeURIComponent(parentThreadId)}` : ""}`,
+    ),
+    agentRun: (id: string) => json<AgentRun>(`/agent-runs/${encodeURIComponent(id)}`),
+    delegateAgent: (input: AgentRunCreateInput) => post<AgentRun>("/agent-runs", input),
+    cancelAgentRun: (id: string) => post<AgentRun>(`/agent-runs/${encodeURIComponent(id)}/cancel`, {}),
+    resumeAgentRun: (id: string) => post<AgentRun>(`/agent-runs/${encodeURIComponent(id)}/resume`, {}),
+    waitAgentRun: (id: string, timeoutSeconds: number) => post<AgentRun>(
+      `/agent-runs/${encodeURIComponent(id)}/wait`,
+      { timeoutSeconds },
+      Math.max(LONG_OPERATION_MS, (timeoutSeconds + 5) * 1_000),
+    ),
     queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>(
       "/query-database",
       request,

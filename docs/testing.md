@@ -58,6 +58,7 @@ npm run lint                                          # oxlint
 npm run test:integration                              # one tier
 npm run poll:smoke                                    # smoke — reads your live sessions
 npm run test:agent                                    # live — needs model auth, paid
+OO_RUN_LIVE_ACP_TEST=1 npm run test:agent-runs:live   # real Claude/acpx kill + resume
 cd apps/widget && swift test                          # widget (Swift)
 ```
 

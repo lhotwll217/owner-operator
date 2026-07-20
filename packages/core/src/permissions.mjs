@@ -25,7 +25,7 @@ const BLACKLIST_REASON = "Owner Operator privacy blacklist";
 // generic changes separately.
 const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_session_state", "query_database"];
 const NATIVE_STATE_SURFACES = ["mark_thread_done"];
-const CHANGE_SURFACES = ["edit", "write", "schedule_prompt", "manage_schedule"];
+const CHANGE_SURFACES = ["edit", "write", "schedule_prompt", "manage_schedule", "delegate_agent", "manage_agent_run"];
 const MANAGED_SURFACES = [...READ_SURFACES, ...NATIVE_STATE_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
 const JSON_FORMAT = { insertSpaces: true, tabSize: 2, eol: "\n" };
 

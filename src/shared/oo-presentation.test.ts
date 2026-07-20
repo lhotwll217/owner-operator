@@ -6,13 +6,16 @@
 // src/cli/oo-args.test.ts.
 import assert from "node:assert";
 import { initTheme } from "@earendil-works/pi-coding-agent";
+import { AgentRunStatus } from "@owner-operator/core";
 import {
   OO_CYCLE_WORDS,
   OO_NAME,
   OO_TOOL_LINGER_TICKS,
   OoWorkingLine,
   buildOoTheme,
+  elapsedLabel,
   foldWorkingLine,
+  formatAgentRunRow,
   isAssistantMessageRow,
   isToolExecutionRow,
   ooInteractiveOptions,
@@ -141,10 +144,10 @@ assert.ok(isAssistantMessageRow({ constructor: { name: "AssistantMessageComponen
 assert.ok(!isAssistantMessageRow({ constructor: { name: "ToolExecutionComponent" } }), "tool rows are not assistant rows");
 assert.ok(!isAssistantMessageRow(null), "null is not an assistant row");
 
-// 7. quietOoInteractiveMode wires the interception in place: tool rows are dropped from the
-//    chat, everything else passes through, and the startup update notices are silenced. A fake
-//    mode stands in for pi's InteractiveMode (structural, no pi import) — mirrors how pi calls
-//    `chatContainer.addChild(component)` and `showPackageUpdateNotification(...)`.
+// 7. quietOoInteractiveMode wires the interception in place: generic tool rows are dropped,
+//    delegated-run rows and non-tool content pass through, and startup notices are silenced.
+//    A fake mode stands in for pi's InteractiveMode (structural, no pi import) — mirrors how pi
+//    calls `chatContainer.addChild(component)` and `showPackageUpdateNotification(...)`.
 const children: unknown[] = [];
 let pkgNoticeShown = false;
 let verNoticeShown = false;
@@ -154,11 +157,17 @@ const fakeMode = {
   showNewVersionNotification: () => { verNoticeShown = true; },
 };
 quietOoInteractiveMode(fakeMode);
-fakeMode.chatContainer.addChild({ constructor: { name: "ToolExecutionComponent" } });
+const genericToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "read" };
+const delegateToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "delegate_agent" };
+const manageRunToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "manage_agent_run" };
+fakeMode.chatContainer.addChild(genericToolRow);
+fakeMode.chatContainer.addChild(delegateToolRow);
+fakeMode.chatContainer.addChild(manageRunToolRow);
 fakeMode.chatContainer.addChild({ constructor: { name: "AssistantMessageComponent" } });
 fakeMode.chatContainer.addChild({ constructor: { name: "Text" } });
-assert.equal(children.length, 2, "the tool row is dropped; assistant + text rows pass through");
-assert.ok(children.every((c) => !isToolExecutionRow(c)), "no tool row reaches the scrollback");
+assert.equal(children.length, 4, "generic tool rows are dropped; delegated runs and non-tool rows pass through");
+assert.ok(!children.includes(genericToolRow), "generic tool output stays out of scrollback");
+assert.ok(children.includes(delegateToolRow) && children.includes(manageRunToolRow), "delegated-run rows stay visible");
 fakeMode.showPackageUpdateNotification();
 fakeMode.showNewVersionNotification();
 assert.ok(!pkgNoticeShown && !verNoticeShown, "startup update notices are silenced");
@@ -223,5 +232,42 @@ assert.equal(shimmedChildren.length, 3, "assistant components still pass through
 
 // 9. Silent start: no initialMessage is fired by default.
 assert.equal(ooInteractiveOptions().initialMessage, undefined, "no auto model turn on launch");
+
+// 10. Delegated-run row: a compact agent line, not a generic tool call. Running rows show the
+// latest activity; terminal rows show the outcome (error preferred over result); elapsed derives
+// from created→finished (or created→now while live).
+assert.equal(elapsedLabel("2026-07-17T10:00:00.000Z", "2026-07-17T10:02:03.000Z"), "2m 3s");
+assert.equal(elapsedLabel("2026-07-17T10:00:00.000Z", "2026-07-17T10:00:09.000Z"), "9s");
+assert.equal(elapsedLabel(undefined, "2026-07-17T10:00:09.000Z"), "", "elapsed needs both stamps");
+assert.equal(
+  formatAgentRunRow({
+    harness: "claude-code",
+    task: "research the flaky retry logic in the scheduler",
+    status: AgentRunStatus.Running,
+    activity: "reading src/scheduler",
+    createdAt: "2026-07-17T10:00:00.000Z",
+  }, "2026-07-17T10:00:30.000Z"),
+  "claude-code · research the flaky retry logic in the scheduler · running · reading src/scheduler · 30s",
+);
+assert.equal(
+  formatAgentRunRow({
+    harness: "codex", task: "audit deps", status: AgentRunStatus.Completed,
+    activity: "still going", resultTail: "no vulnerable deps found",
+    createdAt: "2026-07-17T10:00:00.000Z", finishedAt: "2026-07-17T10:01:00.000Z",
+  }),
+  "codex · audit deps · completed · no vulnerable deps found · 1m 0s",
+  "a terminal row shows the outcome, not the stale activity",
+);
+assert.equal(
+  formatAgentRunRow({
+    harness: "codex",
+    task: "x",
+    status: AgentRunStatus.Failed,
+    error: "turn failed: tool error",
+    resultTail: "partial",
+  }),
+  "codex · x · failed · turn failed: tool error",
+  "a failed row prefers the error over partial output",
+);
 
 process.stdout.write("ok — oo presentation: de-branded marker, OO palette, single working line, cycle words + tool linger, zero-dump shim (tool rows + thinking), silent start\n");

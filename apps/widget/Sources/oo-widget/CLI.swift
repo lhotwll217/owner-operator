@@ -33,8 +33,9 @@ func renderText(rows: [SessionStateRow], port: Int) -> String {
         for r in g.rows {
             let badge = r.priority.map { sgr(33, "P\($0)") + " " } ?? ""
             let age = sgr(90, shortAge(r.lastActive))
-            lines.append("  \(glyphColored(r.state)) \(badge)\(r.title)  \(age)")
-            if let next = r.nextSteps, !next.isEmpty { lines.append(sgr(90, "      → \(next)")) }
+            let indent = String(repeating: "  ", count: r.nestingDepth)
+            lines.append("  \(indent)\(glyphColored(r.state)) \(badge)\(r.title)  \(age)")
+            if let next = r.nextSteps, !next.isEmpty { lines.append(sgr(90, "      \(indent)→ \(next)")) }
         }
     }
     lines.append("")

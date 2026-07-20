@@ -1,4 +1,5 @@
 import {
+  AgentRunStatus,
   DomainEventKind,
   ScheduleRunStatus,
   isBlacklisted,
@@ -6,6 +7,9 @@ import {
   loadBlacklist,
   parseWindowMs,
   resolveState,
+  type AgentRun,
+  type AgentRunActivityUpdate,
+  type AgentRunOutcome,
   type DomainEvent,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -18,7 +22,7 @@ import {
   type MarkThreadsDoneResult,
 } from "@owner-operator/core";
 import { randomUUID } from "node:crypto";
-import { ThreadDb, type SessionStateRow } from "./database";
+import { ThreadDb, type AgentRunInsert, type SessionStateRow } from "./database";
 import { InMemoryEventBus } from "./event-bus";
 import { ownerOperatorHome } from "../shared/paths";
 
@@ -278,8 +282,68 @@ export class State {
     return claimed;
   }
 
+  createAgentRun(insert: Omit<AgentRunInsert, "id">): AgentRun {
+    const run = this.db.createAgentRun({ ...insert, id: randomUUID() });
+    this.publishAgentRun(run);
+    return run;
+  }
+
+  claimNextPendingAgentRun(maxRunning: number): AgentRun | null {
+    const run = this.db.claimNextPendingAgentRun(maxRunning);
+    if (run) this.publishAgentRun(run);
+    return run;
+  }
+
+  recordAgentRunActivity(id: string, update: AgentRunActivityUpdate): AgentRun | null {
+    const run = this.db.recordAgentRunActivity(id, update);
+    if (run) this.publishAgentRun(run);
+    return run;
+  }
+
+  finishAgentRun(id: string, outcome: AgentRunOutcome): AgentRun | null {
+    const run = this.db.finishAgentRun(id, outcome);
+    if (run) this.publishAgentRun(run);
+    return run;
+  }
+
+  markRunningAgentRunsInterrupted(reason: string): string[] {
+    const ids = this.db.markRunningAgentRunsInterrupted(reason);
+    for (const id of ids) {
+      this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Interrupted });
+    }
+    return ids;
+  }
+
+  markAgentRunsLost(liveRunIds: readonly string[], activityCutoffIso: string): string[] {
+    const ids = this.db.markAgentRunsLost(liveRunIds, activityCutoffIso);
+    for (const id of ids) {
+      this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Lost });
+    }
+    return ids;
+  }
+
+  agentRunById(id: string): AgentRun | undefined {
+    return this.db.agentRunById(id);
+  }
+
+  agentRunByChildSession(childSessionId: string): AgentRun | undefined {
+    return this.db.agentRunByChildSession(childSessionId);
+  }
+
+  nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
+    return this.db.nonterminalAgentRunByChildSession(childSessionId);
+  }
+
+  listAgentRuns(filter: { parentThreadId?: string } = {}): AgentRun[] {
+    return this.db.listAgentRuns(filter);
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  private publishAgentRun(run: AgentRun): void {
+    this.publish({ kind: DomainEventKind.AgentRunChanged, runId: run.id, status: run.status });
   }
 
   private publish(event: DomainEvent): void {

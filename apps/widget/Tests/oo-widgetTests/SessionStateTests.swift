@@ -21,6 +21,7 @@ struct SessionStateTests {
         ownerTitle: String? = nil,
         nextSteps: String? = nil,
         priority: Int? = nil,
+        parentThreadId: String? = nil,
         lastMessageAt: String = "2026-01-01T00:00:00.000Z",
         stateSince: String = "2026-01-01T00:00:00.000Z",
         diffAdded: Int? = nil
@@ -34,6 +35,7 @@ struct SessionStateTests {
         if let ownerTitle { d["ownerTitle"] = ownerTitle }
         if let nextSteps { d["nextSteps"] = nextSteps }
         if let priority { d["priority"] = priority }
+        if let parentThreadId { d["parentThreadId"] = parentThreadId }
         if let diffAdded { d["diffAdded"] = diffAdded }
         return d
     }
@@ -89,6 +91,19 @@ struct SessionStateTests {
         ])
         let (groups, _) = buildSessionState(rows: input)
         #expect(groups.map(\.repo) == ["beta", "alpha"])
+    }
+
+    @Test func delegatedChildrenNestImmediatelyAfterTheirParent() throws {
+        let input = try rows([
+            row(id: "other", repo: "repo", state: "needs-you"),
+            row(id: "child", repo: "child-repo", state: "working", parentThreadId: "parent"),
+            row(id: "parent", repo: "repo", state: "idle"),
+        ])
+        let (groups, _) = buildSessionState(rows: input)
+        #expect(groups.count == 1)
+        #expect(groups[0].repo == "repo")
+        #expect(groups[0].rows.map(\.id) == ["other", "parent", "child"])
+        #expect(groups[0].rows.map(\.nestingDepth) == [0, 0, 1])
     }
 
     @Test func hiddenDroppedFromBodyButCountedDone() throws {

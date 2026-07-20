@@ -2,9 +2,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   DatabaseQueryAction,
+  DEFAULT_AGENT_RUN_WAIT_SECONDS,
   DEFAULT_DAEMON_PORT,
   DomainEventKind,
   GatewayEventKind,
+  MAX_AGENT_RUN_WAIT_SECONDS,
+  type AgentRun,
+  type AgentRunCreateInput,
   type DaemonHealth,
   type DaemonReady,
   type DatabaseQueryRequest,
@@ -33,11 +37,21 @@ export interface GatewayQueryService {
   query(sql: string): unknown;
 }
 
+export interface GatewayAgentRuns {
+  list(parentThreadId?: string): AgentRun[];
+  get(id: string): AgentRun | undefined;
+  launch(input: AgentRunCreateInput): AgentRun;
+  cancel(id: string): Promise<AgentRun>;
+  resume(id: string): AgentRun;
+  wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
+}
+
 export interface GatewayOptions {
   authToken: string;
   state: State;
   monitor: GatewayMonitor;
   scheduler: GatewayScheduler;
+  agentRuns: GatewayAgentRuns;
   query: GatewayQueryService;
   health: () => DaemonHealth;
   ready: () => DaemonReady;
@@ -66,6 +80,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 const invalidationFor = (kind: DomainEventKind): GatewayEvent => {
   if (kind === DomainEventKind.ScheduleChanged) return { kind: GatewayEventKind.ScheduleChanged };
   if (kind === DomainEventKind.ScheduleRunChanged) return { kind: GatewayEventKind.ScheduleRunChanged };
+  if (kind === DomainEventKind.AgentRunChanged) return { kind: GatewayEventKind.AgentRunChanged };
   return { kind: GatewayEventKind.StateChanged };
 };
 
@@ -96,6 +111,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       const route = `${request.method} ${url.pathname}`;
       const scheduleId = /^\/schedules\/([^/]+)/.exec(url.pathname)?.[1];
+      const agentRunId = /^\/agent-runs\/([^/]+)/.exec(url.pathname)?.[1];
 
       if (route === "GET /health") return respond(200, options.health());
       if (route === "GET /ready") {
@@ -147,6 +163,35 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       if (scheduleId && request.method === "POST" && url.pathname === `/schedules/${scheduleId}/run`) {
         return respond(202, await options.scheduler.runNow(scheduleId));
+      }
+
+      if (route === "GET /agent-runs") {
+        const parent = url.searchParams.get("parentThreadId");
+        return respond(200, options.agentRuns.list(parent ?? undefined));
+      }
+      if (route === "POST /agent-runs") {
+        const run = options.agentRuns.launch(await readBody(request) as AgentRunCreateInput);
+        return respond(201, run);
+      }
+      if (agentRunId && request.method === "GET" && url.pathname === `/agent-runs/${agentRunId}`) {
+        const run = options.agentRuns.get(agentRunId);
+        return run ? respond(200, run) : respond(404, { error: "no such agent run" });
+      }
+      if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/cancel`) {
+        return respond(200, await options.agentRuns.cancel(agentRunId));
+      }
+      if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/resume`) {
+        return respond(201, options.agentRuns.resume(agentRunId));
+      }
+      if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/wait`) {
+        const body = await readBody(request) as { timeoutSeconds?: unknown };
+        const raw = body.timeoutSeconds;
+        if (raw !== undefined &&
+            (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0 || raw > MAX_AGENT_RUN_WAIT_SECONDS)) {
+          return respond(400, { error: `timeoutSeconds must be an integer in 0..${MAX_AGENT_RUN_WAIT_SECONDS}` });
+        }
+        const timeoutSeconds = typeof raw === "number" ? raw : DEFAULT_AGENT_RUN_WAIT_SECONDS;
+        return respond(200, await options.agentRuns.wait(agentRunId, timeoutSeconds));
       }
 
       if (route === "POST /query-database") {
