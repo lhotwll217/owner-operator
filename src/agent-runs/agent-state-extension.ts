@@ -7,21 +7,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { resolveBackend } from "../gateway/client";
+import {
+  AGENT_RUN_COMPLETION_MESSAGE_TYPE,
+  PiParentCompletionAdapter,
+  renderAgentRunCompletionMessage,
+} from "./agent-run-completion";
+import { formatAgentElapsed } from "./format-agent-elapsed";
 import { ParentRunSession, gatewayParentRunAdapter } from "./parent-run-session";
 
 export type AgentStatePickerAction =
   | { kind: "close" }
   | { kind: "cancel"; runId: string }
   | { kind: "resume"; runId: string };
-
-export function formatAgentElapsed(elapsedMs: number): string {
-  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours) return `${hours}h ${minutes % 60}m`;
-  if (minutes) return `${minutes}m`;
-  return `${seconds}s`;
-}
 
 function statusColor(theme: Theme, run: AgentRunView): string {
   const value = `${run.status.glyph} ${run.status.text}`;
@@ -132,6 +129,7 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
   const getGateway = options.resolveGateway ?? resolveBackend;
   const retryDelayMs = options.retryDelayMs ?? 1_000;
   return (pi: ExtensionAPI) => {
+    pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
     let session: ParentRunSession | undefined;
     let unsubscribeView: (() => void) | undefined;
     let picker: AgentStatePicker | undefined;
@@ -159,7 +157,9 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
         try {
           const gateway = await getGateway();
           if (ownGeneration !== generation) return;
-          candidate = new ParentRunSession(ctx.sessionManager.getSessionId(), gatewayParentRunAdapter(gateway));
+          candidate = new ParentRunSession(ctx.sessionManager.getSessionId(), gatewayParentRunAdapter(gateway), {
+            completionAdapter: new PiParentCompletionAdapter(pi, ctx.sessionManager),
+          });
           unsubscribe = candidate.subscribe((view) => {
             if (ownGeneration !== generation) return;
             ctx.ui.setStatus("agent-state", view.footer ?? undefined);

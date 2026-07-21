@@ -160,6 +160,7 @@ export interface AgentRunCompletionEnvelope {
   task: string;
   outcome: AgentRunStatus;
   completedAt: string;
+  elapsedMs: number;
   evidence: {
     trust: "untrusted";
     result: string;
@@ -190,6 +191,7 @@ export function createAgentRunCompletionEnvelope(
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
     outcome: run.status,
     completedAt: run.finishedAt,
+    elapsedMs: elapsedMs(run, run.finishedAt),
     evidence: {
       trust: "untrusted",
       result: bounded(run.resultTail, AGENT_STATE_RESULT_MAX_LENGTH),

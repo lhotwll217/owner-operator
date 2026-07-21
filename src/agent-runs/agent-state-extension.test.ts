@@ -9,10 +9,10 @@ import { deriveParentAgentState } from "@owner-operator/core/agent-state";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { buildOoTheme } from "../shared/oo-presentation";
 import { agentRunFixture as run } from "../../test/fixtures/agent-run";
+import { formatAgentElapsed } from "./format-agent-elapsed";
 import {
   AgentStatePicker,
   createAgentStateExtension,
-  formatAgentElapsed,
   type AgentStatePickerAction,
 } from "./agent-state-extension";
 
@@ -88,10 +88,14 @@ const gateway = {
 
 const handlers = new Map<string, Function>();
 let command: { handler(args: string, ctx: any): Promise<void> } | undefined;
+const completionMessages: Array<{ message: any; options: any }> = [];
+let completionRenderer: Function | undefined;
 const extension = createAgentStateExtension({ resolveGateway: async () => gateway as GatewayApi });
 extension({
   on(name: string, handler: Function) { handlers.set(name, handler); },
   registerCommand(name: string, value: typeof command) { if (name === "agent-state") command = value; },
+  registerMessageRenderer(_type: string, renderer: Function) { completionRenderer = renderer; },
+  sendMessage(message: any, options: any) { completionMessages.push({ message, options }); },
 } as any);
 
 const statuses: Array<string | undefined> = [];
@@ -99,7 +103,7 @@ let confirmed = false;
 const notices: string[] = [];
 const ctx = {
   mode: "tui",
-  sessionManager: { getSessionId: () => "parent-90" },
+  sessionManager: { getSessionId: () => "parent-90", getEntries: () => [] },
   ui: {
     theme,
     setStatus(_key: string, text: string | undefined) { statuses.push(text); },
@@ -121,6 +125,8 @@ confirmed = true;
 await command!.handler("", ctx);
 assert.ok(calls.includes("cancel:running"), "confirmed picker action cancels through the parent session");
 assert.equal(statuses.at(-1), undefined, "routine terminal completion hides the footer");
+assert.ok(completionRenderer, "the extension registers the typed completion renderer");
+assert.deepEqual(completionMessages[0]?.options, { triggerTurn: true, deliverAs: "followUp" });
 
 gatewayListener?.({ kind: GatewayEventKind.AgentRunChanged });
 await new Promise<void>((resolve) => setImmediate(resolve));
@@ -143,6 +149,8 @@ createAgentStateExtension({
 })({
   on(name: string, handler: Function) { unavailableHandlers.set(name, handler); },
   registerCommand() {},
+  registerMessageRenderer() {},
+  sendMessage() {},
 } as any);
 await assert.doesNotReject(
   () => unavailableHandlers.get("session_start")?.({}, ctx),
@@ -162,6 +170,8 @@ createAgentStateExtension({
 })({
   on(name: string, handler: Function) { staleHandlers.set(name, handler); },
   registerCommand() {},
+  registerMessageRenderer() {},
+  sendMessage() {},
 } as any);
 const staleStart = staleHandlers.get("session_start")?.({}, ctx);
 await staleHandlers.get("session_shutdown")?.({}, ctx);
@@ -186,6 +196,8 @@ const lateListGateway = {
 createAgentStateExtension({ resolveGateway: async () => lateListGateway as GatewayApi })({
   on(name: string, handler: Function) { lateListHandlers.set(name, handler); },
   registerCommand() {},
+  registerMessageRenderer() {},
+  sendMessage() {},
 } as any);
 const lateListStart = lateListHandlers.get("session_start")?.({}, ctx);
 await new Promise<void>((resolve) => setImmediate(resolve));

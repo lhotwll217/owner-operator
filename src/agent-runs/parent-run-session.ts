@@ -1,11 +1,14 @@
 import {
+  AgentRunStatus,
   GatewayEventKind,
   isTerminalAgentRunStatus,
   type AgentRun,
   type GatewayApi,
 } from "@owner-operator/core";
 import {
+  createAgentRunCompletionEnvelope,
   deriveParentAgentState,
+  type AgentRunCompletionEnvelope,
   type ParentAgentStateView,
 } from "@owner-operator/core/agent-state";
 
@@ -17,9 +20,24 @@ export interface ParentRunAdapter {
   resume(runId: string): Promise<AgentRun>;
 }
 
+export interface ParentCompletionDeliveryResult {
+  /** Event IDs whose custom messages are confirmed in the parent transcript. */
+  delivered: readonly string[];
+  /** Event IDs already present in the parent transcript before this delivery attempt. */
+  duplicate: readonly string[];
+}
+
+/** Narrow parent-thread completion seam. Pi and tests consume the same bounded envelopes. */
+export interface ParentCompletionAdapter {
+  deliver(envelopes: readonly AgentRunCompletionEnvelope[]): Promise<ParentCompletionDeliveryResult>;
+}
+
 export interface ParentRunSessionOptions {
   now?: () => string;
   recentLimit?: number;
+  completionAdapter?: ParentCompletionAdapter;
+  /** Routine completed runs batch for approximately two seconds in production. */
+  successBatchDelayMs?: number;
   onError?: (error: unknown) => void;
 }
 
@@ -36,7 +54,14 @@ export class ParentRunSession {
   private readonly listeners = new Set<ViewListener>();
   private readonly now: () => string;
   private readonly recentLimit: number | undefined;
+  private readonly completionAdapter: ParentCompletionAdapter | undefined;
+  private readonly successBatchDelayMs: number;
   private readonly onError: (error: unknown) => void;
+  private readonly pendingCompletionIds = new Set<string>();
+  private readonly settledCompletionIds = new Set<string>();
+  private readonly successBatch = new Map<string, AgentRunCompletionEnvelope>();
+  private readonly completionPromises = new Set<Promise<void>>();
+  private successBatchTimer?: ReturnType<typeof setTimeout>;
   private unsubscribeAdapter?: () => void;
   private reconcilePromise?: Promise<void>;
   private dirty = false;
@@ -50,6 +75,8 @@ export class ParentRunSession {
   ) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.recentLimit = options.recentLimit;
+    this.completionAdapter = options.completionAdapter;
+    this.successBatchDelayMs = Math.max(0, options.successBatchDelayMs ?? 2_000);
     this.onError = options.onError ?? (() => undefined);
   }
 
@@ -80,6 +107,7 @@ export class ParentRunSession {
   /** Resolve after all currently required coalesced lists have settled. */
   async settled(): Promise<void> {
     while (this.reconcilePromise) await this.reconcilePromise;
+    while (this.completionPromises.size) await Promise.all(this.completionPromises);
   }
 
   async cancel(runId: string): Promise<void> {
@@ -100,6 +128,9 @@ export class ParentRunSession {
     if (this.stopped) return;
     this.stopped = true;
     this.dirty = false;
+    if (this.successBatchTimer) clearTimeout(this.successBatchTimer);
+    this.successBatchTimer = undefined;
+    this.successBatch.clear();
     this.unsubscribeAdapter?.();
     this.unsubscribeAdapter = undefined;
     this.listeners.clear();
@@ -139,6 +170,7 @@ export class ParentRunSession {
     this.runs.clear();
     for (const [id, run] of next) this.runs.set(id, run);
     this.notify();
+    this.reconcileCompletions(next.values());
   }
 
   private reconcileOne(run: AgentRun): void {
@@ -153,6 +185,48 @@ export class ParentRunSession {
     for (const listener of this.listeners) {
       try { listener(view); } catch { /* one surface consumer must not break reconciliation */ }
     }
+  }
+
+  private reconcileCompletions(runs: Iterable<AgentRun>): void {
+    if (!this.completionAdapter || this.stopped) return;
+    for (const run of runs) {
+      if (!isTerminalAgentRunStatus(run.status) || !run.finishedAt) continue;
+      const envelope = createAgentRunCompletionEnvelope(run);
+      if (this.pendingCompletionIds.has(envelope.eventId) || this.settledCompletionIds.has(envelope.eventId)) continue;
+      this.pendingCompletionIds.add(envelope.eventId);
+      if (run.status === AgentRunStatus.Completed && this.successBatchDelayMs > 0) {
+        this.successBatch.set(envelope.eventId, envelope);
+        this.successBatchTimer ??= setTimeout(() => this.flushSuccessBatch(), this.successBatchDelayMs);
+      } else {
+        this.dispatchCompletions([envelope]);
+      }
+    }
+  }
+
+  private flushSuccessBatch(): void {
+    this.successBatchTimer = undefined;
+    if (this.stopped || !this.successBatch.size) return;
+    const batch = [...this.successBatch.values()];
+    this.successBatch.clear();
+    this.dispatchCompletions(batch);
+  }
+
+  private dispatchCompletions(envelopes: readonly AgentRunCompletionEnvelope[]): void {
+    if (!this.completionAdapter || this.stopped || !envelopes.length) return;
+    const eventIds = envelopes.map(({ eventId }) => eventId);
+    const delivery = this.completionAdapter.deliver(envelopes)
+      .then(({ delivered, duplicate }) => {
+        const settled = new Set([...delivered, ...duplicate]);
+        for (const eventId of eventIds) {
+          if (settled.has(eventId)) this.settledCompletionIds.add(eventId);
+        }
+      })
+      .catch((error) => this.onError(error))
+      .finally(() => {
+        for (const eventId of eventIds) this.pendingCompletionIds.delete(eventId);
+        this.completionPromises.delete(delivery);
+      });
+    this.completionPromises.add(delivery);
   }
 }
 

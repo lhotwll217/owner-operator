@@ -6,7 +6,9 @@ import {
 } from "./agent-runs";
 import {
   AGENT_STATE_ACTIVITY_MAX_LENGTH,
+  AGENT_STATE_ARTIFACT_LIMIT,
   AGENT_STATE_RECENT_LIMIT,
+  AGENT_STATE_RESULT_MAX_LENGTH,
   AGENT_STATE_TASK_MAX_LENGTH,
   agentRunCompletionEventId,
   createAgentRunCompletionEnvelope,
@@ -137,13 +139,22 @@ const terminal = run("completed-new", AgentRunStatus.Completed, {
   finishedAt: "2026-07-21T12:09:00.000Z",
 });
 const envelope = createAgentRunCompletionEnvelope(terminal, {
-  artifacts: [{ label: "report", reference: "artifact://auth-report" }],
+  artifacts: [
+    { label: "report", reference: "artifact://auth-report" },
+    ...Array.from({ length: AGENT_STATE_ARTIFACT_LIMIT + 2 }, (_, index) => ({
+      label: `artifact ${index}`,
+      reference: `artifact://${index}/${"r".repeat(600)}`,
+    })),
+  ],
 });
 assert.equal(envelope.version, 1);
 assert.equal(envelope.eventId, agentRunCompletionEventId(terminal.id));
+assert.equal(envelope.elapsedMs, 480_000);
 assert.equal(envelope.evidence.trust, "untrusted");
-assert.ok(envelope.evidence.result.length < terminal.resultTail!.length, "child result is bounded");
-assert.deepEqual(envelope.artifacts, [{ label: "report", reference: "artifact://auth-report" }]);
+assert.ok(envelope.evidence.result.length <= AGENT_STATE_RESULT_MAX_LENGTH, "child result is bounded");
+assert.equal(envelope.artifacts.length, AGENT_STATE_ARTIFACT_LIMIT, "artifact references are bounded by count");
+assert.deepEqual(envelope.artifacts[0], { label: "report", reference: "artifact://auth-report" });
+assert.ok(envelope.artifacts.every(({ reference }) => reference.length <= 512));
 assert.match(envelope.parentInstruction, /material outcome.*implication.*owner action/i);
 assert.throws(
   () => createAgentRunCompletionEnvelope(run("not-done", AgentRunStatus.Running)),

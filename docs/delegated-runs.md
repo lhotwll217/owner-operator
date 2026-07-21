@@ -153,6 +153,12 @@ is separate: the footer shows queued, running, and attention counts only while o
 harness, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
 Cancellation confirms before mutation.
 
+Terminal completion behavior is defined at four linked seams: the browser-safe
+[completion envelope](../packages/core/src/agent-state.ts), parent-scoped
+[terminal reconciliation](../src/agent-runs/parent-run-session.ts), the
+[Pi custom-message adapter](../src/agent-runs/agent-run-completion.ts), and its model-free
+[saved-session integration contract](../test/agent-run-completion.integration.test.ts).
+
 ## State
 
 The `agent_runs` table is the durable ledger; its columns are documented once in
