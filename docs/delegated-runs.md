@@ -147,10 +147,11 @@ admitted OO-delegated child currently appears in the widget as an ordinary root 
 ledger record remains the canonical provenance.
 
 In the terminal, the `delegate_agent`/`manage_agent_run` tools retain their compact launch/control
-snapshot row. The parent-scoped live view is separate: the footer shows queued, running, and
-attention counts only while one exists; `/agent-state` orders attention before active and recent
-terminal runs, then shows bounded task, harness, glyph-plus-text status, elapsed time, activity,
-and only currently valid controls. Cancellation confirms before mutation.
+snapshot row (`formatAgentRunRow` in `src/shared/oo-presentation.ts`). The parent-scoped live view
+is separate: the footer shows queued, running, and attention counts only while one exists;
+`/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
+harness, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
+Cancellation confirms before mutation.
 
 ## State
 

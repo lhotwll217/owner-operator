@@ -116,8 +116,7 @@ process.stdout.write(`${ooTheme.fg("accent", ooMarker(ooVersion))}\n`);
 
 // Silent start: no auto model turn. The owner asks; the widget owns the "what's ongoing" view.
 const interactive = new InteractiveMode(runtime, ooInteractiveOptions());
-// Zero-dump: drop pi's tool-execution rows, strip thinking from assistant messages, and silence
-// startup update notices (no extension hook for any of them). During a turn the only moving part
-// is the single working line driven by ooPresentationExtension.
+// Keep raw tool detail behind Pi's explicit expansion, strip reasoning from assistant messages,
+// and silence startup notices. ooPresentationExtension owns the semantic timeline separately.
 quietOoInteractiveMode(interactive);
 await interactive.run();
