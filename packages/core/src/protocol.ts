@@ -100,7 +100,8 @@ export interface GatewayApi {
   resumeAgentRun(id: string): Promise<AgentRun>;
   waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
-  subscribe(listener: (event: GatewayEvent) => void): () => void;
+  /** `onConnected` fires after each initial or replacement SSE connection is established. */
+  subscribe(listener: (event: GatewayEvent) => void, onConnected?: () => void): () => void;
   close(): void;
 }
 

@@ -87,20 +87,22 @@ carries only the event kind; clients refetch `/agent-runs` or `/agent-runs/:id` 
 A client that renders activity should coalesce refetches because a verbose child can produce many
 ACP deltas.
 
-Current clients do not yet present that full live projection:
+Client behavior follows the same invalidation/refetch contract:
 
-- **Interactive TUI:** `delegate_agent` returns immediately and renders that launch snapshot
-  (normally `pending`). The row does not subscribe after the tool call ends.
-  `manage_agent_run status|wait` renders a later snapshot on demand.
+- **Interactive TUI:** each open parent thread lists its complete fleet by `parentThreadId` before
+  opening one Gateway subscription, then lists again after attachment to close the snapshot gap.
+  Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
+  invalidations with an in-flight/dirty refetch rule. Its shared view drives the literal
+  `Agent state` footer and the `/agent-state` picker; it never drives the parent's working indicator.
 - **Widget:** receives the SSE invalidation but currently refetches only `/session-state`, not
   `/agent-runs`, so it does not render ledger activity or outcomes.
 - **RPC:** Owner Operator does not expose a Pi RPC frontend today. A future conversation UI can
   use RPC for turns and tool events, but background runs should remain a Gateway resource so they
   outlive the tool call, parent conversation, and UI process.
 
-The durable rows, list/get/control routes, SSE invalidation, and `GatewayApi.subscribe` are the
-existing seams for a live TUI or widget panel. The missing piece is a client-owned
-subscribe → refetch → render projection.
+The reusable status categories, bounded detail, ordering, controls, and completion envelope live
+in the dependency-free `@owner-operator/core/agent-state` export. Gateway subscriptions, Pi UI,
+and terminal styling are adapters over that contract.
 
 ## Execution
 
@@ -144,9 +146,11 @@ the parent is also visible. Owner Operator conversations are not session-state r
 admitted OO-delegated child currently appears in the widget as an ordinary root session; its
 ledger record remains the canonical provenance.
 
-In the terminal, the `delegate_agent`/`manage_agent_run` tools render a compact snapshot row
-(harness · task · state · activity-or-outcome · elapsed) instead of a generic tool call
-(`formatAgentRunRow` in `src/shared/oo-presentation.ts`).
+In the terminal, the `delegate_agent`/`manage_agent_run` tools retain their compact launch/control
+snapshot row. The parent-scoped live view is separate: the footer shows queued, running, and
+attention counts only while one exists; `/agent-state` orders attention before active and recent
+terminal runs, then shows bounded task, harness, glyph-plus-text status, elapsed time, activity,
+and only currently valid controls. Cancellation confirms before mutation.
 
 ## State
 

@@ -35,6 +35,7 @@ import {
 } from "../agent/permission-settings";
 import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
+import { agentStateExtension } from "../agent-runs/agent-state-extension";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
@@ -70,6 +71,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
         { name: "owner-operator-privacy-tools", factory: blacklistAwareFileToolsExtension },
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },
+        { name: "owner-operator-agent-state", factory: agentStateExtension },
         {
           name: "owner-operator-onboarding",
           factory: createOnboardingExtension({

@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # the sessions-grep blacklist test silently skips without rg — install so it gates
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+      # rg gates sessions-grep; expect drives the real terminal acceptance fixtures.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep expect
       - run: npm ci
       - run: npm test
