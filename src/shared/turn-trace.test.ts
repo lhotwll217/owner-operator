@@ -108,11 +108,7 @@ const actionlessReplay = TurnTraceStore.fromEvents([
   { kind: "turn_started", turnId: "actionless-orphan", at: 9_000 },
 ]);
 assert.equal(actionlessReplay.view("actionless-orphan")?.kind, "interrupted");
-assert.equal(
-  actionlessReplay.visualAnchorTurnId({ kind: "turn_started", turnId: "actionless-orphan", at: 9_000 }),
-  "actionless-orphan",
-  "an actionless orphan anchors its concise replay fallback to the saved turn start",
-);
+assert.deepEqual(actionlessReplay.turnOptions(), [], "actionless interrupted turns do not create a no-op /activity choice");
 
 const entries = [...firstTurn, ...secondTurn].map((event, index) => ({
   type: "custom",
@@ -185,14 +181,14 @@ const actionlessEntry = {
   customType: OO_TURN_ACTIVITY_ENTRY,
   data: { kind: "turn_started", turnId: "rendered-actionless", at: 9_500 } satisfies TurnActivityEvent,
 };
+const actionlessComponent = renderer?.(actionlessEntry, { expanded: false }, theme);
 handlers.get("session_start")?.({ reason: "resume" }, {
   ...ctx,
   sessionManager: { ...ctx.sessionManager, getEntries: () => [actionlessEntry] },
 });
-const actionlessComponent = renderer?.(actionlessEntry, { expanded: false }, theme);
 assert.ok(
   actionlessComponent?.render(80).some((line: string) => stripVTControlCharacters(line).includes("Turn interrupted.")),
-  "hydration renders the concise fallback for an actionless orphan",
+  "end-of-transcript hydration renders the concise fallback for an actionless orphan",
 );
 const followedActionlessEntries = [
   { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: {
@@ -205,16 +201,21 @@ const followedActionlessEntries = [
     kind: "turn_settled", turnId: "following-hidden", at: 9_800, outcome: "completed", hasResponse: true,
   } satisfies TurnActivityEvent },
 ];
+const followedComponents = followedActionlessEntries
+  .map((entry) => renderer?.(entry, { expanded: false }, theme))
+  .filter((component) => component !== undefined);
 handlers.get("session_start")?.({ reason: "resume" }, {
   ...ctx,
   sessionManager: { ...ctx.sessionManager, getEntries: () => followedActionlessEntries },
 });
-const followedFallbacks = followedActionlessEntries
-  .map((entry) => renderer?.(entry, { expanded: false }, theme))
-  .filter((component) => component?.render(80).some((line: string) => stripVTControlCharacters(line).includes("Turn interrupted.")));
+const followedFallbacks = followedComponents.filter((component) =>
+  component.render(80).some((line: string) => stripVTControlCharacters(line).includes("Turn interrupted."))
+);
 assert.equal(followedFallbacks.length, 1, "a following turn start renders one concise orphan fallback");
 handlers.get("session_start")?.({ reason: "startup" }, ctx);
 handlers.get("agent_start")?.({ type: "agent_start" }, ctx);
+const liveAnchorEntry = { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: appended[0]?.data };
+const liveComponent = renderer?.(liveAnchorEntry, { expanded: false }, theme);
 assert.deepEqual(workingVisibility, [true], "the working indicator remains visible before the first semantic action");
 handlers.get("message_update")?.({ assistantMessageEvent: {
   ...harnessSummaryEvent,
@@ -233,8 +234,6 @@ assert.deepEqual(appended.map(({ data }) => data.kind), ["turn_started", "thinki
 assert.ok(!JSON.stringify(appended).includes("/secret/path") && !JSON.stringify(appended).includes("private reasoning"), "the Pi adapter persists no args or hidden thinking");
 assert.equal(widgetCalls, 0, "live activity stays in its transcript anchor instead of duplicating into a widget");
 
-const semanticEntry = { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: appended[1]?.data };
-const liveComponent = renderer?.(semanticEntry, { expanded: false }, theme);
 assert.ok(liveComponent?.render(80).some((line: string) => stripVTControlCharacters(line).includes("Reviewing the reducer boundary")), "the live anchor renders retained activity");
 
 handlers.get("agent_end")?.({ messages: [{

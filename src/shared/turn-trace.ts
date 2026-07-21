@@ -94,9 +94,8 @@ export function thinkingSummaryFromPiEvent(
       .trim();
     return summary || undefined;
   } catch {
-    // The pinned Pi Google adapter identifies `thought: true` blocks as thought summaries; its
+    // The Pi Google adapter identifies `thought: true` blocks as thought summaries; its
     // model catalog marks only thinking-capable Gemini models as `reasoning: true`.
-    // See node_modules/@earendil-works/pi-ai/dist/api/google-shared.js and providers/google*.models.js.
     const summaryOnlyGemini = (model?.provider === "google" || model?.provider === "google-vertex")
       && typeof model.id === "string"
       && /^gemini(?:-live)?-/i.test(model.id)
@@ -110,7 +109,6 @@ export function thinkingSummaryFromPiEvent(
 export class TurnTraceStore {
   private traces = new Map<string, TurnTrace>();
   private order: string[] = [];
-  private firstAction = new Map<string, string>();
   private expanded = new Set<string>();
   // Replay-only settlement boundary. Nothing synthetic is appended to the saved transcript.
   private interruptedAt = new Map<string, number>();
@@ -126,7 +124,6 @@ export class TurnTraceStore {
   reset(events: readonly TurnActivityEvent[] = []): void {
     this.traces.clear();
     this.order = [];
-    this.firstAction.clear();
     this.expanded.clear();
     this.interruptedAt.clear();
     this.lastEventAt.clear();
@@ -151,9 +148,6 @@ export class TurnTraceStore {
     const next = applyTurnTraceEvent(trace, event);
     this.traces.set(event.turnId, next);
     this.lastEventAt.set(event.turnId, event.at);
-    if (next.actions.length > trace.actions.length && "eventId" in event && !this.firstAction.has(event.turnId)) {
-      this.firstAction.set(event.turnId, event.eventId);
-    }
     return next.actions.length > trace.actions.length;
   }
 
@@ -183,18 +177,14 @@ export class TurnTraceStore {
   }
 
   visualAnchorTurnId(event: TurnActivityEvent): string | undefined {
-    if ("eventId" in event && this.firstAction.get(event.turnId) === event.eventId) return event.turnId;
-    const view = this.view(event.turnId);
-    return (event.kind === "turn_settled" || event.kind === "turn_started") && view?.kind === "interrupted"
-      ? event.turnId
-      : undefined;
+    // The start anchor must exist before replay can derive an actionless interruption.
+    return event.kind === "turn_started" ? event.turnId : undefined;
   }
 
   turnOptions(): Array<{ turnId: string; label: string }> {
     const visible = this.order.flatMap((turnId) => {
       const view = this.view(turnId);
       if (view?.kind === "settled") return [{ turnId, marker: view.expanded ? "▼" : "▶", summary: view.summary }];
-      if (view?.kind === "interrupted") return [{ turnId, marker: "!", summary: view.message }];
       return [];
     });
     return visible.map(({ turnId, marker, summary }, index) => ({
