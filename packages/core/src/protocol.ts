@@ -1,4 +1,5 @@
 import type { AgentRun, AgentRunCreateInput } from "./agent-runs";
+import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
 import type { ThreadState } from "./status";
@@ -93,6 +94,8 @@ export interface GatewayApi {
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<ScheduleRun>;
+  /** Shared, surface-independent delegated-run presentation derived from durable rows. */
+  agentState(parentThreadId?: string): Promise<ParentAgentStateView>;
   listAgentRuns(parentThreadId?: string): Promise<AgentRun[]>;
   agentRun(id: string): Promise<AgentRun>;
   delegateAgent(input: AgentRunCreateInput): Promise<AgentRun>;

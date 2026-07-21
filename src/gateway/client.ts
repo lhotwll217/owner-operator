@@ -16,6 +16,7 @@ import {
   type SessionStateRow,
 } from "@owner-operator/core";
 import { daemonInfoPath } from "../shared/paths";
+import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const FAST_REQUEST_MS = 2_000;
@@ -161,6 +162,9 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       await json(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     runSchedule: (id: string) => post<ScheduleRun>(`/schedules/${encodeURIComponent(id)}/run`, {}),
+    agentState: (parentThreadId?: string) => json<ParentAgentStateView>(
+      `/agent-state${parentThreadId ? `?parentThreadId=${encodeURIComponent(parentThreadId)}` : ""}`,
+    ),
     listAgentRuns: (parentThreadId?: string) => json<AgentRun[]>(
       `/agent-runs${parentThreadId ? `?parentThreadId=${encodeURIComponent(parentThreadId)}` : ""}`,
     ),

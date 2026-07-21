@@ -88,6 +88,13 @@ try {
   assert.equal(running.status, AgentRunStatus.Running);
   assert.equal(running.activity, "child started", "explicit activity is captured in the ledger");
   assert.equal(running.childSessionId, "child-research-flaky-test", "child identity captured at spawn");
+  const runningView = await gateway.agentState();
+  assert.equal(runningView.footer, "Agent state: 1 running");
+  assert.deepEqual(
+    runningView.runs.map((run) => [run.id, run.status.glyph, run.status.text, run.category]),
+    [[launched.id, "●", "running", "active"]],
+    "Gateway clients receive the shared run-view contract instead of runtime rows",
+  );
 
   // --- parent stays responsive while the child runs (non-blocking) ------------------------
   assert.deepEqual(await gateway.sessionState(), [], "the parent can still call the gateway mid-run");
@@ -105,6 +112,10 @@ try {
   const afterRestart = await gateway2.agentRun(launched.id);
   assert.equal(afterRestart.status, AgentRunStatus.Interrupted, "the interrupted run survives restart");
   assert.ok(afterRestart.childSessionId, "the child identity survives for resume");
+  const restartedView = await gateway2.agentState();
+  assert.equal(restartedView.footer, "Agent state: 1 needs attention");
+  assert.equal(restartedView.runs[0]?.status.text, "interrupted");
+  assert.equal(restartedView.runs[0]?.canResume, true, "restart reconstructs the durable resumable outcome");
 
   // --- resume over HTTP: a new run under the same child identity --------------------------
   const resumed = await gateway2.resumeAgentRun(launched.id);

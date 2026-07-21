@@ -45,7 +45,7 @@ Run ownership, transcript observation, and widget visibility are separate:
 
 | Work | `agent_runs` ledger | `/session-state` | Widget |
 |---|---|---|---|
-| Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Appears as a normal session row when present in session state |
+| Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Always represented in Agent state; also appears as a normal session row when present in session state |
 | Native Claude, Codex, or Cursor sub-agent | Never | Harness-dependent: it may be folded into its parent, excluded as automated work, or admitted as an ordinary session | Mirrors session state; it has no OO lineage |
 | Any agent launches a separate supported coding CLI | Only if the launch went through `delegate_agent` | Its transcript may be discovered and admitted normally | An ordinary row, without OO lineage |
 | Owner Operator's own conversation | Not a child run; its id may be recorded as a run's parent | Intentionally excluded from external transcript discovery | Not an ordinary session row |
@@ -94,8 +94,7 @@ Client behavior follows the same invalidation/refetch contract:
   Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
   invalidations with an in-flight/dirty refetch rule. Its shared view drives the literal
   `Agent state` footer and the `/agent-state` picker; it never drives the parent's working indicator.
-- **Widget:** receives the SSE invalidation but currently refetches only `/session-state`, not
-  `/agent-runs`, so it does not render ledger activity or outcomes.
+- **Widget:** its live delegated-run client behavior is owned by [Widget](widget.md).
 - **RPC:** Owner Operator does not expose a Pi RPC frontend today. A future conversation UI can
   use RPC for turns and tool events, but background runs should remain a Gateway resource so they
   outlive the tool call, parent conversation, and UI process.

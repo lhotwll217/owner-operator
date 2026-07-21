@@ -1,0 +1,83 @@
+{
+  "counts": { "queued": 1, "running": 1, "attention": 3 },
+  "footer": "Agent state: 1 queued · 1 running · 3 need attention",
+  "runs": [
+    {
+      "id": "failed-run",
+      "harness": "claude-code",
+      "task": "Investigate startup",
+      "status": { "glyph": "!", "text": "failed" },
+      "category": "attention",
+      "elapsedMs": 3000,
+      "latestActivity": "ACP handshake failed",
+      "canCancel": false,
+      "canResume": true
+    },
+    {
+      "id": "interrupted-run",
+      "harness": "codex",
+      "task": "Continue migration",
+      "status": { "glyph": "!", "text": "interrupted" },
+      "category": "attention",
+      "elapsedMs": 62000,
+      "latestActivity": "Daemon stopped",
+      "canCancel": false,
+      "canResume": true
+    },
+    {
+      "id": "lost-run",
+      "harness": "codex",
+      "task": "Check reconciliation",
+      "status": { "glyph": "!", "text": "lost" },
+      "category": "attention",
+      "elapsedMs": 120000,
+      "latestActivity": "No live turn",
+      "canCancel": false,
+      "canResume": true
+    },
+    {
+      "id": "running-run",
+      "harness": "claude-code",
+      "task": "Research widget behavior",
+      "status": { "glyph": "●", "text": "running" },
+      "category": "active",
+      "elapsedMs": 250000,
+      "latestActivity": "Reading UI.swift",
+      "canCancel": true,
+      "canResume": false
+    },
+    {
+      "id": "queued-run",
+      "harness": "codex",
+      "task": "Review the patch",
+      "status": { "glyph": "◦", "text": "queued" },
+      "category": "active",
+      "elapsedMs": 12000,
+      "latestActivity": "",
+      "canCancel": true,
+      "canResume": false
+    },
+    {
+      "id": "completed-run",
+      "harness": "codex",
+      "task": "Map the Gateway seam",
+      "status": { "glyph": "✓", "text": "completed" },
+      "category": "recent",
+      "elapsedMs": 90000,
+      "latestActivity": "Done",
+      "canCancel": false,
+      "canResume": false
+    },
+    {
+      "id": "cancelled-run",
+      "harness": "claude-code",
+      "task": "Superseded audit",
+      "status": { "glyph": "■", "text": "cancelled" },
+      "category": "recent",
+      "elapsedMs": 45000,
+      "latestActivity": "Cancelled by owner",
+      "canCancel": false,
+      "canResume": false
+    }
+  ]
+}

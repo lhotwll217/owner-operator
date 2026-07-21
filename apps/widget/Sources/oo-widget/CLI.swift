@@ -14,7 +14,15 @@ private func glyphColored(_ st: ThreadState) -> String {
     }
 }
 
-func renderText(rows: [SessionStateRow], port: Int) -> String {
+private func agentGlyphColored(_ run: AgentRunView) -> String {
+    switch run.tone {
+    case .attention: return sgr(33, run.status.glyph)
+    case .positive: return sgr(32, run.status.glyph)
+    case .muted: return sgr(90, run.status.glyph)
+    }
+}
+
+func renderText(rows: [SessionStateRow], agentState: AgentStateView = .empty, port: Int) -> String {
     let (groups, counts) = buildSessionState(rows: rows)
     let total = groups.reduce(0) { $0 + $1.rows.count }
 
@@ -38,6 +46,15 @@ func renderText(rows: [SessionStateRow], port: Int) -> String {
             if let next = r.nextSteps, !next.isEmpty { lines.append(sgr(90, "      \(indent)→ \(next)")) }
         }
     }
+    if !agentState.runs.isEmpty {
+        lines.append("")
+        lines.append(sgr(1, "Agent state"))
+        for run in agentState.runs {
+            let resumable = run.canResume ? sgr(33, " · resumable") : ""
+            lines.append("  \(agentGlyphColored(run)) \(run.status.text.rawValue)  \(run.task)  " + sgr(90, "\(run.harness) · \(shortDuration(milliseconds: run.elapsedMs))") + resumable)
+            if !run.latestActivity.isEmpty { lines.append(sgr(90, "      \(run.latestActivity)")) }
+        }
+    }
     lines.append("")
     lines.append(sgr(2, "127.0.0.1:\(port)"))
     return lines.joined(separator: "\n")
@@ -55,7 +72,8 @@ func runOnce() -> Int32 {
         do {
             guard let discovery else { throw URLError(.cannotConnectToHost) }
             let rows = try await DaemonClient.get([SessionStateRow].self, "/session-state", discovery: discovery)
-            output = renderText(rows: rows, port: port)
+            let agentState = try await DaemonClient.get(AgentStateView.self, "/agent-state", discovery: discovery)
+            output = renderText(rows: rows, agentState: agentState, port: port)
         } catch {
             output = "oo-widget: daemon offline on 127.0.0.1:\(port)\nstart it with:  oo daemon"
             code = 1

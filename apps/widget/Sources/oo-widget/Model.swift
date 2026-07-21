@@ -4,6 +4,101 @@
 import Foundation
 import SwiftUI
 
+enum WidgetGatewayEventKind: String, Decodable {
+    case stateChanged = "state.changed"
+    case agentRunChanged = "agent-run.changed"
+}
+
+struct WidgetGatewayEvent: Decodable {
+    let kind: WidgetGatewayEventKind
+}
+
+/// Surface-independent delegated-run projection returned by `GET /agent-state`.
+/// Lifecycle meaning, attention ordering, bounded text, and controls are derived in core.
+struct AgentStateView: Decodable {
+    let counts: AgentStateCounts
+    let footer: String?
+    let runs: [AgentRunView]
+
+    static let empty = AgentStateView(
+        counts: AgentStateCounts(queued: 0, running: 0, attention: 0),
+        footer: nil,
+        runs: []
+    )
+}
+
+struct AgentStateCounts: Decodable {
+    let queued: Int
+    let running: Int
+    let attention: Int
+}
+
+enum AgentRunViewCategory: String, Decodable {
+    case attention
+    case active
+    case recent
+
+    init(from decoder: Decoder) throws {
+        let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? ""
+        self = Self(rawValue: raw) ?? .recent
+    }
+}
+
+struct AgentRunStatusView: Decodable {
+    let glyph: String
+    let text: AgentRunStatusText
+}
+
+enum AgentRunStatusText: String, Decodable {
+    case queued
+    case running
+    case completed
+    case failed
+    case cancelled
+    case interrupted
+    case lost
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? ""
+        self = Self(rawValue: raw) ?? .unknown
+    }
+}
+
+enum AgentRunTone {
+    case attention
+    case positive
+    case muted
+}
+
+struct AgentRunView: Decodable, Identifiable {
+    let id: String
+    let harness: String
+    let task: String
+    let status: AgentRunStatusView
+    let category: AgentRunViewCategory
+    let elapsedMs: Int
+    let latestActivity: String
+    let canCancel: Bool
+    let canResume: Bool
+
+    var tone: AgentRunTone {
+        if category == .attention { return .attention }
+        if status.text == .running || status.text == .completed { return .positive }
+        return .muted
+    }
+}
+
+/// Compact elapsed time for the widget; lifecycle timing itself is computed in core.
+func shortDuration(milliseconds: Int) -> String {
+    let seconds = max(0, milliseconds / 1_000)
+    let minutes = seconds / 60
+    let hours = minutes / 60
+    if hours > 0 { return "\(hours)h \(minutes % 60)m" }
+    if minutes > 0 { return "\(minutes)m" }
+    return "\(seconds)s"
+}
+
 /// Lifecycle state — matches core/status.ts ThreadState. Lenient decode happens in SessionStateRow.
 enum ThreadState: String, Decodable {
     case needsYou = "needs-you"

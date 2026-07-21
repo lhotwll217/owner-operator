@@ -1,7 +1,7 @@
 // The widget's seam to the daemon — a THIN CLIENT (OpenClaw gateway pattern): it discovers the
-// live port, GETs /session-state, and subscribes to the SSE /events stream so state changes land
-// instantly. The poll is the heartbeat (covers SSE gaps + offline→online); the SSE frame is just
-// a "refetch now" nudge, so the GET path stays the single source of shape.
+// live port, GETs the session and agent-state projections, and subscribes to the SSE /events stream
+// so changes land instantly. The poll is the heartbeat (covers SSE gaps + offline→online); the SSE
+// frame is just a "refetch now" nudge, so the GET path stays the single source of shape.
 
 import Foundation
 import Combine
@@ -9,13 +9,29 @@ import Combine
 @MainActor
 final class DaemonClient: ObservableObject {
     static let shared = DaemonClient()
-    nonisolated init() {}
+
+    typealias DiscoverGateway = @Sendable () -> Discovery?
+    typealias FetchData = @Sendable (_ path: String, _ discovery: Discovery) async throws -> Data
+
+    private let discover: DiscoverGateway
+    private let fetchData: FetchData
+
+    nonisolated init(
+        discover: @escaping DiscoverGateway = { DaemonClient.discoverGateway() },
+        fetchData: @escaping FetchData = { path, discovery in
+            try await DaemonClient.data(path, discovery: discovery)
+        }
+    ) {
+        self.discover = discover
+        self.fetchData = fetchData
+    }
 
     @Published var groups: [RepoGroup] = []
     @Published var counts: [ThreadState: Int] = [:]
     @Published var online = false
     @Published var setupRequired = false
     @Published var port = defaultPort
+    @Published var agentState = AgentStateView.empty
 
     nonisolated static let defaultPort = 47711
 
@@ -29,6 +45,8 @@ final class DaemonClient: ObservableObject {
     private var pollTimer: Timer?
     private var sseTask: Task<Void, Never>?
     private var started = false
+    private var refreshInFlight = false
+    private var refreshDirty = false
 
     // The last payload the daemon gave us (the truth we render), plus ids the owner marked done
     // locally but the daemon hasn't confirmed yet — hidden until it does.
@@ -64,7 +82,7 @@ final class DaemonClient: ObservableObject {
         startSSE()
     }
 
-    nonisolated struct Discovery {
+    nonisolated struct Discovery: Sendable {
         let port: Int
         let authToken: String
     }
@@ -89,17 +107,59 @@ final class DaemonClient: ObservableObject {
     }
 
     func refresh() async {
-        guard let discovery = Self.discoverGateway() else { online = false; return }
+        if refreshInFlight {
+            refreshDirty = true
+            return
+        }
+        refreshInFlight = true
+        repeat {
+            refreshDirty = false
+            await refreshOnce()
+        } while refreshDirty
+        refreshInFlight = false
+    }
+
+    private func refreshOnce() async {
+        guard let discovery = discover() else {
+            clearDisconnectedState()
+            return
+        }
         do {
-            let readiness = try await Self.get(Readiness.self, "/ready", discovery: discovery)
-            lastRows = try await Self.get([SessionStateRow].self, "/session-state", discovery: discovery)
+            let readiness = try decode(Readiness.self, from: await fetchData("/ready", discovery))
+            let rows = try decode([SessionStateRow].self, from: await fetchData("/session-state", discovery))
+            lastRows = rows
             port = discovery.port
             setupRequired = readiness.setupRequired
             online = true
             rebuild()
         } catch {
-            online = false
-            setupRequired = false
+            clearDisconnectedState()
+            return
+        }
+        do {
+            agentState = try decode(AgentStateView.self, from: await fetchData("/agent-state", discovery))
+        } catch {
+            agentState = .empty
+        }
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try JSONDecoder().decode(type, from: data)
+    }
+
+    private func clearDisconnectedState() {
+        online = false
+        setupRequired = false
+        lastRows = []
+        agentState = .empty
+        rebuild()
+    }
+
+    /// SSE carries invalidations only. Relevant events reconcile both durable widget snapshots.
+    func receive(_ event: WidgetGatewayEvent) async {
+        switch event.kind {
+        case .stateChanged, .agentRunChanged:
+            await refresh()
         }
     }
 
@@ -165,13 +225,17 @@ final class DaemonClient: ObservableObject {
 
     /// A short-lived GET against the loopback daemon.
     nonisolated static func get<T: Decodable>(_ type: T.Type, _ path: String, discovery: Discovery) async throws -> T {
+        return try JSONDecoder().decode(type, from: await data(path, discovery: discovery))
+    }
+
+    nonisolated static func data(_ path: String, discovery: Discovery) async throws -> Data {
         let url = URL(string: "http://127.0.0.1:\(discovery.port)\(path)")!
         var req = URLRequest(url: url)
         req.timeoutInterval = 4
         req.setValue("Bearer \(discovery.authToken)", forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-        return try JSONDecoder().decode(T.self, from: data)
+        return data
     }
 
     /// A short-lived POST of a JSON body against the loopback daemon.
@@ -187,8 +251,8 @@ final class DaemonClient: ObservableObject {
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
     }
 
-    /// Subscribe to /events; any `data:` frame means "something changed" → refetch. Reconnects
-    /// on drop. Runs off the main actor; the long request timeout keeps an idle stream open.
+    /// Subscribe to /events; known widget invalidations trigger a refetch, while unknown or
+    /// malformed kinds are ignored. Reconnects on drop; the long timeout keeps an idle stream open.
     private func startSSE() {
         sseTask = Task.detached { [weak self] in
             let cfg = URLSessionConfiguration.ephemeral
@@ -207,9 +271,14 @@ final class DaemonClient: ObservableObject {
                 do {
                     let (bytes, resp) = try await session.bytes(for: req)
                     guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+                    await self.refresh()
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
-                        if line.hasPrefix("data:") { await self.refresh() }
+                        guard line.hasPrefix("data:"),
+                              let data = line.dropFirst(5).trimmingCharacters(in: .whitespaces).data(using: .utf8),
+                              let event = try? JSONDecoder().decode(WidgetGatewayEvent.self, from: data)
+                        else { continue }
+                        await self.receive(event)
                     }
                 } catch {
                     // stream dropped or daemon down — reconnect after a beat
