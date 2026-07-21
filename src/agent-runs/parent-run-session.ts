@@ -112,17 +112,19 @@ export class ParentRunSession {
       return this.reconcilePromise;
     }
     this.reconcilePromise = (async () => {
-      do {
-        this.dirty = false;
-        try {
-          this.reconcile(await this.adapter.list(this.parentThreadId));
-        } catch (error) {
-          this.onError(error);
-        }
-      } while (this.dirty && !this.stopped);
-    })().finally(() => {
-      this.reconcilePromise = undefined;
-    });
+      try {
+        do {
+          this.dirty = false;
+          try {
+            this.reconcile(await this.adapter.list(this.parentThreadId));
+          } catch (error) {
+            this.onError(error);
+          }
+        } while (this.dirty && !this.stopped);
+      } finally {
+        this.reconcilePromise = undefined;
+      }
+    })();
     return this.reconcilePromise;
   }
 

@@ -147,6 +147,31 @@ await reopened.start();
 assert.ok(reopened.view.runs.some(({ id }) => id === "lost"));
 reopened.stop();
 
+// An invalidation queued by the final reconciliation lands after the loop's last dirty check.
+// It must start a new list instead of being orphaned behind the finishing in-flight marker.
+const loopExitAdapter = new MemoryAdapter();
+loopExitAdapter.listResults.push(
+  Promise.resolve([]),
+  Promise.resolve([run("loop-exit", AgentRunStatus.Running)]),
+  Promise.resolve([run("loop-exit", AgentRunStatus.Completed)]),
+);
+const loopExitSession = new ParentRunSession("parent-loop-exit", loopExitAdapter);
+let queuedLoopExitInvalidation = false;
+loopExitSession.subscribe((view) => {
+  if (queuedLoopExitInvalidation || !view.runs.some(({ id }) => id === "loop-exit")) return;
+  queuedLoopExitInvalidation = true;
+  queueMicrotask(() => loopExitAdapter.invalidate());
+});
+await loopExitSession.start();
+await loopExitSession.settled();
+assert.equal(
+  loopExitAdapter.operations.filter((operation) => operation.startsWith("list:")).length,
+  3,
+  "a refresh at loop exit triggers a refetch",
+);
+assert.equal(loopExitSession.view.runs[0]?.status.text, "completed");
+loopExitSession.stop();
+
 // The production Gateway adapter filters the one global SSE stream to agent-run invalidations
 // and always lists/controls through the parent-scoped Gateway methods.
 const gatewayCalls: string[] = [];

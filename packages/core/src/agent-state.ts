@@ -78,9 +78,9 @@ function statusView(status: AgentRunStatus): AgentRunStatusView {
   }
 }
 
-function categoryFor(status: AgentRunStatus): AgentRunViewCategory {
-  if (ATTENTION_STATUSES.has(status)) return "attention";
-  return isTerminalAgentRunStatus(status) ? "recent" : "active";
+function categoryFor(run: AgentRun, resumedRunIds: ReadonlySet<string>): AgentRunViewCategory {
+  if (ATTENTION_STATUSES.has(run.status) && !resumedRunIds.has(run.id)) return "attention";
+  return isTerminalAgentRunStatus(run.status) ? "recent" : "active";
 }
 
 function elapsedMs(run: AgentRun, now: string): number {
@@ -98,19 +98,19 @@ function sortTime(run: AgentRun): number {
   return Date.parse(run.finishedAt ?? run.lastActivityAt ?? run.startedAt ?? run.createdAt) || 0;
 }
 
-function deriveRunView(run: AgentRun, now: string): AgentRunView {
+function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<string>): AgentRunView {
   return {
     id: run.id,
     harness: run.harness,
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
     status: statusView(run.status),
-    category: categoryFor(run.status),
+    category: categoryFor(run, resumedRunIds),
     elapsedMs: elapsedMs(run, now),
     latestActivity: activityFor(run),
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
     canResume: AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)
       && run.childSessionId !== null
-      && AGENT_RUN_CAPABILITIES[run.harness].resume,
+      && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
   };
 }
 
@@ -120,16 +120,19 @@ export function deriveParentAgentState(
 ): ParentAgentStateView {
   const now = options.now ?? new Date().toISOString();
   const recentLimit = Math.max(0, options.recentLimit ?? AGENT_STATE_RECENT_LIMIT);
+  const resumedRunIds = new Set(
+    runs.flatMap(({ resumeOfRunId }) => resumeOfRunId === null ? [] : [resumeOfRunId]),
+  );
   const ordered = [...runs].sort((left, right) => {
-    const categoryDifference = ["attention", "active", "recent"].indexOf(categoryFor(left.status))
-      - ["attention", "active", "recent"].indexOf(categoryFor(right.status));
+    const categoryDifference = ["attention", "active", "recent"].indexOf(categoryFor(left, resumedRunIds))
+      - ["attention", "active", "recent"].indexOf(categoryFor(right, resumedRunIds));
     return categoryDifference || sortTime(right) - sortTime(left) || right.id.localeCompare(left.id);
   });
   let recent = 0;
-  const visible = ordered.filter((run) => categoryFor(run.status) !== "recent" || recent++ < recentLimit);
+  const visible = ordered.filter((run) => categoryFor(run, resumedRunIds) !== "recent" || recent++ < recentLimit);
   const queued = runs.filter(({ status }) => status === AgentRunStatus.Pending).length;
   const running = runs.filter(({ status }) => status === AgentRunStatus.Running).length;
-  const attention = runs.filter(({ status }) => ATTENTION_STATUSES.has(status)).length;
+  const attention = runs.filter((run) => categoryFor(run, resumedRunIds) === "attention").length;
   const footerParts = [
     queued ? `${queued} queued` : "",
     running ? `${running} running` : "",
@@ -138,7 +141,7 @@ export function deriveParentAgentState(
   return {
     counts: { queued, running, attention },
     footer: footerParts.length ? `Agent state: ${footerParts.join(" · ")}` : null,
-    runs: visible.map((run) => deriveRunView(run, now)),
+    runs: visible.map((run) => deriveRunView(run, now, resumedRunIds)),
   };
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert";
 import {
   AgentRunHarness,
   AgentRunStatus,
+  type AgentRun,
 } from "./agent-runs";
 import {
   AGENT_STATE_ACTIVITY_MAX_LENGTH,
@@ -81,6 +82,43 @@ const idle = deriveParentAgentState([
   run("owner-cancelled", AgentRunStatus.Cancelled),
 ], { now });
 assert.equal(idle.footer, null, "footer hides when no run is active or awaiting attention");
+
+const resumedFailure = deriveParentAgentState([
+  run("failed-predecessor", AgentRunStatus.Failed, { childSessionId: "resumed-child" }),
+  run("resume", AgentRunStatus.Running, {
+    childSessionId: "resumed-child",
+    resumeOfRunId: "failed-predecessor",
+  }),
+], { now });
+assert.equal(
+  resumedFailure.runs.find(({ id }) => id === "failed-predecessor")?.category,
+  "recent",
+  "a resumed predecessor becomes terminal history instead of demanding attention",
+);
+assert.equal(resumedFailure.counts.attention, 0);
+
+const resumedOnlyFailure = deriveParentAgentState([
+  run("only-failure", AgentRunStatus.Failed, { childSessionId: "resumed-child" }),
+  run("successful-resume", AgentRunStatus.Completed, {
+    childSessionId: "resumed-child",
+    resumeOfRunId: "only-failure",
+  }),
+], { now });
+assert.equal(resumedOnlyFailure.footer, null, "footer hides when the only failure has been resumed");
+
+const unresumedFailure = deriveParentAgentState([
+  run("unresumed-failure", AgentRunStatus.Failed, { childSessionId: "failed-child" }),
+], { now });
+assert.equal(unresumedFailure.counts.attention, 1, "an unresumed failure still demands attention");
+assert.equal(unresumedFailure.runs[0]?.category, "attention");
+
+const unknownHarness = deriveParentAgentState([
+  run("unknown-harness", AgentRunStatus.Failed, {
+    harness: "future-harness" as AgentRun["harness"],
+    childSessionId: "future-child",
+  }),
+], { now });
+assert.equal(unknownHarness.runs[0]?.canResume, false, "unknown harness capabilities fail closed");
 
 const lotsOfRecent = Array.from({ length: AGENT_STATE_RECENT_LIMIT + 4 }, (_, index) =>
   run(`recent-${index}`, AgentRunStatus.Completed, {

@@ -60,7 +60,7 @@ interface GatewayTarget {
 }
 
 function mayReplayAfterTransportFailure(init: RequestInit | undefined): boolean {
-  return ["GET", "HEAD", "OPTIONS", "PUT", "DELETE"].includes((init?.method ?? "GET").toUpperCase());
+  return ["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
 }
 
 async function gatewayJson<T>(
