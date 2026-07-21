@@ -41,6 +41,13 @@ function daemonIdentityOrCredentialChanged(current: DaemonInfo, next: DaemonInfo
     || current.authToken !== next.authToken;
 }
 
+function adoptDiscoveredTarget(target: GatewayTarget, requested: DaemonInfo, discovered: DaemonInfo): void {
+  if (!daemonIdentityOrCredentialChanged(target.info, requested)
+    || !daemonIdentityOrCredentialChanged(target.info, discovered)) {
+    target.info = discovered;
+  }
+}
+
 interface GatewayJsonOptions {
   init?: RequestInit;
   timeoutMs?: number;
@@ -48,8 +55,16 @@ interface GatewayJsonOptions {
   onUnavailable?: () => void;
 }
 
+interface GatewayTarget {
+  info: DaemonInfo;
+}
+
+function mayReplayAfterTransportFailure(init: RequestInit | undefined): boolean {
+  return ["GET", "HEAD", "OPTIONS", "PUT", "DELETE"].includes((init?.method ?? "GET").toUpperCase());
+}
+
 async function gatewayJson<T>(
-  info: DaemonInfo,
+  target: GatewayTarget,
   path: string,
   options: GatewayJsonOptions = {},
 ): Promise<T> {
@@ -69,11 +84,23 @@ async function gatewayJson<T>(
   };
   const accepted = (response: Response): boolean => response.ok || options.acceptStatuses?.includes(response.status) === true;
 
-  let response = await request(info);
+  let requested = target.info;
+  let response: Response;
+  try {
+    response = await request(requested);
+  } catch (error) {
+    if (!mayReplayAfterTransportFailure(options.init)) throw error;
+    const next = readDaemonInfo();
+    if (!next?.authToken || !daemonIdentityOrCredentialChanged(requested, next)) throw error;
+    adoptDiscoveredTarget(target, requested, next);
+    requested = next;
+    response = await request(next);
+  }
   if (!accepted(response) && response.status === 401) {
     options.onUnavailable?.();
     const next = readDaemonInfo();
-    if (next?.authToken && daemonIdentityOrCredentialChanged(info, next)) {
+    if (next?.authToken && daemonIdentityOrCredentialChanged(requested, next)) {
+      adoptDiscoveredTarget(target, requested, next);
       response = await request(next);
       if (!accepted(response) && response.status === 401) options.onUnavailable?.();
     }
@@ -86,11 +113,12 @@ async function gatewayJson<T>(
 export async function probeGateway(): Promise<GatewayProbe | null> {
   const info = readDaemonInfo();
   if (!info?.authToken) return null;
+  const target = { info };
   try {
-    const health = await gatewayJson<DaemonHealth>(info, "/health");
-    const ready = await gatewayJson<DaemonReady>(info, "/ready", { acceptStatuses: [503] });
-    if (health.pid !== info.pid || health.fingerprint !== info.fingerprint) return null;
-    return { info, health, ready };
+    const health = await gatewayJson<DaemonHealth>(target, "/health");
+    const ready = await gatewayJson<DaemonReady>(target, "/ready", { acceptStatuses: [503] });
+    if (health.pid !== target.info.pid || health.fingerprint !== target.info.fingerprint) return null;
+    return { info: target.info, health, ready };
   } catch {
     return null;
   }
@@ -100,12 +128,12 @@ export async function probeGateway(): Promise<GatewayProbe | null> {
 export async function connectGateway(onUnavailable: () => void = () => undefined): Promise<GatewayApi | null> {
   const probe = await probeGateway();
   if (!probe?.ready.ready) return null;
-  const { info } = probe;
+  const target = { info: probe.info };
 
   const json = <T>(path: string, init?: RequestInit, timeoutMs = FAST_REQUEST_MS): Promise<T> =>
-    gatewayJson<T>(info, path, { init, timeoutMs, onUnavailable });
+    gatewayJson<T>(target, path, { init, timeoutMs, onUnavailable });
   const post = <T>(path: string, body: unknown, timeoutMs = MUTATION_REQUEST_MS): Promise<T> =>
-    gatewayJson<T>(info, path, {
+    gatewayJson<T>(target, path, {
       timeoutMs,
       onUnavailable,
       init: {
@@ -150,12 +178,13 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       request,
       LONG_OPERATION_MS,
     ),
-    subscribe(listener: (event: GatewayEvent) => void) {
+    subscribe(listener: (event: GatewayEvent) => void, onConnected?: () => void) {
       let stopped = false;
       const controller = new AbortController();
       void (async () => {
         while (!stopped) {
           try {
+            const requestedBeforeDiscovery = target.info;
             const eventInfo = readDaemonInfo();
             if (!eventInfo?.authToken) throw new Error("gateway discovery is unavailable");
             const response = await fetch(`http://127.0.0.1:${eventInfo.port}/events`, {
@@ -168,6 +197,8 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
             }
             const reader = response.body?.getReader();
             if (!reader) throw new Error("gateway event stream has no body");
+            adoptDiscoveredTarget(target, requestedBeforeDiscovery, eventInfo);
+            try { onConnected?.(); } catch { /* connection observers are fail-isolated */ }
             const decoder = new TextDecoder();
             let buffer = "";
             for (;;) {

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GatewayEventKind, type GatewayEvent } from "@owner-operator/core";
+import { AgentRunHarness, GatewayEventKind, type GatewayEvent } from "@owner-operator/core";
 import { waitFor } from "./test/helpers";
 import { connectGateway, resolveBackend } from "./client";
 
@@ -17,6 +17,7 @@ const fingerprint = "client-test-fingerprint";
 const pid = 41_001;
 const streams = new Set<ServerResponse>();
 let retired = false;
+let initialServerClosed = false;
 let healthRequests = 0;
 let boundPort = 0;
 const server = createServer((request, response) => {
@@ -70,6 +71,7 @@ try {
   const replacementToken = "replacement-token";
   const replacementPid = 41_002;
   const replacementFingerprint = "replacement-fingerprint";
+  let replacementAgentRunPosts = 0;
   const replacementServer = createServer((request, response) => {
     if (request.headers.authorization !== `Bearer ${replacementToken}`) {
       response.writeHead(401).end();
@@ -90,6 +92,9 @@ try {
     } else if (request.url === "/events") {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end(`data: ${JSON.stringify({ kind: GatewayEventKind.StateChanged })}\n\n`);
+    } else if (request.url === "/agent-runs" && request.method === "POST") {
+      replacementAgentRunPosts += 1;
+      response.end(JSON.stringify({}));
     } else {
       response.writeHead(404).end();
     }
@@ -106,10 +111,20 @@ try {
       fingerprint: replacementFingerprint,
       authToken: replacementToken,
     }));
-    retired = true;
     for (const stream of streams) stream.end();
     streams.clear();
-    assert.equal((await memoized.health()).pid, replacementPid, "the original request follows daemon replacement");
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    initialServerClosed = true;
+    await assert.rejects(
+      () => memoized.delegateAgent({ harness: AgentRunHarness.Codex, task: "do not replay", cwd: root }),
+      "an ambiguous POST failure is not replayed against a replacement daemon",
+    );
+    assert.equal(replacementAgentRunPosts, 0);
+    assert.equal(
+      (await memoized.health()).pid,
+      replacementPid,
+      "the original request rediscovers after the replaced daemon closes its port",
+    );
     const replacement = await resolveBackend();
     assert.equal((await replacement.health()).pid, replacementPid, "the next tool call resolves fresh discovery");
     await waitFor(
@@ -125,7 +140,7 @@ try {
   process.stdout.write("ok — gateway client request lifetimes and replacement recovery\n");
 } finally {
   for (const stream of streams) stream.end();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!initialServerClosed) await new Promise<void>((resolve) => server.close(() => resolve()));
   if (previousOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = previousOoHome;
   rmSync(root, { recursive: true, force: true });

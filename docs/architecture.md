@@ -27,11 +27,11 @@ widget · oo agent/tools · Pi extension · oo CLI
 
 | Module | Owns | Does not own |
 |---|---|---|
-| `packages/core` | Shared enums, types, pure state rules, wire contract, dependency-light filesystem config readers | SQLite, network, timers, processes, model calls |
+| `packages/core` | Shared enums, types, pure state rules, wire contract, dependency-light filesystem config readers; browser-safe presentation/protocol contracts use dedicated subpath exports | SQLite, network, timers, processes, model calls |
 | `src/state` | SQLite schema, transactions, projections, post-commit events, read-only query docs | Polling, HTTP, model calls |
 | `src/session-monitor` | Transcript scan/watch and its private async enrichment worker | HTTP, scheduling |
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
-| `src/agent-runs` | Delegated-run executor (claim-under-cap, deadline, abort, restart/lost reconciliation) and the ACP launcher over `acpx` | SQLite access outside `State`, HTTP |
+| `src/agent-runs` | Delegated-run executor, ACP launcher over `acpx`, and client-side parent-fleet reconciliation adapters | SQLite access outside `State`, HTTP |
 | `src/gateway` | Loopback HTTP/SSE translation and client SDK | SQLite, child processes, polling, model calls |
 | `src/daemon` | Composition, process lifecycle, readiness, discovery, source fingerprint | Domain decisions |
 | `src/agent` | Owned Pi runtime, onboarding, diagnostics, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
