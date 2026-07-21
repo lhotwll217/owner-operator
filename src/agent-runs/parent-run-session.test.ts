@@ -6,10 +6,12 @@ import {
   type GatewayApi,
   type GatewayEvent,
 } from "@owner-operator/core";
+import type { AgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import { agentRunFixture as run } from "../../test/fixtures/agent-run";
 import {
   ParentRunSession,
   gatewayParentRunAdapter,
+  type ParentCompletionAdapter,
   type ParentRunAdapter,
 } from "./parent-run-session";
 
@@ -60,6 +62,15 @@ class MemoryAdapter implements ParentRunAdapter {
   async resume(id: string): Promise<AgentRun> {
     this.resumed.push(id);
     return run(`${id}-resumed`, AgentRunStatus.Pending, { resumeOfRunId: id });
+  }
+}
+
+class MemoryCompletionAdapter implements ParentCompletionAdapter {
+  batches: AgentRunCompletionEnvelope[][] = [];
+
+  async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
+    this.batches.push([...envelopes]);
+    return { delivered: envelopes.map(({ eventId }) => eventId), duplicate: [] };
   }
 }
 
@@ -171,6 +182,72 @@ assert.equal(
 );
 assert.equal(loopExitSession.view.runs[0]?.status.text, "completed");
 loopExitSession.stop();
+
+// Terminal reconciliation delivers through one narrow parent-owned seam. Routine successes
+// batch, actionable failure bypasses that delay, and repeat durable observations stay exactly once.
+const completionRunAdapter = new MemoryAdapter();
+completionRunAdapter.rows = [run("child-success", AgentRunStatus.Running)];
+const completions = new MemoryCompletionAdapter();
+const completionSession = new ParentRunSession("parent-completion", completionRunAdapter, {
+  completionAdapter: completions,
+  successBatchDelayMs: 15,
+});
+await completionSession.start();
+assert.equal(completions.batches.length, 0, "nonterminal rows never create completion evidence");
+completionRunAdapter.rows = [
+  run("child-success", AgentRunStatus.Completed, {
+    parentThreadId: "parent-completion",
+    childSessionId: "child-session-success",
+    resultTail: "bounded child report",
+  }),
+  run("child-success-2", AgentRunStatus.Completed, {
+    parentThreadId: "parent-completion",
+    childSessionId: "child-session-success-2",
+    resultTail: "second bounded child report",
+  }),
+  run("child-failure", AgentRunStatus.Failed, {
+    parentThreadId: "parent-completion",
+    childSessionId: "child-session-failure",
+    error: "startup failed",
+  }),
+];
+completionRunAdapter.invalidate();
+await completionSession.settled();
+assert.deepEqual(
+  completions.batches.map((batch) => batch.map(({ runId }) => runId)),
+  [["child-failure"]],
+  "actionable failure bypasses routine-success batching",
+);
+await new Promise((resolve) => setTimeout(resolve, 25));
+await completionSession.settled();
+assert.deepEqual(
+  completions.batches.map((batch) => batch.map(({ runId }) => runId)),
+  [["child-failure"], ["child-success", "child-success-2"]],
+  "nearby routine successes share one delayed continuation batch",
+);
+completionRunAdapter.invalidate();
+await completionSession.settled();
+assert.equal(completions.batches.length, 2, "repeat observation cannot redeliver a completion event");
+assert.equal(completions.batches[1]![0]!.childSessionId, "child-session-success");
+assert.equal(completions.batches[1]![0]!.outcome, AgentRunStatus.Completed);
+completionSession.stop();
+
+// A terminal row completed while the parent is closed is found by the durable initial list on reopen.
+const closedAdapter = new MemoryAdapter();
+closedAdapter.rows = [run("closed-child", AgentRunStatus.Running, { parentThreadId: "closed-parent" })];
+const closedSession = new ParentRunSession("closed-parent", closedAdapter);
+await closedSession.start();
+closedSession.stop();
+closedAdapter.rows = [run("closed-child", AgentRunStatus.Completed, { parentThreadId: "closed-parent" })];
+const reopenedCompletions = new MemoryCompletionAdapter();
+const reopenedCompletionSession = new ParentRunSession("closed-parent", closedAdapter, {
+  completionAdapter: reopenedCompletions,
+  successBatchDelayMs: 0,
+});
+await reopenedCompletionSession.start();
+await reopenedCompletionSession.settled();
+assert.deepEqual(reopenedCompletions.batches.map((batch) => batch[0]?.runId), ["closed-child"]);
+reopenedCompletionSession.stop();
 
 // The production Gateway adapter filters the one global SSE stream to agent-run invalidations
 // and always lists/controls through the parent-scoped Gateway methods.
