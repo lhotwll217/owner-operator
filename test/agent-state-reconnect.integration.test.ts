@@ -4,6 +4,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
+import { PiParentCompletionAdapter } from "../src/agent-runs/agent-run-completion";
 import { ParentRunSession, gatewayParentRunAdapter } from "../src/agent-runs/parent-run-session";
 import { connectGateway } from "../src/gateway/client";
 import { waitFor } from "../src/gateway/test/helpers";
@@ -56,6 +57,19 @@ let initialGateway: Awaited<ReturnType<typeof connectGateway>>;
 let replacementGateway: Awaited<ReturnType<typeof connectGateway>>;
 let replacementServer: ReturnType<typeof createServer> | undefined;
 const replacementStreams = new Set<ServerResponse>();
+const completionEntries: any[] = [];
+let completionContinuations = 0;
+const completionTranscript = { getEntries: () => completionEntries };
+const completionPi = {
+  sendMessage(message: any) {
+    completionContinuations += 1;
+    completionEntries.push({
+      type: "custom_message",
+      customType: message.customType,
+      details: message.details,
+    });
+  },
+};
 
 try {
   initialPort = await new Promise<number>((resolve, reject) => {
@@ -73,6 +87,8 @@ try {
   assert.ok(initialGateway);
   open = new ParentRunSession("parent-reconnect", gatewayParentRunAdapter(initialGateway!), {
     now: () => "2026-07-21T12:10:00.000Z",
+    completionAdapter: new PiParentCompletionAdapter(completionPi, completionTranscript),
+    successBatchDelayMs: 0,
   });
   await open.start();
   assert.equal(open.view.runs[0]?.status.text, "running");
@@ -121,13 +137,20 @@ try {
     2_500,
     "connection callback refetches terminal truth without a replayed domain event",
   );
+  await open.settled();
+  assert.equal(completionContinuations, 1, "daemon replacement inserts one completion continuation");
   replacementGateway = await connectGateway();
   assert.ok(replacementGateway);
   reopened = new ParentRunSession("parent-reconnect", gatewayParentRunAdapter(replacementGateway!), {
     now: () => "2026-07-21T12:10:00.000Z",
+    completionAdapter: new PiParentCompletionAdapter(completionPi, completionTranscript),
+    successBatchDelayMs: 0,
   });
   await reopened.start();
+  await reopened.settled();
   assert.deepEqual(reopened.view, open.view, "reopening reconstructs the same durable projection");
+  assert.equal(completionEntries.length, 1, "reopening cannot insert a duplicate lifecycle row");
+  assert.equal(completionContinuations, 1, "reopening cannot evoke a duplicate continuation");
 
   process.stdout.write("ok — parent agent state survives Gateway reconnect, daemon replacement, and reopening\n");
 } finally {
