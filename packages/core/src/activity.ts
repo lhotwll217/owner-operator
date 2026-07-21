@@ -15,7 +15,7 @@ export type TurnActivityEvent =
     turnId: string;
     at: number;
     outcome: "completed" | "interrupted";
-    responseText?: string;
+    hasResponse?: true;
   };
 
 export interface TurnTraceAction {
@@ -29,7 +29,7 @@ export interface TurnTrace {
   startedAt?: number;
   settledAt?: number;
   outcome?: "completed" | "interrupted";
-  responseText?: string;
+  hasResponse?: true;
   actions: readonly TurnTraceAction[];
   eventIds: ReadonlySet<string>;
 }
@@ -55,10 +55,9 @@ export type TurnTraceView =
     actionCount: number;
     summary: string;
     actions: readonly TurnTraceActionView[];
-    responseText?: string;
     interruptionMessage?: "Turn interrupted.";
   }
-  | { kind: "hidden"; turnId: string; responseText?: string }
+  | { kind: "hidden"; turnId: string }
   | { kind: "interrupted"; turnId: string; message: "Turn interrupted." };
 
 const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
@@ -100,12 +99,11 @@ export function applyTurnTraceEvent(trace: TurnTrace, event: TurnActivityEvent):
     return trace.startedAt === undefined ? { ...trace, startedAt: event.at } : trace;
   }
   if (event.kind === "turn_settled") {
-    const responseText = event.responseText?.trim();
     return {
       ...trace,
       settledAt: event.at,
       outcome: event.outcome,
-      ...(responseText ? { responseText } : {}),
+      ...(event.hasResponse ? { hasResponse: true as const } : {}),
     };
   }
   if (trace.eventIds.has(event.eventId)) return trace;
@@ -149,18 +147,21 @@ const actionViews = (trace: TurnTrace, active: boolean): TurnTraceActionView[] =
 /** Derive the complete presentation view. Expansion is caller-owned per-turn state. */
 export function deriveTurnTraceView(
   trace: TurnTrace,
-  options: { expanded?: boolean } = {},
+  options: { expanded?: boolean; interruptedAt?: number } = {},
 ): TurnTraceView {
-  if (trace.settledAt === undefined) {
+  const derivedInterruption = trace.settledAt === undefined && options.interruptedAt !== undefined;
+  const settledAt = trace.settledAt ?? options.interruptedAt;
+  const outcome = derivedInterruption ? "interrupted" : trace.outcome;
+  if (settledAt === undefined) {
     return { kind: "active", turnId: trace.turnId, actions: actionViews(trace, true) };
   }
   if (trace.actions.length === 0) {
-    if (trace.responseText) return { kind: "hidden", turnId: trace.turnId, responseText: trace.responseText };
-    if (trace.outcome === "interrupted") return { kind: "interrupted", turnId: trace.turnId, message: "Turn interrupted." };
+    if (trace.hasResponse) return { kind: "hidden", turnId: trace.turnId };
+    if (outcome === "interrupted") return { kind: "interrupted", turnId: trace.turnId, message: "Turn interrupted." };
     return { kind: "hidden", turnId: trace.turnId };
   }
 
-  const durationMs = Math.max(0, trace.settledAt - (trace.startedAt ?? trace.settledAt));
+  const durationMs = Math.max(0, settledAt - (trace.startedAt ?? settledAt));
   const actionCount = trace.actions.length;
   const expanded = options.expanded === true;
   return {
@@ -171,8 +172,7 @@ export function deriveTurnTraceView(
     actionCount,
     summary: `Worked for ${formatTurnDuration(durationMs)} · ${actionCount} action${actionCount === 1 ? "" : "s"}`,
     actions: expanded ? actionViews(trace, false) : [],
-    ...(trace.responseText ? { responseText: trace.responseText } : {}),
-    ...(trace.outcome === "interrupted" && !trace.responseText
+    ...(outcome === "interrupted" && !trace.hasResponse
       ? { interruptionMessage: "Turn interrupted." as const }
       : {}),
   };
@@ -181,11 +181,14 @@ export function deriveTurnTraceView(
 /** Replay retained events through the same reducer used by live ingestion. */
 export function replayTurnTrace(
   events: readonly TurnActivityEvent[],
-  options: { expanded?: boolean } = {},
+  options: { expanded?: boolean; transcriptEnded?: boolean } = {},
 ): TurnTraceView {
   const first = events[0];
   if (!first) throw new Error("Cannot replay an empty turn trace");
   let trace = createTurnTrace(first.turnId);
   for (const event of events) trace = applyTurnTraceEvent(trace, event);
-  return deriveTurnTraceView(trace, options);
+  return deriveTurnTraceView(trace, {
+    expanded: options.expanded,
+    ...(options.transcriptEnded && trace.settledAt === undefined ? { interruptedAt: events.at(-1)?.at } : {}),
+  });
 }

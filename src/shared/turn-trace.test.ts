@@ -24,7 +24,30 @@ const harnessSummaryEvent = {
     }],
   },
 };
-assert.equal(thinkingSummaryFromPiEvent(harnessSummaryEvent), "Reviewing the reducer boundary");
+assert.equal(thinkingSummaryFromPiEvent(harnessSummaryEvent), "Reviewing the reducer boundary", "OpenAI signed summaries remain visible");
+const opaqueThinkingEvent = {
+  ...harnessSummaryEvent,
+  partial: { content: [{
+    type: "thinking",
+    thinking: "Reviewing the Gemini adapter boundary",
+    thinkingSignature: "AQIDBA==",
+  }] },
+};
+assert.equal(
+  thinkingSummaryFromPiEvent(opaqueThinkingEvent, { provider: "google", id: "gemini-2.5-pro", reasoning: true }),
+  "Reviewing the Gemini adapter boundary",
+  "Gemini's summary-only thinking becomes timeline activity",
+);
+assert.equal(
+  thinkingSummaryFromPiEvent(opaqueThinkingEvent, { provider: "google", id: "gemini-flash-latest", reasoning: true }),
+  "Reviewing the Gemini adapter boundary",
+  "Google's unversioned reasoning aliases retain Gemini summaries",
+);
+assert.equal(
+  thinkingSummaryFromPiEvent(opaqueThinkingEvent, { provider: "anthropic", id: "claude-sonnet-4-5", reasoning: true }),
+  undefined,
+  "Anthropic opaque-signature thinking remains excluded",
+);
 assert.equal(thinkingSummaryFromPiEvent({
   ...harnessSummaryEvent,
   partial: { content: [{ type: "thinking", thinking: "hidden chain of thought" }] },
@@ -38,7 +61,7 @@ const firstTurn: TurnActivityEvent[] = [
   { kind: "turn_started", turnId: "one", at: 0 },
   { kind: "thinking_summary", turnId: "one", eventId: "one-summary", at: 100, summary: "Inspecting the adapter" },
   { kind: "tool", turnId: "one", eventId: "one-tool", at: 200, toolName: "read" },
-  { kind: "turn_settled", turnId: "one", at: 2_000, outcome: "completed", responseText: "Done." },
+  { kind: "turn_settled", turnId: "one", at: 2_000, outcome: "completed", hasResponse: true },
 ];
 const secondTurn: TurnActivityEvent[] = [
   { kind: "turn_started", turnId: "two", at: 3_000 },
@@ -57,6 +80,40 @@ assert.equal(expandedOne?.kind, "settled");
 assert.equal(expandedOne?.kind === "settled" && expandedOne.expanded, true);
 assert.equal(compactTwo?.kind === "settled" && compactTwo.expanded, false, "expansion belongs to one turn");
 
+const replayWithOrphans = TurnTraceStore.fromEvents([
+  { kind: "turn_started", turnId: "orphan-one", at: 5_000 },
+  { kind: "tool", turnId: "orphan-one", eventId: "orphan-read", at: 5_100, toolName: "read" },
+  { kind: "turn_started", turnId: "hidden-two", at: 6_000 },
+  { kind: "turn_settled", turnId: "hidden-two", at: 6_100, outcome: "completed", hasResponse: true },
+  { kind: "turn_started", turnId: "orphan-three", at: 7_000 },
+  { kind: "tool", turnId: "orphan-three", eventId: "orphan-grep", at: 7_100, toolName: "grep" },
+]);
+assert.equal(replayWithOrphans.view("orphan-one")?.kind, "settled", "a later turn start interrupts an unterminated replay turn");
+assert.equal(replayWithOrphans.view("orphan-three")?.kind, "settled", "end-of-transcript interrupts the final unterminated replay turn");
+assert.deepEqual(replayWithOrphans.turnOptions().map(({ label }) => label), [
+  "▶ Turn 1 · Worked for 1s · 1 action",
+  "▶ Turn 2 · Worked for 0s · 1 action",
+], "replayed interrupted turns are selectable and visible numbering does not skip hidden turns");
+const reloadedOrphan = new TurnTraceStore();
+const orphanAtReload: TurnActivityEvent[] = [
+  { kind: "turn_started", turnId: "reload-orphan", at: 8_000 },
+  { kind: "tool", turnId: "reload-orphan", eventId: "reload-read", at: 8_100, toolName: "read" },
+];
+for (const event of orphanAtReload) reloadedOrphan.ingest(event);
+assert.equal(reloadedOrphan.view("reload-orphan")?.kind, "active");
+reloadedOrphan.reset(orphanAtReload);
+assert.equal(reloadedOrphan.view("reload-orphan")?.kind, "settled", "session reload derives an unterminated turn as interrupted");
+
+const actionlessReplay = TurnTraceStore.fromEvents([
+  { kind: "turn_started", turnId: "actionless-orphan", at: 9_000 },
+]);
+assert.equal(actionlessReplay.view("actionless-orphan")?.kind, "interrupted");
+assert.equal(
+  actionlessReplay.visualAnchorTurnId({ kind: "turn_started", turnId: "actionless-orphan", at: 9_000 }),
+  "actionless-orphan",
+  "an actionless orphan anchors its concise replay fallback to the saved turn start",
+);
+
 const entries = [...firstTurn, ...secondTurn].map((event, index) => ({
   type: "custom",
   id: `entry-${index}`,
@@ -68,9 +125,21 @@ assert.deepEqual(turnActivityEventsFromSessionEntries([
   ...entries,
   { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: { kind: "tool", args: "invalid" } },
 ]), [...firstTurn, ...secondTurn], "saved transcript replay accepts only valid normalized activity entries");
+assert.deepEqual(turnActivityEventsFromSessionEntries([{
+  type: "custom",
+  customType: OO_TURN_ACTIVITY_ENTRY,
+  data: { kind: "turn_settled", turnId: "legacy", at: 1, outcome: "completed", responseText: "Existing answer" },
+}]), [{
+  kind: "turn_settled",
+  turnId: "legacy",
+  at: 1,
+  outcome: "completed",
+  hasResponse: true,
+}], "older full-text settlements replay through the minimal response-presence contract");
 
 const theme = buildOoTheme();
-const activeStore = TurnTraceStore.fromEvents(firstTurn.slice(0, -1));
+const activeStore = new TurnTraceStore();
+for (const event of firstTurn.slice(0, -1)) activeStore.ingest(event);
 const activeView = activeStore.view("one");
 assert.ok(activeView);
 const activeText = stripVTControlCharacters(renderTurnTraceText(activeView, theme));
@@ -99,20 +168,61 @@ extension({
 } as any);
 let widgetCalls = 0;
 let rawExpansionRefresh: boolean | undefined;
+const workingVisibility: boolean[] = [];
 const ctx = {
   sessionManager: { getSessionId: () => "session-1", getEntries: () => [] },
   ui: {
     async select(_title: string, choices: string[]): Promise<string> { return choices[0] ?? ""; },
     notify(): void {},
     setWidget(): void { widgetCalls += 1; },
-    setWorkingVisible(): void {},
+    setWorkingVisible(visible: boolean): void { workingVisibility.push(visible); },
     setToolsExpanded(expanded: boolean): void { rawExpansionRefresh = expanded; },
     getToolsExpanded: () => false,
   },
 };
+const actionlessEntry = {
+  type: "custom",
+  customType: OO_TURN_ACTIVITY_ENTRY,
+  data: { kind: "turn_started", turnId: "rendered-actionless", at: 9_500 } satisfies TurnActivityEvent,
+};
+handlers.get("session_start")?.({ reason: "resume" }, {
+  ...ctx,
+  sessionManager: { ...ctx.sessionManager, getEntries: () => [actionlessEntry] },
+});
+const actionlessComponent = renderer?.(actionlessEntry, { expanded: false }, theme);
+assert.ok(
+  actionlessComponent?.render(80).some((line: string) => stripVTControlCharacters(line).includes("Turn interrupted.")),
+  "hydration renders the concise fallback for an actionless orphan",
+);
+const followedActionlessEntries = [
+  { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: {
+    kind: "turn_started", turnId: "followed-actionless", at: 9_600,
+  } satisfies TurnActivityEvent },
+  { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: {
+    kind: "turn_started", turnId: "following-hidden", at: 9_700,
+  } satisfies TurnActivityEvent },
+  { type: "custom", customType: OO_TURN_ACTIVITY_ENTRY, data: {
+    kind: "turn_settled", turnId: "following-hidden", at: 9_800, outcome: "completed", hasResponse: true,
+  } satisfies TurnActivityEvent },
+];
+handlers.get("session_start")?.({ reason: "resume" }, {
+  ...ctx,
+  sessionManager: { ...ctx.sessionManager, getEntries: () => followedActionlessEntries },
+});
+const followedFallbacks = followedActionlessEntries
+  .map((entry) => renderer?.(entry, { expanded: false }, theme))
+  .filter((component) => component?.render(80).some((line: string) => stripVTControlCharacters(line).includes("Turn interrupted.")));
+assert.equal(followedFallbacks.length, 1, "a following turn start renders one concise orphan fallback");
 handlers.get("session_start")?.({ reason: "startup" }, ctx);
 handlers.get("agent_start")?.({ type: "agent_start" }, ctx);
+assert.deepEqual(workingVisibility, [true], "the working indicator remains visible before the first semantic action");
+handlers.get("message_update")?.({ assistantMessageEvent: {
+  ...harnessSummaryEvent,
+  partial: { content: [{ type: "thinking", thinking: "private reasoning" }] },
+} }, ctx);
+assert.deepEqual(workingVisibility, [true], "hidden reasoning does not create dead air by hiding the indicator");
 handlers.get("message_update")?.({ assistantMessageEvent: harnessSummaryEvent }, ctx);
+assert.deepEqual(workingVisibility, [true, false], "the first visible timeline entry replaces the working indicator");
 handlers.get("message_update")?.({ assistantMessageEvent: {
   ...harnessSummaryEvent,
   partial: { content: [{ type: "thinking", thinking: "private reasoning" }] },
@@ -144,10 +254,20 @@ handlers.get("agent_end")?.({ messages: [{
 assert.notEqual(appended.at(-1)?.data.kind, "turn_settled", "agent_end alone does not expose a routine retry/failure");
 handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 assert.equal(appended.at(-1)?.data.kind, "turn_settled");
+const settlement = appended.at(-1)?.data;
+assert.deepEqual(settlement?.kind === "turn_settled" ? settlement : undefined, {
+  kind: "turn_settled",
+  turnId: settlement?.turnId,
+  at: settlement?.at,
+  outcome: "completed",
+  hasResponse: true,
+}, "settlement persists only whether owner-facing response text exists");
 assert.ok(liveComponent?.render(80).some((line: string) => stripVTControlCharacters(line).includes("Worked for")), "settlement updates the existing trace anchor");
 assert.ok(activityCommand, "one command owns per-turn semantic expansion");
 await activityCommand?.handler("", ctx);
 assert.ok(liveComponent?.render(80).some((line: string) => stripVTControlCharacters(line).includes("collapse trace")), "/activity expands the selected turn in place");
 assert.equal(rawExpansionRefresh, false, "semantic expansion does not enable raw tool detail");
+handlers.get("agent_start")?.({ type: "agent_start" }, ctx);
+assert.equal(workingVisibility.at(-1), true, "the next owner turn restores the working indicator");
 
 process.stdout.write("ok — Pi TurnTrace adapter: signed summaries, persistence/replay, timeline rendering, per-turn expansion\n");

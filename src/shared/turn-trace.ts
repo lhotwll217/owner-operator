@@ -33,13 +33,16 @@ function parseTurnActivityEvent(value: unknown): TurnActivityEvent | undefined {
       return { kind: "tool", turnId: event.turnId, eventId: event.eventId, at: event.at, toolName: event.toolName };
     case "turn_settled":
       if (event.outcome !== "completed" && event.outcome !== "interrupted") return undefined;
+      if (event.hasResponse !== undefined && event.hasResponse !== true) return undefined;
       if (event.responseText !== undefined && typeof event.responseText !== "string") return undefined;
+      const legacyResponseText = typeof event.responseText === "string" ? event.responseText.trim() : "";
+      const hasResponse = event.hasResponse === true || legacyResponseText !== "";
       return {
         kind: "turn_settled",
         turnId: event.turnId,
         at: event.at,
         outcome: event.outcome,
-        ...(event.responseText ? { responseText: event.responseText } : {}),
+        ...(hasResponse ? { hasResponse: true } : {}),
       };
     default:
       return undefined;
@@ -60,17 +63,24 @@ export function turnActivityEventsFromSessionEntries(entries: readonly unknown[]
 }
 
 /**
- * Pi uses one generic `thinking` block for both hidden reasoning and provider summaries. Only a
- * signed OpenAI Responses item with a non-empty `summary` is safe to expose; generic thinking
- * content and the event's convenience `content` field are deliberately ignored.
+ * Pi uses one generic `thinking` block for both hidden reasoning and provider summaries. Signed
+ * OpenAI Responses summaries are safe to expose. Gemini 2.5+ thinking from Google's adapters is
+ * also summary-only; every other provider's generic thinking content remains private.
  */
-export function thinkingSummaryFromPiEvent(event: unknown): string | undefined {
+export function thinkingSummaryFromPiEvent(
+  event: unknown,
+  model?: { provider?: unknown; id?: unknown; reasoning?: unknown },
+): string | undefined {
   if (!event || typeof event !== "object") return undefined;
   const update = event as { type?: unknown; contentIndex?: unknown; partial?: { content?: unknown } };
   if (update.type !== "thinking_end" || typeof update.contentIndex !== "number") return undefined;
   const content = update.partial?.content;
   if (!Array.isArray(content)) return undefined;
-  const block = content[update.contentIndex] as { type?: unknown; thinkingSignature?: unknown } | undefined;
+  const block = content[update.contentIndex] as {
+    type?: unknown;
+    thinking?: unknown;
+    thinkingSignature?: unknown;
+  } | undefined;
   if (block?.type !== "thinking" || typeof block.thinkingSignature !== "string") return undefined;
   try {
     const signed = JSON.parse(block.thinkingSignature) as { summary?: unknown };
@@ -84,7 +94,15 @@ export function thinkingSummaryFromPiEvent(event: unknown): string | undefined {
       .trim();
     return summary || undefined;
   } catch {
-    return undefined;
+    // The pinned Pi Google adapter identifies `thought: true` blocks as thought summaries; its
+    // model catalog marks only thinking-capable Gemini models as `reasoning: true`.
+    // See node_modules/@earendil-works/pi-ai/dist/api/google-shared.js and providers/google*.models.js.
+    const summaryOnlyGemini = (model?.provider === "google" || model?.provider === "google-vertex")
+      && typeof model.id === "string"
+      && /^gemini(?:-live)?-/i.test(model.id)
+      && model.reasoning === true;
+    if (!summaryOnlyGemini || typeof block.thinking !== "string") return undefined;
+    return block.thinking.trim() || undefined;
   }
 }
 
@@ -94,10 +112,14 @@ export class TurnTraceStore {
   private order: string[] = [];
   private firstAction = new Map<string, string>();
   private expanded = new Set<string>();
+  // Replay-only settlement boundary. Nothing synthetic is appended to the saved transcript.
+  private interruptedAt = new Map<string, number>();
+  private lastEventAt = new Map<string, number>();
 
   static fromEvents(events: readonly TurnActivityEvent[]): TurnTraceStore {
     const store = new TurnTraceStore();
     for (const event of events) store.ingest(event);
+    store.finishReplay();
     return store;
   }
 
@@ -106,26 +128,51 @@ export class TurnTraceStore {
     this.order = [];
     this.firstAction.clear();
     this.expanded.clear();
+    this.interruptedAt.clear();
+    this.lastEventAt.clear();
     for (const event of events) this.ingest(event);
+    this.finishReplay();
   }
 
-  ingest(event: TurnActivityEvent): void {
+  ingest(event: TurnActivityEvent): boolean {
     let trace = this.traces.get(event.turnId);
     if (!trace) {
+      if (event.kind === "turn_started") {
+        const previousTurnId = this.order.at(-1);
+        const previous = previousTurnId ? this.traces.get(previousTurnId) : undefined;
+        if (previousTurnId && previous && previous.settledAt === undefined && !this.interruptedAt.has(previousTurnId)) {
+          this.interruptedAt.set(previousTurnId, event.at);
+        }
+      }
       trace = createTurnTrace(event.turnId);
       this.traces.set(event.turnId, trace);
       this.order.push(event.turnId);
     }
     const next = applyTurnTraceEvent(trace, event);
     this.traces.set(event.turnId, next);
+    this.lastEventAt.set(event.turnId, event.at);
     if (next.actions.length > trace.actions.length && "eventId" in event && !this.firstAction.has(event.turnId)) {
       this.firstAction.set(event.turnId, event.eventId);
     }
+    return next.actions.length > trace.actions.length;
+  }
+
+  private finishReplay(): void {
+    const turnId = this.order.at(-1);
+    const trace = turnId ? this.traces.get(turnId) : undefined;
+    const at = turnId ? this.lastEventAt.get(turnId) : undefined;
+    if (turnId && trace?.settledAt === undefined && at !== undefined) this.interruptedAt.set(turnId, at);
   }
 
   view(turnId: string): TurnTraceView | undefined {
     const trace = this.traces.get(turnId);
-    return trace ? deriveTurnTraceView(trace, { expanded: this.expanded.has(turnId) }) : undefined;
+    const interruptedAt = this.interruptedAt.get(turnId);
+    return trace
+      ? deriveTurnTraceView(trace, {
+        expanded: this.expanded.has(turnId),
+        ...(interruptedAt !== undefined ? { interruptedAt } : {}),
+      })
+      : undefined;
   }
 
   toggleExpanded(turnId: string): void {
@@ -135,17 +182,25 @@ export class TurnTraceStore {
     else this.expanded.add(turnId);
   }
 
-  isVisualAnchor(event: TurnActivityEvent): boolean {
-    if ("eventId" in event && this.firstAction.get(event.turnId) === event.eventId) return true;
-    return event.kind === "turn_settled" && this.view(event.turnId)?.kind === "interrupted";
+  visualAnchorTurnId(event: TurnActivityEvent): string | undefined {
+    if ("eventId" in event && this.firstAction.get(event.turnId) === event.eventId) return event.turnId;
+    const view = this.view(event.turnId);
+    return (event.kind === "turn_settled" || event.kind === "turn_started") && view?.kind === "interrupted"
+      ? event.turnId
+      : undefined;
   }
 
   turnOptions(): Array<{ turnId: string; label: string }> {
-    return this.order.flatMap((turnId, index) => {
+    const visible = this.order.flatMap((turnId) => {
       const view = this.view(turnId);
-      if (view?.kind !== "settled") return [];
-      return [{ turnId, label: `${view.expanded ? "▼" : "▶"} Turn ${index + 1} · ${view.summary}` }];
+      if (view?.kind === "settled") return [{ turnId, marker: view.expanded ? "▼" : "▶", summary: view.summary }];
+      if (view?.kind === "interrupted") return [{ turnId, marker: "!", summary: view.message }];
+      return [];
     });
+    return visible.map(({ turnId, marker, summary }, index) => ({
+      turnId,
+      label: `${marker} Turn ${index + 1} · ${summary}`,
+    }));
   }
 }
 
@@ -196,15 +251,13 @@ function finalAssistant(messages: readonly unknown[]): { stopReason?: unknown; c
     !!message && typeof message === "object" && (message as { role?: unknown }).role === "assistant");
 }
 
-function textFromAssistant(message: { content?: unknown } | undefined): string | undefined {
-  if (!Array.isArray(message?.content)) return undefined;
-  const text = message.content
-    .map((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"
-      ? (part as { text: string }).text
-      : "")
-    .join("")
-    .trim();
-  return text || undefined;
+function hasAssistantText(message: { content?: unknown } | undefined): boolean {
+  if (!Array.isArray(message?.content)) return false;
+  return message.content.some((part) => part
+    && typeof part === "object"
+    && (part as { type?: unknown }).type === "text"
+    && typeof (part as { text?: unknown }).text === "string"
+    && (part as { text: string }).text.trim() !== "");
 }
 
 export function createTurnTraceExtension(options: { now?: () => number } = {}): ExtensionFactory {
@@ -214,11 +267,12 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
     let activeTurnId: string | undefined;
     let turnCounter = 0;
     let eventCounter = 0;
-    let pendingSettlement: { outcome: "completed" | "interrupted"; responseText?: string } | undefined;
+    let pendingSettlement: { outcome: "completed" | "interrupted"; hasResponse?: true } | undefined;
 
-    const append = (event: TurnActivityEvent): void => {
-      store.ingest(event);
+    const append = (event: TurnActivityEvent): boolean => {
+      const addedVisibleEntry = store.ingest(event);
       pi.appendEntry(OO_TURN_ACTIVITY_ENTRY, event);
+      return addedVisibleEntry;
     };
 
     pi.registerEntryRenderer<TurnActivityEvent>(OO_TURN_ACTIVITY_ENTRY, (entry, _renderOptions, theme) => {
@@ -228,8 +282,8 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
       // entry into the same store here makes that ordering deterministic; live duplicates are
       // harmless because the core reducer deduplicates semantic event IDs and is terminal-monotonic.
       store.ingest(event);
-      if (!store.isVisualAnchor(event)) return undefined;
-      return new TurnTraceComponent(store, event.turnId, theme);
+      const anchorTurnId = store.visualAnchorTurnId(event);
+      return anchorTurnId ? new TurnTraceComponent(store, anchorTurnId, theme) : undefined;
     });
 
     pi.registerCommand("activity", {
@@ -262,32 +316,32 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
       activeTurnId = `${ctx.sessionManager.getSessionId()}:${startedAt}:${turnCounter++}`;
       eventCounter = 0;
       pendingSettlement = undefined;
-      ctx.ui.setWorkingVisible(false);
+      ctx.ui.setWorkingVisible(true);
       append({ kind: "turn_started", turnId: activeTurnId, at: startedAt });
     });
 
-    pi.on("message_update", (event) => {
+    pi.on("message_update", (event, ctx) => {
       if (!activeTurnId) return;
-      const summary = thinkingSummaryFromPiEvent(event.assistantMessageEvent);
+      const summary = thinkingSummaryFromPiEvent(event.assistantMessageEvent, ctx.model);
       if (!summary) return;
-      append({
+      if (append({
         kind: "thinking_summary",
         turnId: activeTurnId,
         eventId: `${activeTurnId}:summary:${eventCounter++}`,
         at: now(),
         summary,
-      });
+      })) ctx.ui.setWorkingVisible(false);
     });
 
-    pi.on("tool_execution_start", (event) => {
+    pi.on("tool_execution_start", (event, ctx) => {
       if (!activeTurnId || !semanticActionForTool(event.toolName)) return;
-      append({
+      if (append({
         kind: "tool",
         turnId: activeTurnId,
         eventId: `${activeTurnId}:tool:${event.toolCallId}`,
         at: now(),
         toolName: event.toolName,
-      });
+      })) ctx.ui.setWorkingVisible(false);
     });
 
     pi.on("agent_end", (event) => {
@@ -296,10 +350,10 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
       const interrupted = assistant?.stopReason === "aborted"
         || assistant?.stopReason === "error"
         || assistant?.stopReason === "length";
-      const responseText = textFromAssistant(assistant);
+      const hasResponse = hasAssistantText(assistant);
       pendingSettlement = {
         outcome: interrupted ? "interrupted" : "completed",
-        ...(responseText ? { responseText } : {}),
+        ...(hasResponse ? { hasResponse: true } : {}),
       };
     });
 

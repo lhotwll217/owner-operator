@@ -15,7 +15,7 @@ try {
     { kind: "turn_started", turnId: "saved-turn", at: 1_000 },
     { kind: "thinking_summary", turnId: "saved-turn", eventId: "summary", at: 1_100, summary: "Inspecting saved state" },
     { kind: "tool", turnId: "saved-turn", eventId: "tool", at: 1_200, toolName: "read" },
-    { kind: "turn_settled", turnId: "saved-turn", at: 4_000, outcome: "completed", responseText: "Final answer" },
+    { kind: "turn_settled", turnId: "saved-turn", at: 4_000, outcome: "completed", hasResponse: true },
   ];
   for (const event of events) saved.appendCustomEntry(OO_TURN_ACTIVITY_ENTRY, event);
   saved.appendMessage({

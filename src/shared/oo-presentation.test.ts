@@ -87,8 +87,8 @@ genericToolRow.expanded = false; // Pi's updateDisplay mutates internal fields, 
 assert.deepEqual(genericToolRow.render(), ["RAW read /secret/path result body"], "tool updates cannot bypass an explicit raw-detail expansion");
 genericToolRow.setExpanded(false);
 assert.deepEqual(genericToolRow.render(), [], "the separate expansion closes raw detail again");
-assert.deepEqual(delegateToolRow.render(), [], "delegation arguments are also hidden by default");
-assert.deepEqual(manageRunToolRow.render(), [], "run-management arguments are also hidden by default");
+assert.deepEqual(delegateToolRow.render(), ["RAW delegate_agent /secret/path result body"], "the delegated-run snapshot stays visible by default");
+assert.deepEqual(manageRunToolRow.render(), ["RAW manage_agent_run /secret/path result body"], "the run-management snapshot stays visible by default");
 fakeMode.showPackageUpdateNotification();
 fakeMode.showNewVersionNotification();
 assert.ok(!pkgNoticeShown && !verNoticeShown, "startup update notices are silenced");

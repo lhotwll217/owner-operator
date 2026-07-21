@@ -58,7 +58,9 @@ if (process.env.OO_TURN_TRACE_PTY_CHILD === "1") {
         outcome: "completed" as const,
       }]),
     ];
-    for (const event of events) sessionManager.appendCustomEntry(OO_TURN_ACTIVITY_ENTRY, event);
+    if (mode !== "active") {
+      for (const event of events) sessionManager.appendCustomEntry(OO_TURN_ACTIVITY_ENTRY, event);
+    }
     sessionManager.appendMessage({
       role: "assistant",
       content: [{ type: "toolCall", id: "raw-call", name: "read", arguments: { path: "/private/credential.txt" } }],
@@ -99,6 +101,15 @@ if (process.env.OO_TURN_TRACE_PTY_CHILD === "1") {
     const interactive = new InteractiveMode(runtime, {});
     quietOoInteractiveMode(interactive);
     await (interactive as any).init();
+
+    if (mode === "active") {
+      for (const event of events) {
+        sessionManager.appendCustomEntry(OO_TURN_ACTIVITY_ENTRY, event);
+        const entry = sessionManager.getEntries().at(-1);
+        assert.equal(entry?.type, "custom");
+        (interactive as any).addCustomEntryToChat(entry);
+      }
+    }
 
     if (mode === "expanded") {
       (interactive as any).showExtensionSelector = async (_title: string, choices: string[]) => choices[0];

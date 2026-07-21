@@ -273,6 +273,7 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
 // components) rather than silently letting the dump back in.
 const TOOL_EXECUTION_COMPONENT = "ToolExecutionComponent";
 const ASSISTANT_MESSAGE_COMPONENT = "AssistantMessageComponent";
+const VISIBLE_TOOL_ROWS = new Set(["delegate_agent", "manage_agent_run"]);
 
 const className = (child: unknown): string | undefined =>
   (child as { constructor?: { name?: string } } | null)?.constructor?.name;
@@ -280,6 +281,14 @@ const className = (child: unknown): string | undefined =>
 /** True for Pi's tool-row component. */
 export function isToolExecutionRow(child: unknown): boolean {
   return className(child) === TOOL_EXECUTION_COMPONENT;
+}
+
+/** Delegated-run tools own compact snapshot rendering, so their rows remain visible without raw
+ * expansion. Pi's pinned ToolExecutionComponent constructor stores `toolName` on the component;
+ * see node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js. */
+function isVisibleToolExecutionRow(child: unknown): boolean {
+  const toolName = (child as { toolName?: unknown } | null)?.toolName;
+  return typeof toolName === "string" && VISIBLE_TOOL_ROWS.has(toolName);
 }
 
 /** Keep raw tool components in their source position, but render zero lines until Pi's separate
@@ -353,7 +362,7 @@ export function quietOoInteractiveMode(mode: unknown): void {
   if (chat && typeof chat.addChild === "function") {
     const original = chat.addChild.bind(chat);
     chat.addChild = (child: unknown): void => {
-      if (isToolExecutionRow(child)) gateRawToolDetail(child);
+      if (isToolExecutionRow(child) && !isVisibleToolExecutionRow(child)) gateRawToolDetail(child);
       if (isAssistantMessageRow(child)) muteThinkingRendering(child); // reasoning renders nothing
       original(child);
     };

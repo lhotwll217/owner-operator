@@ -56,7 +56,7 @@ const settledEvents: TurnActivityEvent[] = [
     turnId: "turn-10",
     at: 18_000,
     outcome: "completed",
-    responseText: "The final response remains visible.",
+    hasResponse: true,
   },
 ];
 const compact = replayTurnTrace(settledEvents);
@@ -68,7 +68,6 @@ assert.deepEqual(compact, {
   actionCount: 10,
   summary: "Worked for 8s · 10 actions",
   actions: [],
-  responseText: "The final response remains visible.",
 }, "settlement collapses to duration/action count without losing the final response");
 
 const expanded = replayTurnTrace(settledEvents, { expanded: true });
@@ -112,20 +111,18 @@ assert.ok(!JSON.stringify(replayTurnTrace([
 
 assert.deepEqual(replayTurnTrace([
   { kind: "turn_started", turnId: "short", at: 0 },
-  { kind: "turn_settled", turnId: "short", at: 250, outcome: "completed", responseText: "Done." },
+  { kind: "turn_settled", turnId: "short", at: 250, outcome: "completed", hasResponse: true },
 ]), {
   kind: "hidden",
   turnId: "short",
-  responseText: "Done.",
 }, "short turns with no semantic actions do not manufacture an activity summary");
 
 assert.deepEqual(replayTurnTrace([
   { kind: "turn_started", turnId: "partial", at: 0 },
-  { kind: "turn_settled", turnId: "partial", at: 2_000, outcome: "interrupted", responseText: "Partial answer" },
+  { kind: "turn_settled", turnId: "partial", at: 2_000, outcome: "interrupted", hasResponse: true },
 ]), {
   kind: "hidden",
   turnId: "partial",
-  responseText: "Partial answer",
 }, "interrupted turns retain partial output without adding technical noise");
 
 assert.deepEqual(replayTurnTrace([
@@ -151,5 +148,19 @@ assert.deepEqual(replayTurnTrace([
   actions: [],
   interruptionMessage: "Turn interrupted.",
 }, "an interrupted turn with activity retains its compact trace and explains the outcome");
+
+assert.deepEqual(replayTurnTrace([
+  { kind: "turn_started", turnId: "orphaned", at: 20_000 },
+  { kind: "tool", turnId: "orphaned", eventId: "orphaned-read", at: 21_000, toolName: "read" },
+], { transcriptEnded: true }), {
+  kind: "settled",
+  turnId: "orphaned",
+  expanded: false,
+  durationMs: 1_000,
+  actionCount: 1,
+  summary: "Worked for 1s · 1 action",
+  actions: [],
+  interruptionMessage: "Turn interrupted.",
+}, "an unterminated trace is derived as interrupted at end-of-transcript");
 
 process.stdout.write("ok — TurnTrace core: ordered live activity, settlement, expansion, replay, privacy, interruption\n");
