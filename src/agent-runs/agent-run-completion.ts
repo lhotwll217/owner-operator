@@ -1,5 +1,5 @@
 import type { AgentRunStatus } from "@owner-operator/core";
-import type { AgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
+import { bounded, type AgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import type {
   ExtensionAPI,
   MessageRenderOptions,
@@ -107,7 +107,13 @@ export class PiParentCompletionAdapter implements ParentCompletionAdapter {
     for (const eventId of persisted) queued.delete(eventId);
     const duplicate = envelopes.filter(({ eventId }) => persisted.has(eventId)).map(({ eventId }) => eventId);
     const fresh = envelopes.filter(({ eventId }) => !persisted.has(eventId) && !queued.has(eventId));
-    if (!fresh.length) return { delivered: [], duplicate };
+    if (!fresh.length) {
+      return {
+        delivered: [],
+        duplicate,
+        queued: envelopes.filter(({ eventId }) => queued.has(eventId)).map(({ eventId }) => eventId),
+      };
+    }
 
     const details: AgentRunCompletionMessageDetails = {
       version: 1,
@@ -128,7 +134,11 @@ export class PiParentCompletionAdapter implements ParentCompletionAdapter {
     const persistedAfterSend = transcriptEventIds(this.transcript.getEntries());
     const delivered = details.eventIds.filter((eventId) => persistedAfterSend.has(eventId));
     for (const eventId of delivered) queued.delete(eventId);
-    return { delivered, duplicate };
+    return {
+      delivered,
+      duplicate,
+      queued: envelopes.filter(({ eventId }) => queued.has(eventId)).map(({ eventId }) => eventId),
+    };
   }
 }
 
@@ -151,13 +161,15 @@ export function renderAgentRunCompletionMessage(
   const envelopes = message.details?.version === 1 ? message.details.envelopes : [];
   const lines: string[] = [];
   for (const envelope of envelopes) {
-    const child = envelope.childSessionId ?? envelope.runId;
+    const runId = bounded(envelope.runId, 512);
+    const child = bounded(envelope.childSessionId ?? envelope.runId, 512);
+    const harness = bounded(envelope.harness, 512);
     const glyph = completionGlyph(envelope.outcome);
     const row = `${glyph} ${envelope.task} · ${child} · ${envelope.outcome} · ${formatAgentElapsed(envelope.elapsedMs)}`;
     lines.push(envelope.outcome === "completed" ? theme.fg("success", row) : theme.fg("warning", row));
     if (!options.expanded) continue;
-    lines.push(theme.fg("dim", `  Run: ${envelope.runId}`));
-    lines.push(theme.fg("dim", `  Harness: ${envelope.harness}`));
+    lines.push(theme.fg("dim", `  Run: ${runId}`));
+    lines.push(theme.fg("dim", `  Harness: ${harness}`));
     lines.push(theme.fg("dim", `  Completed: ${envelope.completedAt}`));
     for (const artifact of envelope.artifacts) {
       lines.push(theme.fg("dim", `  Artifact: ${artifact.label} · ${artifact.reference}`));

@@ -158,6 +158,11 @@ Terminal completion behavior is defined at four linked seams: the browser-safe
 [terminal reconciliation](../src/agent-runs/parent-run-session.ts), the
 [Pi custom-message adapter](../src/agent-runs/agent-run-completion.ts), and its model-free
 [saved-session integration contract](../test/agent-run-completion.integration.test.ts).
+Queued delivery and bounded retry/recovery behavior are owned by the
+[terminal reconciliation](../src/agent-runs/parent-run-session.ts) and
+[Pi custom-message adapter](../src/agent-runs/agent-run-completion.ts). Bounded child evidence
+is normalized to remove terminal control and bidirectional override characters before any adapter
+receives it.
 
 ## State
 

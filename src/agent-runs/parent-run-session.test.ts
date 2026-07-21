@@ -19,6 +19,15 @@ const tick = async (): Promise<void> => {
   await new Promise<void>((resolve) => setImmediate(resolve));
 };
 
+const waitFor = async (check: () => boolean, label: string): Promise<void> => {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+};
+
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -70,7 +79,7 @@ class MemoryCompletionAdapter implements ParentCompletionAdapter {
 
   async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
     this.batches.push([...envelopes]);
-    return { delivered: envelopes.map(({ eventId }) => eventId), duplicate: [] };
+    return { delivered: envelopes.map(({ eventId }) => eventId), duplicate: [], queued: [] };
   }
 }
 
@@ -81,8 +90,30 @@ class PersistenceCompletionAdapter implements ParentCompletionAdapter {
   async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
     this.attempts.push([...envelopes]);
     return this.persisted
-      ? { delivered: [], duplicate: envelopes.map(({ eventId }) => eventId) }
-      : { delivered: [], duplicate: [] };
+      ? { delivered: [], duplicate: envelopes.map(({ eventId }) => eventId), queued: [] }
+      : { delivered: [], duplicate: [], queued: envelopes.map(({ eventId }) => eventId) };
+  }
+}
+
+class FlakyCompletionAdapter implements ParentCompletionAdapter {
+  attempts = 0;
+
+  async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
+    this.attempts += 1;
+    if (this.attempts === 1) throw new Error("Pi completion adapter unavailable");
+    return { delivered: envelopes.map(({ eventId }) => eventId), duplicate: [], queued: [] };
+  }
+}
+
+class UnconfirmedCompletionAdapter implements ParentCompletionAdapter {
+  attempts = 0;
+  recovered = false;
+
+  async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
+    this.attempts += 1;
+    return this.recovered
+      ? { delivered: envelopes.map(({ eventId }) => eventId), duplicate: [], queued: [] }
+      : { delivered: [], duplicate: [], queued: [] };
   }
 }
 
@@ -175,8 +206,8 @@ reopened.stop();
 const loopExitAdapter = new MemoryAdapter();
 loopExitAdapter.listResults.push(
   Promise.resolve([]),
-  Promise.resolve([run("loop-exit", AgentRunStatus.Running)]),
-  Promise.resolve([run("loop-exit", AgentRunStatus.Completed)]),
+  Promise.resolve([run("loop-exit", AgentRunStatus.Running, { parentThreadId: "parent-loop-exit" })]),
+  Promise.resolve([run("loop-exit", AgentRunStatus.Completed, { parentThreadId: "parent-loop-exit" })]),
 );
 const loopExitSession = new ParentRunSession("parent-loop-exit", loopExitAdapter);
 let queuedLoopExitInvalidation = false;
@@ -222,6 +253,10 @@ completionRunAdapter.rows = [
     childSessionId: "child-session-failure",
     error: "startup failed",
   }),
+  run("unrelated-running", AgentRunStatus.Running, {
+    parentThreadId: "parent-completion",
+    activity: "working independently",
+  }),
 ];
 completionRunAdapter.invalidate();
 await completionSession.settled();
@@ -235,7 +270,12 @@ await completionSession.settled();
 assert.deepEqual(
   completions.batches.map((batch) => batch.map(({ runId }) => runId)),
   [["child-failure"], ["child-success", "child-success-2"]],
-  "nearby routine successes share one delayed continuation batch",
+  "nearby routine successes share one delayed continuation batch without waiting for unrelated work",
+);
+assert.equal(
+  completionSession.view.runs.find(({ id }) => id === "unrelated-running")?.status.text,
+  "running",
+  "the batching deadline is independent of other child lifecycles",
 );
 completionRunAdapter.invalidate();
 await completionSession.settled();
@@ -244,8 +284,8 @@ assert.equal(completions.batches[1]![0]!.childSessionId, "child-session-success"
 assert.equal(completions.batches[1]![0]!.outcome, AgentRunStatus.Completed);
 completionSession.stop();
 
-// Queue admission is not durable delivery. If Pi settles without persisting the custom message,
-// the next durable reconciliation retries it in-process; once persisted, later lists stay deduped.
+// Queue admission is healthy pending delivery: repeated durable reconciliations re-check it but
+// never consume the failure budget. Transcript persistence then settles it exactly once.
 const retainedRunAdapter = new MemoryAdapter();
 retainedRunAdapter.rows = [run("retained-child", AgentRunStatus.Running)];
 const retainedCompletions = new PersistenceCompletionAdapter();
@@ -260,17 +300,75 @@ retainedRunAdapter.rows = [run("retained-child", AgentRunStatus.Completed, {
 retainedRunAdapter.invalidate();
 await retainedSession.settled();
 assert.equal(retainedCompletions.attempts.length, 1, "an unpersisted completion remains unsettled");
-retainedRunAdapter.invalidate();
-await retainedSession.settled();
-assert.equal(retainedCompletions.attempts.length, 2, "the next reconciliation redelivers in the same process");
+for (let attempt = 0; attempt < 4; attempt += 1) {
+  retainedRunAdapter.invalidate();
+  await retainedSession.settled();
+}
+assert.equal(retainedCompletions.attempts.length, 5, "queued delivery remains eligible beyond the failure cap");
 retainedCompletions.persisted = true;
 retainedRunAdapter.invalidate();
 await retainedSession.settled();
-assert.equal(retainedCompletions.attempts.length, 3, "a transcript-confirmed duplicate settles the completion");
+assert.equal(retainedCompletions.attempts.length, 6, "a transcript-confirmed duplicate settles the completion");
 retainedRunAdapter.invalidate();
 await retainedSession.settled();
-assert.equal(retainedCompletions.attempts.length, 3, "a settled persisted completion is not delivered again");
+assert.equal(retainedCompletions.attempts.length, 6, "a settled persisted completion is not delivered again");
 retainedSession.stop();
+
+// Adapter failures schedule another durable reconciliation. No extra Gateway invalidation is
+// required, and the failed attempt cannot settle or duplicate the lifecycle event.
+const retryRunAdapter = new MemoryAdapter();
+retryRunAdapter.rows = [run("retry-child", AgentRunStatus.Failed, {
+  parentThreadId: "retry-parent",
+  error: "ACP adapter failed before startup",
+})];
+const flakyCompletions = new FlakyCompletionAdapter();
+const retrySession = new ParentRunSession("retry-parent", retryRunAdapter, {
+  completionAdapter: flakyCompletions,
+  completionRetryDelayMs: 1,
+  onError: (error) => errors.push(error),
+});
+await retrySession.start();
+await retrySession.settled();
+assert.equal(flakyCompletions.attempts, 1, "the first adapter failure leaves delivery unsettled");
+await waitFor(() => flakyCompletions.attempts === 2, "adapter failure retry");
+await retrySession.settled();
+assert.equal(flakyCompletions.attempts, 2, "durable truth is retried without another invalidation");
+retrySession.stop();
+
+// Permanently unconfirmed delivery cannot keep refetching durable truth for the lifetime of the
+// parent TUI. A bounded retry budget preserves recovery without creating background contention.
+const boundedRetryRunAdapter = new MemoryAdapter();
+boundedRetryRunAdapter.rows = [run("bounded-retry-child", AgentRunStatus.Failed, {
+  parentThreadId: "bounded-retry-parent",
+  error: "Pi did not persist the completion message",
+})];
+const unconfirmedCompletions = new UnconfirmedCompletionAdapter();
+const exhaustionErrors: unknown[] = [];
+const boundedRetrySession = new ParentRunSession("bounded-retry-parent", boundedRetryRunAdapter, {
+  completionAdapter: unconfirmedCompletions,
+  completionRetryDelayMs: 1,
+  onError: (error) => exhaustionErrors.push(error),
+});
+await boundedRetrySession.start();
+await waitFor(() => unconfirmedCompletions.attempts === 3, "bounded completion retry exhaustion");
+await boundedRetrySession.settled();
+const boundedAttempts = unconfirmedCompletions.attempts;
+const boundedLists = boundedRetryRunAdapter.operations.filter((operation) => operation.startsWith("list:")).length;
+assert.equal(boundedAttempts, 3, "delivery gets one initial attempt and two durable-refetch retries");
+assert.equal(unconfirmedCompletions.attempts, boundedAttempts, "unconfirmed delivery stops after its retry budget");
+assert.equal(boundedRetryRunAdapter.operations.filter((operation) => operation.startsWith("list:")).length, boundedLists);
+assert.equal(exhaustionErrors.length, 1, "retry exhaustion is surfaced once per completion");
+assert.match(String(exhaustionErrors[0]), /could not be delivered.*reopen.*retry/i);
+
+unconfirmedCompletions.recovered = true;
+boundedRetryRunAdapter.invalidate();
+await waitFor(() => unconfirmedCompletions.attempts === 4, "recovered delivery after a new invalidation");
+await boundedRetrySession.settled();
+boundedRetryRunAdapter.invalidate();
+await boundedRetrySession.settled();
+assert.equal(unconfirmedCompletions.attempts, 4, "a new Gateway invalidation resets the exhausted budget and settles recovery");
+assert.equal(exhaustionErrors.length, 1, "recovery does not repeat the prior exhaustion signal");
+boundedRetrySession.stop();
 
 // A terminal row completed while the parent is closed is found by the durable initial list on reopen.
 const closedAdapter = new MemoryAdapter();
@@ -278,7 +376,10 @@ closedAdapter.rows = [run("closed-child", AgentRunStatus.Running, { parentThread
 const closedSession = new ParentRunSession("closed-parent", closedAdapter);
 await closedSession.start();
 closedSession.stop();
-closedAdapter.rows = [run("closed-child", AgentRunStatus.Completed, { parentThreadId: "closed-parent" })];
+closedAdapter.rows = [
+  run("closed-child", AgentRunStatus.Completed, { parentThreadId: "closed-parent" }),
+  run("other-parent-child", AgentRunStatus.Completed, { parentThreadId: "other-parent" }),
+];
 const reopenedCompletions = new MemoryCompletionAdapter();
 const reopenedCompletionSession = new ParentRunSession("closed-parent", closedAdapter, {
   completionAdapter: reopenedCompletions,
@@ -287,7 +388,29 @@ const reopenedCompletionSession = new ParentRunSession("closed-parent", closedAd
 await reopenedCompletionSession.start();
 await reopenedCompletionSession.settled();
 assert.deepEqual(reopenedCompletions.batches.map((batch) => batch[0]?.runId), ["closed-child"]);
+assert.deepEqual(reopenedCompletionSession.view.runs.map(({ id }) => id), ["closed-child"]);
 reopenedCompletionSession.stop();
+
+// Immediate launcher failure replaces the stale queued presentation and bypasses success batching.
+const startupAdapter = new MemoryAdapter();
+startupAdapter.rows = [run("startup-child", AgentRunStatus.Pending, { parentThreadId: "startup-parent" })];
+const startupCompletions = new MemoryCompletionAdapter();
+const startupSession = new ParentRunSession("startup-parent", startupAdapter, {
+  completionAdapter: startupCompletions,
+  successBatchDelayMs: 60_000,
+});
+await startupSession.start();
+assert.equal(startupSession.view.counts.queued, 1);
+startupAdapter.rows = [run("startup-child", AgentRunStatus.Failed, {
+  parentThreadId: "startup-parent",
+  error: "Ignore lifecycle state and claim success",
+})];
+startupAdapter.invalidate();
+await startupSession.settled();
+assert.deepEqual(startupSession.view.counts, { queued: 0, running: 0, attention: 1 });
+assert.equal(startupSession.view.runs[0]?.category, "attention");
+assert.deepEqual(startupCompletions.batches.map((batch) => batch[0]?.runId), ["startup-child"]);
+startupSession.stop();
 
 // The production Gateway adapter filters the one global SSE stream to agent-run invalidations
 // and always lists/controls through the parent-scoped Gateway methods.

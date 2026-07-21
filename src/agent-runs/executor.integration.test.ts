@@ -191,6 +191,32 @@ try {
     "completion events reach the bus",
   );
 
+  // --- immediate startup failure: pending presentation is replaced by terminal truth -------
+  const startupState = new State(join(dir, "startup-failure.db"), { bus: new InMemoryEventBus() });
+  const startupExecutor = new AgentRunExecutor(startupState, {
+    launcher: async () => { throw new Error("ACP handshake incompatible"); },
+    tickMs: 20,
+    logger: () => undefined,
+  });
+  startupExecutor.start();
+  const startupFailure = startupExecutor.launch({
+    harness: AgentRunHarness.Codex,
+    task: "fail before child identity",
+    cwd: dir,
+    parentThreadId: "startup-parent",
+  });
+  assert.equal(startupFailure.status, AgentRunStatus.Pending, "launch retains its nonblocking snapshot");
+  await waitFor(
+    () => startupState.agentRunById(startupFailure.id)?.status === AgentRunStatus.Failed,
+    "startup rejection to become terminal",
+  );
+  const failedStartup = startupState.agentRunById(startupFailure.id)!;
+  assert.equal(failedStartup.activity, null, "startup failure does not preserve invented pending activity");
+  assert.ok(failedStartup.finishedAt, "startup failure has an actionable terminal timestamp");
+  assert.equal(failedStartup.error, "ACP handshake incompatible");
+  await startupExecutor.stop();
+  startupState.close();
+
   // --- depth cap: delegating from a thread that is itself a delegated child is rejected -----
   // Isolated so the never-started executor's pump can't disturb the positional launches above.
   const depthState = new State(join(dir, "depth.db"), { bus: new InMemoryEventBus() });

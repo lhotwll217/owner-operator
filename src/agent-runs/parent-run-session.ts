@@ -25,6 +25,8 @@ export interface ParentCompletionDeliveryResult {
   delivered: readonly string[];
   /** Event IDs already present in the parent transcript before this delivery attempt. */
   duplicate: readonly string[];
+  /** Event IDs accepted by Pi's follow-up queue but not yet persisted in the transcript. */
+  queued: readonly string[];
 }
 
 /** Narrow parent-thread completion seam. Pi and tests consume the same bounded envelopes. */
@@ -38,10 +40,14 @@ export interface ParentRunSessionOptions {
   completionAdapter?: ParentCompletionAdapter;
   /** Routine completed runs batch for approximately two seconds in production. */
   successBatchDelayMs?: number;
+  /** Base delay for bounded durable-refetch retries after failed or unconfirmed delivery. */
+  completionRetryDelayMs?: number;
   onError?: (error: unknown) => void;
 }
 
 type ViewListener = (view: ParentAgentStateView) => void;
+
+const MAX_COMPLETION_DELIVERY_ATTEMPTS = 3;
 
 /**
  * One open parent thread's live projection over its complete delegated-run fleet.
@@ -56,12 +62,16 @@ export class ParentRunSession {
   private readonly recentLimit: number | undefined;
   private readonly completionAdapter: ParentCompletionAdapter | undefined;
   private readonly successBatchDelayMs: number;
+  private readonly completionRetryDelayMs: number;
   private readonly onError: (error: unknown) => void;
   private readonly pendingCompletionIds = new Set<string>();
   private readonly settledCompletionIds = new Set<string>();
+  private readonly completionDeliveryAttempts = new Map<string, number>();
+  private readonly completionDeliveryExhaustionReported = new Set<string>();
   private readonly successBatch = new Map<string, AgentRunCompletionEnvelope>();
   private readonly completionPromises = new Set<Promise<void>>();
   private successBatchTimer?: ReturnType<typeof setTimeout>;
+  private completionRetryTimer?: ReturnType<typeof setTimeout>;
   private unsubscribeAdapter?: () => void;
   private reconcilePromise?: Promise<void>;
   private dirty = false;
@@ -77,6 +87,7 @@ export class ParentRunSession {
     this.recentLimit = options.recentLimit;
     this.completionAdapter = options.completionAdapter;
     this.successBatchDelayMs = Math.max(0, options.successBatchDelayMs ?? 2_000);
+    this.completionRetryDelayMs = Math.max(0, options.completionRetryDelayMs ?? 1_000);
     this.onError = options.onError ?? (() => undefined);
   }
 
@@ -94,7 +105,10 @@ export class ParentRunSession {
     const initial = await this.adapter.list(this.parentThreadId);
     this.reconcile(initial);
     this.started = true;
-    this.unsubscribeAdapter = this.adapter.subscribe(() => { void this.refresh(); });
+    this.unsubscribeAdapter = this.adapter.subscribe(() => {
+      this.resetCompletionRetryBudget();
+      void this.refresh();
+    });
     await this.refresh();
   }
 
@@ -130,7 +144,11 @@ export class ParentRunSession {
     this.dirty = false;
     if (this.successBatchTimer) clearTimeout(this.successBatchTimer);
     this.successBatchTimer = undefined;
+    if (this.completionRetryTimer) clearTimeout(this.completionRetryTimer);
+    this.completionRetryTimer = undefined;
     this.successBatch.clear();
+    this.completionDeliveryAttempts.clear();
+    this.completionDeliveryExhaustionReported.clear();
     this.unsubscribeAdapter?.();
     this.unsubscribeAdapter = undefined;
     this.listeners.clear();
@@ -160,7 +178,9 @@ export class ParentRunSession {
   }
 
   private reconcile(rows: readonly AgentRun[]): void {
-    const next = new Map(rows.map((run) => [run.id, run]));
+    const next = new Map(
+      rows.filter((run) => run.parentThreadId === this.parentThreadId).map((run) => [run.id, run]),
+    );
     for (const [id, previous] of this.runs) {
       const incoming = next.get(id);
       if (!incoming || !acceptsTransition(previous, incoming)) {
@@ -174,6 +194,7 @@ export class ParentRunSession {
   }
 
   private reconcileOne(run: AgentRun): void {
+    if (run.parentThreadId !== this.parentThreadId) return;
     const previous = this.runs.get(run.id);
     if (previous && !acceptsTransition(previous, run)) return;
     this.runs.set(run.id, run);
@@ -190,9 +211,10 @@ export class ParentRunSession {
   private reconcileCompletions(runs: Iterable<AgentRun>): void {
     if (!this.completionAdapter || this.stopped) return;
     for (const run of runs) {
-      if (!isTerminalAgentRunStatus(run.status) || !run.finishedAt) continue;
+      if (run.parentThreadId !== this.parentThreadId || !isTerminalAgentRunStatus(run.status) || !run.finishedAt) continue;
       const envelope = createAgentRunCompletionEnvelope(run);
       if (this.pendingCompletionIds.has(envelope.eventId) || this.settledCompletionIds.has(envelope.eventId)) continue;
+      if ((this.completionDeliveryAttempts.get(envelope.eventId) ?? 0) >= MAX_COMPLETION_DELIVERY_ATTEMPTS) continue;
       this.pendingCompletionIds.add(envelope.eventId);
       if (run.status === AgentRunStatus.Completed && this.successBatchDelayMs > 0) {
         this.successBatch.set(envelope.eventId, envelope);
@@ -215,18 +237,63 @@ export class ParentRunSession {
     if (!this.completionAdapter || this.stopped || !envelopes.length) return;
     const eventIds = envelopes.map(({ eventId }) => eventId);
     const delivery = this.completionAdapter.deliver(envelopes)
-      .then(({ delivered, duplicate }) => {
+      .then(({ delivered, duplicate, queued }) => {
         const settled = new Set([...delivered, ...duplicate]);
+        const pendingInPi = new Set(queued);
         for (const eventId of eventIds) {
-          if (settled.has(eventId)) this.settledCompletionIds.add(eventId);
+          if (settled.has(eventId)) {
+            this.settledCompletionIds.add(eventId);
+            this.completionDeliveryAttempts.delete(eventId);
+          }
         }
+        this.scheduleCompletionRetry(
+          eventIds.filter((eventId) => !settled.has(eventId) && !pendingInPi.has(eventId)),
+        );
       })
-      .catch((error) => this.onError(error))
+      .catch((error) => {
+        this.onError(error);
+        this.scheduleCompletionRetry(eventIds);
+      })
       .finally(() => {
         for (const eventId of eventIds) this.pendingCompletionIds.delete(eventId);
         this.completionPromises.delete(delivery);
       });
     this.completionPromises.add(delivery);
+  }
+
+  /** Retry with bounded backoff; each attempt still starts from the durable parent fleet. */
+  private scheduleCompletionRetry(eventIds: readonly string[]): void {
+    if (this.stopped || !this.completionAdapter || !eventIds.length) return;
+    let nextAttempt = MAX_COMPLETION_DELIVERY_ATTEMPTS;
+    for (const eventId of eventIds) {
+      const attempt = (this.completionDeliveryAttempts.get(eventId) ?? 0) + 1;
+      this.completionDeliveryAttempts.set(eventId, attempt);
+      if (attempt >= MAX_COMPLETION_DELIVERY_ATTEMPTS) {
+        this.reportCompletionDeliveryExhausted(eventId);
+      }
+      nextAttempt = Math.min(nextAttempt, attempt);
+    }
+    if (nextAttempt >= MAX_COMPLETION_DELIVERY_ATTEMPTS || this.completionRetryTimer) return;
+    const delayMs = this.completionRetryDelayMs * 2 ** (nextAttempt - 1);
+    this.completionRetryTimer = setTimeout(() => {
+      this.completionRetryTimer = undefined;
+      void this.refresh();
+    }, delayMs);
+    this.completionRetryTimer.unref?.();
+  }
+
+  private resetCompletionRetryBudget(): void {
+    this.completionDeliveryAttempts.clear();
+    if (this.completionRetryTimer) clearTimeout(this.completionRetryTimer);
+    this.completionRetryTimer = undefined;
+  }
+
+  private reportCompletionDeliveryExhausted(eventId: string): void {
+    if (this.completionDeliveryExhaustionReported.has(eventId)) return;
+    this.completionDeliveryExhaustionReported.add(eventId);
+    this.onError(new Error(
+      `Delegated-run completion ${eventId} could not be delivered after ${MAX_COMPLETION_DELIVERY_ATTEMPTS} attempts. Reopen this parent thread to retry delivery.`,
+    ));
   }
 }
 

@@ -54,9 +54,16 @@ const ATTENTION_STATUSES = new Set<AgentRunStatus>([
   AgentRunStatus.Lost,
 ]);
 
-function bounded(value: string | null | undefined, maxLength: number): string {
-  const compact = value?.replace(/\s+/g, " ").trim() ?? "";
-  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+export function bounded(value: string | null | undefined, maxLength: number): string {
+  const compact = (value ?? "")
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (maxLength <= 0) return "";
+  const codePoints = [...compact];
+  return codePoints.length > maxLength
+    ? `${codePoints.slice(0, maxLength - 1).join("")}…`
+    : compact;
 }
 
 function statusView(status: AgentRunStatus): AgentRunStatusView {

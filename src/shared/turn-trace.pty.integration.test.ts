@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -14,6 +12,7 @@ import {
   initTheme,
 } from "@earendil-works/pi-coding-agent";
 import type { TurnActivityEvent } from "@owner-operator/core/activity";
+import { renderInRealPty } from "../../test/fixtures/real-pty";
 import { ooPresentationExtension, quietOoInteractiveMode } from "./oo-presentation";
 import { OO_TURN_ACTIVITY_ENTRY } from "./turn-trace";
 
@@ -133,49 +132,12 @@ if (process.env.OO_TURN_TRACE_PTY_CHILD === "1") {
 
 async function renderInPty(width: number, mode: "active" | "settled" | "expanded" | "raw"): Promise<string[]> {
   const command = "stty cols \"$OO_TURN_TRACE_WIDTH\" rows 40; exec env -u NODE_USE_SYSTEM_CA OO_TURN_TRACE_PTY_CHILD=1 node --import tsx src/shared/turn-trace.pty.integration.test.ts \"$OO_TURN_TRACE_MODE\"";
-  const scriptCommand = process.platform === "darwin"
-    ? `/usr/bin/script -q /dev/null /bin/sh -c '${command}'`
-    : `/usr/bin/script -q -e -c '${command}' /dev/null`;
-  // macOS `script` requires an anonymous pipe (not Node's socket-backed "pipe") as stdin.
-  // The throttled producer keeps it open until InteractiveMode shuts down, then exits on SIGPIPE.
-  const wrapper = [
-    "(while printf '\\0'; do sleep 1; done) |",
-    scriptCommand,
-  ].join("\n");
-  const child = spawn("/bin/sh", ["-c", wrapper], {
-    cwd: process.cwd(),
-    detached: true,
-    env: { ...process.env, OO_TURN_TRACE_WIDTH: String(width), OO_TURN_TRACE_MODE: mode },
-    stdio: ["ignore", "pipe", "pipe"],
+  return renderInRealPty({
+    command,
+    width,
+    env: { OO_TURN_TRACE_WIDTH: String(width), OO_TURN_TRACE_MODE: mode },
+    label: `TurnTrace PTY fixture in ${mode} mode`,
   });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
-  child.stderr.on("data", (chunk) => { stderr += chunk; });
-  const status = await new Promise<number | null>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      if (child.pid) {
-        try { process.kill(-child.pid, "SIGKILL"); } catch {}
-      }
-      reject(new Error(`PTY fixture timed out at ${width} columns in ${mode} mode`));
-    }, 15_000);
-    child.once("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timeout);
-      resolve(code);
-    });
-  });
-  assert.equal(status, 0, `PTY fixture exits cleanly: ${stderr}`);
-  const plain = stripVTControlCharacters(stdout).replaceAll("\r", "");
-  assert.match(plain, new RegExp(`TTY=true COLS=${width}`), "the acceptance fixture runs inside a real PTY at the requested width");
-  const body = plain.match(/BEGIN\n([\s\S]*?)\nEND/)?.[1];
-  assert.ok(body !== undefined, `PTY output has render markers: ${plain}`);
-  return body.split("\n");
 }
 
 const normal = await renderInPty(80, "active");
