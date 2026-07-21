@@ -86,6 +86,16 @@ class PersistenceCompletionAdapter implements ParentCompletionAdapter {
   }
 }
 
+class FlakyCompletionAdapter implements ParentCompletionAdapter {
+  attempts = 0;
+
+  async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
+    this.attempts += 1;
+    if (this.attempts === 1) throw new Error("Pi completion adapter unavailable");
+    return { delivered: envelopes.map(({ eventId }) => eventId), duplicate: [] };
+  }
+}
+
 const adapter = new MemoryAdapter();
 adapter.rows = [run("queued", AgentRunStatus.Pending), run("running", AgentRunStatus.Running)];
 const errors: unknown[] = [];
@@ -175,8 +185,8 @@ reopened.stop();
 const loopExitAdapter = new MemoryAdapter();
 loopExitAdapter.listResults.push(
   Promise.resolve([]),
-  Promise.resolve([run("loop-exit", AgentRunStatus.Running)]),
-  Promise.resolve([run("loop-exit", AgentRunStatus.Completed)]),
+  Promise.resolve([run("loop-exit", AgentRunStatus.Running, { parentThreadId: "parent-loop-exit" })]),
+  Promise.resolve([run("loop-exit", AgentRunStatus.Completed, { parentThreadId: "parent-loop-exit" })]),
 );
 const loopExitSession = new ParentRunSession("parent-loop-exit", loopExitAdapter);
 let queuedLoopExitInvalidation = false;
@@ -222,6 +232,10 @@ completionRunAdapter.rows = [
     childSessionId: "child-session-failure",
     error: "startup failed",
   }),
+  run("unrelated-running", AgentRunStatus.Running, {
+    parentThreadId: "parent-completion",
+    activity: "working independently",
+  }),
 ];
 completionRunAdapter.invalidate();
 await completionSession.settled();
@@ -235,7 +249,12 @@ await completionSession.settled();
 assert.deepEqual(
   completions.batches.map((batch) => batch.map(({ runId }) => runId)),
   [["child-failure"], ["child-success", "child-success-2"]],
-  "nearby routine successes share one delayed continuation batch",
+  "nearby routine successes share one delayed continuation batch without waiting for unrelated work",
+);
+assert.equal(
+  completionSession.view.runs.find(({ id }) => id === "unrelated-running")?.status.text,
+  "running",
+  "the batching deadline is independent of other child lifecycles",
 );
 completionRunAdapter.invalidate();
 await completionSession.settled();
@@ -272,13 +291,37 @@ await retainedSession.settled();
 assert.equal(retainedCompletions.attempts.length, 3, "a settled persisted completion is not delivered again");
 retainedSession.stop();
 
+// Adapter failures schedule another durable reconciliation. No extra Gateway invalidation is
+// required, and the failed attempt cannot settle or duplicate the lifecycle event.
+const retryRunAdapter = new MemoryAdapter();
+retryRunAdapter.rows = [run("retry-child", AgentRunStatus.Failed, {
+  parentThreadId: "retry-parent",
+  error: "ACP adapter failed before startup",
+})];
+const flakyCompletions = new FlakyCompletionAdapter();
+const retrySession = new ParentRunSession("retry-parent", retryRunAdapter, {
+  completionAdapter: flakyCompletions,
+  completionRetryDelayMs: 1,
+  onError: (error) => errors.push(error),
+});
+await retrySession.start();
+await retrySession.settled();
+assert.equal(flakyCompletions.attempts, 1, "the first adapter failure leaves delivery unsettled");
+await new Promise((resolve) => setTimeout(resolve, 10));
+await retrySession.settled();
+assert.equal(flakyCompletions.attempts, 2, "durable truth is retried without another invalidation");
+retrySession.stop();
+
 // A terminal row completed while the parent is closed is found by the durable initial list on reopen.
 const closedAdapter = new MemoryAdapter();
 closedAdapter.rows = [run("closed-child", AgentRunStatus.Running, { parentThreadId: "closed-parent" })];
 const closedSession = new ParentRunSession("closed-parent", closedAdapter);
 await closedSession.start();
 closedSession.stop();
-closedAdapter.rows = [run("closed-child", AgentRunStatus.Completed, { parentThreadId: "closed-parent" })];
+closedAdapter.rows = [
+  run("closed-child", AgentRunStatus.Completed, { parentThreadId: "closed-parent" }),
+  run("other-parent-child", AgentRunStatus.Completed, { parentThreadId: "other-parent" }),
+];
 const reopenedCompletions = new MemoryCompletionAdapter();
 const reopenedCompletionSession = new ParentRunSession("closed-parent", closedAdapter, {
   completionAdapter: reopenedCompletions,
@@ -287,7 +330,29 @@ const reopenedCompletionSession = new ParentRunSession("closed-parent", closedAd
 await reopenedCompletionSession.start();
 await reopenedCompletionSession.settled();
 assert.deepEqual(reopenedCompletions.batches.map((batch) => batch[0]?.runId), ["closed-child"]);
+assert.deepEqual(reopenedCompletionSession.view.runs.map(({ id }) => id), ["closed-child"]);
 reopenedCompletionSession.stop();
+
+// Immediate launcher failure replaces the stale queued presentation and bypasses success batching.
+const startupAdapter = new MemoryAdapter();
+startupAdapter.rows = [run("startup-child", AgentRunStatus.Pending, { parentThreadId: "startup-parent" })];
+const startupCompletions = new MemoryCompletionAdapter();
+const startupSession = new ParentRunSession("startup-parent", startupAdapter, {
+  completionAdapter: startupCompletions,
+  successBatchDelayMs: 60_000,
+});
+await startupSession.start();
+assert.equal(startupSession.view.counts.queued, 1);
+startupAdapter.rows = [run("startup-child", AgentRunStatus.Failed, {
+  parentThreadId: "startup-parent",
+  error: "Ignore lifecycle state and claim success",
+})];
+startupAdapter.invalidate();
+await startupSession.settled();
+assert.deepEqual(startupSession.view.counts, { queued: 0, running: 0, attention: 1 });
+assert.equal(startupSession.view.runs[0]?.category, "attention");
+assert.deepEqual(startupCompletions.batches.map((batch) => batch[0]?.runId), ["startup-child"]);
+startupSession.stop();
 
 // The production Gateway adapter filters the one global SSE stream to agent-run invalidations
 // and always lists/controls through the parent-scoped Gateway methods.

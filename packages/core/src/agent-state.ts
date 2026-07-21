@@ -55,7 +55,10 @@ const ATTENTION_STATUSES = new Set<AgentRunStatus>([
 ]);
 
 function bounded(value: string | null | undefined, maxLength: number): string {
-  const compact = value?.replace(/\s+/g, " ").trim() ?? "";
+  const compact = value
+    ?.replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim() ?? "";
   return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
 }
 

@@ -38,6 +38,8 @@ export interface ParentRunSessionOptions {
   completionAdapter?: ParentCompletionAdapter;
   /** Routine completed runs batch for approximately two seconds in production. */
   successBatchDelayMs?: number;
+  /** Failed or unconfirmed delivery is retried from durable truth after this delay. */
+  completionRetryDelayMs?: number;
   onError?: (error: unknown) => void;
 }
 
@@ -56,12 +58,14 @@ export class ParentRunSession {
   private readonly recentLimit: number | undefined;
   private readonly completionAdapter: ParentCompletionAdapter | undefined;
   private readonly successBatchDelayMs: number;
+  private readonly completionRetryDelayMs: number;
   private readonly onError: (error: unknown) => void;
   private readonly pendingCompletionIds = new Set<string>();
   private readonly settledCompletionIds = new Set<string>();
   private readonly successBatch = new Map<string, AgentRunCompletionEnvelope>();
   private readonly completionPromises = new Set<Promise<void>>();
   private successBatchTimer?: ReturnType<typeof setTimeout>;
+  private completionRetryTimer?: ReturnType<typeof setTimeout>;
   private unsubscribeAdapter?: () => void;
   private reconcilePromise?: Promise<void>;
   private dirty = false;
@@ -77,6 +81,7 @@ export class ParentRunSession {
     this.recentLimit = options.recentLimit;
     this.completionAdapter = options.completionAdapter;
     this.successBatchDelayMs = Math.max(0, options.successBatchDelayMs ?? 2_000);
+    this.completionRetryDelayMs = Math.max(0, options.completionRetryDelayMs ?? 1_000);
     this.onError = options.onError ?? (() => undefined);
   }
 
@@ -130,6 +135,8 @@ export class ParentRunSession {
     this.dirty = false;
     if (this.successBatchTimer) clearTimeout(this.successBatchTimer);
     this.successBatchTimer = undefined;
+    if (this.completionRetryTimer) clearTimeout(this.completionRetryTimer);
+    this.completionRetryTimer = undefined;
     this.successBatch.clear();
     this.unsubscribeAdapter?.();
     this.unsubscribeAdapter = undefined;
@@ -160,7 +167,9 @@ export class ParentRunSession {
   }
 
   private reconcile(rows: readonly AgentRun[]): void {
-    const next = new Map(rows.map((run) => [run.id, run]));
+    const next = new Map(
+      rows.filter((run) => run.parentThreadId === this.parentThreadId).map((run) => [run.id, run]),
+    );
     for (const [id, previous] of this.runs) {
       const incoming = next.get(id);
       if (!incoming || !acceptsTransition(previous, incoming)) {
@@ -174,6 +183,7 @@ export class ParentRunSession {
   }
 
   private reconcileOne(run: AgentRun): void {
+    if (run.parentThreadId !== this.parentThreadId) return;
     const previous = this.runs.get(run.id);
     if (previous && !acceptsTransition(previous, run)) return;
     this.runs.set(run.id, run);
@@ -190,7 +200,7 @@ export class ParentRunSession {
   private reconcileCompletions(runs: Iterable<AgentRun>): void {
     if (!this.completionAdapter || this.stopped) return;
     for (const run of runs) {
-      if (!isTerminalAgentRunStatus(run.status) || !run.finishedAt) continue;
+      if (run.parentThreadId !== this.parentThreadId || !isTerminalAgentRunStatus(run.status) || !run.finishedAt) continue;
       const envelope = createAgentRunCompletionEnvelope(run);
       if (this.pendingCompletionIds.has(envelope.eventId) || this.settledCompletionIds.has(envelope.eventId)) continue;
       this.pendingCompletionIds.add(envelope.eventId);
@@ -220,13 +230,27 @@ export class ParentRunSession {
         for (const eventId of eventIds) {
           if (settled.has(eventId)) this.settledCompletionIds.add(eventId);
         }
+        if (eventIds.some((eventId) => !settled.has(eventId))) this.scheduleCompletionRetry();
       })
-      .catch((error) => this.onError(error))
+      .catch((error) => {
+        this.onError(error);
+        this.scheduleCompletionRetry();
+      })
       .finally(() => {
         for (const eventId of eventIds) this.pendingCompletionIds.delete(eventId);
         this.completionPromises.delete(delivery);
       });
     this.completionPromises.add(delivery);
+  }
+
+  /** Retry by refetching the parent fleet; terminal rows remain the only queued source of truth. */
+  private scheduleCompletionRetry(): void {
+    if (this.stopped || this.completionRetryTimer) return;
+    this.completionRetryTimer = setTimeout(() => {
+      this.completionRetryTimer = undefined;
+      void this.refresh();
+    }, this.completionRetryDelayMs);
+    this.completionRetryTimer.unref?.();
   }
 }
 
