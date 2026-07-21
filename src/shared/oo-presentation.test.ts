@@ -1,5 +1,5 @@
 // Unit: the OO presentation seam. We test external behaviour — the rendered strings, the
-// palette data, the single-working-line fold, the zero-dump shim — not pi's live TUI (which
+// palette data, the raw-detail/thinking shim — not pi's live TUI (which
 // needs a real TTY and isn't snapshot-testable in this hermetic runner). The shim tests render
 // pi's REAL AssistantMessageComponent, so a pi rename/reshape fails here loudly instead of
 // silently letting the dump back into the scrollback. Same assertion style as
@@ -8,13 +8,9 @@ import assert from "node:assert";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { AgentRunStatus } from "@owner-operator/core";
 import {
-  OO_CYCLE_WORDS,
   OO_NAME,
-  OO_TOOL_LINGER_TICKS,
-  OoWorkingLine,
   buildOoTheme,
   elapsedLabel,
-  foldWorkingLine,
   formatAgentRunRow,
   isAssistantMessageRow,
   isToolExecutionRow,
@@ -22,8 +18,6 @@ import {
   ooMarker,
   ooPalette,
   quietOoInteractiveMode,
-  statusLabelFor,
-  type OoWorkEvent,
 } from "./oo-presentation";
 
 // 1. The identity marker reads as Owner Operator and carries NO pi branding.
@@ -45,95 +39,7 @@ for (const color of ["accent", "muted", "dim", "text", "toolTitle", "success", "
   assert.doesNotThrow(() => theme.fg(color, "x"), `theme has the ${color} token`);
 }
 
-// 3. The cycling words: a persona-rich set — confident chief-of-staff, short, quiet, unique.
-assert.ok(OO_CYCLE_WORDS.length >= 8, "a persona-rich set of at least 8 cycle words");
-assert.equal(new Set(OO_CYCLE_WORDS).size, OO_CYCLE_WORDS.length, "no duplicate cycle words");
-assert.equal(OO_CYCLE_WORDS[0], "working…", "leads with plain work");
-assert.ok(([...OO_CYCLE_WORDS] as string[]).includes("owning and operating…"), "the namesake word is in the cycle");
-for (const word of OO_CYCLE_WORDS) {
-  assert.ok(word.endsWith("…"), `"${word}" keeps the … suffix`);
-  assert.equal(word, word.toLowerCase(), `"${word}" stays lowercase — a status line, not a headline`);
-  assert.ok(!word.includes("\n") && word.length <= 24, `"${word}" is short and single-line`);
-}
-
-// 4. The single working line collapses a sequence of N stream/tool events to ONE current line —
-//    it replaces, never accumulates.
-// A running tool overrides the cycling word with the tool's label…
-assert.equal(
-  foldWorkingLine([{ kind: "resume" }, { kind: "tool_start", toolName: "bash" }]),
-  statusLabelFor("bash"),
-  "a running tool names itself on the one line",
-);
-// …and the label is a single line, not a wall.
-const toolLine = foldWorkingLine([{ kind: "tool_start", toolName: "query_database" }]);
-assert.ok(toolLine && !toolLine.includes("\n"), "the working line is a single line, never a wall");
-// Two tools in a row: only the latest shows — nothing lingers past a replacement.
-assert.equal(
-  foldWorkingLine([
-    { kind: "tool_start", toolName: "bash" },
-    { kind: "tool_end" },
-    { kind: "tool_start", toolName: "query_database" },
-  ]),
-  statusLabelFor("query_database"),
-  "only the latest tool shows; the previous does not linger",
-);
-
-// resume begins on the first cycling word; idle clears the line entirely.
-assert.equal(foldWorkingLine([{ kind: "resume" }]), OO_CYCLE_WORDS[0], "resume → first cycle word");
-assert.equal(
-  foldWorkingLine([{ kind: "tool_start", toolName: "bash" }, { kind: "idle" }]),
-  undefined,
-  "idle clears the working line",
-);
-// After the answer starts streaming (idle), the next turn's resume picks the cycle back up
-// where it left off — livelier than restarting on the same word every turn.
-assert.equal(
-  foldWorkingLine([{ kind: "resume" }, { kind: "tick" }, { kind: "idle" }, { kind: "resume" }]),
-  OO_CYCLE_WORDS[1],
-  "resume revives the cycle from idle, keeping its place",
-);
-
-// 5. The cycling words advance one per tick and wrap. Between tools the word keeps moving;
-//    it never accumulates.
-const cyclingTicks: OoWorkEvent[] = [{ kind: "resume" }, { kind: "tick" }, { kind: "tick" }];
-assert.equal(foldWorkingLine(cyclingTicks), OO_CYCLE_WORDS[2], "two ticks advance to the third word");
-const fullLap: OoWorkEvent[] = [{ kind: "resume" }, ...Array<OoWorkEvent>(OO_CYCLE_WORDS.length).fill({ kind: "tick" })];
-assert.equal(foldWorkingLine(fullLap), OO_CYCLE_WORDS[0], "a full lap of ticks wraps back to the first word");
-// A tick while a tool runs does NOT advance the word — the tool label owns the line.
-assert.equal(
-  foldWorkingLine([{ kind: "resume" }, { kind: "tool_start", toolName: "read" }, { kind: "tick" }]),
-  statusLabelFor("read"),
-  "ticks don't disturb a running tool's label",
-);
-// The visibility fix: a finished tool's label lingers OO_TOOL_LINGER_TICKS beats past tool_end,
-// so even a millisecond-fast tool (get_current_session_state returns almost instantly) is
-// legible in the cycle rather than flashing by unseen — then cycling resumes where it paused.
-const linger = new OoWorkingLine();
-linger.apply({ kind: "resume" }); // working… (idx 0)
-linger.apply({ kind: "tick" }); // idx 1
-linger.apply({ kind: "tool_start", toolName: "read" }); // → tool label
-linger.apply({ kind: "tool_end" }); // label lingers, does not snap back
-assert.equal(linger.current, statusLabelFor("read"), "the label holds through tool_end");
-assert.equal(linger.apply({ kind: "resume" }), statusLabelFor("read"), "a turn boundary doesn't cut the linger short");
-for (let beat = 1; beat < OO_TOOL_LINGER_TICKS; beat++) {
-  assert.equal(linger.apply({ kind: "tick" }), statusLabelFor("read"), `the label lingers through beat ${beat}`);
-}
-assert.equal(linger.apply({ kind: "tick" }), OO_CYCLE_WORDS[2], "after the linger, cycling resumes where it paused");
-
-// The live reducer returns the current line as each event is applied, and starts empty.
-const line = new OoWorkingLine();
-assert.equal(line.current, undefined, "starts empty");
-assert.equal(line.apply({ kind: "tool_start", toolName: "mark_thread_done" }), statusLabelFor("mark_thread_done"));
-assert.equal(line.apply({ kind: "tool_start", toolName: "read" }), statusLabelFor("read"), "each start replaces the line");
-assert.equal(line.apply({ kind: "idle" }), undefined, "idle clears it");
-
-// Labels are human, compact, and single-line.
-for (const name of ["bash", "query_database", "read", "mark_thread_done", "unknown_tool"]) {
-  const label = statusLabelFor(name);
-  assert.ok(label.length > 0 && !label.includes("\n"), `${name} → a compact one-line label`);
-}
-
-// 6. The zero-dump predicates match pi's components by class name — the guard that keeps the
+// 3. The zero-dump predicates match pi's components by class name — the guard that keeps the
 //    wall of tool output and the reasoning dump out of scrollback. If pi renames a component,
 //    this file (and the real-component render test below) is where it fails loudly.
 assert.ok(isToolExecutionRow({ constructor: { name: "ToolExecutionComponent" } }), "matches the pi tool row");
@@ -144,8 +50,8 @@ assert.ok(isAssistantMessageRow({ constructor: { name: "AssistantMessageComponen
 assert.ok(!isAssistantMessageRow({ constructor: { name: "ToolExecutionComponent" } }), "tool rows are not assistant rows");
 assert.ok(!isAssistantMessageRow(null), "null is not an assistant row");
 
-// 7. quietOoInteractiveMode wires the interception in place: generic tool rows are dropped,
-//    delegated-run rows and non-tool content pass through, and startup notices are silenced.
+// 4. quietOoInteractiveMode keeps generic raw tool rows hidden until Pi's separate expansion,
+//    while delegated-run rows and non-tool content remain visible and startup notices are silent.
 //    A fake mode stands in for pi's InteractiveMode (structural, no pi import) — mirrors how pi
 //    calls `chatContainer.addChild(component)` and `showPackageUpdateNotification(...)`.
 const children: unknown[] = [];
@@ -157,17 +63,32 @@ const fakeMode = {
   showNewVersionNotification: () => { verNoticeShown = true; },
 };
 quietOoInteractiveMode(fakeMode);
-const genericToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "read" };
-const delegateToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "delegate_agent" };
-const manageRunToolRow = { constructor: { name: "ToolExecutionComponent" }, toolName: "manage_agent_run" };
+const toolRow = (toolName: string) => ({
+  constructor: { name: "ToolExecutionComponent" },
+  toolName,
+  expanded: false,
+  setExpanded(expanded: boolean): void { this.expanded = expanded; },
+  render(): string[] { return [`RAW ${toolName} /secret/path result body`]; },
+});
+const genericToolRow = toolRow("read");
+const delegateToolRow = toolRow("delegate_agent");
+const manageRunToolRow = toolRow("manage_agent_run");
 fakeMode.chatContainer.addChild(genericToolRow);
 fakeMode.chatContainer.addChild(delegateToolRow);
 fakeMode.chatContainer.addChild(manageRunToolRow);
 fakeMode.chatContainer.addChild({ constructor: { name: "AssistantMessageComponent" } });
 fakeMode.chatContainer.addChild({ constructor: { name: "Text" } });
-assert.equal(children.length, 4, "generic tool rows are dropped; delegated runs and non-tool rows pass through");
-assert.ok(!children.includes(genericToolRow), "generic tool output stays out of scrollback");
-assert.ok(children.includes(delegateToolRow) && children.includes(manageRunToolRow), "delegated-run rows stay visible");
+assert.equal(children.length, 5, "raw tool rows retain their source position beside non-tool rows");
+assert.ok(children.includes(genericToolRow), "the raw-detail component remains available for explicit expansion");
+assert.deepEqual(genericToolRow.render(), [], "raw arguments and results render zero lines by default");
+genericToolRow.setExpanded(true);
+assert.deepEqual(genericToolRow.render(), ["RAW read /secret/path result body"], "raw detail uses Pi's separate explicit expansion");
+genericToolRow.expanded = false; // Pi's updateDisplay mutates internal fields, but not our gate.
+assert.deepEqual(genericToolRow.render(), ["RAW read /secret/path result body"], "tool updates cannot bypass an explicit raw-detail expansion");
+genericToolRow.setExpanded(false);
+assert.deepEqual(genericToolRow.render(), [], "the separate expansion closes raw detail again");
+assert.deepEqual(delegateToolRow.render(), [], "delegation arguments are also hidden by default");
+assert.deepEqual(manageRunToolRow.render(), [], "run-management arguments are also hidden by default");
 fakeMode.showPackageUpdateNotification();
 fakeMode.showNewVersionNotification();
 assert.ok(!pkgNoticeShown && !verNoticeShown, "startup update notices are silenced");
@@ -228,7 +149,21 @@ const visibleConfig = new AssistantMessageComponent(undefined, false);
 shimmedMode.chatContainer.addChild(visibleConfig);
 visibleConfig.updateContent(mkAssistant([THINKING, ANSWER]));
 assert.ok(!visibleConfig.render(80).join("\n").includes("secret reasoning"), "no reasoning text reaches the scrollback");
-assert.equal(shimmedChildren.length, 3, "assistant components still pass through to the chat");
+
+const providerFailure = new AssistantMessageComponent({
+  role: "assistant", content: [], stopReason: "error", errorMessage: "credential and endpoint detail",
+}, true, undefined, "");
+shimmedMode.chatContainer.addChild(providerFailure);
+assert.deepEqual(providerFailure.render(80), [], "technical provider failures render no raw diagnostic by default");
+
+for (const stopReason of ["aborted", "length"] as const) {
+  const partial = new AssistantMessageComponent({
+    role: "assistant", content: [ANSWER], stopReason, errorMessage: "routine retry detail",
+  }, true, undefined, "");
+  shimmedMode.chatContainer.addChild(partial);
+  assert.deepEqual(partial.render(80), baseline, `${stopReason} turns retain partial output without technical prose`);
+}
+assert.equal(shimmedChildren.length, 6, "assistant components still pass through to the chat");
 
 // 9. Silent start: no initialMessage is fired by default.
 assert.equal(ooInteractiveOptions().initialMessage, undefined, "no auto model turn on launch");
@@ -270,4 +205,4 @@ assert.equal(
   "a failed row prefers the error over partial output",
 );
 
-process.stdout.write("ok — oo presentation: de-branded marker, OO palette, single working line, cycle words + tool linger, zero-dump shim (tool rows + thinking), silent start\n");
+process.stdout.write("ok — oo presentation: identity/theme, separate raw-detail gate, hidden reasoning, silent start\n");

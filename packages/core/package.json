@@ -7,7 +7,8 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./activity": "./src/activity.ts",
     "./agent-state": "./src/agent-state.ts"
   },
-  "scripts": { "test": "tsx src/resolve.test.ts && tsx src/status.test.ts && tsx src/session-state.test.ts && tsx src/session-text.test.ts && tsx src/blacklist.test.ts && tsx src/session-sources.test.ts && tsx src/session-hosts.test.ts && tsx src/gui-hosts.test.ts && tsx src/settings.test.ts && tsx src/agent-state.test.ts && tsx src/onboarding.integration.test.ts && tsx src/harness.integration.test.ts && tsx src/permissions.integration.test.ts" }
+  "scripts": { "test": "tsx src/activity.test.ts && tsx src/resolve.test.ts && tsx src/status.test.ts && tsx src/session-state.test.ts && tsx src/session-text.test.ts && tsx src/blacklist.test.ts && tsx src/session-sources.test.ts && tsx src/session-hosts.test.ts && tsx src/gui-hosts.test.ts && tsx src/settings.test.ts && tsx src/agent-state.test.ts && tsx src/onboarding.integration.test.ts && tsx src/harness.integration.test.ts && tsx src/permissions.integration.test.ts" }
 }

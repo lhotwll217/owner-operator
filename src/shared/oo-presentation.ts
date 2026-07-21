@@ -1,15 +1,14 @@
 // Owner Operator — the single presentation seam for the interactive terminal surface.
 //
-// One pure module owns every choice that makes bare `./oo` read as Owner Operator instead
-// of stock pi: the identity marker, the minimal OO palette/theme, the per-turn status-line
-// formatter, the compact tool renderers, and the silent-start options. `interactive.ts`
+// This adapter owns the choices that make bare `./oo` read as Owner Operator instead of
+// stock pi: the identity marker, palette/theme, tool-detail gate, and silent-start options.
+// Browser-safe activity policy lives in @owner-operator/core/activity; turn-trace.ts adapts it
+// to Pi and the terminal. `interactive.ts`
 // stays a thin wiring shell that feeds these into pi's supported extension API — no fork.
 //
 // pi hooks used (see pi's docs/extensions.md + docs/tui.md, shipped in the package):
-//   ctx.ui.setWorkingMessage / setWorkingVisible / setWorkingIndicator / setTheme
-//     — pi's one streaming loader row is THE status line; nothing else moves.
-//   pi.on("turn_start" | "message_update" | "tool_execution_*" | "agent_end")
-//     — drive that line from the stream deltas (thinking/toolcall = working, text = answer).
+//   custom session entries + entry renderer — deterministic live/replay turn timelines.
+//   ctx.ui.setTheme — Owner Operator styling.
 //   tool `renderCall` / `renderResult` — one-line tool rows (for tools that opt in).
 //
 // The startup banner is silenced through the supported `quietStartup` setting (.pi/settings.json).
@@ -18,16 +17,16 @@
 
 import { Text, type Component } from "@earendil-works/pi-tui";
 import { isTerminalAgentRunStatus, type AgentRunStatus } from "@owner-operator/core";
+import { formatTurnDuration } from "@owner-operator/core/activity";
+import { turnTraceExtension } from "./turn-trace";
 import {
   Theme,
   type ExtensionAPI,
-  type ExtensionContext,
   type ExtensionFactory,
   type InteractiveModeOptions,
   type ToolDefinition,
   type ThemeColor,
   type ToolRenderResultOptions,
-  type WorkingIndicatorOptions,
 } from "@earendil-works/pi-coding-agent";
 
 // pi doesn't re-export ToolRenderContext from its entry point; derive it from ToolDefinition.
@@ -124,80 +123,6 @@ export function buildOoTheme(mode: "truecolor" | "256color" = "truecolor"): Them
   });
 }
 
-/** A tamed, low-key working indicator — a single pulsing dot in the OO accent. */
-export function ooWorkingIndicator(theme: Theme): WorkingIndicatorOptions {
-  return {
-    frames: [
-      theme.fg("dim", "·"),
-      theme.fg("muted", "•"),
-      theme.fg("accent", "●"),
-      theme.fg("muted", "•"),
-    ],
-    intervalMs: 160,
-  };
-}
-
-// ---- The single working line ---------------------------------------------------------
-// Decision §6 (issue #34): one in-place line during a turn — never an accumulating wall.
-// It drives pi's streaming loader message (ctx.ui.setWorkingMessage), the single point where
-// activity surfaces. Between tools it cycles character words; while a tool runs it names the
-// tool; when the answer streams (or the turn ends) it clears. Reasoning renders nothing in the
-// chat (quietOoInteractiveMode strips it), so this line — not a dumped block — is the live
-// "the Operator is thinking" signal.
-
-/** The cycling character words shown between tool calls — the Owner Operator persona,
- * confident chief-of-staff, not cutesy. */
-export const OO_CYCLE_WORDS = [
-  "working…",
-  "on it…",
-  "owning it…",
-  "operating…",
-  "taking stock…",
-  "connecting the dots…",
-  "minding the store…",
-  "making it happen…",
-  "getting it done…",
-  "doing the thing…",
-  "owning and operating…",
-] as const;
-
-/** How often the cycling word advances, in ms. */
-export const OO_CYCLE_MS = 2000;
-
-/** Ticks a finished tool's label lingers before cycling resumes — even an instant tool
- * (get_current_session_state returns in ms) stays legible for ~2 beats instead of flashing by. */
-export const OO_TOOL_LINGER_TICKS = 2;
-
-/** Human label for the activity a tool represents, e.g. "searching sessions…". */
-export function statusLabelFor(toolName: string): string {
-  switch (toolName) {
-    case "get_current_session_state":
-      return "reading session state…";
-    case "mark_thread_done":
-      return "updating threads…";
-    case "query_database":
-      return "querying the session database…";
-    case "schedule_prompt":
-      return "scheduling…";
-    case "delegate_agent":
-      return "delegating to an agent…";
-    case "manage_agent_run":
-      return "managing a delegated run…";
-    case "bash":
-      return "running a command…";
-    case "read":
-      return "reading…";
-    case "grep":
-      return "searching…";
-    case "find":
-      return "finding files…";
-    case "ls":
-      return "listing files…";
-    default:
-      return `${toolName.replace(/_/g, " ")}…`;
-  }
-}
-
 // ---- Delegated-run row -------------------------------------------------------------------
 // Issue #69: a delegated run must not read as a generic tool call. The delegate/manage tools
 // render a compact agent row — harness · task · state · (activity / result / error) · elapsed —
@@ -218,10 +143,8 @@ export interface AgentRunRowView {
 /** Human elapsed between two ISO stamps, e.g. "2m 3s". Empty when either is missing. */
 export function elapsedLabel(fromIso?: string | null, toIso?: string | null): string {
   if (!fromIso || !toIso) return "";
-  const seconds = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 1_000));
-  if (!Number.isFinite(seconds)) return "";
-  const minutes = Math.floor(seconds / 60);
-  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+  const durationMs = Date.parse(toIso) - Date.parse(fromIso);
+  return Number.isFinite(durationMs) ? formatTurnDuration(durationMs) : "";
 }
 
 /** One compact line for a delegated run: "‹harness› · ‹task› · ‹state› · ‹detail› · ‹elapsed›".
@@ -244,77 +167,6 @@ export function formatAgentRunRow(run: AgentRunRowView, nowIso?: string): string
 function truncate(value: string, max: number): string {
   const trimmed = value.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
-}
-
-export type OoWorkEvent =
-  | { kind: "tick" }
-  | { kind: "tool_start"; toolName: string }
-  | { kind: "tool_end" }
-  | { kind: "resume" }
-  | { kind: "idle" };
-
-/** The single working line for a turn. `resume` starts (or revives) the cycling words; `tick`
- * advances them; a running tool overrides them with its label, which lingers a couple of beats
- * past `tool_end`; `idle` clears the line. Every event replaces the line — nothing accumulates,
- * so a turn is one moving line, never a wall. */
-export class OoWorkingLine {
-  private phase: "idle" | "cycle" | "tool" | "tool_done" = "idle";
-  private cycleIdx = 0;
-  private lingerLeft = 0;
-  private toolLabel: string | undefined;
-
-  get current(): string | undefined {
-    if (this.phase === "idle") return undefined;
-    if (this.phase === "tool" || this.phase === "tool_done") return this.toolLabel;
-    return OO_CYCLE_WORDS[this.cycleIdx % OO_CYCLE_WORDS.length];
-  }
-
-  /** Apply one event and return the (single) current line. */
-  apply(event: OoWorkEvent): string | undefined {
-    switch (event.kind) {
-      case "tick":
-        // A running tool owns the line. A just-finished tool lingers OO_TOOL_LINGER_TICKS more
-        // beats — so even a millisecond-fast tool is legible — then cycling resumes.
-        if (this.phase === "tool_done") {
-          this.lingerLeft -= 1;
-          if (this.lingerLeft <= 0) {
-            this.phase = "cycle";
-            this.cycleIdx = (this.cycleIdx + 1) % OO_CYCLE_WORDS.length;
-          }
-        } else if (this.phase === "cycle") {
-          this.cycleIdx = (this.cycleIdx + 1) % OO_CYCLE_WORDS.length;
-        }
-        break;
-      case "tool_start":
-        this.phase = "tool";
-        this.toolLabel = statusLabelFor(event.toolName);
-        break;
-      case "tool_end":
-        // Hold the label a couple of beats; don't snap back to a cycle word instantly.
-        if (this.phase === "tool") {
-          this.phase = "tool_done";
-          this.lingerLeft = OO_TOOL_LINGER_TICKS;
-        }
-        break;
-      case "resume":
-        // Revive cycling only from idle — a running/lingering tool label keeps the line, and the
-        // cycle picks up where it left off rather than restarting on the same word every turn.
-        if (this.phase === "idle") this.phase = "cycle";
-        break;
-      case "idle":
-        this.phase = "idle";
-        this.toolLabel = undefined;
-        break;
-    }
-    return this.current;
-  }
-}
-
-/** Fold a sequence of events to the single current line — the non-accumulation contract. */
-export function foldWorkingLine(events: readonly OoWorkEvent[]): string | undefined {
-  const line = new OoWorkingLine();
-  for (const event of events) line.apply(event);
-  return line.current;
 }
 
 // ---- Compact tool rendering ----------------------------------------------------------
@@ -399,92 +251,13 @@ export function ooInteractiveOptions(): InteractiveModeOptions {
 
 // ---- The presentation extension ------------------------------------------------------
 // Registered alongside `blacklistAwareFileToolsExtension` in the interactive runtime. It
-// installs the theme + working indicator and drives the single working line from pi's turn,
-// stream-delta, and tool events. It changes only per-turn rendering and startup — no command
-// wiring, keybindings, or model selection.
+// installs the theme and delegates all turn behavior to the Pi TurnTrace adapter.
 export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
-  const work = new OoWorkingLine();
-  let ui: ExtensionContext["ui"] | undefined;
-  let timer: ReturnType<typeof setInterval> | undefined;
-
-  const push = (): void => ui?.setWorkingMessage(work.current);
-  const stopTimer = (): void => {
-    if (timer) clearInterval(timer);
-    timer = undefined;
-  };
-  // The cycling word advances on a steady beat (turn/tool events alone don't tick). Never
-  // restarted while running — codex emits many thinking segments per turn, and resetting the
-  // interval on each would stall the word. unref'd so it can't keep the process alive;
-  // agent_end + session_shutdown stop it either way.
-  const ensureTimer = (): void => {
-    if (timer) return;
-    timer = setInterval(() => {
-      work.apply({ kind: "tick" });
-      push();
-    }, OO_CYCLE_MS);
-    timer.unref?.();
-  };
-
-  // Reveal the line (an answer-stream may have hidden it), apply the event, keep the beat going.
-  const showWorking = (ctx: ExtensionContext, event: OoWorkEvent): void => {
-    ui = ctx.ui;
-    ctx.ui.setWorkingVisible(true);
-    work.apply(event);
-    push();
-    ensureTimer();
-  };
-  const hideWorking = (ctx: ExtensionContext): void => {
-    ui = ctx.ui;
-    stopTimer();
-    work.apply({ kind: "idle" });
-    ctx.ui.setWorkingVisible(false);
-  };
-
+  turnTraceExtension(pi);
   pi.on("session_start", (_event, ctx) => {
-    ui = ctx.ui;
     const mode = ctx.ui.theme.getColorMode();
     ctx.ui.setTheme(buildOoTheme(mode));
-    ctx.ui.setWorkingIndicator(ooWorkingIndicator(ctx.ui.theme));
   });
-
-  pi.on("turn_start", (_event, ctx) => showWorking(ctx, { kind: "resume" }));
-
-  // The stream deltas say which phase the turn is in (a `*_start` always precedes its deltas):
-  //   thinking → the Operator reasons; the cycle words carry the line (reasoning renders nothing).
-  //   toolcall → a tool call is being written; name it as early as the stream knows the name.
-  //   text     → the answer is streaming into the chat; the line has done its job — drop it, don't
-  //              let it linger under the reply. If the text turns out to be a preamble before more
-  //              tool calls, the next toolcall/thinking event brings the line straight back.
-  pi.on("message_update", (event, ctx) => {
-    const delta = event.assistantMessageEvent;
-    switch (delta.type) {
-      case "thinking_start":
-        showWorking(ctx, { kind: "resume" });
-        break;
-      case "toolcall_start": {
-        const call = delta.partial.content[delta.contentIndex];
-        showWorking(
-          ctx,
-          call?.type === "toolCall" && call.name
-            ? { kind: "tool_start", toolName: call.name }
-            : { kind: "resume" },
-        );
-        break;
-      }
-      case "text_start":
-        hideWorking(ctx);
-        break;
-    }
-  });
-
-  pi.on("tool_execution_start", (event, ctx) => showWorking(ctx, { kind: "tool_start", toolName: event.toolName }));
-  pi.on("tool_execution_end", (_event, ctx) => {
-    ui = ctx.ui;
-    work.apply({ kind: "tool_end" }); // label lingers OO_TOOL_LINGER_TICKS beats, then cycling resumes
-    push();
-  });
-  pi.on("agent_end", (_event, ctx) => hideWorking(ctx));
-  pi.on("session_shutdown", () => stopTimer());
 };
 
 // ---- Zero-dump shim ------------------------------------------------------------------
@@ -500,21 +273,35 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
 // components) rather than silently letting the dump back in.
 const TOOL_EXECUTION_COMPONENT = "ToolExecutionComponent";
 const ASSISTANT_MESSAGE_COMPONENT = "AssistantMessageComponent";
-const VISIBLE_TOOL_ROWS = new Set(["delegate_agent", "manage_agent_run"]);
 
 const className = (child: unknown): string | undefined =>
   (child as { constructor?: { name?: string } } | null)?.constructor?.name;
 
-/** True for the pi tool-row component we drop from the chat scrollback. */
+/** True for Pi's tool-row component. */
 export function isToolExecutionRow(child: unknown): boolean {
   return className(child) === TOOL_EXECUTION_COMPONENT;
 }
 
-/** Delegated-run tools own compact presentation, so their rows survive the generic zero-dump
- * filter. Pi stores the registered tool name on ToolExecutionComponent at runtime. */
-function isVisibleToolExecutionRow(child: unknown): boolean {
-  const toolName = (child as { toolName?: unknown } | null)?.toolName;
-  return typeof toolName === "string" && VISIBLE_TOOL_ROWS.has(toolName);
+/** Keep raw tool components in their source position, but render zero lines until Pi's separate
+ * tool-detail expansion is explicitly enabled. The pinned Pi expansion contract and the reason
+ * this narrow construction-site shim exists are recorded in docs/inspiration.md. */
+function gateRawToolDetail(child: unknown): void {
+  const component = child as {
+    expanded?: boolean;
+    render?: (width: number) => string[];
+    setExpanded?: (expanded: boolean) => void;
+  };
+  let rawExpanded = component.expanded === true;
+  if (typeof component.render === "function") {
+    const render = component.render.bind(component);
+    component.render = (width: number): string[] => rawExpanded ? render(width) : [];
+  }
+  if (typeof component.setExpanded !== "function") return;
+  const setExpanded = component.setExpanded.bind(component);
+  component.setExpanded = (expanded: boolean): void => {
+    rawExpanded = expanded;
+    setExpanded(expanded);
+  };
 }
 
 /** True for the pi assistant-message component whose thinking rendering we mute. */
@@ -522,30 +309,39 @@ export function isAssistantMessageRow(child: unknown): boolean {
   return className(child) === ASSISTANT_MESSAGE_COMPONENT;
 }
 
-/** An assistant message minus its thinking items — text, tool calls, stop reason untouched.
- * The model still reasons (nothing here touches the request); only the rendering goes. */
-function stripThinking<T>(message: T): T {
+/** An assistant message stripped to owner-facing output. Thinking and provider diagnostics stay
+ * out of the transcript; partial response text remains. TurnTrace supplies a concise interruption
+ * marker after settlement, independently of Pi's raw error prose. */
+function ownerFacingAssistantMessage<T>(message: T): T {
   const content = (message as { content?: unknown } | null)?.content;
-  if (!Array.isArray(content) || !content.some((c) => c?.type === "thinking")) return message;
-  return { ...(message as object), content: content.filter((c) => c?.type !== "thinking") } as T;
+  if (!Array.isArray(content)) return message;
+  const visibleContent = content.filter((c) => c?.type !== "thinking");
+  const value = message as { stopReason?: unknown };
+  const technicalStop = value.stopReason === "aborted"
+    || value.stopReason === "error"
+    || value.stopReason === "length";
+  if (!technicalStop && visibleContent.length === content.length) return message;
+  return {
+    ...(message as object),
+    content: visibleContent,
+    ...(technicalStop ? { stopReason: "stop", errorMessage: undefined } : {}),
+  } as T;
 }
 
-/** Re-route a component's `updateContent` through stripThinking, in place. Covers both pi
+/** Re-route a component's `updateContent` through the owner-facing filter, in place. Covers both pi
  * paths: streaming (component added empty, then updateContent streams into it) and finalized
  * (the constructor renders the message before addChild — so re-render what's already there). */
 function muteThinkingRendering(child: unknown): void {
   const component = child as { updateContent?: (message: unknown) => void; lastMessage?: unknown };
   if (typeof component.updateContent !== "function") return;
   const original = component.updateContent.bind(component);
-  component.updateContent = (message: unknown): void => original(stripThinking(message));
+  component.updateContent = (message: unknown): void => original(ownerFacingAssistantMessage(message));
   if (component.lastMessage) component.updateContent(component.lastMessage);
 }
 
-/** Quiet a constructed pi InteractiveMode in place: no tool-row dumps, no thinking blocks (or
- * their blank label lines), no startup update notices. Structural (duck-typed) so it never
- * imports pi internals; a no-op if pi's shape shifts. The dropped tool components still live in
- * pi's `pendingTools` map, so execution, results, and expand/collapse all keep working — they
- * just never reach the scrollback. */
+/** Quiet a constructed pi InteractiveMode in place: raw tool rows render only under Pi's
+ * explicit tool expansion, thinking blocks never render, and startup notices stay silent.
+ * Structural (duck-typed) so it never imports Pi internals; a no-op if Pi's shape shifts. */
 export function quietOoInteractiveMode(mode: unknown): void {
   if (typeof mode !== "object" || mode === null) return;
   const m = mode as {
@@ -557,7 +353,7 @@ export function quietOoInteractiveMode(mode: unknown): void {
   if (chat && typeof chat.addChild === "function") {
     const original = chat.addChild.bind(chat);
     chat.addChild = (child: unknown): void => {
-      if (isToolExecutionRow(child) && !isVisibleToolExecutionRow(child)) return;
+      if (isToolExecutionRow(child)) gateRawToolDetail(child);
       if (isAssistantMessageRow(child)) muteThinkingRendering(child); // reasoning renders nothing
       original(child);
     };

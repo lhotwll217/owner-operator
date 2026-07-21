@@ -110,6 +110,15 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | [`acpx`](https://github.com/openclaw/acpx) (MIT, pinned `0.11.2`) | `src/agent-runs/acp-launcher.ts` — the Agent Client Protocol wire runtime for delegated children (spawn, handshake, resume, typed event stream) on the official ACP SDK; Owner Operator keeps the control plane (`agent_runs`) and resolves its directly pinned [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp/blob/ca66e03adbc18072cd3395f140fdcd3c86fd2403/package.json#L2-L16) entrypoint, whose package owns the compatible Codex dependency ([package](https://github.com/agentclientprotocol/codex-acp/blob/ca66e03adbc18072cd3395f140fdcd3c86fd2403/package.json#L63-L69)) |
 | `jsonc-parser` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
+Issue #89's separate raw-tool expansion follows Pi's expandable-component contract: tool rows
+re-render from `setExpanded`
+([tool component](https://github.com/earendil-works/pi/blob/f4e9ca7466b5576090d1093c27fe38d73909f3d2/packages/coding-agent/src/modes/interactive/components/tool-execution.ts#L201-L224))
+and the host applies expansion to each expandable chat component
+([interactive mode](https://github.com/earendil-works/pi/blob/f4e9ca7466b5576090d1093c27fe38d73909f3d2/packages/coding-agent/src/modes/interactive/interactive-mode.ts#L3754-L3767)).
+Pi has no supported hook that suppresses a built-in tool row while retaining it for later
+expansion, so Owner Operator keeps the existing construction-site shim narrow: it gates only the
+row's `render` method and leaves execution, updates, ordering, and expansion ownership with Pi.
+
 Permission gating is adopted wholesale from
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system). The full
 contract, with every claim pinned to the extension's source, lives in

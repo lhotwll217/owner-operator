@@ -27,6 +27,18 @@ an unknown flag. The recognized set lives in
 `--json` and one-shot spellings are rejected with guidance instead of being treated as a
 prompt.
 
+## Interactive turn activity
+
+While an interactive turn is active, the thread shows an ordered timeline rail containing only
+provider-supplied reasoning summaries and allowlisted semantic tool labels. Prior actions use the
+muted `│` rail and the current action uses the emphasized `●` marker, so status never depends on
+color alone. Tool arguments, results, retries, and technical failures stay out of this trace.
+
+After settlement, meaningful activity collapses to `Worked for… · N actions`. `/activity` expands
+or collapses one historical turn. Pi's separate tool-output expansion (`Ctrl+O` by default) owns raw
+tool detail; expanding semantic activity does not expose it. Turns with no meaningful activity add
+no summary, and interrupted turns retain partial response text or show `Turn interrupted.`
+
 ## Sessions and provenance
 
 Every oo chat, human or agent, is saved under `~/.owner-operator/sessions`,
