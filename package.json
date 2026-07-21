@@ -24,6 +24,7 @@
     "test:e2e": "node test/run.mjs e2e",
     "test:agent": "tsx src/agent/agent.behavior.ts",
     "test:agent-runs:live": "tsx src/agent-runs/acp-launcher.live.test.ts",
+    "test:agent-runs:codex-live": "tsx src/agent-runs/acp-launcher.codex.live.test.ts",
     "eval": "node eval/loop.mjs --full",
     "eval:loop": "node eval/loop.mjs",
     "eval:compare": "node eval/compare.mjs",
@@ -32,6 +33,7 @@
     "lint": "oxlint --deny-warnings"
   },
   "dependencies": {
+    "@agentclientprotocol/codex-acp": "1.1.5",
     "@earendil-works/pi-ai": "0.80.6",
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@earendil-works/pi-tui": "0.80.6",

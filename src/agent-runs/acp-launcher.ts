@@ -56,7 +56,9 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
     // wrapper path lets startup cleanup fail closed after a hard daemon crash.
     const lease = createAgentRunProcessLease({ runId: request.run.id, wrapperPath });
     const registry = createAgentRegistry();
-    const agentCommand = registry.resolve(capability.acpAgent);
+    const agentCommand = capability.acpAgent === "codex"
+      ? codexAcpAgentCommand()
+      : registry.resolve(capability.acpAgent);
     const sessionStore = createRuntimeStore({ stateDir: agentRunStateDir() });
     const runtime = createAcpRuntime({
       cwd: ownerOperatorHome(),
@@ -187,6 +189,14 @@ function ensureAcpSession(
     ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
     ...(request.run.model ? { sessionOptions: { model: request.run.model } } : {}),
   });
+}
+
+/** acpx 0.11's built-in Codex registry is pinned to codex-acp 0.0.44, which cannot
+ * initialize current Codex. Resolve Owner Operator's tested direct dependency instead so the
+ * package lock, not acpx's stale fallback registry, owns adapter compatibility. */
+export function codexAcpAgentCommand(): string {
+  const entrypoint = fileURLToPath(import.meta.resolve("@agentclientprotocol/codex-acp"));
+  return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");
 }
 
 function leasedAgentCommand(params: {
