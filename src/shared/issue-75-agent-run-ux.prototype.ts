@@ -8,7 +8,7 @@ type State = (typeof states)[number];
 
 const requestedVariant = process.argv.find((arg) => arg.startsWith("--variant="))?.split("=")[1]?.toUpperCase();
 const requestedState = process.argv.find((arg) => arg.startsWith("--state="))?.split("=")[1]?.toLowerCase();
-let variantIndex = Math.max(0, variants.indexOf(requestedVariant as Variant));
+let variantIndex = requestedVariant ? Math.max(0, variants.indexOf(requestedVariant as Variant)) : variants.indexOf("C");
 let stateIndex = Math.max(0, states.indexOf(requestedState as State));
 
 const dim = (value: string) => `\x1b[2m${value}\x1b[22m`;
@@ -32,9 +32,9 @@ const answer = [
 ].join("\n");
 
 function footer(state: State): string {
-  if (state === "delegated" || state === "active") return `\n${dim("────────────────────────────────────────────────────────────")}\n${dim("◦ 1 queued")} · ${green("● 2 running")}                    ${dim("/runs")}`;
-  if (state === "completed") return `\n${dim("────────────────────────────────────────────────────────────")}\n${green("✓ Research completed")}                         ${dim("/runs")}`;
-  if (state === "attention") return `\n${dim("────────────────────────────────────────────────────────────")}\n${yellow("! 1 agent needs attention")}                   ${dim("/runs")}`;
+  if (state === "delegated" || state === "active") return `\n${dim("────────────────────────────────────────────────────────────")}\n${bold("Agent state:")} ${dim("◦ 1 queued")} · ${green("● 2 running")}       ${dim("/agent-state")}`;
+  if (state === "completed") return `\n${dim("────────────────────────────────────────────────────────────")}\n${bold("Agent state:")} ${green("✓ research completed")}          ${dim("/agent-state")}`;
+  if (state === "attention") return `\n${dim("────────────────────────────────────────────────────────────")}\n${bold("Agent state:")} ${yellow("! 1 needs attention")}           ${dim("/agent-state")}`;
   return "";
 }
 
@@ -53,7 +53,7 @@ function lifecycle(state: State): string {
 
 function picker(): string {
   return [
-    bold("Delegated runs"),
+    bold("Agent state"),
     "",
     `${green("●")} running    claude-code  Research Codex TUI patterns       4m 12s`,
     `${dim("◦")} queued     codex        Review Pi extensions              18s`,
@@ -92,7 +92,7 @@ function variantC(state: State): string {
   if (state === "picker") return picker();
   if (state === "completed" || state === "attention") return prompt + "\n" + lifecycle(state) + footer(state);
   if (state === "settled") return prompt + `\n${dim("▶ 8m · 6 actions · expand trace")}\n\n${answer}`;
-  const activity = actions.map((action, index) => `${index === actions.length - 1 ? green("●") : dim("│")} ${action}`).join("\n");
+  const activity = actions.map((action, index) => index === actions.length - 1 ? `${green("●")} ${action}` : dim(`│ ${action}`)).join("\n");
   return prompt + `\n${activity}\n\n${state === "delegated" ? dim("Waiting for the final local checks") : answer}` + footer(state);
 }
 
