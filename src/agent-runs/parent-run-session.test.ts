@@ -74,6 +74,18 @@ class MemoryCompletionAdapter implements ParentCompletionAdapter {
   }
 }
 
+class PersistenceCompletionAdapter implements ParentCompletionAdapter {
+  attempts: AgentRunCompletionEnvelope[][] = [];
+  persisted = false;
+
+  async deliver(envelopes: readonly AgentRunCompletionEnvelope[]) {
+    this.attempts.push([...envelopes]);
+    return this.persisted
+      ? { delivered: [], duplicate: envelopes.map(({ eventId }) => eventId) }
+      : { delivered: [], duplicate: [] };
+  }
+}
+
 const adapter = new MemoryAdapter();
 adapter.rows = [run("queued", AgentRunStatus.Pending), run("running", AgentRunStatus.Running)];
 const errors: unknown[] = [];
@@ -231,6 +243,34 @@ assert.equal(completions.batches.length, 2, "repeat observation cannot redeliver
 assert.equal(completions.batches[1]![0]!.childSessionId, "child-session-success");
 assert.equal(completions.batches[1]![0]!.outcome, AgentRunStatus.Completed);
 completionSession.stop();
+
+// Queue admission is not durable delivery. If Pi settles without persisting the custom message,
+// the next durable reconciliation retries it in-process; once persisted, later lists stay deduped.
+const retainedRunAdapter = new MemoryAdapter();
+retainedRunAdapter.rows = [run("retained-child", AgentRunStatus.Running)];
+const retainedCompletions = new PersistenceCompletionAdapter();
+const retainedSession = new ParentRunSession("retained-parent", retainedRunAdapter, {
+  completionAdapter: retainedCompletions,
+  successBatchDelayMs: 0,
+});
+await retainedSession.start();
+retainedRunAdapter.rows = [run("retained-child", AgentRunStatus.Completed, {
+  parentThreadId: "retained-parent",
+})];
+retainedRunAdapter.invalidate();
+await retainedSession.settled();
+assert.equal(retainedCompletions.attempts.length, 1, "an unpersisted completion remains unsettled");
+retainedRunAdapter.invalidate();
+await retainedSession.settled();
+assert.equal(retainedCompletions.attempts.length, 2, "the next reconciliation redelivers in the same process");
+retainedCompletions.persisted = true;
+retainedRunAdapter.invalidate();
+await retainedSession.settled();
+assert.equal(retainedCompletions.attempts.length, 3, "a transcript-confirmed duplicate settles the completion");
+retainedRunAdapter.invalidate();
+await retainedSession.settled();
+assert.equal(retainedCompletions.attempts.length, 3, "a settled persisted completion is not delivered again");
+retainedSession.stop();
 
 // A terminal row completed while the parent is closed is found by the durable initial list on reopen.
 const closedAdapter = new MemoryAdapter();

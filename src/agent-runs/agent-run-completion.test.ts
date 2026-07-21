@@ -22,13 +22,15 @@ const envelope = createAgentRunCompletionEnvelope(run("run-complete", AgentRunSt
 
 const sent: Array<{ message: any; options: any }> = [];
 const entries: any[] = [];
+const settledHandlers: Array<() => void> = [];
 const transcript = { getEntries: () => entries };
 const adapter = new PiParentCompletionAdapter({
+  on(_event, handler) { settledHandlers.push(handler); },
   sendMessage(message, options) { sent.push({ message, options }); },
 }, transcript);
 
 assert.deepEqual(await adapter.deliver([envelope]), {
-  delivered: [envelope.eventId],
+  delivered: [],
   duplicate: [],
 });
 assert.equal(sent.length, 1);
@@ -44,13 +46,20 @@ assert.doesNotMatch(sent[0]!.message.content, /FULL_CHILD_TRANSCRIPT_SENTINEL/);
 
 const details = sent[0]!.message.details as AgentRunCompletionMessageDetails;
 const replacementAdapter = new PiParentCompletionAdapter({
+  on(_event, handler) { settledHandlers.push(handler); },
   sendMessage(message, options) { sent.push({ message, options }); },
 }, transcript);
 assert.deepEqual(await replacementAdapter.deliver([envelope]), {
   delivered: [],
-  duplicate: [envelope.eventId],
+  duplicate: [],
 });
 assert.equal(sent.length, 1, "adapter replacement cannot duplicate a queued pre-persistence event");
+for (const handler of settledHandlers) handler();
+assert.deepEqual(await adapter.deliver([envelope]), {
+  delivered: [],
+  duplicate: [],
+});
+assert.equal(sent.length, 2, "an unpersisted event is redelivered after Pi settles with an empty queue");
 entries.push({
   type: "custom_message",
   customType: AGENT_RUN_COMPLETION_MESSAGE_TYPE,
@@ -60,7 +69,7 @@ assert.deepEqual(await adapter.deliver([envelope]), {
   delivered: [],
   duplicate: [envelope.eventId],
 });
-assert.equal(sent.length, 1, "a saved transcript event ID prevents another row or continuation");
+assert.equal(sent.length, 2, "a saved transcript event ID prevents another row or continuation");
 
 const batchSent: any[] = [];
 const batch = Array.from({ length: AGENT_RUN_COMPLETION_CONTEXT_LIMIT + 2 }, (_, index) =>
@@ -69,6 +78,7 @@ const batch = Array.from({ length: AGENT_RUN_COMPLETION_CONTEXT_LIMIT + 2 }, (_,
     resultTail: `RESULT_SENTINEL_${index}`,
   })));
 await new PiParentCompletionAdapter({
+  on() {},
   sendMessage(message) { batchSent.push(message); },
 }, { getEntries: () => [] }).deliver(batch);
 assert.equal(batchSent[0]!.details.envelopes.length, batch.length, "every typed lifecycle row is retained");

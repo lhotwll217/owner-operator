@@ -9,10 +9,10 @@ import { deriveParentAgentState } from "@owner-operator/core/agent-state";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { buildOoTheme } from "../shared/oo-presentation";
 import { agentRunFixture as run } from "../../test/fixtures/agent-run";
+import { formatAgentElapsed } from "./format-agent-elapsed";
 import {
   AgentStatePicker,
   createAgentStateExtension,
-  formatAgentElapsed,
   type AgentStatePickerAction,
 } from "./agent-state-extension";
 

@@ -26,9 +26,14 @@ interface CompletionTranscript {
   getEntries(): SessionEntry[];
 }
 
+interface CompletionExtensionApi {
+  sendMessage: ExtensionAPI["sendMessage"];
+  on(event: "agent_settled", handler: () => void): void;
+}
+
 // Pi persists a streaming follow-up only when it reaches the queue head. Extension reloads reuse
-// the same session manager, so this guard covers that pre-persistence window without adding a
-// continuation queue or durable event store.
+// the same session manager, so this guard covers only that pre-persistence window without adding
+// a continuation queue or durable event store.
 const queuedEventIdsByTranscript = new WeakMap<CompletionTranscript, Set<string>>();
 
 type CompletionMessage = Parameters<ExtensionAPI["sendMessage"]>[0] & {
@@ -84,17 +89,24 @@ function completionContext(envelopes: readonly AgentRunCompletionEnvelope[]): st
 /** Production completion adapter over Pi's native custom-message persistence and follow-up queue. */
 export class PiParentCompletionAdapter implements ParentCompletionAdapter {
   constructor(
-    private readonly pi: Pick<ExtensionAPI, "sendMessage">,
+    private readonly pi: CompletionExtensionApi,
     private readonly transcript: CompletionTranscript,
-  ) {}
+  ) {
+    this.pi.on("agent_settled", () => this.clearQueuedEventIdsAfterAgentSettled());
+  }
+
+  /** Pi has no queued continuation after this event; the transcript now owns durable dedupe. */
+  private clearQueuedEventIdsAfterAgentSettled(): void {
+    queuedEventIdsByTranscript.delete(this.transcript);
+  }
 
   async deliver(envelopes: readonly AgentRunCompletionEnvelope[]): Promise<ParentCompletionDeliveryResult> {
-    const known = transcriptEventIds(this.transcript.getEntries());
+    const persisted = transcriptEventIds(this.transcript.getEntries());
     const queued = queuedEventIdsByTranscript.get(this.transcript) ?? new Set<string>();
     queuedEventIdsByTranscript.set(this.transcript, queued);
-    for (const eventId of queued) known.add(eventId);
-    const duplicate = envelopes.filter(({ eventId }) => known.has(eventId)).map(({ eventId }) => eventId);
-    const fresh = envelopes.filter(({ eventId }) => !known.has(eventId));
+    for (const eventId of persisted) queued.delete(eventId);
+    const duplicate = envelopes.filter(({ eventId }) => persisted.has(eventId)).map(({ eventId }) => eventId);
+    const fresh = envelopes.filter(({ eventId }) => !persisted.has(eventId) && !queued.has(eventId));
     if (!fresh.length) return { delivered: [], duplicate };
 
     const details: AgentRunCompletionMessageDetails = {
@@ -108,14 +120,15 @@ export class PiParentCompletionAdapter implements ParentCompletionAdapter {
       display: true,
       details,
     };
+    this.pi.sendMessage(message, { triggerTurn: true, deliverAs: "followUp" });
     for (const eventId of details.eventIds) queued.add(eventId);
-    try {
-      this.pi.sendMessage(message, { triggerTurn: true, deliverAs: "followUp" });
-    } catch (error) {
-      for (const eventId of details.eventIds) queued.delete(eventId);
-      throw error;
-    }
-    return { delivered: details.eventIds, duplicate };
+
+    // ExtensionAPI.sendMessage is fire-and-forget. Only a transcript entry confirms delivery;
+    // otherwise ParentRunSession must leave the completion unsettled for a later reconciliation.
+    const persistedAfterSend = transcriptEventIds(this.transcript.getEntries());
+    const delivered = details.eventIds.filter((eventId) => persistedAfterSend.has(eventId));
+    for (const eventId of delivered) queued.delete(eventId);
+    return { delivered, duplicate };
   }
 }
 

@@ -21,7 +21,9 @@ export interface ParentRunAdapter {
 }
 
 export interface ParentCompletionDeliveryResult {
+  /** Event IDs whose custom messages are confirmed in the parent transcript. */
   delivered: readonly string[];
+  /** Event IDs already present in the parent transcript before this delivery attempt. */
   duplicate: readonly string[];
 }
 

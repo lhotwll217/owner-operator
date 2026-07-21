@@ -15,8 +15,6 @@ import {
 import { formatAgentElapsed } from "./format-agent-elapsed";
 import { ParentRunSession, gatewayParentRunAdapter } from "./parent-run-session";
 
-export { formatAgentElapsed } from "./format-agent-elapsed";
-
 export type AgentStatePickerAction =
   | { kind: "close" }
   | { kind: "cancel"; runId: string }

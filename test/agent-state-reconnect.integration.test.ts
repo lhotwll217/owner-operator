@@ -61,6 +61,7 @@ const completionEntries: any[] = [];
 let completionContinuations = 0;
 const completionTranscript = { getEntries: () => completionEntries };
 const completionPi = {
+  on() {},
   sendMessage(message: any) {
     completionContinuations += 1;
     completionEntries.push({
