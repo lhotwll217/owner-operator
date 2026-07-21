@@ -305,6 +305,7 @@ try {
   assert.deepEqual(await reopenedAdapter.deliver([queuedEnvelope]), {
     delivered: [],
     duplicate: [queuedEnvelope.eventId],
+    queued: [],
   });
   assert.equal(duplicateContinuation, false, "reopening and reconciling cannot duplicate a row or response");
 

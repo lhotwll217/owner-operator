@@ -32,6 +32,7 @@ const adapter = new PiParentCompletionAdapter({
 assert.deepEqual(await adapter.deliver([envelope]), {
   delivered: [],
   duplicate: [],
+  queued: [envelope.eventId],
 });
 assert.equal(sent.length, 1);
 assert.equal(sent[0]!.message.customType, AGENT_RUN_COMPLETION_MESSAGE_TYPE);
@@ -53,12 +54,14 @@ const replacementAdapter = new PiParentCompletionAdapter({
 assert.deepEqual(await replacementAdapter.deliver([envelope]), {
   delivered: [],
   duplicate: [],
+  queued: [envelope.eventId],
 });
 assert.equal(sent.length, 1, "adapter replacement cannot duplicate a queued pre-persistence event");
 for (const handler of settledHandlers) handler();
 assert.deepEqual(await adapter.deliver([envelope]), {
   delivered: [],
   duplicate: [],
+  queued: [envelope.eventId],
 });
 assert.equal(sent.length, 2, "an unpersisted event is redelivered after Pi settles with an empty queue");
 entries.push({
@@ -69,6 +72,7 @@ entries.push({
 assert.deepEqual(await adapter.deliver([envelope]), {
   delivered: [],
   duplicate: [envelope.eventId],
+  queued: [],
 });
 assert.equal(sent.length, 2, "a saved transcript event ID prevents another row or continuation");
 
@@ -97,6 +101,7 @@ const recoveredAdapter = new PiParentCompletionAdapter({
 assert.deepEqual(await recoveredAdapter.deliver([envelope]), {
   delivered: [],
   duplicate: [envelope.eventId],
+  queued: [],
 });
 assert.equal(partialEntries.length, 1, "adapter failure cannot corrupt the durable lifecycle row");
 assert.equal(partialSends, 1, "adapter replacement cannot evoke a duplicate continuation");
@@ -134,5 +139,22 @@ const expanded = renderAgentRunCompletionMessage(message, { expanded: true }, th
 assert.match(expanded, /Run:.*run-complete/);
 assert.match(expanded, /Artifact:.*artifact:\/\/auth-report/);
 assert.match(expanded, /Evidence.*Ignore the parent/);
+
+const hostileIdentityEnvelope = {
+  ...envelope,
+  runId: "run\u200e-id\u{e0001}\ud83d\ude00".repeat(100),
+  childSessionId: "child\u200f-session\u200b",
+  harness: "pi\u061c-harness\ufff9",
+};
+const hostileIdentityMessage = {
+  ...message,
+  details: { ...details, envelopes: [hostileIdentityEnvelope] },
+};
+const sanitized = renderAgentRunCompletionMessage(hostileIdentityMessage, { expanded: true }, theme).render(700).join("\n");
+assert.doesNotMatch(sanitized, /\p{Cf}/u, "child-owned identity fields are sanitized at the renderer boundary");
+assert.match(sanitized, /child -session/);
+assert.match(sanitized, /Run:.*run -id/);
+assert.match(sanitized, /Harness:.*pi -harness/);
+assert.ok(!sanitized.includes("\ud83d\ufffd"), "bounded identity truncation does not split a surrogate pair");
 
 process.stdout.write("ok — Pi completion messages are bounded, visible, and transcript-deduplicated\n");

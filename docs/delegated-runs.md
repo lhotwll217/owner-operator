@@ -158,11 +158,9 @@ Terminal completion behavior is defined at four linked seams: the browser-safe
 [terminal reconciliation](../src/agent-runs/parent-run-session.ts), the
 [Pi custom-message adapter](../src/agent-runs/agent-run-completion.ts), and its model-free
 [saved-session integration contract](../test/agent-run-completion.integration.test.ts).
-Reconciliation projects and delivers only rows attributed to the exact open parent thread. Failed or
-transcript-unconfirmed adapter attempts schedule two parent-fleet refetches with exponential backoff,
-so durable terminal truth remains retryable without a second event but cannot create permanent
-background work; closing the parent cancels any transient retry and the initial list performs the
-same reconciliation when the thread reopens. Bounded child evidence
+Queued delivery and bounded retry/recovery behavior are owned by the
+[terminal reconciliation](../src/agent-runs/parent-run-session.ts) and
+[Pi custom-message adapter](../src/agent-runs/agent-run-completion.ts). Bounded child evidence
 is normalized to remove terminal control and bidirectional override characters before any adapter
 receives it.
 
