@@ -38,12 +38,14 @@ export interface ParentRunSessionOptions {
   completionAdapter?: ParentCompletionAdapter;
   /** Routine completed runs batch for approximately two seconds in production. */
   successBatchDelayMs?: number;
-  /** Failed or unconfirmed delivery is retried from durable truth after this delay. */
+  /** Base delay for bounded durable-refetch retries after failed or unconfirmed delivery. */
   completionRetryDelayMs?: number;
   onError?: (error: unknown) => void;
 }
 
 type ViewListener = (view: ParentAgentStateView) => void;
+
+const MAX_COMPLETION_DELIVERY_ATTEMPTS = 3;
 
 /**
  * One open parent thread's live projection over its complete delegated-run fleet.
@@ -62,6 +64,7 @@ export class ParentRunSession {
   private readonly onError: (error: unknown) => void;
   private readonly pendingCompletionIds = new Set<string>();
   private readonly settledCompletionIds = new Set<string>();
+  private readonly completionDeliveryAttempts = new Map<string, number>();
   private readonly successBatch = new Map<string, AgentRunCompletionEnvelope>();
   private readonly completionPromises = new Set<Promise<void>>();
   private successBatchTimer?: ReturnType<typeof setTimeout>;
@@ -138,6 +141,7 @@ export class ParentRunSession {
     if (this.completionRetryTimer) clearTimeout(this.completionRetryTimer);
     this.completionRetryTimer = undefined;
     this.successBatch.clear();
+    this.completionDeliveryAttempts.clear();
     this.unsubscribeAdapter?.();
     this.unsubscribeAdapter = undefined;
     this.listeners.clear();
@@ -203,6 +207,7 @@ export class ParentRunSession {
       if (run.parentThreadId !== this.parentThreadId || !isTerminalAgentRunStatus(run.status) || !run.finishedAt) continue;
       const envelope = createAgentRunCompletionEnvelope(run);
       if (this.pendingCompletionIds.has(envelope.eventId) || this.settledCompletionIds.has(envelope.eventId)) continue;
+      if ((this.completionDeliveryAttempts.get(envelope.eventId) ?? 0) >= MAX_COMPLETION_DELIVERY_ATTEMPTS) continue;
       this.pendingCompletionIds.add(envelope.eventId);
       if (run.status === AgentRunStatus.Completed && this.successBatchDelayMs > 0) {
         this.successBatch.set(envelope.eventId, envelope);
@@ -228,13 +233,16 @@ export class ParentRunSession {
       .then(({ delivered, duplicate }) => {
         const settled = new Set([...delivered, ...duplicate]);
         for (const eventId of eventIds) {
-          if (settled.has(eventId)) this.settledCompletionIds.add(eventId);
+          if (settled.has(eventId)) {
+            this.settledCompletionIds.add(eventId);
+            this.completionDeliveryAttempts.delete(eventId);
+          }
         }
-        if (eventIds.some((eventId) => !settled.has(eventId))) this.scheduleCompletionRetry();
+        this.scheduleCompletionRetry(eventIds.filter((eventId) => !settled.has(eventId)));
       })
       .catch((error) => {
         this.onError(error);
-        this.scheduleCompletionRetry();
+        this.scheduleCompletionRetry(eventIds);
       })
       .finally(() => {
         for (const eventId of eventIds) this.pendingCompletionIds.delete(eventId);
@@ -243,13 +251,21 @@ export class ParentRunSession {
     this.completionPromises.add(delivery);
   }
 
-  /** Retry by refetching the parent fleet; terminal rows remain the only queued source of truth. */
-  private scheduleCompletionRetry(): void {
-    if (this.stopped || this.completionRetryTimer) return;
+  /** Retry with bounded backoff; each attempt still starts from the durable parent fleet. */
+  private scheduleCompletionRetry(eventIds: readonly string[]): void {
+    if (this.stopped || !this.completionAdapter || !eventIds.length) return;
+    let nextAttempt = MAX_COMPLETION_DELIVERY_ATTEMPTS;
+    for (const eventId of eventIds) {
+      const attempt = (this.completionDeliveryAttempts.get(eventId) ?? 0) + 1;
+      this.completionDeliveryAttempts.set(eventId, attempt);
+      nextAttempt = Math.min(nextAttempt, attempt);
+    }
+    if (nextAttempt >= MAX_COMPLETION_DELIVERY_ATTEMPTS || this.completionRetryTimer) return;
+    const delayMs = this.completionRetryDelayMs * 2 ** (nextAttempt - 1);
     this.completionRetryTimer = setTimeout(() => {
       this.completionRetryTimer = undefined;
       void this.refresh();
-    }, this.completionRetryDelayMs);
+    }, delayMs);
     this.completionRetryTimer.unref?.();
   }
 }

@@ -96,6 +96,15 @@ class FlakyCompletionAdapter implements ParentCompletionAdapter {
   }
 }
 
+class UnconfirmedCompletionAdapter implements ParentCompletionAdapter {
+  attempts = 0;
+
+  async deliver() {
+    this.attempts += 1;
+    return { delivered: [], duplicate: [] };
+  }
+}
+
 const adapter = new MemoryAdapter();
 adapter.rows = [run("queued", AgentRunStatus.Pending), run("running", AgentRunStatus.Running)];
 const errors: unknown[] = [];
@@ -311,6 +320,30 @@ await new Promise((resolve) => setTimeout(resolve, 10));
 await retrySession.settled();
 assert.equal(flakyCompletions.attempts, 2, "durable truth is retried without another invalidation");
 retrySession.stop();
+
+// Permanently unconfirmed delivery cannot keep refetching durable truth for the lifetime of the
+// parent TUI. A bounded retry budget preserves recovery without creating background contention.
+const boundedRetryRunAdapter = new MemoryAdapter();
+boundedRetryRunAdapter.rows = [run("bounded-retry-child", AgentRunStatus.Failed, {
+  parentThreadId: "bounded-retry-parent",
+  error: "Pi did not persist the completion message",
+})];
+const unconfirmedCompletions = new UnconfirmedCompletionAdapter();
+const boundedRetrySession = new ParentRunSession("bounded-retry-parent", boundedRetryRunAdapter, {
+  completionAdapter: unconfirmedCompletions,
+  completionRetryDelayMs: 1,
+});
+await boundedRetrySession.start();
+await new Promise((resolve) => setTimeout(resolve, 20));
+await boundedRetrySession.settled();
+const boundedAttempts = unconfirmedCompletions.attempts;
+const boundedLists = boundedRetryRunAdapter.operations.filter((operation) => operation.startsWith("list:")).length;
+await new Promise((resolve) => setTimeout(resolve, 20));
+await boundedRetrySession.settled();
+assert.equal(boundedAttempts, 3, "delivery gets one initial attempt and two durable-refetch retries");
+assert.equal(unconfirmedCompletions.attempts, boundedAttempts, "unconfirmed delivery stops after its retry budget");
+assert.equal(boundedRetryRunAdapter.operations.filter((operation) => operation.startsWith("list:")).length, boundedLists);
+boundedRetrySession.stop();
 
 // A terminal row completed while the parent is closed is found by the durable initial list on reopen.
 const closedAdapter = new MemoryAdapter();

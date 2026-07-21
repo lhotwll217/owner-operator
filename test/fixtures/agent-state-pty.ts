@@ -22,7 +22,9 @@ import { agentRunFixture } from "./agent-run";
 const actionFile = process.env.OO_TEST_ACTION_FILE;
 if (!actionFile) throw new Error("OO_TEST_ACTION_FILE is required");
 
+const sessionManager = createOoSession(ooProvenance("interactive"));
 let rows = [agentRunFixture("running", AgentRunStatus.Running, {
+  parentThreadId: sessionManager.getSessionId(),
   task: "Review reconnect behavior",
   activity: "Waiting for durable terminal truth",
 })];
@@ -31,11 +33,15 @@ const gateway = {
   subscribe: () => () => undefined,
   cancelAgentRun: async (id: string) => {
     appendFileSync(actionFile, `cancel:${id}\n`);
-    const cancelled = agentRunFixture(id, AgentRunStatus.Cancelled);
+    const cancelled = agentRunFixture(id, AgentRunStatus.Cancelled, {
+      parentThreadId: sessionManager.getSessionId(),
+    });
     rows = [cancelled];
     return cancelled;
   },
-  resumeAgentRun: async (id: string) => agentRunFixture(`${id}-resumed`, AgentRunStatus.Pending),
+  resumeAgentRun: async (id: string) => agentRunFixture(`${id}-resumed`, AgentRunStatus.Pending, {
+    parentThreadId: sessionManager.getSessionId(),
+  }),
 } as Pick<GatewayApi, "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun">;
 
 const { authStorage, paths } = ownerOperatorPiServices();
@@ -69,7 +75,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
 const runtime = await createAgentSessionRuntime(createRuntime, {
   cwd: process.cwd(),
   agentDir: paths.piAgentDir,
-  sessionManager: createOoSession(ooProvenance("interactive")),
+  sessionManager,
 });
 initTheme(runtime.services.settingsManager.getTheme(), true);
 await new InteractiveMode(runtime).run();
