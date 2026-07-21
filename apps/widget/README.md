@@ -9,7 +9,6 @@ goes through the daemon.
 Owns no state — the daemon does.
 
 - port — `~/.owner-operator/daemon.json`
-- data — `GET /session-state` (cf. [`core/session-state.ts`](../../packages/core/src/session-state.ts))
 - live — SSE `/events`; short poll as fallback
 
 UI (layout, controls, animation) lives in [`Sources/oo-widget/UI.swift`](Sources/oo-widget/UI.swift), not here.
@@ -26,6 +25,7 @@ swift test     # unit tests — session state grouping, decode, fresh-window
 ```
 
 `swift test` needs XCTest (Xcode, not CLT): `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`.
+Behavior and wire ownership live in [`docs/widget.md`](../../docs/widget.md).
 
 ## Notes
 

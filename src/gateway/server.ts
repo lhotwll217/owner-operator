@@ -17,6 +17,7 @@ import {
   type ScheduleDefinition,
   type ScheduleRun,
 } from "@owner-operator/core";
+import { deriveParentAgentState } from "@owner-operator/core/agent-state";
 import type { State } from "../state/state";
 
 export interface GatewayMonitor {
@@ -168,6 +169,10 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (route === "GET /agent-runs") {
         const parent = url.searchParams.get("parentThreadId");
         return respond(200, options.agentRuns.list(parent ?? undefined));
+      }
+      if (route === "GET /agent-state") {
+        const parent = url.searchParams.get("parentThreadId");
+        return respond(200, deriveParentAgentState(options.agentRuns.list(parent ?? undefined)));
       }
       if (route === "POST /agent-runs") {
         const run = options.agentRuns.launch(await readBody(request) as AgentRunCreateInput);

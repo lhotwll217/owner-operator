@@ -13,18 +13,27 @@ struct WidgetRoot: View {
     var body: some View {
         VStack(spacing: 0) {
             CompactBar(expanded: $expanded)
+            if client.online, let footer = client.agentState.footer {
+                Divider()
+                AgentStateRail(footer: footer) {
+                    withAnimation(.easeInOut(duration: 0.2)) { expanded = true }
+                }
+            }
             if expanded {
                 Divider()
                 if !client.online {
                     offline
                 } else if client.setupRequired {
                     setupRequired
-                } else if client.groups.isEmpty {
+                } else if client.groups.isEmpty && client.agentState.runs.isEmpty {
                     Text("no active threads")
                         .foregroundStyle(.secondary).font(.system(size: 11)).padding(12)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 10) {
+                            if !client.agentState.runs.isEmpty {
+                                AgentStateSection(view: client.agentState)
+                            }
                             ForEach(client.groups) { group in
                                 GroupView(group: group, onDone: { id in
                                     withAnimation(.easeInOut(duration: 0.28)) { client.markDone(id) }
@@ -77,6 +86,83 @@ struct WidgetRoot: View {
                 .buttonStyle(.borderless).font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
+    }
+}
+
+/// Calm literal state outside the parent/thread working indicator. The Gateway supplies the copy.
+struct AgentStateRail: View {
+    let footer: String
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 6) {
+                Text(footer).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 6)
+                Image(systemName: "arrow.up.right.circle")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show delegated agents")
+    }
+}
+
+/// Runs stay in Gateway order: attention, active, then recent terminal history.
+struct AgentStateSection: View {
+    let view: AgentStateView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Agent state")
+                .font(.system(size: 12, weight: .semibold))
+            ForEach(view.runs) { run in
+                AgentRunRow(run: run)
+            }
+        }
+        .padding(.bottom, 2)
+    }
+}
+
+struct AgentRunRow: View {
+    let run: AgentRunView
+
+    private var statusColor: Color {
+        switch run.tone {
+        case .attention: return .yellow
+        case .positive: return .green
+        case .muted: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Text(run.status.glyph)
+                .foregroundStyle(statusColor)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 11)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(run.task).font(.system(size: 11, weight: .medium)).lineLimit(2)
+                HStack(spacing: 4) {
+                    Text(run.status.text.rawValue)
+                    Text("·")
+                    Text(run.harness)
+                    Text("·")
+                    Text(shortDuration(milliseconds: run.elapsedMs))
+                    if run.canResume {
+                        Text("· resumable").foregroundStyle(.yellow)
+                    }
+                }
+                .foregroundStyle(.secondary).font(.system(size: 10))
+                if !run.latestActivity.isEmpty {
+                    Text(run.latestActivity)
+                        .foregroundStyle(.secondary).font(.system(size: 10)).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 
