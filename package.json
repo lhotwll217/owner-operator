@@ -29,6 +29,7 @@
     "eval:loop": "node eval/loop.mjs",
     "eval:compare": "node eval/compare.mjs",
     "poll:smoke": "tsx src/session-monitor/monitor.smoke.ts",
+    "prototype:issue-75": "tsx src/shared/issue-75-agent-run-ux.prototype.ts",
     "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
     "lint": "oxlint --deny-warnings"
   },
