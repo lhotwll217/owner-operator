@@ -6,7 +6,11 @@ import {
   type AgentRun,
   type AgentRunActivityUpdate,
 } from "@owner-operator/core";
-import { createAcpLauncher } from "./acp-launcher";
+import { codexAcpAgentCommand, createAcpLauncher } from "./acp-launcher";
+
+const codexCommand = codexAcpAgentCommand();
+assert.match(codexCommand, /codex-acp\/dist\/index\.js"?$/, "Codex uses Owner Operator's pinned adapter");
+assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's stale registry command");
 
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };

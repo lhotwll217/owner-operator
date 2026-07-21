@@ -57,9 +57,11 @@ npm run typecheck                                     # tsc: root src + workspac
 npm run lint                                          # oxlint
 npm run test:integration                              # one tier
 npm run poll:smoke                                    # smoke — reads your live sessions
-npm run test:agent                                    # live — needs model auth, paid
-OO_RUN_LIVE_ACP_TEST=1 npm run test:agent-runs:live   # real Claude/acpx kill + resume
-cd apps/widget && swift test                          # widget (Swift)
+npm run test:agent                                     # live — needs model auth, paid
+OO_RUN_LIVE_ACP_TEST=1 npm run test:agent-runs:live    # real Claude/acpx kill + resume
+OO_RUN_LIVE_CODEX_ACP_TEST=1 \
+  npm run test:agent-runs:codex-live                    # real Codex ACP startup + turn
+cd apps/widget && swift test                            # widget (Swift)
 ```
 
 CI runs on every PR and every landing on `main`: [`ci.yml`](../.github/workflows/ci.yml);
