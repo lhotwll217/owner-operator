@@ -117,6 +117,7 @@ function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<st
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
     canResume: AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)
       && run.childSessionId !== null
+      && !resumedRunIds.has(run.id)
       && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
   };
 }

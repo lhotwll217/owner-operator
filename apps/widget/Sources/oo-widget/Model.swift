@@ -37,6 +37,11 @@ enum AgentRunViewCategory: String, Decodable {
     case attention
     case active
     case recent
+
+    init(from decoder: Decoder) throws {
+        let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? ""
+        self = Self(rawValue: raw) ?? .recent
+    }
 }
 
 struct AgentRunStatusView: Decodable {
@@ -52,6 +57,12 @@ enum AgentRunStatusText: String, Decodable {
     case cancelled
     case interrupted
     case lost
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? ""
+        self = Self(rawValue: raw) ?? .unknown
+    }
 }
 
 enum AgentRunTone {

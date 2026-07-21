@@ -7,13 +7,16 @@ import Foundation
 
 private actor StubWidgetGateway {
     private var agentStateData: Data
+    private var sessionStateData: Data
     private var unavailable = false
+    private var agentStateUnavailable = false
     private var paths: [String] = []
     private var holdNextAgentState = false
     private var heldAgentState: CheckedContinuation<Data, Error>?
 
-    init(agentStateData: Data) {
+    init(agentStateData: Data, sessionStateData: Data = Data("[]".utf8)) {
         self.agentStateData = agentStateData
+        self.sessionStateData = sessionStateData
     }
 
     func fetch(_ path: String) async throws -> Data {
@@ -23,8 +26,9 @@ private actor StubWidgetGateway {
         case "/ready":
             return Data(#"{"setupRequired":false}"#.utf8)
         case "/session-state":
-            return Data("[]".utf8)
+            return sessionStateData
         case "/agent-state":
+            if agentStateUnavailable { throw URLError(.badServerResponse) }
             if holdNextAgentState {
                 holdNextAgentState = false
                 return try await withCheckedThrowingContinuation { heldAgentState = $0 }
@@ -37,6 +41,7 @@ private actor StubWidgetGateway {
 
     func setAgentState(_ data: Data) { agentStateData = data }
     func setUnavailable(_ value: Bool) { unavailable = value }
+    func setAgentStateUnavailable(_ value: Bool) { agentStateUnavailable = value }
     func requestCount(_ path: String) -> Int { paths.filter { $0 == path }.count }
     func holdNextAgentStateRequest() { holdNextAgentState = true }
     func hasHeldAgentStateRequest() -> Bool { heldAgentState != nil }
@@ -138,6 +143,34 @@ struct SessionStateTests {
         let running = try #require(rendered.range(of: "Research widget behavior"))
         let completed = try #require(rendered.range(of: "Map the Gateway seam"))
         #expect(failed.lowerBound < running.lowerBound && running.lowerBound < completed.lowerBound)
+    }
+
+    @Test func unknownAgentStatusAndCategoryStillRender() throws {
+        let payload = Data("""
+        {"counts":{"queued":0,"running":1,"attention":0},"footer":"Agent state: 1 running","runs":[{"id":"run-1","harness":"codex","task":"Future lifecycle","status":{"glyph":"◆","text":"paused"},"category":"future","elapsedMs":1000,"latestActivity":"waiting","canCancel":false,"canResume":false}]}
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(AgentStateView.self, from: payload)
+        let rendered = renderText(rows: [], agentState: decoded, port: 47711)
+            .replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+
+        #expect(rendered.contains("◆ unknown  Future lifecycle"))
+    }
+
+    @Test @MainActor func agentStateFailureLeavesSessionsOnlineWithEmptyAgentState() async throws {
+        let sessionData = try JSONSerialization.data(withJSONObject: [row(id: "thread-1", state: "needs-you")])
+        let stub = StubWidgetGateway(agentStateData: Data("{}".utf8), sessionStateData: sessionData)
+        await stub.setAgentStateUnavailable(true)
+        let client = DaemonClient(
+            discover: { DaemonClient.Discovery(port: 47711, authToken: "test") },
+            fetchData: { path, _ in try await stub.fetch(path) }
+        )
+
+        await client.refresh()
+
+        #expect(client.online)
+        #expect(client.groups.flatMap(\.rows).map(\.id) == ["thread-1"])
+        #expect(client.agentState.runs.isEmpty)
     }
 
     @Test @MainActor func agentRunInvalidationAndReconnectRefetchDurableTruth() async throws {

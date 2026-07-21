@@ -86,19 +86,24 @@ const idle = deriveParentAgentState([
 ], { now });
 assert.equal(idle.footer, null, "footer hides when no run is active or awaiting attention");
 
-const resumedFailure = deriveParentAgentState([
-  run("failed-predecessor", AgentRunStatus.Failed, { childSessionId: "resumed-child" }),
+const resumedInterrupted = deriveParentAgentState([
+  run("interrupted-predecessor", AgentRunStatus.Interrupted, { childSessionId: "resumed-child" }),
   run("resume", AgentRunStatus.Running, {
     childSessionId: "resumed-child",
-    resumeOfRunId: "failed-predecessor",
+    resumeOfRunId: "interrupted-predecessor",
   }),
 ], { now });
 assert.equal(
-  resumedFailure.runs.find(({ id }) => id === "failed-predecessor")?.category,
+  resumedInterrupted.runs.find(({ id }) => id === "interrupted-predecessor")?.category,
   "recent",
   "a resumed predecessor becomes terminal history instead of demanding attention",
 );
-assert.equal(resumedFailure.counts.attention, 0);
+assert.equal(
+  resumedInterrupted.runs.find(({ id }) => id === "interrupted-predecessor")?.canResume,
+  false,
+  "a resumed interrupted run cannot be resumed again",
+);
+assert.equal(resumedInterrupted.counts.attention, 0);
 
 const resumedOnlyFailure = deriveParentAgentState([
   run("only-failure", AgentRunStatus.Failed, { childSessionId: "resumed-child" }),

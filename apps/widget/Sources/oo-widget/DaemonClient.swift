@@ -127,15 +127,19 @@ final class DaemonClient: ObservableObject {
         do {
             let readiness = try decode(Readiness.self, from: await fetchData("/ready", discovery))
             let rows = try decode([SessionStateRow].self, from: await fetchData("/session-state", discovery))
-            let delegated = try decode(AgentStateView.self, from: await fetchData("/agent-state", discovery))
             lastRows = rows
-            agentState = delegated
             port = discovery.port
             setupRequired = readiness.setupRequired
             online = true
             rebuild()
         } catch {
             clearDisconnectedState()
+            return
+        }
+        do {
+            agentState = try decode(AgentStateView.self, from: await fetchData("/agent-state", discovery))
+        } catch {
+            agentState = .empty
         }
     }
 
@@ -247,8 +251,8 @@ final class DaemonClient: ObservableObject {
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
     }
 
-    /// Subscribe to /events; any `data:` frame means "something changed" → refetch. Reconnects
-    /// on drop. Runs off the main actor; the long request timeout keeps an idle stream open.
+    /// Subscribe to /events; known widget invalidations trigger a refetch, while unknown or
+    /// malformed kinds are ignored. Reconnects on drop; the long timeout keeps an idle stream open.
     private func startSSE() {
         sseTask = Task.detached { [weak self] in
             let cfg = URLSessionConfiguration.ephemeral
