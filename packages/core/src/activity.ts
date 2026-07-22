@@ -55,10 +55,9 @@ export type TurnTraceView =
     actionCount: number;
     summary: string;
     actions: readonly TurnTraceActionView[];
-    interruptionMessage?: "Turn interrupted.";
   }
   | { kind: "hidden"; turnId: string }
-  | { kind: "interrupted"; turnId: string; message: "Turn interrupted." };
+  | { kind: "interrupted"; turnId: string; message: "Operation interrupted" };
 
 const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
   read: "Reading files",
@@ -109,7 +108,7 @@ export function applyTurnTraceEvent(trace: TurnTrace, event: TurnActivityEvent):
   if (trace.eventIds.has(event.eventId)) return trace;
 
   const label = event.kind === "thinking_summary"
-    ? oneLine(event.summary)
+    ? oneLine(plainTextSummary(event.summary))
     : semanticActionForTool(event.toolName);
   if (!label) return trace;
 
@@ -129,8 +128,18 @@ export function formatTurnDuration(durationMs: number): string {
   const minutes = Math.floor((seconds % 3_600) / 60);
   const remainder = seconds % 60;
   if (hours) return `${hours}h ${minutes}m`;
-  if (minutes) return `${minutes}m ${remainder}s`;
+  if (minutes) return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
   return `${seconds}s`;
+}
+
+/** Pi's timeline rows are plain text, so remove common inline Markdown presentation markers. */
+function plainTextSummary(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(`{1,3})(.*?)\1/g, "$2")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/([*_])(.*?)\1/g, "$2");
 }
 
 const actionViews = (trace: TurnTrace, active: boolean): TurnTraceActionView[] =>
@@ -157,24 +166,24 @@ export function deriveTurnTraceView(
   }
   if (trace.actions.length === 0) {
     if (trace.hasResponse) return { kind: "hidden", turnId: trace.turnId };
-    if (outcome === "interrupted") return { kind: "interrupted", turnId: trace.turnId, message: "Turn interrupted." };
+    if (outcome === "interrupted") return { kind: "interrupted", turnId: trace.turnId, message: "Operation interrupted" };
     return { kind: "hidden", turnId: trace.turnId };
   }
 
   const durationMs = Math.max(0, settledAt - (trace.startedAt ?? settledAt));
   const actionCount = trace.actions.length;
   const expanded = options.expanded === true;
+  const interrupted = outcome === "interrupted";
   return {
     kind: "settled",
     turnId: trace.turnId,
     expanded,
     durationMs,
     actionCount,
-    summary: `Worked for ${formatTurnDuration(durationMs)} · ${actionCount} action${actionCount === 1 ? "" : "s"}`,
+    summary: interrupted
+      ? `Worked for ${formatTurnDuration(durationMs)} · interrupted`
+      : `Worked for ${formatTurnDuration(durationMs)} · ${actionCount} action${actionCount === 1 ? "" : "s"}`,
     actions: expanded ? actionViews(trace, false) : [],
-    ...(outcome === "interrupted" && !trace.hasResponse
-      ? { interruptionMessage: "Turn interrupted." as const }
-      : {}),
   };
 }
 

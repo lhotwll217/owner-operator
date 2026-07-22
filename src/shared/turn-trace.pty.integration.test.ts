@@ -111,12 +111,10 @@ if (process.env.OO_TURN_TRACE_PTY_CHILD === "1") {
     }
 
     if (mode === "expanded") {
-      (interactive as any).showExtensionSelector = async (_title: string, choices: string[]) => choices[0];
-      const command = created.session.extensionRunner.getCommand("activity");
-      assert.ok(command, "the real Pi runtime registered /activity");
-      await command.handler("", created.session.extensionRunner.createCommandContext());
+      (interactive as any).toggleToolOutputExpansion();
     } else if (mode === "raw") {
-      (interactive as any).setToolsExpanded(true);
+      (interactive as any).toggleToolOutputExpansion();
+      (interactive as any).toggleToolOutputExpansion();
     }
 
     const width = process.stdout.columns ?? 80;
@@ -168,12 +166,11 @@ for (const action of normal.slice(1).map((line) => line.slice(2))) {
 
 assert.deepEqual(await renderInPty(80, "settled"), [
   "",
-  "▶ Worked for 8m 0s · 6 actions · expand trace",
+  "▶ Worked for 8m · 6 actions",
 ], "settlement collapses through Pi's real custom-entry host");
 const expanded = await renderInPty(80, "expanded");
 assert.equal(expanded[0], "", "expanded activity keeps the single transcript spacer");
-assert.equal(expanded[1], "▼ Worked for 8m 0s · 6 actions · collapse trace");
-assert.deepEqual(expanded.slice(2), normal.slice(1).map((line) => line.replace(/^● /, "│ ")), "expanded settlement restores the ordered semantic trace");
+assert.deepEqual(expanded.slice(1), normal.slice(1).map((line) => line.replace(/^● /, "│ ")), "Pi's first expansion restores the ordered semantic trace");
 const raw = await renderInPty(80, "raw");
 assert.ok(raw.some((line) => line.includes("/private/credential.txt") || line.includes("raw credential result")), "Pi's separate tool expansion restores raw detail explicitly");
 assert.ok(!normal.some((line) => line.includes("credential")), "raw arguments and results stay hidden in the normal Pi surface");

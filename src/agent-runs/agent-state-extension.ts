@@ -31,6 +31,7 @@ function statusColor(theme: Theme, run: AgentRunView): string {
 /** Focused, surface-only component. All lifecycle meaning arrives in ParentAgentStateView. */
 export class AgentStatePicker {
   private selectedIndex = 0;
+  private inspecting = false;
 
   constructor(
     private view: ParentAgentStateView,
@@ -44,12 +45,23 @@ export class AgentStatePicker {
     this.view = view;
     const nextIndex = selectedId ? view.runs.findIndex(({ id }) => id === selectedId) : -1;
     this.selectedIndex = nextIndex >= 0 ? nextIndex : Math.min(this.selectedIndex, Math.max(0, view.runs.length - 1));
+    if (!this.selected) this.inspecting = false;
     this.requestRender();
   }
 
   handleInput(data: string): void {
     if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+      if (this.inspecting) {
+        this.inspecting = false;
+        this.requestRender();
+        return;
+      }
       this.onAction({ kind: "close" });
+      return;
+    }
+    if (matchesKey(data, "enter") && this.selected) {
+      this.inspecting = true;
+      this.requestRender();
       return;
     }
     if (matchesKey(data, "down") || data === "j") {
@@ -78,6 +90,22 @@ export class AgentStatePicker {
       return lines;
     }
 
+    if (this.inspecting) {
+      const selected = this.selected!;
+      lines.push(line(`${statusColor(this.theme, selected)} · ${this.theme.fg("text", selected.task)}`));
+      lines.push("", line(this.theme.fg("borderMuted", "─".repeat(safeWidth))));
+      lines.push(line(`${this.theme.fg("dim", "Task:")} ${selected.task}`));
+      lines.push(line(`${this.theme.fg("dim", "Harness:")} ${selected.harness}`));
+      lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
+      lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
+      lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
+      const controls = [selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc back"]
+        .filter(Boolean)
+        .join(" · ");
+      lines.push("", line(this.theme.fg("dim", controls)));
+      return lines;
+    }
+
     const visibleCount = Math.min(8, this.view.runs.length);
     const start = Math.max(0, Math.min(
       this.selectedIndex - Math.floor(visibleCount / 2),
@@ -93,16 +121,10 @@ export class AgentStatePicker {
     }
 
     const selected = this.selected!;
-    lines.push("", line(this.theme.fg("borderMuted", "─".repeat(safeWidth))));
-    lines.push(line(`${this.theme.fg("dim", "Task:")} ${selected.task}`));
-    lines.push(line(`${this.theme.fg("dim", "Harness:")} ${selected.harness}`));
-    lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
-    lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
-    lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
     const controls = ["↑/↓ select", selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc close"]
       .filter(Boolean)
       .join(" · ");
-    lines.push("", line(this.theme.fg("dim", controls)));
+    lines.push("", line(this.theme.fg("dim", `enter inspect · ${controls}`)));
     return lines;
   }
 
@@ -114,6 +136,7 @@ export class AgentStatePicker {
 
   private move(delta: number): void {
     if (!this.view.runs.length) return;
+    this.inspecting = false;
     this.selectedIndex = (this.selectedIndex + delta + this.view.runs.length) % this.view.runs.length;
     this.requestRender();
   }

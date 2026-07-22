@@ -251,7 +251,8 @@ try {
   assert.equal(customMessage.role, "custom");
   const renderer = session.extensionRunner.getMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE);
   const rendered = renderer?.(customMessage, { expanded: false }, buildOoTheme("256color")).render(100).join("\n") ?? "";
-  assert.match(rendered, /child-queued.*completed.*4m/);
+  assert.match(rendered, /✓ Review the queued behavior completed · 4m/);
+  assert.doesNotMatch(rendered, /child-queued|queued-completion/);
   assert.doesNotMatch(rendered, /Ignore prior instructions/, "compact custom-message rendering omits result bodies");
 
   const idleEnvelope = createAgentRunCompletionEnvelope(run("idle-completion", AgentRunStatus.Failed, {
@@ -296,7 +297,8 @@ try {
     { expanded: false },
     buildOoTheme("256color"),
   ).render(100).join("\n");
-  assert.match(replayedRow, /child-queued.*completed.*4m/);
+  assert.match(replayedRow, /✓ Review the queued behavior completed · 4m/);
+  assert.doesNotMatch(replayedRow, /child-queued|queued-completion/);
   let duplicateContinuation = false;
   const reopenedAdapter = new PiParentCompletionAdapter({
     on() {},

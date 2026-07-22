@@ -7,6 +7,7 @@ import {
   type GatewayApi,
 } from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
+import { agentRunToolResult } from "./agent-run-result";
 
 /** The manage_agent_run actions, declared once so the runtime schema and the request type can't
  * drift. The compile-time `action` type and the model-facing Type.Union both derive from this. */
@@ -62,9 +63,6 @@ export const manageAgentRunTool = defineTool({
   async execute(_id, params) {
     const backend = await resolveBackend();
     const run = await manageAgentRun(backend, params);
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(run, null, 2) }],
-      details: run,
-    };
+    return agentRunToolResult(run);
   },
 });

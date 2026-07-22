@@ -16,9 +16,9 @@
 // the chat scrollback — are handled by the `quietOoInteractiveMode` shim at the bottom.
 
 import { Text, type Component } from "@earendil-works/pi-tui";
-import { isTerminalAgentRunStatus, type AgentRunStatus } from "@owner-operator/core";
+import type { AgentRunStatus } from "@owner-operator/core";
 import { formatTurnDuration } from "@owner-operator/core/activity";
-import { turnTraceExtension } from "./turn-trace";
+import { OO_TURN_ACTIVITY_ENTRY, turnTraceExtension } from "./turn-trace";
 import {
   Theme,
   type ExtensionAPI,
@@ -125,17 +125,14 @@ export function buildOoTheme(mode: "truecolor" | "256color" = "truecolor"): Them
 
 // ---- Delegated-run row -------------------------------------------------------------------
 // Issue #69: a delegated run must not read as a generic tool call. The delegate/manage tools
-// render a compact agent row — harness · task · state · (activity / result / error) · elapsed —
-// so the terminal shows what the child is and where it stands.
+// render a compact agent row — harness · task · state · elapsed — so the terminal shows what
+// the child is and where it stands without activity, result, failure, or retry dumps.
 
 /** The wire AgentRun fields read by the compact terminal presentation. */
 export interface AgentRunRowView {
   harness?: string;
   task?: string;
   status?: AgentRunStatus;
-  activity?: string | null;
-  resultTail?: string | null;
-  error?: string | null;
   createdAt?: string | null;
   finishedAt?: string | null;
 }
@@ -147,18 +144,12 @@ export function elapsedLabel(fromIso?: string | null, toIso?: string | null): st
   return Number.isFinite(durationMs) ? formatTurnDuration(durationMs) : "";
 }
 
-/** One compact line for a delegated run: "‹harness› · ‹task› · ‹state› · ‹detail› · ‹elapsed›".
- * The detail is the terminal outcome (result/error) once finished, else the latest activity. */
+/** One compact line for a delegated run. Activity/result/error bodies never enter this view. */
 export function formatAgentRunRow(run: AgentRunRowView, nowIso?: string): string {
   const parts: string[] = [];
   if (run.harness) parts.push(run.harness);
   if (run.task) parts.push(truncate(run.task, 60));
   if (run.status) parts.push(run.status);
-  const isTerminal = run.status ? isTerminalAgentRunStatus(run.status) : false;
-  const detail = isTerminal
-    ? (run.error ?? run.resultTail ?? undefined)
-    : (run.activity ?? undefined);
-  if (detail) parts.push(truncate(detail.replace(/\s+/g, " ").trim(), 80));
   const elapsed = elapsedLabel(run.createdAt, run.finishedAt ?? nowIso ?? null);
   if (elapsed) parts.push(elapsed);
   return parts.join(" · ");
@@ -273,6 +264,7 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
 // components) rather than silently letting the dump back in.
 const TOOL_EXECUTION_COMPONENT = "ToolExecutionComponent";
 const ASSISTANT_MESSAGE_COMPONENT = "AssistantMessageComponent";
+const CUSTOM_ENTRY_COMPONENT = "CustomEntryComponent";
 const VISIBLE_TOOL_ROWS = new Set(["delegate_agent", "manage_agent_run"]);
 
 const className = (child: unknown): string | undefined =>
@@ -318,6 +310,11 @@ export function isAssistantMessageRow(child: unknown): boolean {
   return className(child) === ASSISTANT_MESSAGE_COMPONENT;
 }
 
+function isTurnTraceEntry(child: unknown): boolean {
+  if (className(child) !== CUSTOM_ENTRY_COMPONENT) return false;
+  return (child as { entry?: { customType?: unknown } }).entry?.customType === OO_TURN_ACTIVITY_ENTRY;
+}
+
 /** An assistant message stripped to owner-facing output. Thinking and provider diagnostics stay
  * out of the transcript; partial response text remains. TurnTrace supplies a concise interruption
  * marker after settlement, independently of Pi's raw error prose. */
@@ -348,23 +345,41 @@ function muteThinkingRendering(child: unknown): void {
   if (component.lastMessage) component.updateContent(component.lastMessage);
 }
 
-/** Quiet a constructed pi InteractiveMode in place: raw tool rows render only under Pi's
- * explicit tool expansion, thinking blocks never render, and startup notices stay silent.
+/** Quiet a constructed pi InteractiveMode in place: Pi expansion reveals semantic turn traces
+ * first and raw tool rows second; thinking blocks never render and startup notices stay silent.
  * Structural (duck-typed) so it never imports Pi internals; a no-op if Pi's shape shifts. */
 export function quietOoInteractiveMode(mode: unknown): void {
   if (typeof mode !== "object" || mode === null) return;
   const m = mode as {
-    chatContainer?: { addChild?: (child: unknown) => void };
+    chatContainer?: { children?: unknown[]; addChild?: (child: unknown) => void };
+    toolOutputExpanded?: boolean;
+    toggleToolOutputExpansion?: unknown;
+    ui?: { requestRender?: () => void };
     showPackageUpdateNotification?: unknown;
     showNewVersionNotification?: unknown;
   };
   const chat = m.chatContainer;
+  let expansionStage: 0 | 1 | 2 = 0;
+  const setComponentExpansion = (child: unknown): void => {
+    const expandable = child as { setExpanded?: (expanded: boolean) => void };
+    if (typeof expandable.setExpanded !== "function") return;
+    expandable.setExpanded(isTurnTraceEntry(child) ? expansionStage >= 1 : expansionStage >= 2);
+  };
   if (chat && typeof chat.addChild === "function") {
     const original = chat.addChild.bind(chat);
     chat.addChild = (child: unknown): void => {
       if (isToolExecutionRow(child) && !isVisibleToolExecutionRow(child)) gateRawToolDetail(child);
       if (isAssistantMessageRow(child)) muteThinkingRendering(child); // reasoning renders nothing
+      setComponentExpansion(child);
       original(child);
+    };
+  }
+  if ("toggleToolOutputExpansion" in m) {
+    m.toggleToolOutputExpansion = (): void => {
+      expansionStage = ((expansionStage + 1) % 3) as 0 | 1 | 2;
+      m.toolOutputExpanded = expansionStage === 2;
+      for (const child of chat?.children ?? []) setComponentExpansion(child);
+      m.ui?.requestRender?.();
     };
   }
   // Startup update notices are pi self-promotion irrelevant to the owner; OO owns its own deps.

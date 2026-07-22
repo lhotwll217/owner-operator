@@ -8,6 +8,7 @@ import {
   MAX_AGENT_RUN_WAIT_SECONDS,
 } from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
+import { agentRunToolResult } from "./agent-run-result";
 
 const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
@@ -58,9 +59,6 @@ export const delegateAgentTool = defineTool({
     if (params.waitSeconds && params.waitSeconds > 0) {
       run = await backend.waitAgentRun(run.id, params.waitSeconds);
     }
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(run, null, 2) }],
-      details: run,
-    };
+    return agentRunToolResult(run);
   },
 });

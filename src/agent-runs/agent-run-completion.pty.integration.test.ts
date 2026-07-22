@@ -334,10 +334,11 @@ async function renderInPty(width: number): Promise<string[]> {
 
 const normal = await renderInPty(80);
 const normalText = normal.join("\n");
-assert.match(normalText, /! Active parent startup failure · active-child · failed · 4m/);
-assert.match(normalText, /✓ First nearby success · batch-child-one · completed · 4m/);
-assert.match(normalText, /✓ Second nearby success · batch-child-two · completed · 4m/);
-assert.match(normalText, /! Closed parent recovered result · closed-child · lost · 4m/);
+assert.match(normalText, /! Active parent startup failure failed · 4m/);
+assert.match(normalText, /✓ First nearby success completed · 4m/);
+assert.match(normalText, /✓ Second nearby success completed · 4m/);
+assert.match(normalText, /! Closed parent recovered result lost · 4m/);
+assert.doesNotMatch(normalText, /active-child|batch-child|closed-child/);
 assert.doesNotMatch(normalText, /Ignore the parent|wrong-parent-result|Must not enter this transcript/);
 
 const narrow = await renderInPty(34);

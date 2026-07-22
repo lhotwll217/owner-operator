@@ -9,14 +9,14 @@ import {
 export const AGENT_STATE_TASK_MAX_LENGTH = 80;
 export const AGENT_STATE_ACTIVITY_MAX_LENGTH = 160;
 export const AGENT_STATE_RESULT_MAX_LENGTH = 1_200;
-export const AGENT_STATE_RECENT_LIMIT = 10;
+export const AGENT_STATE_RECENT_LIMIT = 20;
 export const AGENT_STATE_ARTIFACT_LIMIT = 20;
 
 export type AgentRunViewCategory = "attention" | "active" | "recent";
 
 export interface AgentRunStatusView {
   glyph: "◦" | "●" | "✓" | "!" | "■";
-  text: "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted" | "lost";
+  text: "queued" | "running" | "completed" | "attention" | "failed" | "cancelled" | "interrupted" | "lost";
 }
 
 export interface AgentRunView {
@@ -39,7 +39,7 @@ export interface ParentAgentStateView {
   };
   /** Literal footer copy, or null when the surface should stay calm. */
   footer: string | null;
-  /** Picker order: attention, active, then bounded recent terminal runs. */
+  /** Picker order: attention, active, then recent terminal runs; bounded to latest 20 by default. */
   runs: AgentRunView[];
 }
 
@@ -66,7 +66,8 @@ export function bounded(value: string | null | undefined, maxLength: number): st
     : compact;
 }
 
-function statusView(status: AgentRunStatus): AgentRunStatusView {
+function statusView(status: AgentRunStatus, category: AgentRunViewCategory): AgentRunStatusView {
+  if (category === "attention") return { glyph: "!", text: "attention" };
   switch (status) {
     case AgentRunStatus.Pending:
       return { glyph: "◦", text: "queued" };
@@ -106,12 +107,13 @@ function sortTime(run: AgentRun): number {
 }
 
 function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<string>): AgentRunView {
+  const category = categoryFor(run, resumedRunIds);
   return {
     id: run.id,
     harness: run.harness,
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
-    status: statusView(run.status),
-    category: categoryFor(run, resumedRunIds),
+    status: statusView(run.status, category),
+    category,
     elapsedMs: elapsedMs(run, now),
     latestActivity: activityFor(run),
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
@@ -136,19 +138,18 @@ export function deriveParentAgentState(
       - ["attention", "active", "recent"].indexOf(categoryFor(right, resumedRunIds));
     return categoryDifference || sortTime(right) - sortTime(left) || right.id.localeCompare(left.id);
   });
-  let recent = 0;
-  const visible = ordered.filter((run) => categoryFor(run, resumedRunIds) !== "recent" || recent++ < recentLimit);
+  const visible = ordered.slice(0, recentLimit);
   const queued = runs.filter(({ status }) => status === AgentRunStatus.Pending).length;
   const running = runs.filter(({ status }) => status === AgentRunStatus.Running).length;
   const attention = runs.filter((run) => categoryFor(run, resumedRunIds) === "attention").length;
   const footerParts = [
-    queued ? `${queued} queued` : "",
-    running ? `${running} running` : "",
-    attention ? `${attention} need${attention === 1 ? "s" : ""} attention` : "",
+    queued ? `◦ ${queued} queued` : "",
+    running ? `● ${running} running` : "",
+    attention ? `! ${attention} attention` : "",
   ].filter(Boolean);
   return {
     counts: { queued, running, attention },
-    footer: footerParts.length ? `Agent state: ${footerParts.join(" · ")}` : null,
+    footer: footerParts.length ? `${footerParts.join(" · ")}    /agent-state` : null,
     runs: visible.map((run) => deriveRunView(run, now, resumedRunIds)),
   };
 }

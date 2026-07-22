@@ -109,7 +109,6 @@ export function thinkingSummaryFromPiEvent(
 export class TurnTraceStore {
   private traces = new Map<string, TurnTrace>();
   private order: string[] = [];
-  private expanded = new Set<string>();
   // Replay-only settlement boundary. Nothing synthetic is appended to the saved transcript.
   private interruptedAt = new Map<string, number>();
   private lastEventAt = new Map<string, number>();
@@ -124,7 +123,6 @@ export class TurnTraceStore {
   reset(events: readonly TurnActivityEvent[] = []): void {
     this.traces.clear();
     this.order = [];
-    this.expanded.clear();
     this.interruptedAt.clear();
     this.lastEventAt.clear();
     for (const event of events) this.ingest(event);
@@ -158,22 +156,15 @@ export class TurnTraceStore {
     if (turnId && trace?.settledAt === undefined && at !== undefined) this.interruptedAt.set(turnId, at);
   }
 
-  view(turnId: string): TurnTraceView | undefined {
+  view(turnId: string, expanded = false): TurnTraceView | undefined {
     const trace = this.traces.get(turnId);
     const interruptedAt = this.interruptedAt.get(turnId);
     return trace
       ? deriveTurnTraceView(trace, {
-        expanded: this.expanded.has(turnId),
+        expanded,
         ...(interruptedAt !== undefined ? { interruptedAt } : {}),
       })
       : undefined;
-  }
-
-  toggleExpanded(turnId: string): void {
-    const view = this.view(turnId);
-    if (view?.kind !== "settled") return;
-    if (this.expanded.has(turnId)) this.expanded.delete(turnId);
-    else this.expanded.add(turnId);
   }
 
   visualAnchorTurnId(event: TurnActivityEvent): string | undefined {
@@ -181,40 +172,22 @@ export class TurnTraceStore {
     return event.kind === "turn_started" ? event.turnId : undefined;
   }
 
-  turnOptions(): Array<{ turnId: string; label: string }> {
-    const visible = this.order.flatMap((turnId) => {
-      const view = this.view(turnId);
-      if (view?.kind === "settled") return [{ turnId, marker: view.expanded ? "▼" : "▶", summary: view.summary }];
-      return [];
-    });
-    return visible.map(({ turnId, marker, summary }, index) => ({
-      turnId,
-      label: `${marker} Turn ${index + 1} · ${summary}`,
-    }));
-  }
 }
 
 export function renderTurnTraceText(view: TurnTraceView, theme: Theme): string {
   if (view.kind === "hidden") return "";
   if (view.kind === "interrupted") return theme.fg("warning", `! ${view.message}`);
   if (view.kind === "settled" && !view.expanded) {
-    return [
-      theme.fg("dim", `▶ ${view.summary} · expand trace`),
-      ...(view.interruptionMessage ? [theme.fg("warning", `! ${view.interruptionMessage}`)] : []),
-    ].join("\n");
+    return theme.fg("dim", `▶ ${view.summary}`);
   }
 
   const lines: string[] = [];
-  if (view.kind === "settled") lines.push(theme.fg("dim", `▼ ${view.summary} · collapse trace`));
   for (const action of view.actions) {
     if (action.emphasis === "current") {
       lines.push(`${theme.fg("accent", action.marker)} ${theme.bold(theme.fg("text", action.label))}`);
     } else {
       lines.push(theme.fg("dim", `${action.marker} ${action.label}`));
     }
-  }
-  if (view.kind === "settled" && view.interruptionMessage) {
-    lines.push(theme.fg("warning", `! ${view.interruptionMessage}`));
   }
   return lines.join("\n");
 }
@@ -224,10 +197,11 @@ class TurnTraceComponent implements Component {
     private readonly store: TurnTraceStore,
     private readonly turnId: string,
     private readonly theme: Theme,
+    private readonly expanded: boolean,
   ) {}
 
   render(width: number): string[] {
-    const view = this.store.view(this.turnId);
+    const view = this.store.view(this.turnId, this.expanded);
     if (!view) return [];
     const value = renderTurnTraceText(view, this.theme);
     return value ? new Text(value, 0, 0).render(width) : [];
@@ -255,6 +229,8 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
     const now = options.now ?? Date.now;
     const store = new TurnTraceStore();
     let activeTurnId: string | undefined;
+    let activeStartEvent: Extract<TurnActivityEvent, { kind: "turn_started" }> | undefined;
+    let anchorPersisted = false;
     let turnCounter = 0;
     let eventCounter = 0;
     let pendingSettlement: { outcome: "completed" | "interrupted"; hasResponse?: true } | undefined;
@@ -265,7 +241,16 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
       return addedVisibleEntry;
     };
 
-    pi.registerEntryRenderer<TurnActivityEvent>(OO_TURN_ACTIVITY_ENTRY, (entry, _renderOptions, theme) => {
+    const ensureAnchor = (): void => {
+      if (anchorPersisted || !activeStartEvent) return;
+      // Pi emits agent_start before it persists/renders the triggering user message. Waiting
+      // until the first visible activity (or an interruption fallback) keeps this custom entry
+      // directly below that message in both the live scrollback and saved-session replay.
+      pi.appendEntry(OO_TURN_ACTIVITY_ENTRY, activeStartEvent);
+      anchorPersisted = true;
+    };
+
+    pi.registerEntryRenderer<TurnActivityEvent>(OO_TURN_ACTIVITY_ENTRY, (entry, renderOptions, theme) => {
       const event = parseTurnActivityEvent(entry.data);
       if (!event) return undefined;
       // Pi rebuilds chat entries before firing session_start on extension reload. Replaying each
@@ -273,28 +258,14 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
       // harmless because the core reducer deduplicates semantic event IDs and is terminal-monotonic.
       store.ingest(event);
       const anchorTurnId = store.visualAnchorTurnId(event);
-      return anchorTurnId ? new TurnTraceComponent(store, anchorTurnId, theme) : undefined;
-    });
-
-    pi.registerCommand("activity", {
-      description: "Expand or collapse one historical turn's semantic activity trace.",
-      handler: async (_args, ctx) => {
-        const choices = store.turnOptions();
-        if (choices.length === 0) {
-          ctx.ui.notify("No settled activity traces in this session.", "info");
-          return;
-        }
-        const selected = await ctx.ui.select("Turn activity", choices.map(({ label }) => label));
-        const choice = choices.find(({ label }) => label === selected);
-        if (!choice) return;
-        store.toggleExpanded(choice.turnId);
-        ctx.ui.setToolsExpanded(ctx.ui.getToolsExpanded());
-      },
+      return anchorTurnId ? new TurnTraceComponent(store, anchorTurnId, theme, renderOptions.expanded) : undefined;
     });
 
     pi.on("session_start", (_event, ctx) => {
       store.reset(turnActivityEventsFromSessionEntries(ctx.sessionManager.getEntries()));
       activeTurnId = undefined;
+      activeStartEvent = undefined;
+      anchorPersisted = false;
       pendingSettlement = undefined;
     });
 
@@ -304,16 +275,19 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
       if (activeTurnId) return;
       const startedAt = now();
       activeTurnId = `${ctx.sessionManager.getSessionId()}:${startedAt}:${turnCounter++}`;
+      activeStartEvent = { kind: "turn_started", turnId: activeTurnId, at: startedAt };
+      anchorPersisted = false;
       eventCounter = 0;
       pendingSettlement = undefined;
       ctx.ui.setWorkingVisible(true);
-      append({ kind: "turn_started", turnId: activeTurnId, at: startedAt });
+      store.ingest(activeStartEvent);
     });
 
     pi.on("message_update", (event, ctx) => {
       if (!activeTurnId) return;
       const summary = thinkingSummaryFromPiEvent(event.assistantMessageEvent, ctx.model);
       if (!summary) return;
+      ensureAnchor();
       if (append({
         kind: "thinking_summary",
         turnId: activeTurnId,
@@ -325,6 +299,7 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
 
     pi.on("tool_execution_start", (event, ctx) => {
       if (!activeTurnId || !semanticActionForTool(event.toolName)) return;
+      ensureAnchor();
       if (append({
         kind: "tool",
         turnId: activeTurnId,
@@ -350,13 +325,24 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
     pi.on("agent_settled", (_event, ctx) => {
       if (!activeTurnId) return;
       const settlement = pendingSettlement ?? { outcome: "interrupted" as const };
-      append({
+      const event: TurnActivityEvent = {
         kind: "turn_settled",
         turnId: activeTurnId,
         at: now(),
         ...settlement,
-      });
+      };
+      const activeView = store.view(activeTurnId);
+      const hasActivity = activeView?.kind === "active" && activeView.actions.length > 0;
+      const needsInterruptionFallback = settlement.outcome === "interrupted" && !settlement.hasResponse;
+      if (hasActivity || needsInterruptionFallback) {
+        ensureAnchor();
+        append(event);
+      } else {
+        store.ingest(event);
+      }
       activeTurnId = undefined;
+      activeStartEvent = undefined;
+      anchorPersisted = false;
       pendingSettlement = undefined;
       ctx.ui.setWorkingVisible(false);
     });

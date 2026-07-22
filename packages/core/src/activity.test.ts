@@ -32,6 +32,23 @@ assert.deepEqual(active.actions.map(({ marker, emphasis }) => ({ marker, emphasi
   { marker: "●", emphasis: "current" },
 ], "the current action has both a distinct marker and emphasis; prior actions are muted");
 
+const markdownSummary = replayTurnTrace([
+  { kind: "turn_started", turnId: "markdown", at: 0 },
+  {
+    kind: "thinking_summary",
+    turnId: "markdown",
+    eventId: "markdown-summary",
+    at: 1,
+    summary: "**Inspecting** the `adapter` boundary",
+  },
+]);
+assert.equal(markdownSummary.kind, "active");
+assert.equal(
+  markdownSummary.actions[0]?.label,
+  "Inspecting the adapter boundary",
+  "harness markdown is normalized before it reaches plain-text timeline renderers",
+);
+
 assert.equal(semanticActionForTool("bash"), "Running commands");
 assert.equal(semanticActionForTool("not_registered"), undefined, "the deterministic map is an allowlist");
 
@@ -131,7 +148,7 @@ assert.deepEqual(replayTurnTrace([
 ]), {
   kind: "interrupted",
   turnId: "fallback",
-  message: "Turn interrupted.",
+  message: "Operation interrupted",
 }, "an interrupted empty turn gets one concise fallback");
 
 assert.deepEqual(replayTurnTrace([
@@ -144,10 +161,9 @@ assert.deepEqual(replayTurnTrace([
   expanded: false,
   durationMs: 2_000,
   actionCount: 1,
-  summary: "Worked for 2s · 1 action",
+  summary: "Worked for 2s · interrupted",
   actions: [],
-  interruptionMessage: "Turn interrupted.",
-}, "an interrupted turn with activity retains its compact trace and explains the outcome");
+}, "an interrupted turn with activity uses the approved compact interruption literal");
 
 assert.deepEqual(replayTurnTrace([
   { kind: "turn_started", turnId: "orphaned", at: 20_000 },
@@ -158,9 +174,19 @@ assert.deepEqual(replayTurnTrace([
   expanded: false,
   durationMs: 1_000,
   actionCount: 1,
-  summary: "Worked for 1s · 1 action",
+  summary: "Worked for 1s · interrupted",
   actions: [],
-  interruptionMessage: "Turn interrupted.",
 }, "an unterminated trace is derived as interrupted at end-of-transcript");
+
+const wholeMinutes = replayTurnTrace([
+  { kind: "turn_started", turnId: "whole-minutes", at: 0 },
+  { kind: "tool", turnId: "whole-minutes", eventId: "read", at: 1, toolName: "read" },
+  { kind: "turn_settled", turnId: "whole-minutes", at: 8 * 60_000, outcome: "completed" },
+]);
+assert.equal(
+  wholeMinutes.kind === "settled" ? wholeMinutes.summary : "",
+  "Worked for 8m · 1 action",
+  "whole-minute settled rows match the approved literal shape",
+);
 
 process.stdout.write("ok — TurnTrace core: ordered live activity, settlement, expansion, replay, privacy, interruption\n");

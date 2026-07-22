@@ -34,10 +34,11 @@ provider-supplied reasoning summaries and allowlisted semantic tool labels. Prio
 muted `│` rail and the current action uses the emphasized `●` marker, so status never depends on
 color alone. Tool arguments, results, retries, and technical failures stay out of this trace.
 
-After settlement, meaningful activity collapses to `Worked for… · N actions`. `/activity` expands
-or collapses one historical turn. Pi's separate tool-output expansion (`Ctrl+O` by default) owns raw
-tool detail; expanding semantic activity does not expose it. Turns with no meaningful activity add
-no summary, and interrupted turns retain partial response text or show `Turn interrupted.`
+After settlement, meaningful activity collapses to `▶ Worked for… · N actions`. Pi's expansion key
+(`Ctrl+O` by default) first restores the semantic trace; a second use explicitly reveals raw tool
+detail, and a third returns to compact turns. Turns with no meaningful activity add no summary.
+Interrupted turns retain partial response text, use `Worked for… · interrupted` after meaningful
+activity, or show `Operation interrupted` when no response exists.
 
 ## Sessions and provenance
 

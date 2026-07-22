@@ -11,6 +11,11 @@ import { createTurnTraceExtension, OO_TURN_ACTIVITY_ENTRY } from "./turn-trace";
 const root = mkdtempSync(join(tmpdir(), "oo-turn-trace-"));
 try {
   const saved = SessionManager.create(root, root);
+  saved.appendMessage({
+    role: "user",
+    content: [{ type: "text", text: "Fix the delegated runner" }],
+    timestamp: 900,
+  });
   const events: TurnActivityEvent[] = [
     { kind: "turn_started", turnId: "saved-turn", at: 1_000 },
     { kind: "thinking_summary", turnId: "saved-turn", eventId: "summary", at: 1_100, summary: "Inspecting saved state" },
@@ -32,6 +37,11 @@ try {
   assert.ok(sessionFile && readFileSync(sessionFile, "utf8").includes(OO_TURN_ACTIVITY_ENTRY), "Pi persisted normalized activity in a real saved session");
 
   const reopened = SessionManager.open(sessionFile, root);
+  const reopenedEntries = reopened.getEntries();
+  const userIndex = reopenedEntries.findIndex((entry) => entry.type === "message" && entry.message.role === "user");
+  const traceIndex = reopenedEntries.findIndex((entry) => entry.type === "custom" && entry.customType === OO_TURN_ACTIVITY_ENTRY);
+  const answerIndex = reopenedEntries.findIndex((entry) => entry.type === "message" && entry.message.role === "assistant");
+  assert.ok(userIndex < traceIndex && traceIndex < answerIndex, "replay keeps activity below its user message and the final response last");
   const handlers = new Map<string, (event: any, ctx: any) => void>();
   let renderer: ((entry: any, options: any, theme: any) => any) | undefined;
   createTurnTraceExtension()({
@@ -41,7 +51,7 @@ try {
     appendEntry(): void {},
   } as any);
   let component: { render(width: number): string[] } | undefined;
-  for (const entry of reopened.getEntries()) {
+  for (const entry of reopenedEntries) {
     if ((entry as any).type !== "custom" || (entry as any).customType !== OO_TURN_ACTIVITY_ENTRY) continue;
     const rendered = renderer?.(entry, { expanded: false }, buildOoTheme());
     component ??= rendered;
@@ -49,7 +59,7 @@ try {
   assert.ok(component, "chat reconstruction restores the saved trace anchor before session_start");
   assert.equal(
     stripVTControlCharacters(component.render(80).map((line: string) => line.trimEnd()).join("\n")),
-    "▶ Worked for 3s · 2 actions · expand trace",
+    "▶ Worked for 3s · 2 actions",
     "pre-session_start replay renders the same compact presentation as live ingestion",
   );
   handlers.get("session_start")?.({ type: "session_start", reason: "resume" }, {
@@ -58,7 +68,7 @@ try {
   });
   assert.equal(
     stripVTControlCharacters(component.render(80).map((line: string) => line.trimEnd()).join("\n")),
-    "▶ Worked for 3s · 2 actions · expand trace",
+    "▶ Worked for 3s · 2 actions",
     "session hydration preserves the component created during Pi's reload ordering",
   );
 } finally {
