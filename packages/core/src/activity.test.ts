@@ -26,13 +26,31 @@ assert.deepEqual(active.actions.map(({ label }) => label), [
   "Reading files",
   "Searching code",
 ], "retained summaries and allowlisted tools stay in source order; unknown tools are omitted");
-assert.deepEqual(active.actions.map(({ marker, emphasis }) => ({ marker, emphasis })), [
-  { marker: "│", emphasis: "muted" },
-  { marker: "│", emphasis: "muted" },
-  { marker: "●", emphasis: "current" },
-], "the current action has both a distinct marker and emphasis; prior actions are muted");
+assert.deepEqual(active.actions, [
+  { kind: "thinking_summary", label: "Inspecting the launcher" },
+  { kind: "tool", label: "Reading files" },
+  { kind: "tool", label: "Searching code" },
+], "§5.1 keeps the core view free of presentation markers and per-row emphasis");
+
+const markdownSummary = replayTurnTrace([
+  { kind: "turn_started", turnId: "markdown", at: 0 },
+  {
+    kind: "thinking_summary",
+    turnId: "markdown",
+    eventId: "markdown-summary",
+    at: 1,
+    summary: "**Inspecting** the `adapter` boundary",
+  },
+]);
+assert.equal(markdownSummary.kind, "active");
+assert.equal(
+  markdownSummary.actions[0]?.label,
+  "Inspecting the adapter boundary",
+  "harness markdown is normalized before it reaches plain-text timeline renderers",
+);
 
 assert.equal(semanticActionForTool("bash"), "Running commands");
+assert.equal(semanticActionForTool("manage_agent_run.cancel"), "Cancelling an agent");
 assert.equal(semanticActionForTool("not_registered"), undefined, "the deterministic map is an allowlist");
 
 const tenEvents: TurnActivityEvent[] = [
@@ -73,7 +91,7 @@ assert.deepEqual(compact, {
 const expanded = replayTurnTrace(settledEvents, { expanded: true });
 assert.equal(expanded.kind, "settled");
 assert.deepEqual(expanded.actions.map(({ label }) => label), Array.from({ length: 10 }, (_, index) => `Action ${index + 1}`));
-assert.ok(expanded.actions.every(({ marker, emphasis }) => marker === "│" && emphasis === "muted"), "settled expansion restores the trace without claiming a current action");
+assert.ok(expanded.actions.every((action) => Object.keys(action).sort().join(",") === "kind,label"), "§5.1 settled expansion restores semantic rows without styling state");
 assert.deepEqual(
   replayTurnTrace([...settledEvents, { kind: "tool", turnId: "turn-10", eventId: "late", at: 19_000, toolName: "write" }]),
   compact,
@@ -131,7 +149,7 @@ assert.deepEqual(replayTurnTrace([
 ]), {
   kind: "interrupted",
   turnId: "fallback",
-  message: "Turn interrupted.",
+  message: "Operation interrupted",
 }, "an interrupted empty turn gets one concise fallback");
 
 assert.deepEqual(replayTurnTrace([
@@ -144,10 +162,9 @@ assert.deepEqual(replayTurnTrace([
   expanded: false,
   durationMs: 2_000,
   actionCount: 1,
-  summary: "Worked for 2s · 1 action",
+  summary: "Worked for 2s · interrupted",
   actions: [],
-  interruptionMessage: "Turn interrupted.",
-}, "an interrupted turn with activity retains its compact trace and explains the outcome");
+}, "an interrupted turn with activity uses the approved compact interruption literal");
 
 assert.deepEqual(replayTurnTrace([
   { kind: "turn_started", turnId: "orphaned", at: 20_000 },
@@ -158,9 +175,19 @@ assert.deepEqual(replayTurnTrace([
   expanded: false,
   durationMs: 1_000,
   actionCount: 1,
-  summary: "Worked for 1s · 1 action",
+  summary: "Worked for 1s · interrupted",
   actions: [],
-  interruptionMessage: "Turn interrupted.",
 }, "an unterminated trace is derived as interrupted at end-of-transcript");
+
+const wholeMinutes = replayTurnTrace([
+  { kind: "turn_started", turnId: "whole-minutes", at: 0 },
+  { kind: "tool", turnId: "whole-minutes", eventId: "read", at: 1, toolName: "read" },
+  { kind: "turn_settled", turnId: "whole-minutes", at: 8 * 60_000, outcome: "completed" },
+]);
+assert.equal(
+  wholeMinutes.kind === "settled" ? wholeMinutes.summary : "",
+  "Worked for 8m · 1 action",
+  "whole-minute settled rows match the approved literal shape",
+);
 
 process.stdout.write("ok — TurnTrace core: ordered live activity, settlement, expansion, replay, privacy, interruption\n");

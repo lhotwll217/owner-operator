@@ -24,6 +24,8 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
     cwd: process.cwd(),
     parentThreadId: "codex-live-acceptance",
     model: process.env.OO_CODEX_ACP_LIVE_MODEL?.trim() || null,
+    effort: "high",
+    effortApplied: false,
     depth: 1,
     status: AgentRunStatus.Running,
     createdAt: now,

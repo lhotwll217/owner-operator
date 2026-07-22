@@ -42,6 +42,9 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     [durable pre-spawn lease](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/runtime.ts#L967-L987)
     plus a fail-closed
     [startup orphan reaper](https://github.com/openclaw/openclaw/blob/6bd9e5f158f7b5dcb54491425ee54135abecc825/extensions/acpx/src/process-reaper.ts#L413-L446).
+  - Borrowed (delegated-run effort, [#104](https://github.com/lhotwll217/owner-operator/issues/104)):
+    the normalized `minimal | low | medium | high | xhigh` subset of OpenClaw's canonical
+    [thinking-level vocabulary](https://github.com/openclaw/openclaw/blob/8c802aa683510c7f7503597b54c3021733245e59/src/auto-reply/thinking.shared.ts#L7-L16).
 - **[pi-subagents](https://github.com/nicobailon/pi-subagents/tree/c940fe20e86d9ba429eebcac809ec79d478ef206)** —
   pi-only subagent framework; a design donor, not a dependency.
   - Borrowed: its versioned lifecycle-artifact contract and lifecycle state names informed the
@@ -107,7 +110,7 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `@earendil-works/pi-coding-agent` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
 | `@earendil-works/pi-ai` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`croner`](https://github.com/Hexagon/croner) | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
-| [`acpx`](https://github.com/openclaw/acpx) (MIT, pinned `0.11.2`) | `src/agent-runs/acp-launcher.ts` — the Agent Client Protocol wire runtime for delegated children (spawn, handshake, resume, typed event stream) on the official ACP SDK; Owner Operator keeps the control plane (`agent_runs`) and resolves its directly pinned [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp/blob/ca66e03adbc18072cd3395f140fdcd3c86fd2403/package.json#L2-L16) entrypoint, whose package owns the compatible Codex dependency ([package](https://github.com/agentclientprotocol/codex-acp/blob/ca66e03adbc18072cd3395f140fdcd3c86fd2403/package.json#L63-L69)) |
+| [`acpx`](https://github.com/openclaw/acpx) (MIT, pinned `0.11.2`) | `src/agent-runs/acp-launcher.ts` — the Agent Client Protocol wire runtime for delegated children (spawn, handshake, resume, typed event stream) on the official ACP SDK. Effort uses the generic runtime's adapter-advertised [`configOptionKeys` and `setConfigOption`](https://github.com/openclaw/acpx/blob/e8e39dc485e5934227f8900eba3ce340244da38d/src/runtime.ts#L224-L271), not a harness-specific path. Owner Operator keeps the control plane (`agent_runs`) and resolves its directly pinned [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp/blob/ca66e03adbc18072cd3395f140fdcd3c86fd2403/package.json#L2-L16) entrypoint, whose package owns the compatible Codex dependency ([package](https://github.com/agentclientprotocol/codex-acp/blob/ca66e03adbc18072cd3395f140fdcd3c86fd2403/package.json#L63-L69)) |
 | `jsonc-parser` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
 Issue #89's separate raw-tool expansion follows Pi's expandable-component contract: tool rows

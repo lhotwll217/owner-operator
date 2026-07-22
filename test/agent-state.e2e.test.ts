@@ -22,8 +22,10 @@ try {
         "set timeout 12",
         "spawn $env(OO_TEST_NODE) --import tsx $env(OO_TEST_FIXTURE)",
         "stty rows 30 columns 40",
-        "expect -exact \"Agent state: 1 running\"",
+        "expect \"● 1 running *(/agent-state)\"",
         "send \"/agent-state\\r\"",
+        "expect -exact \"enter inspect\"",
+        "send \"\\r\"",
         "expect -exact \"Task:\"",
         "send \"c\"",
         "expect -exact \"Cancel delegated agent?\"",
@@ -53,7 +55,7 @@ try {
     .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
     .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")
     .replace(/\r/g, "");
-  assert.match(readable, /Agent state: 1 running/);
+  assert.match(readable, /● 1 running\s+\/agent-state/);
   assert.match(readable, /Selected · ● running/);
   assert.match(readable, /Task:/);
   assert.match(readable, /Status:/);

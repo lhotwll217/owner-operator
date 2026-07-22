@@ -21,6 +21,14 @@ import {
  * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
+const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
+const CHILD_TASK_BOUNDARY =
+  "Do the work yourself. Do not launch nested or background agents; delegated children must complete the task directly.";
+
+/** Preserve the durable owner task verbatim while adding execution-only child policy. */
+export function delegatedChildTaskEnvelope(task: string): string {
+  return `${task}\n\n${CHILD_TASK_BOUNDARY}`;
+}
 
 /** Where acpx persists its per-child session records. Relocated out of the system tmpdir
  * (acpx's default) into OO_HOME per the issue #69 hardening note, so restart reconciliation
@@ -36,9 +44,9 @@ export interface AcpLauncherOptions {
 
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
  * event stream mirrored into the ledger as explicit activity, and the protocol turn result
- * mapped to a terminal run status. Permissions stay in-harness and non-escalating: OO forces
- * `nonInteractivePermissions: "fail"`, so a headless child that hits an unapprovable ask fails
- * loudly into the run row rather than silently degrading. */
+ * mapped to a terminal run status. Permissions stay in-harness: `permissionMode: "approve-all"`
+ * defers every ask to the child harness's own configuration — the same gate as launching that
+ * harness directly. OO adds no extra permission layer. */
 export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLauncher {
   if (options.runtimeFactory) {
     const runtime = options.runtimeFactory();
@@ -73,13 +81,10 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
           }),
         },
       }),
-      // Per the issue #69 decision record: deny-by-default for non-read asks — reads pass, any
-      // change ask the child's own harness config didn't already approve does not. The owner's
-      // harness settings remain the real gate; OO never loosens this and never escalates.
-      permissionMode: "approve-reads",
-      // Fail-closed: an unapprovable ask fails the turn (recorded as a run failure) rather
-      // than continuing degraded. Owner decision on issue #69.
-      nonInteractivePermissions: "fail",
+      // Owner ruling 2026-07-22 (supersedes the issue #69 fail-closed record): delegated
+      // children inherit the child harness's own permission config — the same gate as
+      // launching that harness directly. OO adds no extra permission layer.
+      permissionMode: "approve-all",
     });
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
@@ -122,12 +127,13 @@ async function runAcpTurn(
 ): Promise<AgentRunLaunchResult> {
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
+  await applyAdvertisedEffort(runtime, handle, request);
 
   // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
   const turn = runtime.startTurn({
     handle,
-    text: request.run.task,
+    text: delegatedChildTaskEnvelope(request.run.task),
     mode: "prompt",
     requestId: request.run.id,
     signal: request.signal,
@@ -173,6 +179,24 @@ async function runAcpTurn(
     error: result.error.message,
     ...identity,
   };
+}
+
+/** Apply effort only through ACP's self-described config-option control. An absent option is an
+ * honest no-op: the durable row retains the requested effort with effortApplied=false. */
+async function applyAdvertisedEffort(
+  runtime: AcpRuntime,
+  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
+  request: AgentRunLaunchRequest,
+): Promise<void> {
+  if (!request.run.effort || !runtime.getCapabilities || !runtime.setConfigOption) return;
+  const capabilities = await runtime.getCapabilities({ handle });
+  if (!capabilities.configOptionKeys?.includes(REASONING_EFFORT_CONFIG_OPTION)) return;
+  await runtime.setConfigOption({
+    handle,
+    key: REASONING_EFFORT_CONFIG_OPTION,
+    value: request.run.effort,
+  });
+  request.onActivity({ effortApplied: true });
 }
 
 function ensureAcpSession(

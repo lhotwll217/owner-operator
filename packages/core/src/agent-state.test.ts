@@ -14,6 +14,7 @@ import {
   bounded,
   createAgentRunCompletionEnvelope,
   deriveParentAgentState,
+  formatAgentRunIdentity,
 } from "./agent-state";
 import { agentRunFixture as run } from "../../../test/fixtures/agent-run";
 
@@ -26,6 +27,9 @@ const fleet = [
   }),
   run("running", AgentRunStatus.Running, {
     harness: AgentRunHarness.Codex,
+    model: "gpt-5.6-sol",
+    effort: "high",
+    effortApplied: true,
     activity: `Reading ${"nested/".repeat(30)}file.ts`,
     lastActivityAt: "2026-07-21T12:09:30.000Z",
     childSessionId: "codex-child",
@@ -47,7 +51,7 @@ const fleet = [
 
 const view = deriveParentAgentState(fleet, { now, recentLimit: AGENT_STATE_RECENT_LIMIT });
 assert.deepEqual(view.counts, { queued: 1, running: 1, attention: 2 });
-assert.equal(view.footer, "Agent state: 1 queued · 1 running · 2 need attention");
+assert.equal(view.footer, "◦ 1 queued · ● 1 running · ! 2 attention    /agent-state");
 assert.deepEqual(
   view.runs.map(({ id }) => id),
   ["failed", "lost-no-child", "running", "queued", "completed-new", "cancelled"],
@@ -63,15 +67,34 @@ assert.deepEqual(
     canCancel: running.canCancel,
     canResume: running.canResume,
     elapsedMs: running.elapsedMs,
+    model: running.model,
+    effort: running.effort,
+    effortApplied: running.effortApplied,
   },
-  { glyph: "●", text: "running", category: "active", canCancel: true, canResume: false, elapsedMs: 540_000 },
+  {
+    glyph: "●",
+    text: "running",
+    category: "active",
+    canCancel: true,
+    canResume: false,
+    elapsedMs: 540_000,
+    model: "gpt-5.6-sol",
+    effort: "high",
+    effortApplied: true,
+  },
 );
 assert.ok(running.latestActivity.length <= AGENT_STATE_ACTIVITY_MAX_LENGTH);
 assert.ok(!running.latestActivity.includes("/tmp/repo"), "detail does not invent or expose cwd");
 
 const queued = view.runs.find(({ id }) => id === "queued")!;
 assert.deepEqual([queued.status.glyph, queued.status.text, queued.canCancel], ["◦", "queued", true]);
+assert.equal(queued.effort, null, "unknown effort stays absent from the derived view");
 assert.equal(view.runs.find(({ id }) => id === "failed")?.canResume, true, "failed child identity is resumable");
+assert.deepEqual(
+  view.runs.find(({ id }) => id === "failed")?.status,
+  { glyph: "!", text: "attention" },
+  "attention status is always exposed as an accessible glyph/text pair",
+);
 assert.equal(view.runs.find(({ id }) => id === "lost-no-child")?.canResume, false, "missing child identity blocks resume");
 assert.ok(view.runs.find(({ id }) => id === "completed-new")!.task.length <= AGENT_STATE_TASK_MAX_LENGTH);
 assert.equal(
@@ -137,7 +160,7 @@ const deterministicAttention = deriveParentAgentState([
 ], { now });
 assert.deepEqual(
   deterministicAttention.runs.filter(({ category }) => category === "attention").map(({ status }) => status.text).sort(),
-  ["failed", "interrupted", "lost"],
+  ["attention", "attention", "attention"],
   "attention is derived only from deterministic lifecycle outcomes",
 );
 
@@ -158,9 +181,29 @@ assert.equal(
   AGENT_STATE_RECENT_LIMIT,
   "routine terminal history is bounded",
 );
+assert.equal(AGENT_STATE_RECENT_LIMIT, 20, "the picker includes the approved latest 20 terminal runs");
+const lotsOfActive = Array.from({ length: AGENT_STATE_RECENT_LIMIT + 4 }, (_, index) =>
+  run(`active-${index}`, AgentRunStatus.Running, {
+    lastActivityAt: new Date(Date.parse(now) - index * 1_000).toISOString(),
+  }));
+assert.equal(
+  deriveParentAgentState(lotsOfActive, { now }).runs.length,
+  AGENT_STATE_RECENT_LIMIT,
+  "the entire ordered picker is bounded to the approved latest 20",
+);
+
+const approvedFooter = deriveParentAgentState([
+  run("queued-one", AgentRunStatus.Pending),
+  run("running-one", AgentRunStatus.Running),
+  run("running-two", AgentRunStatus.Running),
+], { now });
+assert.equal(approvedFooter.footer, "◦ 1 queued · ● 2 running    /agent-state");
 
 const terminal = run("completed-new", AgentRunStatus.Completed, {
   task: "Summarize authentication findings",
+  model: "sonnet",
+  effort: "low",
+  effortApplied: true,
   childSessionId: "child-123",
   resultTail: "z".repeat(2_000),
   finishedAt: "2026-07-21T12:09:00.000Z",
@@ -176,6 +219,9 @@ const envelope = createAgentRunCompletionEnvelope(terminal, {
 });
 assert.equal(envelope.version, 1);
 assert.equal(envelope.eventId, agentRunCompletionEventId(terminal.id));
+assert.equal(envelope.model, "sonnet");
+assert.equal(envelope.effort, "low");
+assert.equal(envelope.effortApplied, true);
 assert.equal(envelope.elapsedMs, 480_000);
 assert.equal(envelope.evidence.trust, "untrusted");
 assert.ok(envelope.evidence.result.length <= AGENT_STATE_RESULT_MAX_LENGTH, "child result is bounded");
@@ -190,6 +236,20 @@ assert.equal(hostileEnvelope.evidence.trust, "untrusted");
 assert.doesNotMatch(hostileEnvelope.evidence.result, /[\p{Cc}\p{Cf}]/u, "control and format characters stay inert in every adapter");
 assert.doesNotMatch(hostileEnvelope.parentInstruction, /approve destructive work/);
 assert.equal(bounded("😀😀😀", 2), "😀…", "truncation counts code points instead of splitting a surrogate pair");
+assert.equal(
+  formatAgentRunIdentity(AgentRunHarness.Codex, "gpt-5.6-sol", "high"),
+  "Codex · gpt-5.6-sol · high",
+);
+assert.equal(
+  formatAgentRunIdentity(AgentRunHarness.ClaudeCode, "sonnet", null),
+  "Claude Code · sonnet",
+  "unknown effort adds no filler segment",
+);
+assert.equal(
+  formatAgentRunIdentity(AgentRunHarness.Codex, null, "high"),
+  "Codex · high",
+  "known effort remains visible when model is unknown",
+);
 assert.throws(
   () => createAgentRunCompletionEnvelope(run("not-done", AgentRunStatus.Running)),
   /terminal run/,

@@ -89,7 +89,7 @@ try {
   assert.equal(running.activity, "child started", "explicit activity is captured in the ledger");
   assert.equal(running.childSessionId, "child-research-flaky-test", "child identity captured at spawn");
   const runningView = await gateway.agentState();
-  assert.equal(runningView.footer, "Agent state: 1 running");
+  assert.equal(runningView.footer, "● 1 running    /agent-state");
   assert.deepEqual(
     runningView.runs.map((run) => [run.id, run.status.glyph, run.status.text, run.category]),
     [[launched.id, "●", "running", "active"]],
@@ -113,8 +113,8 @@ try {
   assert.equal(afterRestart.status, AgentRunStatus.Interrupted, "the interrupted run survives restart");
   assert.ok(afterRestart.childSessionId, "the child identity survives for resume");
   const restartedView = await gateway2.agentState();
-  assert.equal(restartedView.footer, "Agent state: 1 needs attention");
-  assert.equal(restartedView.runs[0]?.status.text, "interrupted");
+  assert.equal(restartedView.footer, "! 1 attention    /agent-state");
+  assert.equal(restartedView.runs[0]?.status.text, "attention");
   assert.equal(restartedView.runs[0]?.canResume, true, "restart reconstructs the durable resumable outcome");
 
   // --- resume over HTTP: a new run under the same child identity --------------------------

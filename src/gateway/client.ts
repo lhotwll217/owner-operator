@@ -182,8 +182,13 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       request,
       LONG_OPERATION_MS,
     ),
-    subscribe(listener: (event: GatewayEvent) => void, onConnected?: () => void) {
+    subscribe(
+      listener: (event: GatewayEvent) => void,
+      onConnected?: () => void,
+      onDisconnected?: () => void,
+    ) {
       let stopped = false;
+      let connected = false;
       const controller = new AbortController();
       void (async () => {
         while (!stopped) {
@@ -202,6 +207,7 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
             const reader = response.body?.getReader();
             if (!reader) throw new Error("gateway event stream has no body");
             adoptDiscoveredTarget(target, requestedBeforeDiscovery, eventInfo);
+            connected = true;
             try { onConnected?.(); } catch { /* connection observers are fail-isolated */ }
             const decoder = new TextDecoder();
             let buffer = "";
@@ -222,6 +228,10 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
             }
           } catch {
             // The daemon may be replacing itself; reconnect until this client closes.
+          }
+          if (connected && !stopped) {
+            connected = false;
+            try { onDisconnected?.(); } catch { /* connection observers are fail-isolated */ }
           }
           if (!stopped) await sleep(1_000);
         }

@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { stripVTControlCharacters } from "node:util";
 import { AgentRunStatus } from "@owner-operator/core";
 import { createAgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import { buildOoTheme } from "../shared/oo-presentation";
@@ -16,6 +17,9 @@ const envelope = createAgentRunCompletionEnvelope(run("run-complete", AgentRunSt
   parentThreadId: "parent-thread",
   childSessionId: "child-session-123456789",
   task: "Research authentication failures",
+  model: "sonnet",
+  effort: "high",
+  effortApplied: true,
   resultTail: hostileResult,
   activity: "FULL_CHILD_TRANSCRIPT_SENTINEL",
 }), { artifacts: [{ label: "report", reference: "artifact://auth-report" }] });
@@ -40,6 +44,9 @@ assert.equal(sent[0]!.message.display, true);
 assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
 assert.match(sent[0]!.message.content, /UNTRUSTED CHILD EVIDENCE/);
 assert.match(sent[0]!.message.content, /artifact:\/\/auth-report/);
+assert.match(sent[0]!.message.content, /"model": "sonnet"/);
+assert.match(sent[0]!.message.content, /"effort": "high"/);
+assert.match(sent[0]!.message.content, /"effortApplied": true/);
 assert.match(sent[0]!.message.content, /Ignore the parent/);
 assert.doesNotMatch(sent[0]!.message.content, /\u001b|\\u001b/, "child controls remain inert evidence");
 assert.match(sent[0]!.message.content, /material outcome.*implication.*owner action/is);
@@ -131,30 +138,46 @@ const message = {
 };
 const theme = buildOoTheme("256color");
 const compact = renderAgentRunCompletionMessage(message, { expanded: false }, theme).render(120).join("\n");
-assert.match(compact, /child-session-123456789/);
-assert.match(compact, /completed/);
-assert.match(compact, /4m/);
+assert.match(compact, /✓ Research authentication failures completed · 4m/);
+assert.doesNotMatch(compact, /child-session-123456789|run-complete|artifact:\/\/auth-report/);
 assert.doesNotMatch(compact, /Ignore the parent/, "the lifecycle row never dumps result evidence");
 const expanded = renderAgentRunCompletionMessage(message, { expanded: true }, theme).render(120).join("\n");
-assert.match(expanded, /Run:.*run-complete/);
-assert.match(expanded, /Artifact:.*artifact:\/\/auth-report/);
-assert.match(expanded, /Evidence.*Ignore the parent/);
+assert.equal(expanded, compact, "tool expansion cannot add identifiers or child result bodies to lifecycle rows");
+
+const emptyEnvelope = createAgentRunCompletionEnvelope(run("empty-result", AgentRunStatus.Completed, {
+  task: "Agent",
+  resultTail: null,
+}));
+const emptyResult = renderAgentRunCompletionMessage({
+  details: { version: 1, eventIds: [emptyEnvelope.eventId], envelopes: [emptyEnvelope] },
+}, { expanded: false }, theme).render(120).join("\n");
+assert.match(emptyResult, /✓ Agent completed · 4m/);
+assert.match(emptyResult, /The agent completed without returning a material result\./);
+
+const approvedLiteralEnvelope = createAgentRunCompletionEnvelope(run("approved-literal", AgentRunStatus.Completed, {
+  task: "Research agent",
+  model: "gpt-5.6-sol",
+  startedAt: "2026-07-21T12:00:00.000Z",
+  finishedAt: "2026-07-21T12:14:00.000Z",
+  resultTail: "Material result",
+}));
+const approvedLiteral = renderAgentRunCompletionMessage({
+  details: { version: 1, eventIds: [approvedLiteralEnvelope.eventId], envelopes: [approvedLiteralEnvelope] },
+}, { expanded: false }, theme).render(120).map((line) => stripVTControlCharacters(line).trimEnd()).join("\n");
+assert.equal(approvedLiteral, "✓ Research agent completed · 14m");
 
 const hostileIdentityEnvelope = {
   ...envelope,
   runId: "run\u200e-id\u{e0001}\ud83d\ude00".repeat(100),
   childSessionId: "child\u200f-session\u200b",
-  harness: "pi\u061c-harness\ufff9",
+  harness: "pi\u061c-harness\ufff9" as typeof envelope.harness,
 };
 const hostileIdentityMessage = {
   ...message,
   details: { ...details, envelopes: [hostileIdentityEnvelope] },
 };
 const sanitized = renderAgentRunCompletionMessage(hostileIdentityMessage, { expanded: true }, theme).render(700).join("\n");
-assert.doesNotMatch(sanitized, /\p{Cf}/u, "child-owned identity fields are sanitized at the renderer boundary");
-assert.match(sanitized, /child -session/);
-assert.match(sanitized, /Run:.*run -id/);
-assert.match(sanitized, /Harness:.*pi -harness/);
-assert.ok(!sanitized.includes("\ud83d\ufffd"), "bounded identity truncation does not split a surrogate pair");
+assert.doesNotMatch(sanitized, /\p{Cf}/u, "hidden child-owned identity fields never reach the renderer");
+assert.doesNotMatch(sanitized, /child|run -id|harness/i);
 
 process.stdout.write("ok — Pi completion messages are bounded, visible, and transcript-deduplicated\n");

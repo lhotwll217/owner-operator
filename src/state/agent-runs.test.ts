@@ -127,9 +127,19 @@ assert.equal(db.agentRunByChildSession("child-session-1")?.id, "run-1", "a child
 assert.equal(db.agentRunByChildSession("no-such-child"), undefined, "an unknown child session resolves to nothing");
 
 // --- model is persisted and returned -----------------------------------------------------
-const withModel = db.createAgentRun(input("run-7", { model: "claude-opus-4-8" }));
+const withModel = db.createAgentRun(input("run-7", { model: "claude-opus-4-8", effort: "high" }));
 assert.equal(withModel.model, "claude-opus-4-8", "a pinned model round-trips");
+assert.equal(withModel.effort, "high", "resolved effort intent round-trips");
+assert.equal(withModel.effortApplied, false, "effort is not claimed as applied before launch");
 assert.equal(db.createAgentRun(input("run-8")).model, null, "an unpinned model is null");
+assert.equal(db.createAgentRun(input("run-9")).effort, null, "an unknown effort remains null");
+assert.equal(db.claimNextPendingAgentRun(10)?.id, "run-6", "the older pending resume claims first");
+assert.equal(db.claimNextPendingAgentRun(10)?.id, "run-7");
+assert.equal(
+  db.recordAgentRunActivity("run-7", { effortApplied: true })?.effortApplied,
+  true,
+  "runtime acknowledgement durably distinguishes applied effort",
+);
 
 // --- projection join: a scanned child thread carries its parent --------------------------
 db.recordScan({

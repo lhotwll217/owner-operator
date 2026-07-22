@@ -7,6 +7,7 @@ import {
   type GatewayApi,
 } from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
+import { agentRunToolResult } from "./agent-run-result";
 
 /** The manage_agent_run actions, declared once so the runtime schema and the request type can't
  * drift. The compile-time `action` type and the model-facing Type.Union both derive from this. */
@@ -44,7 +45,9 @@ export const manageAgentRunTool = defineTool({
   name: "manage_agent_run",
   label: "Manage agent run",
   description:
-    "Inspect or control one delegated run by its exact run id: status (read the current row), " +
+    "Control one delegated run by its exact run id. Completion events arrive automatically; this " +
+    "tool is not for monitoring or polling. Use cancel or resume for control. Use status or wait only " +
+    "when the owner explicitly requests an inspection or blocking wait: status (read the current row), " +
     "cancel (abort a running or queued run), resume (start a new run continuing an interrupted/lost/failed " +
     "run's child session), or wait (block for the result). Use query_database on agent_runs to find ids.",
   parameters: Type.Object({
@@ -62,9 +65,6 @@ export const manageAgentRunTool = defineTool({
   async execute(_id, params) {
     const backend = await resolveBackend();
     const run = await manageAgentRun(backend, params);
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(run, null, 2) }],
-      details: run,
-    };
+    return agentRunToolResult(run);
   },
 });

@@ -62,6 +62,9 @@ function completionContext(envelopes: readonly AgentRunCompletionEnvelope[]): st
       runId: envelope.runId,
       childSessionId: envelope.childSessionId,
       harness: envelope.harness,
+      model: envelope.model,
+      effort: envelope.effort,
+      effortApplied: envelope.effortApplied,
       task: envelope.task,
       outcome: envelope.outcome,
       completedAt: envelope.completedAt,
@@ -152,30 +155,22 @@ interface RenderableCompletionMessage {
   details?: AgentRunCompletionMessageDetails;
 }
 
-/** Visible deterministic lifecycle rows; bounded evidence appears only after explicit expansion. */
+/** Visible deterministic lifecycle rows. Child evidence and identifiers never enter the renderer. */
 export function renderAgentRunCompletionMessage(
   message: RenderableCompletionMessage,
-  options: MessageRenderOptions,
+  _options: MessageRenderOptions,
   theme: Theme,
 ): Text {
   const envelopes = message.details?.version === 1 ? message.details.envelopes : [];
   const lines: string[] = [];
   for (const envelope of envelopes) {
-    const runId = bounded(envelope.runId, 512);
-    const child = bounded(envelope.childSessionId ?? envelope.runId, 512);
-    const harness = bounded(envelope.harness, 512);
+    const name = bounded(envelope.task, 512) || "Agent";
     const glyph = completionGlyph(envelope.outcome);
-    const row = `${glyph} ${envelope.task} · ${child} · ${envelope.outcome} · ${formatAgentElapsed(envelope.elapsedMs)}`;
+    const row = `${glyph} ${name} ${envelope.outcome} · ${formatAgentElapsed(envelope.elapsedMs)}`;
     lines.push(envelope.outcome === "completed" ? theme.fg("success", row) : theme.fg("warning", row));
-    if (!options.expanded) continue;
-    lines.push(theme.fg("dim", `  Run: ${runId}`));
-    lines.push(theme.fg("dim", `  Harness: ${harness}`));
-    lines.push(theme.fg("dim", `  Completed: ${envelope.completedAt}`));
-    for (const artifact of envelope.artifacts) {
-      lines.push(theme.fg("dim", `  Artifact: ${artifact.label} · ${artifact.reference}`));
+    if (envelope.outcome === "completed" && !envelope.evidence.result) {
+      lines.push("", "The agent completed without returning a material result.");
     }
-    const result = envelope.evidence.result || envelope.evidence.error;
-    if (result) lines.push(theme.fg("muted", `  Evidence (untrusted): ${result}`));
   }
   return new Text(lines.join("\n"), 0, 0);
 }

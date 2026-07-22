@@ -22,6 +22,8 @@ import {
   type ScheduleExecutionResult,
   type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
+import { createAgentRunDeliveryExtension } from "../agent-runs/agent-run-delivery-extension";
+import { agentRunLaunchExtension } from "../agent-runs/agent-run-launch";
 import { repoRoot } from "../shared/repo-root";
 import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
 import {
@@ -56,6 +58,13 @@ export interface OwnerOperatorSessionOptions {
   cwd?: string;
   callerSessionId?: string;
   toolsAllow?: readonly AgentToolId[];
+}
+
+export async function bindOwnerOperatorSessionExtensions(
+  session: OwnerOperatorSession["session"],
+): Promise<void> {
+  await session.bindExtensions({});
+  await session.waitForIdle();
 }
 
 export function evalSettingsOverrides(
@@ -142,6 +151,12 @@ export async function createOwnerOperatorSession(
           ]
         : [...configuredTools];
   const cwd = opts.cwd ?? ownerOperatorTaskCwd();
+  let deliveryStartupError: { value: unknown } | undefined;
+  const deliveryExtension = surface === "chat"
+    ? createAgentRunDeliveryExtension({
+        onUnavailable: (error) => { deliveryStartupError = { value: error }; },
+      })
+    : undefined;
 
   settingsManager.applyOverrides(evalSettingsOverrides(process.env));
 
@@ -162,6 +177,14 @@ export async function createOwnerOperatorSession(
         name: "owner-operator-permission-settings",
         factory: createPermissionSettingsExtension({ ooHome: paths.home }),
       },
+      {
+        name: "owner-operator-agent-run-launch",
+        factory: agentRunLaunchExtension,
+      },
+      ...(deliveryExtension ? [{
+        name: "owner-operator-agent-run-delivery",
+        factory: deliveryExtension,
+      }] : []),
     ],
   });
   await loader.reload();
@@ -180,7 +203,18 @@ export async function createOwnerOperatorSession(
 
   // A raw createAgentSession does not emit the extension lifecycle. Bind non-test sessions
   // so the privacy-aware file-tool overrides are active, then pair with shutdown before dispose.
-  if (!opts.ephemeral) await session.bindExtensions({});
+  if (!opts.ephemeral) {
+    await bindOwnerOperatorSessionExtensions(session);
+    if (deliveryStartupError) {
+      await shutdownSessionExtensions(session);
+      session.dispose();
+      const cause = deliveryStartupError.value;
+      throw new Error(
+        `Delegated-run completion delivery is unavailable: ${cause instanceof Error ? cause.message : String(cause)}`,
+        { cause },
+      );
+    }
+  }
 
   const configuredModel = [settingsManager.getDefaultProvider(), settingsManager.getDefaultModel()]
     .filter(Boolean)

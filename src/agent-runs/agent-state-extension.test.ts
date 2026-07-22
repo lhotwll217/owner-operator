@@ -21,10 +21,15 @@ const rows = [
   run("running", AgentRunStatus.Running, {
     task: "Task running",
     harness: AgentRunHarness.Codex,
+    model: "gpt-5.6-sol",
+    effort: "high",
+    effortApplied: true,
     activity: "Reviewing the gateway reconnect path",
   }),
   run("failed", AgentRunStatus.Failed, {
     task: "Investigate ACP startup",
+    model: "sonnet",
+    effort: "low",
     error: "Handshake failed",
     childSessionId: "failed-child",
   }),
@@ -38,21 +43,31 @@ const wide = picker.render(100).join("\n");
 assert.match(wide, /Agent state/);
 assert.ok(wide.indexOf("Investigate ACP startup") < wide.indexOf("Task running"), "attention renders before active");
 assert.ok(wide.indexOf("Task running") < wide.indexOf("Task completed"), "active renders before recent terminal");
-assert.match(wide, /! failed/);
+assert.match(wide, /! attention/);
 assert.match(wide, /● running/);
 assert.match(wide, /✓ completed/);
-assert.match(wide, /Task:/);
-assert.match(wide, /Harness:/);
-assert.match(wide, /Status:/);
-assert.match(wide, /Elapsed:/);
-assert.match(wide, /Activity:/);
+assert.match(wide, /enter inspect/);
+assert.match(wide, /Codex · gpt-5\.6-sol · high/);
+assert.doesNotMatch(wide, /Task:/, "details require explicit inspection");
+
+picker.handleInput("\r");
+const inspected = picker.render(100).join("\n");
+const inspectedText = inspected.replace(/\u001b\[[0-9;]*m/g, "");
+assert.match(inspected, /Task:/);
+assert.match(inspected, /Harness:/);
+assert.match(inspected, /Claude Code · sonnet/);
+assert.match(inspectedText, /Effort:\s+low/);
+assert.match(inspected, /Status:/);
+assert.match(inspected, /Elapsed:/);
+assert.match(inspected, /Activity:/);
+assert.match(inspected, /esc back/);
+picker.handleInput("\u001b");
 
 const narrowLines = picker.render(32);
 assert.ok(narrowLines.every((line) => visibleWidth(line) <= 32), "every picker line fits a narrow terminal");
 const accessibleText = narrowLines.join("\n").replace(/\u001b\[[0-9;]*m/g, "");
-assert.match(accessibleText, /Selected · ! failed/, "screen-reader order names selection, glyph, and status text");
-assert.match(accessibleText, /Status:/);
-assert.match(accessibleText, /Harness:/);
+assert.match(accessibleText, /Selected · ! attention/, "screen-reader order names selection, glyph, and status text");
+assert.match(accessibleText, /enter inspect/);
 assert.equal(formatAgentElapsed(540_000), "9m");
 
 picker.handleInput("c");
@@ -69,7 +84,9 @@ assert.deepEqual(actions, [{ kind: "resume", runId: "failed" }]);
 // footer and picker, cancellation is confirmed, and shutdown clears both subscription/footer.
 const calls: string[] = [];
 let gatewayListener: ((event: { kind: GatewayEventKind }) => void) | undefined;
-let gatewayRows = [run("running", AgentRunStatus.Running)];
+let gatewayConnected: (() => void) | undefined;
+let gatewayDisconnected: (() => void) | undefined;
+let gatewayRows = [run("running", AgentRunStatus.Running, { model: "sonnet" })];
 const gateway = {
   listAgentRuns: async (parent?: string) => { calls.push(`list:${parent}`); return gatewayRows; },
   cancelAgentRun: async (id: string) => {
@@ -79,9 +96,11 @@ const gateway = {
     return cancelled;
   },
   resumeAgentRun: async (id: string) => { calls.push(`resume:${id}`); return run(`${id}-resumed`, AgentRunStatus.Pending); },
-  subscribe: (listener: typeof gatewayListener) => {
+  subscribe: (listener: typeof gatewayListener, onConnected?: () => void, onDisconnected?: () => void) => {
     calls.push("subscribe");
     gatewayListener = listener;
+    gatewayConnected = onConnected;
+    gatewayDisconnected = onDisconnected;
     return () => calls.push("unsubscribe");
   },
 } as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "subscribe">;
@@ -100,6 +119,7 @@ extension({
 
 const statuses: Array<string | undefined> = [];
 let confirmed = false;
+const confirmationDetails: string[] = [];
 const notices: string[] = [];
 const ctx = {
   mode: "tui",
@@ -108,7 +128,7 @@ const ctx = {
     theme,
     setStatus(_key: string, text: string | undefined) { statuses.push(text); },
     notify(message: string) { notices.push(message); },
-    confirm: async () => confirmed,
+    confirm: async (_title: string, details: string) => { confirmationDetails.push(details); return confirmed; },
     custom: async (factory: Function) => await new Promise((resolve) => {
       const component = factory({ requestRender() {} }, theme, {}, resolve);
       component.handleInput("c");
@@ -117,10 +137,17 @@ const ctx = {
 };
 await handlers.get("session_start")?.({}, ctx);
 assert.deepEqual(calls.slice(0, 2), ["list:parent-90", "subscribe"]);
-assert.ok(statuses.includes("Agent state: 1 running"));
+assert.ok(statuses.includes("● 1 running    /agent-state"));
+gatewayDisconnected?.();
+assert.equal(statuses.at(-1), undefined, "gateway loss clears stale live counts immediately");
+gatewayConnected?.();
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(statuses.at(-1), "● 1 running    /agent-state", "reconnect restores counts from the durable fleet list");
 assert.ok(command);
 await command!.handler("", ctx);
 assert.ok(!calls.includes("cancel:running"), "declined confirmation does not cancel");
+assert.match(confirmationDetails.at(-1) ?? "", /Task running|task running/);
+assert.match(confirmationDetails.at(-1) ?? "", /Claude Code · sonnet/);
 confirmed = true;
 await command!.handler("", ctx);
 assert.ok(calls.includes("cancel:running"), "confirmed picker action cancels through the parent session");
@@ -159,7 +186,7 @@ await assert.doesNotReject(
 assert.match(notices.at(-1) ?? "", /Agent state unavailable: daemon replacing/);
 await new Promise<void>((resolve) => setTimeout(resolve, 10));
 assert.ok(resolveAttempts >= 2, "an open parent retries when Gateway returns");
-assert.ok(statuses.includes("Agent state: 1 running"), "retry reconstructs the durable parent projection");
+assert.ok(statuses.includes("● 1 running    /agent-state"), "retry reconstructs the durable parent projection");
 await unavailableHandlers.get("session_shutdown")?.({}, ctx);
 
 const staleHandlers = new Map<string, Function>();

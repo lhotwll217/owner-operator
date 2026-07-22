@@ -37,8 +37,6 @@ export interface TurnTrace {
 export interface TurnTraceActionView {
   kind: TurnTraceAction["kind"];
   label: string;
-  marker: "│" | "●";
-  emphasis: "muted" | "current";
 }
 
 export type TurnTraceView =
@@ -55,10 +53,9 @@ export type TurnTraceView =
     actionCount: number;
     summary: string;
     actions: readonly TurnTraceActionView[];
-    interruptionMessage?: "Turn interrupted.";
   }
   | { kind: "hidden"; turnId: string }
-  | { kind: "interrupted"; turnId: string; message: "Turn interrupted." };
+  | { kind: "interrupted"; turnId: string; message: "Operation interrupted" };
 
 const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
   read: "Reading files",
@@ -74,7 +71,10 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
   schedule_prompt: "Scheduling work",
   manage_schedule: "Managing schedules",
   delegate_agent: "Delegating to an agent",
-  manage_agent_run: "Managing a delegated run",
+  "manage_agent_run.status": "Inspecting an agent",
+  "manage_agent_run.cancel": "Cancelling an agent",
+  "manage_agent_run.resume": "Resuming an agent",
+  "manage_agent_run.wait": "Waiting for an agent",
 });
 
 /** Return the stable presentation label for an allowlisted tool, else omit the activity. */
@@ -109,7 +109,7 @@ export function applyTurnTraceEvent(trace: TurnTrace, event: TurnActivityEvent):
   if (trace.eventIds.has(event.eventId)) return trace;
 
   const label = event.kind === "thinking_summary"
-    ? oneLine(event.summary)
+    ? oneLine(plainTextSummary(event.summary))
     : semanticActionForTool(event.toolName);
   if (!label) return trace;
 
@@ -129,20 +129,22 @@ export function formatTurnDuration(durationMs: number): string {
   const minutes = Math.floor((seconds % 3_600) / 60);
   const remainder = seconds % 60;
   if (hours) return `${hours}h ${minutes}m`;
-  if (minutes) return `${minutes}m ${remainder}s`;
+  if (minutes) return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
   return `${seconds}s`;
 }
 
-const actionViews = (trace: TurnTrace, active: boolean): TurnTraceActionView[] =>
-  trace.actions.map((action, index) => {
-    const current = active && index === trace.actions.length - 1;
-    return {
-      kind: action.kind,
-      label: action.label,
-      marker: current ? "●" : "│",
-      emphasis: current ? "current" : "muted",
-    };
-  });
+/** Pi's timeline rows are plain text, so remove common inline Markdown presentation markers. */
+function plainTextSummary(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(`{1,3})(.*?)\1/g, "$2")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/([*_])(.*?)\1/g, "$2");
+}
+
+const actionViews = (trace: TurnTrace): TurnTraceActionView[] =>
+  trace.actions.map(({ kind, label }) => ({ kind, label }));
 
 /** Derive the complete presentation view. Expansion is caller-owned per-turn state. */
 export function deriveTurnTraceView(
@@ -153,28 +155,28 @@ export function deriveTurnTraceView(
   const settledAt = trace.settledAt ?? options.interruptedAt;
   const outcome = derivedInterruption ? "interrupted" : trace.outcome;
   if (settledAt === undefined) {
-    return { kind: "active", turnId: trace.turnId, actions: actionViews(trace, true) };
+    return { kind: "active", turnId: trace.turnId, actions: actionViews(trace) };
   }
   if (trace.actions.length === 0) {
     if (trace.hasResponse) return { kind: "hidden", turnId: trace.turnId };
-    if (outcome === "interrupted") return { kind: "interrupted", turnId: trace.turnId, message: "Turn interrupted." };
+    if (outcome === "interrupted") return { kind: "interrupted", turnId: trace.turnId, message: "Operation interrupted" };
     return { kind: "hidden", turnId: trace.turnId };
   }
 
   const durationMs = Math.max(0, settledAt - (trace.startedAt ?? settledAt));
   const actionCount = trace.actions.length;
   const expanded = options.expanded === true;
+  const interrupted = outcome === "interrupted";
   return {
     kind: "settled",
     turnId: trace.turnId,
     expanded,
     durationMs,
     actionCount,
-    summary: `Worked for ${formatTurnDuration(durationMs)} · ${actionCount} action${actionCount === 1 ? "" : "s"}`,
-    actions: expanded ? actionViews(trace, false) : [],
-    ...(outcome === "interrupted" && !trace.hasResponse
-      ? { interruptionMessage: "Turn interrupted." as const }
-      : {}),
+    summary: interrupted
+      ? `Worked for ${formatTurnDuration(durationMs)} · interrupted`
+      : `Worked for ${formatTurnDuration(durationMs)} · ${actionCount} action${actionCount === 1 ? "" : "s"}`,
+    actions: expanded ? actionViews(trace) : [],
   };
 }
 

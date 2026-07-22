@@ -17,6 +17,8 @@ export function agentRunFixture(
     cwd: "/tmp/repo",
     parentThreadId: "parent-90",
     model: null,
+    effort: null,
+    effortApplied: false,
     depth: 1,
     status,
     createdAt: "2026-07-21T12:00:00.000Z",

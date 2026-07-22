@@ -6,6 +6,7 @@ import {
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
+  isAgentRunEffort,
   isTerminalAgentRunStatus,
   type AgentRun,
   type AgentRunCreateInput,
@@ -15,6 +16,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
+import { resolveAgentRunEffort, resolveAgentRunModel } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
 const WAIT_POLL_MS = 100;
@@ -129,13 +131,16 @@ export class AgentRunExecutor {
     }
     if (!input.task.trim()) throw new Error("delegation task is required");
     if (!isAbsolute(input.cwd)) throw new Error("delegation cwd must be an absolute path");
+    if (input.effort != null && !isAgentRunEffort(input.effort)) {
+      throw new Error(`unknown delegation effort: ${String(input.effort)}`);
+    }
     const timeoutSeconds = input.timeoutSeconds ?? DEFAULT_AGENT_RUN_TIMEOUT_SECONDS;
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > MAX_AGENT_RUN_TIMEOUT_SECONDS) {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
     }
     // Enforce the delegation-depth cap, not just structurally: if the delegating thread is
-    // itself some run's child, this launch would sit one level deeper. A child needing a helper
-    // uses its harness's native subagents, which never touch the ledger.
+    // itself some run's child, this launch would sit one level deeper. The ACP task envelope also
+    // tells every delegated child to complete its work directly without native subagents.
     const depth = this.depthFor(input.parentThreadId ?? null);
     if (depth > AGENT_RUN_MAX_DEPTH) {
       throw new Error(`delegation depth ${depth} exceeds the cap of ${AGENT_RUN_MAX_DEPTH}`);
@@ -145,7 +150,8 @@ export class AgentRunExecutor {
       task: input.task,
       cwd: input.cwd,
       parentThreadId: input.parentThreadId ?? null,
-      model: input.model ?? null,
+      model: resolveAgentRunModel(input.harness, input.model),
+      effort: resolveAgentRunEffort(input.harness, input.effort),
       depth,
       timeoutSeconds,
     });
@@ -212,6 +218,7 @@ export class AgentRunExecutor {
       cwd: run.cwd,
       parentThreadId: run.parentThreadId,
       model: run.model,
+      effort: run.effort,
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
       resumeOfRunId: run.id,

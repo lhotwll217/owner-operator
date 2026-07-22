@@ -15,7 +15,7 @@ import {
 /** Parent-scoped transport seam. The production Gateway and tests use the same contract. */
 export interface ParentRunAdapter {
   list(parentThreadId: string): Promise<AgentRun[]>;
-  subscribe(listener: () => void): () => void;
+  subscribe(listener: () => void, onDisconnected?: () => void): () => void;
   cancel(runId: string): Promise<AgentRun>;
   resume(runId: string): Promise<AgentRun>;
 }
@@ -43,6 +43,7 @@ export interface ParentRunSessionOptions {
   /** Base delay for bounded durable-refetch retries after failed or unconfirmed delivery. */
   completionRetryDelayMs?: number;
   onError?: (error: unknown) => void;
+  onDisconnected?: () => void;
 }
 
 type ViewListener = (view: ParentAgentStateView) => void;
@@ -64,6 +65,7 @@ export class ParentRunSession {
   private readonly successBatchDelayMs: number;
   private readonly completionRetryDelayMs: number;
   private readonly onError: (error: unknown) => void;
+  private readonly onDisconnected: () => void;
   private readonly pendingCompletionIds = new Set<string>();
   private readonly settledCompletionIds = new Set<string>();
   private readonly completionDeliveryAttempts = new Map<string, number>();
@@ -89,6 +91,7 @@ export class ParentRunSession {
     this.successBatchDelayMs = Math.max(0, options.successBatchDelayMs ?? 2_000);
     this.completionRetryDelayMs = Math.max(0, options.completionRetryDelayMs ?? 1_000);
     this.onError = options.onError ?? (() => undefined);
+    this.onDisconnected = options.onDisconnected ?? (() => undefined);
   }
 
   get view(): ParentAgentStateView {
@@ -105,10 +108,13 @@ export class ParentRunSession {
     const initial = await this.adapter.list(this.parentThreadId);
     this.reconcile(initial);
     this.started = true;
-    this.unsubscribeAdapter = this.adapter.subscribe(() => {
-      this.resetCompletionRetryBudget();
-      void this.refresh();
-    });
+    this.unsubscribeAdapter = this.adapter.subscribe(
+      () => {
+        this.resetCompletionRetryBudget();
+        void this.refresh();
+      },
+      this.onDisconnected,
+    );
     await this.refresh();
   }
 
@@ -308,9 +314,10 @@ export function gatewayParentRunAdapter(
 ): ParentRunAdapter {
   return {
     list: (parentThreadId) => gateway.listAgentRuns(parentThreadId),
-    subscribe: (listener) => gateway.subscribe(
+    subscribe: (listener, onDisconnected) => gateway.subscribe(
       (event) => { if (event.kind === GatewayEventKind.AgentRunChanged) listener(); },
       listener,
+      onDisconnected,
     ),
     cancel: (runId) => gateway.cancelAgentRun(runId),
     resume: (runId) => gateway.resumeAgentRun(runId),

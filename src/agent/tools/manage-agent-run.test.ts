@@ -1,6 +1,8 @@
 import assert from "node:assert";
 import { AgentRunHarness, AgentRunStatus, type AgentRun, type GatewayApi } from "@owner-operator/core";
-import { manageAgentRun } from "./manage-agent-run";
+import { manageAgentRun, manageAgentRunTool } from "./manage-agent-run";
+
+assert.match(manageAgentRunTool.description, /not for monitoring/i, "the tool reserves status and wait for explicit owner requests");
 
 const run: AgentRun = {
   id: "run-1",
@@ -9,6 +11,8 @@ const run: AgentRun = {
   cwd: "/tmp/example-repo",
   parentThreadId: "parent-1",
   model: null,
+  effort: null,
+  effortApplied: false,
   depth: 1,
   status: AgentRunStatus.Running,
   createdAt: "2026-07-17T10:00:00.000Z",

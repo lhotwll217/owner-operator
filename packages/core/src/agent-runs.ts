@@ -21,6 +21,14 @@ export enum AgentRunStatus {
   Lost = "lost",
 }
 
+/** Harness-neutral reasoning-effort intent supported by the durable run contract. */
+export const AGENT_RUN_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export type AgentRunEffort = (typeof AGENT_RUN_EFFORTS)[number];
+
+export function isAgentRunEffort(value: unknown): value is AgentRunEffort {
+  return typeof value === "string" && AGENT_RUN_EFFORTS.includes(value as AgentRunEffort);
+}
+
 /** Terminal states are monotonic: once reached, a run row never changes status again,
  * except that `interrupted` and `lost` may be resumed — which creates a NEW run under
  * the same child identity, never a status downgrade on the old row. */
@@ -98,6 +106,8 @@ export interface AgentRunCreateInput {
   parentThreadId?: string | null;
   /** Model the child should run, when the owner pins one; null lets the harness pick. */
   model?: string | null;
+  /** Reasoning effort requested for the child; null lets launch configuration decide. */
+  effort?: AgentRunEffort | null;
   timeoutSeconds?: number;
 }
 
@@ -108,6 +118,10 @@ export interface AgentRun {
   cwd: string;
   parentThreadId: string | null;
   model: string | null;
+  /** Resolved reasoning-effort intent; null means no intent was resolved, never a filler value. */
+  effort: AgentRunEffort | null;
+  /** True only after the launcher successfully applies effort through an advertised option. */
+  effortApplied: boolean;
   depth: number;
   status: AgentRunStatus;
   createdAt: string;
@@ -140,6 +154,8 @@ export interface ChildIdentity {
 /** An explicit activity update from the child's runtime: a progress line and/or its identity. */
 export interface AgentRunActivityUpdate extends ChildIdentity {
   activity?: string;
+  /** Runtime acknowledgement that the resolved effort was applied. */
+  effortApplied?: boolean;
 }
 
 /** Runtime request passed from the executor to the injected launcher seam. */

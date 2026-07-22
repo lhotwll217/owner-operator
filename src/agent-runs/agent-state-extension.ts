@@ -1,19 +1,17 @@
 import type { GatewayApi } from "@owner-operator/core";
-import type { AgentRunView, ParentAgentStateView } from "@owner-operator/core/agent-state";
+import {
+  formatAgentRunIdentity,
+  type AgentRunView,
+  type ParentAgentStateView,
+} from "@owner-operator/core/agent-state";
 import {
   type ExtensionAPI,
   type ExtensionFactory,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { resolveBackend } from "../gateway/client";
-import {
-  AGENT_RUN_COMPLETION_MESSAGE_TYPE,
-  PiParentCompletionAdapter,
-  renderAgentRunCompletionMessage,
-} from "./agent-run-completion";
+import { registerAgentRunDelivery } from "./agent-run-delivery-extension";
 import { formatAgentElapsed } from "./format-agent-elapsed";
-import { ParentRunSession, gatewayParentRunAdapter } from "./parent-run-session";
 
 export type AgentStatePickerAction =
   | { kind: "close" }
@@ -31,6 +29,7 @@ function statusColor(theme: Theme, run: AgentRunView): string {
 /** Focused, surface-only component. All lifecycle meaning arrives in ParentAgentStateView. */
 export class AgentStatePicker {
   private selectedIndex = 0;
+  private inspecting = false;
 
   constructor(
     private view: ParentAgentStateView,
@@ -44,12 +43,23 @@ export class AgentStatePicker {
     this.view = view;
     const nextIndex = selectedId ? view.runs.findIndex(({ id }) => id === selectedId) : -1;
     this.selectedIndex = nextIndex >= 0 ? nextIndex : Math.min(this.selectedIndex, Math.max(0, view.runs.length - 1));
+    if (!this.selected) this.inspecting = false;
     this.requestRender();
   }
 
   handleInput(data: string): void {
     if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+      if (this.inspecting) {
+        this.inspecting = false;
+        this.requestRender();
+        return;
+      }
       this.onAction({ kind: "close" });
+      return;
+    }
+    if (matchesKey(data, "enter") && this.selected) {
+      this.inspecting = true;
+      this.requestRender();
       return;
     }
     if (matchesKey(data, "down") || data === "j") {
@@ -78,6 +88,25 @@ export class AgentStatePicker {
       return lines;
     }
 
+    if (this.inspecting) {
+      const selected = this.selected!;
+      lines.push(line(`${statusColor(this.theme, selected)} · ${this.theme.fg("text", selected.task)}`));
+      lines.push("", line(this.theme.fg("borderMuted", "─".repeat(safeWidth))));
+      lines.push(line(`${this.theme.fg("dim", "Task:")} ${selected.task}`));
+      lines.push(line(`${this.theme.fg("dim", "Harness:")} ${formatAgentRunIdentity(selected.harness, selected.model, null)}`));
+      if (selected.effort) {
+        lines.push(line(`${this.theme.fg("dim", "Effort:")} ${selected.effort}`));
+      }
+      lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
+      lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
+      lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
+      const controls = [selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc back"]
+        .filter(Boolean)
+        .join(" · ");
+      lines.push("", line(this.theme.fg("dim", controls)));
+      return lines;
+    }
+
     const visibleCount = Math.min(8, this.view.runs.length);
     const start = Math.max(0, Math.min(
       this.selectedIndex - Math.floor(visibleCount / 2),
@@ -88,21 +117,17 @@ export class AgentStatePicker {
       const selected = index === this.selectedIndex;
       const prefix = selected ? this.theme.fg("accent", "› Selected · ") : "  ";
       const task = selected ? this.theme.fg("text", run.task) : this.theme.fg("muted", run.task);
-      const wideContext = safeWidth >= 60 ? ` · ${run.harness} · ${formatAgentElapsed(run.elapsedMs)}` : "";
+      const wideContext = safeWidth >= 60
+        ? ` · ${formatAgentRunIdentity(run.harness, run.model, run.effort)} · ${formatAgentElapsed(run.elapsedMs)}`
+        : "";
       lines.push(line(`${prefix}${statusColor(this.theme, run)} · ${task}${this.theme.fg("dim", wideContext)}`));
     }
 
     const selected = this.selected!;
-    lines.push("", line(this.theme.fg("borderMuted", "─".repeat(safeWidth))));
-    lines.push(line(`${this.theme.fg("dim", "Task:")} ${selected.task}`));
-    lines.push(line(`${this.theme.fg("dim", "Harness:")} ${selected.harness}`));
-    lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
-    lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
-    lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
     const controls = ["↑/↓ select", selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc close"]
       .filter(Boolean)
       .join(" · ");
-    lines.push("", line(this.theme.fg("dim", controls)));
+    lines.push("", line(this.theme.fg("dim", `enter inspect · ${controls}`)));
     return lines;
   }
 
@@ -114,6 +139,7 @@ export class AgentStatePicker {
 
   private move(delta: number): void {
     if (!this.view.runs.length) return;
+    this.inspecting = false;
     this.selectedIndex = (this.selectedIndex + delta + this.view.runs.length) % this.view.runs.length;
     this.requestRender();
   }
@@ -126,74 +152,27 @@ interface AgentStateExtensionOptions {
 
 /** Pi adapter: a literal footer/status entry plus the `/agent-state` focused picker. */
 export function createAgentStateExtension(options: AgentStateExtensionOptions = {}): ExtensionFactory {
-  const getGateway = options.resolveGateway ?? resolveBackend;
   const retryDelayMs = options.retryDelayMs ?? 1_000;
   return (pi: ExtensionAPI) => {
-    pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
-    let session: ParentRunSession | undefined;
-    let unsubscribeView: (() => void) | undefined;
     let picker: AgentStatePicker | undefined;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let generation = 0;
-
-    const stopSession = (): void => {
-      if (retryTimer) clearTimeout(retryTimer);
-      retryTimer = undefined;
-      unsubscribeView?.();
-      unsubscribeView = undefined;
-      session?.stop();
-      session = undefined;
-    };
-
-    pi.on("session_start", async (_event, ctx) => {
-      generation += 1;
-      const ownGeneration = generation;
-      stopSession();
-      let notified = false;
-      const start = async (): Promise<void> => {
-        if (ownGeneration !== generation) return;
-        let candidate: ParentRunSession | undefined;
-        let unsubscribe: (() => void) | undefined;
-        try {
-          const gateway = await getGateway();
-          if (ownGeneration !== generation) return;
-          candidate = new ParentRunSession(ctx.sessionManager.getSessionId(), gatewayParentRunAdapter(gateway), {
-            completionAdapter: new PiParentCompletionAdapter(pi, ctx.sessionManager),
-          });
-          unsubscribe = candidate.subscribe((view) => {
-            if (ownGeneration !== generation) return;
-            ctx.ui.setStatus("agent-state", view.footer ?? undefined);
-            picker?.update(view);
-          });
-          await candidate.start();
-          if (ownGeneration !== generation) {
-            unsubscribe();
-            candidate.stop();
-            return;
-          }
-          session = candidate;
-          unsubscribeView = unsubscribe;
-        } catch (error) {
-          unsubscribe?.();
-          candidate?.stop();
-          if (ownGeneration !== generation) return;
-          stopSession();
-          ctx.ui.setStatus("agent-state", undefined);
-          if (!notified) {
-            notified = true;
-            ctx.ui.notify(`Agent state unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
-          }
-          retryTimer = setTimeout(() => { void start(); }, retryDelayMs);
-        }
-      };
-      await start();
-    });
-
-    pi.on("session_shutdown", (_event, ctx) => {
-      generation += 1;
-      picker = undefined;
-      stopSession();
-      ctx.ui.setStatus("agent-state", undefined);
+    const delivery = registerAgentRunDelivery(pi, {
+      resolveGateway: options.resolveGateway,
+      retryDelayMs,
+      onView: (view, ctx) => {
+        ctx.ui.setStatus("agent-state", view.footer ?? undefined);
+        picker?.update(view);
+      },
+      onUnavailable: (error, ctx) => {
+        ctx.ui.setStatus("agent-state", undefined);
+        ctx.ui.notify(`Agent state unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+      },
+      onDisconnected: (ctx) => {
+        ctx.ui.setStatus("agent-state", undefined);
+      },
+      onStopped: (ctx) => {
+        picker = undefined;
+        ctx.ui.setStatus("agent-state", undefined);
+      },
     });
 
     pi.registerCommand("agent-state", {
@@ -203,6 +182,7 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
           ctx.ui.notify("/agent-state requires interactive mode", "error");
           return;
         }
+        const session = delivery.session;
         if (!session) {
           ctx.ui.notify("Agent state is unavailable", "warning");
           return;
@@ -218,7 +198,9 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
           if (selected.kind === "cancel") {
             const confirmed = await ctx.ui.confirm(
               "Cancel delegated agent?",
-              run ? `${run.status.glyph} ${run.status.text} · ${run.harness} · ${run.task}` : selected.runId,
+              run
+                ? `${run.status.glyph} ${run.status.text} · ${run.task} · ${formatAgentRunIdentity(run.harness, run.model, run.effort)}`
+                : selected.runId,
             );
             if (!confirmed) return;
             await session.cancel(selected.runId);

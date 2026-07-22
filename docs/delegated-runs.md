@@ -94,6 +94,10 @@ Client behavior follows the same invalidation/refetch contract:
   Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
   invalidations with an in-flight/dirty refetch rule. Its shared view drives the literal
   `Agent state` footer and the `/agent-state` picker; it never drives the parent's working indicator.
+- **Headless chat:** opening or resuming a parent thread starts the same `ParentRunSession` and Pi
+  completion adapter without the footer or picker. Initial completion delivery is unbatched and
+  awaited before the explicit prompt, and shutdown drains current delivery before closing the
+  subscription, so a short-lived process cannot strand a retained terminal row.
 - **Widget:** its live delegated-run client behavior is owned by [Widget](widget.md).
 - **RPC:** Owner Operator does not expose a Pi RPC frontend today. A future conversation UI can
   use RPC for turns and tool events, but background runs should remain a Gateway resource so they
@@ -107,18 +111,31 @@ and terminal styling are adapters over that contract.
 
 - **Background by default.** `delegate_agent` records the durable `pending` row and returns
   immediately; the parent session is never frozen. The result is carried by the ledger, not the
-  parent tool call. An optional bounded `waitSeconds` (and `manage_agent_run wait`) blocks for the
-  result without coupling liveness to the parent.
+  parent tool call, and completion arrives through the parent subscription. The Operator does not
+  poll after delegation; `/agent-state` owns liveness. Bounded waits and status reads remain only
+  for explicit owner requests.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.
 - **Owner Operator owns the deadline.** The executor aborts on its own per-run timeout so a
   launcher-side timeout after partial output can never read as success.
 - **Depth is 1**, enforced not just structurally. The executor rejects a launch whose parent
-  thread is itself a delegated run's child (`AGENT_RUN_MAX_DEPTH`). A child needing a helper (e.g.
-  a review agent) uses its harness's native subagents, which never touch the ledger.
+  thread is itself a delegated run's child (`AGENT_RUN_MAX_DEPTH`). Every child prompt also tells
+  the child to complete the work directly without nested or background agents, including
+  harness-native sub-agents.
 - **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
-  session options; omitting it lets the harness pick its default.
+  session options, and a caller pin always wins. When omitted, `delegate_agent` resolves the
+  per-harness default from the runtime [launch configuration](../src/agent-runs/launch-config.ts)
+  before creating the durable row; it never inherits an unsuitable ambient harness default.
+- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`). Its canonical vocabulary
+  lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts); resolution follows the same caller
+  pin then per-harness [launch configuration](../src/agent-runs/launch-config.ts) order as model and
+  lands in the durable row before launch. Legacy rows and runs with neither a caller pin nor a
+  harness default retain `NULL`; clients omit unknown effort instead of displaying a placeholder.
+- **Effort application** is owned by the [ACP launcher](../src/agent-runs/acp-launcher.ts), which
+  uses only session-advertised config options. The durable `effort_applied` field distinguishes
+  recorded intent from successful application; its contract lives in
+  [schema docs](../src/state/schema-docs.ts).
 - **Process ownership is explicit on POSIX.** Before `acpx` can spawn, the launcher persists a
   lease and puts its unguessable id on a stable Owner Operator wrapper's command line. Normal
   completion closes the ACP process tree and lease; daemon startup reaps only orphaned trees whose
@@ -145,11 +162,14 @@ the parent is also visible. Owner Operator conversations are not session-state r
 admitted OO-delegated child currently appears in the widget as an ordinary root session; its
 ledger record remains the canonical provenance.
 
-In the terminal, the `delegate_agent`/`manage_agent_run` tools retain their compact launch/control
-snapshot row (`formatAgentRunRow` in `src/shared/oo-presentation.ts`). The parent-scoped live view
-is separate: the footer shows queued, running, and attention counts only while one exists;
+In the terminal, `delegate_agent`/`manage_agent_run` never render as Pi tool components in the
+compact view; their allowlisted semantic labels participate in ordinary turn activity, and raw
+details require explicit tool expansion. A successful delegation persists one neutral launch line
+derived from the run row; the existing completion message persists the only other inline run
+moment. The parent-scoped live view is separate: the footer shows queued, running, and attention
+counts only while one exists and clears whenever the Gateway connection is unavailable;
 `/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
-harness, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
+harness, model and known effort, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
 Cancellation confirms before mutation.
 
 Terminal completion behavior is defined at four linked seams: the browser-safe

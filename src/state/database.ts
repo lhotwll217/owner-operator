@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AGENT_RUN_EFFORTS,
   AgentRunStatus,
   ScheduleRunStatus,
   ScheduleRunTrigger,
@@ -10,6 +11,7 @@ import {
   type AgentRun,
   type AgentRunActivityUpdate,
   type AgentRunHarness,
+  type AgentRunEffort,
   type AgentRunOutcome,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -24,6 +26,8 @@ import {
 import { stateDatabasePath } from "../shared/paths";
 
 export { type SessionStateRow } from "@owner-operator/core";
+
+const AGENT_RUN_EFFORT_SQL = AGENT_RUN_EFFORTS.map((effort) => `'${effort}'`).join(", ");
 
 export function defaultDbPath(): string {
   return stateDatabasePath();
@@ -164,6 +168,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   cwd TEXT NOT NULL,
   parent_thread_id TEXT,
   model TEXT,
+  effort TEXT CHECK (effort IS NULL OR effort IN (${AGENT_RUN_EFFORT_SQL})),
+  effort_applied INTEGER NOT NULL DEFAULT 0 CHECK (effort_applied IN (0, 1)),
   depth INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN (
     'pending', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'lost'
@@ -192,7 +198,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_parent_created
 `;
 
 const AGENT_RUN_COLUMNS = `
-  id, harness, task, cwd, parent_thread_id AS parentThreadId, model, depth, status,
+  id, harness, task, cwd, parent_thread_id AS parentThreadId, model, effort,
+  effort_applied AS effortApplied, depth, status,
   created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt,
   activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
   acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
@@ -205,11 +212,18 @@ export interface AgentRunInsert {
   cwd: string;
   parentThreadId?: string | null;
   model?: string | null;
+  effort?: AgentRunEffort | null;
   depth: number;
   timeoutSeconds: number;
   resumeOfRunId?: string | null;
   childSessionId?: string | null;
   acpxRecordId?: string | null;
+}
+
+type AgentRunDbRow = Omit<AgentRun, "effortApplied"> & { effortApplied: number };
+
+function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
+  return row ? { ...row, effortApplied: Boolean(row.effortApplied) } : undefined;
 }
 
 type DetailsPatch = Partial<{
@@ -233,6 +247,27 @@ export class ThreadDb {
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec(SCHEMA);
+    this.migrateAgentRunEffort();
+  }
+
+  /** Additive migration for issue #104. Existing rows deliberately retain NULL effort. */
+  private migrateAgentRunEffort(): void {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (!columns.has("effort")) {
+      this.db.exec(
+        `ALTER TABLE agent_runs ADD COLUMN effort TEXT
+         CHECK (effort IS NULL OR effort IN (${AGENT_RUN_EFFORT_SQL}))`,
+      );
+    }
+    if (!columns.has("effort_applied")) {
+      this.db.exec(
+        "ALTER TABLE agent_runs ADD COLUMN effort_applied INTEGER NOT NULL DEFAULT 0 "
+        + "CHECK (effort_applied IN (0, 1))",
+      );
+    }
   }
 
   private appendDetailsInTx(
@@ -677,12 +712,12 @@ export class ThreadDb {
   createAgentRun(insert: AgentRunInsert): AgentRun {
     this.db.prepare(
       `INSERT INTO agent_runs (
-         id, harness, task, cwd, parent_thread_id, model, depth, status, created_at,
+         id, harness, task, cwd, parent_thread_id, model, effort, depth, status, created_at,
          child_session_id, acpx_record_id, resume_of_run_id, timeout_seconds
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
-      insert.model ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
+      insert.model ?? null, insert.effort ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
       insert.childSessionId ?? null, insert.acpxRecordId ?? null,
       insert.resumeOfRunId ?? null, insert.timeoutSeconds,
     );
@@ -692,19 +727,21 @@ export class ThreadDb {
   /** The most recent run whose child session equals this id — the depth-guard and monitor-join
    * lookup. A thread that is some run's child cannot itself be a delegating parent at depth 1. */
   agentRunByChildSession(childSessionId: string): AgentRun | undefined {
-    return this.db.prepare(
+    const row = this.db.prepare(
       `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs
        WHERE child_session_id = ? ORDER BY created_at DESC LIMIT 1`,
-    ).get(childSessionId) as unknown as AgentRun | undefined;
+    ).get(childSessionId) as unknown as AgentRunDbRow | undefined;
+    return toAgentRun(row);
   }
 
   /** A pending-or-running run for this child session, if any — the resume-duplication guard. */
   nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
-    return this.db.prepare(
+    const row = this.db.prepare(
       `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs
        WHERE child_session_id = ? AND status IN (?, ?)
        ORDER BY created_at DESC LIMIT 1`,
-    ).get(childSessionId, AgentRunStatus.Pending, AgentRunStatus.Running) as unknown as AgentRun | undefined;
+    ).get(childSessionId, AgentRunStatus.Pending, AgentRunStatus.Running) as unknown as AgentRunDbRow | undefined;
+    return toAgentRun(row);
   }
 
   /** Start the oldest pending run iff fewer than `maxRunning` rows are running — one transaction,
@@ -744,11 +781,14 @@ export class ThreadDb {
          activity = COALESCE(?, activity),
          last_activity_at = ?,
          child_session_id = COALESCE(?, child_session_id),
-         acpx_record_id = COALESCE(?, acpx_record_id)
+         acpx_record_id = COALESCE(?, acpx_record_id),
+         effort_applied = COALESCE(?, effort_applied)
        WHERE id = ? AND status = ?`,
     ).run(
       update.activity ?? null, this.now(), update.childSessionId ?? null,
-      update.acpxRecordId ?? null, id, AgentRunStatus.Running,
+      update.acpxRecordId ?? null,
+      update.effortApplied === undefined ? null : Number(update.effortApplied),
+      id, AgentRunStatus.Running,
     ).changes) > 0;
     return changed ? this.agentRunById(id)! : null;
   }
@@ -802,9 +842,10 @@ export class ThreadDb {
   }
 
   agentRunById(id: string): AgentRun | undefined {
-    return this.db.prepare(
+    const row = this.db.prepare(
       `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs WHERE id = ?`,
-    ).get(id) as unknown as AgentRun | undefined;
+    ).get(id) as unknown as AgentRunDbRow | undefined;
+    return toAgentRun(row);
   }
 
   listAgentRuns(filter: { parentThreadId?: string } = {}): AgentRun[] {
@@ -812,9 +853,10 @@ export class ThreadDb {
                  ${filter.parentThreadId !== undefined ? "WHERE parent_thread_id = ?" : ""}
                  ORDER BY created_at DESC, rowid DESC`;
     const statement = this.db.prepare(sql);
-    return (
+    const rows = (
       filter.parentThreadId !== undefined ? statement.all(filter.parentThreadId) : statement.all()
-    ) as unknown as AgentRun[];
+    ) as unknown as AgentRunDbRow[];
+    return rows.map((row) => toAgentRun(row)!);
   }
 
   listNeedsYouMessageVersions(): Array<{ threadId: string; lastMessageAt: string }> {
