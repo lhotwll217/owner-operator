@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunStatus } from "@owner-operator/core";
+import { AgentRunStatus, type AgentRun, type GatewayApi } from "@owner-operator/core";
 import { createAgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import {
   AuthStorage,
@@ -21,7 +21,9 @@ import {
   PiParentCompletionAdapter,
   renderAgentRunCompletionMessage,
 } from "../src/agent-runs/agent-run-completion";
+import { createAgentRunDeliveryExtension } from "../src/agent-runs/agent-run-delivery-extension";
 import { ParentRunSession, type ParentRunAdapter } from "../src/agent-runs/parent-run-session";
+import { bindOwnerOperatorSessionExtensions } from "../src/agent/agent";
 
 const root = mkdtempSync(join(tmpdir(), "oo-pi-completion-"));
 const cwd = join(root, "workspace");
@@ -68,6 +70,10 @@ try {
       observedContexts.push(structuredClone(context));
       return fauxAssistantMessage("Idle completion reviewed.");
     },
+    (context) => {
+      observedContexts.push(structuredClone(context));
+      return fauxAssistantMessage("Headless retained completion reviewed.");
+    },
   ]);
 
   const sessionManager = SessionManager.create(cwd, sessionsDir);
@@ -76,37 +82,78 @@ try {
     "oo-completion-test": { type: "api_key", key: "test-only" },
   });
   let completionPi: ExtensionAPI | undefined;
-  const resourceLoader = new DefaultResourceLoader({
+  let headlessRows: AgentRun[] = [];
+  let headlessSubscriptions = 0;
+  let headlessUnsubscriptions = 0;
+  const headlessGateway = {
+    listAgentRuns: async () => headlessRows,
+    subscribe: () => {
+      headlessSubscriptions += 1;
+      return () => { headlessUnsubscriptions += 1; };
+    },
+    async cancelAgentRun() { throw new Error("not used"); },
+    async resumeAgentRun() { throw new Error("not used"); },
+  } as Pick<GatewayApi, "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun">;
+  const createTestResourceLoader = () => new DefaultResourceLoader({
     cwd,
     agentDir,
     settingsManager,
     systemPromptOverride: () => "Review delegated-run lifecycle evidence.",
     appendSystemPromptOverride: () => [],
-    extensionFactories: [{
-      name: "completion-test",
-      factory: (pi) => {
-        completionPi = pi;
-        const model = faux.getModel();
-        pi.registerProvider("oo-completion-test", {
-          baseUrl: model.baseUrl,
-          apiKey: "test-only",
-          api: faux.api as any,
-          models: [{
-            id: model.id,
-            name: model.name,
-            reasoning: model.reasoning,
-            input: model.input,
-            cost: model.cost,
-            contextWindow: model.contextWindow,
-            maxTokens: model.maxTokens,
-          }],
-          streamSimple: faux.provider.streamSimple.bind(faux.provider),
-        });
-        pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
+    extensionFactories: [
+      {
+        name: "completion-test",
+        factory: (pi) => {
+          completionPi = pi;
+          const model = faux.getModel();
+          pi.registerProvider("oo-completion-test", {
+            baseUrl: model.baseUrl,
+            apiKey: "test-only",
+            api: faux.api as any,
+            models: [{
+              id: model.id,
+              name: model.name,
+              reasoning: model.reasoning,
+              input: model.input,
+              cost: model.cost,
+              contextWindow: model.contextWindow,
+              maxTokens: model.maxTokens,
+            }],
+            streamSimple: faux.provider.streamSimple.bind(faux.provider),
+          });
+          pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
+        },
       },
-    }],
+      {
+        name: "headless-agent-run-delivery",
+        factory: createAgentRunDeliveryExtension({ resolveGateway: async () => headlessGateway as GatewayApi }),
+      },
+    ],
   });
+  const resourceLoader = createTestResourceLoader();
   await resourceLoader.reload();
+  const openHeadlessSession = async (manager: SessionManager) => {
+    const loader = createTestResourceLoader();
+    await loader.reload();
+    const { session: headlessSession } = await createAgentSession({
+      cwd,
+      agentDir,
+      authStorage,
+      model: faux.getModel(),
+      noTools: "all",
+      resourceLoader: loader,
+      sessionManager: manager,
+      settingsManager,
+    });
+    await bindOwnerOperatorSessionExtensions(headlessSession);
+    return headlessSession;
+  };
+  const completionEntryCount = (manager: SessionManager, eventId: string): number =>
+    manager.getEntries().filter(
+      (entry) => entry.type === "custom_message"
+        && entry.customType === AGENT_RUN_COMPLETION_MESSAGE_TYPE
+        && (entry.details as Partial<{ eventIds: string[] }> | undefined)?.eventIds?.includes(eventId),
+    ).length;
   const { session } = await createAgentSession({
     cwd,
     agentDir,
@@ -311,7 +358,39 @@ try {
   });
   assert.equal(duplicateContinuation, false, "reopening and reconciling cannot duplicate a row or response");
 
-  process.stdout.write("ok — real saved Pi session persists, renders, contextualizes, and queues completion follow-ups\n");
+  const retainedHeadlessRun = run("headless-retained-completion", AgentRunStatus.Completed, {
+    parentThreadId: reopened.getSessionId(),
+    childSessionId: "child-headless-retained",
+    task: "Deliver after a headless parent reopen",
+    resultTail: "The retained completion reached its parent thread.",
+  });
+  const retainedHeadlessEnvelope = createAgentRunCompletionEnvelope(retainedHeadlessRun);
+  headlessRows = [retainedHeadlessRun];
+  const headlessOpen = await openHeadlessSession(reopened);
+  assert.equal(headlessSubscriptions, 1, "the print-mode lifecycle starts parent delivery");
+  assert.equal(
+    completionEntryCount(reopened, retainedHeadlessEnvelope.eventId),
+    1,
+    "a retained completion persists during the short-lived headless session start",
+  );
+  assert.equal(faux.state.callCount, 6, "the retained completion queues one normal continuation");
+  await headlessOpen.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+  headlessOpen.dispose();
+
+  const secondHeadlessManager = SessionManager.open(sessionFile!, sessionsDir, cwd);
+  const secondHeadlessOpen = await openHeadlessSession(secondHeadlessManager);
+  assert.equal(
+    completionEntryCount(secondHeadlessManager, retainedHeadlessEnvelope.eventId),
+    1,
+    "the next headless reopen observes the typed event and does not append a duplicate",
+  );
+  assert.equal(faux.state.callCount, 6, "the duplicate completion does not queue another continuation");
+  await secondHeadlessOpen.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+  secondHeadlessOpen.dispose();
+  assert.equal(headlessSubscriptions, 2, "each headless reopen starts one parent delivery session");
+  assert.equal(headlessUnsubscriptions, 2, "each short-lived parent delivery session stops cleanly");
+
+  process.stdout.write("ok — real saved Pi session persists, renders, and dedupes headless completion delivery\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

@@ -94,6 +94,10 @@ Client behavior follows the same invalidation/refetch contract:
   Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
   invalidations with an in-flight/dirty refetch rule. Its shared view drives the literal
   `Agent state` footer and the `/agent-state` picker; it never drives the parent's working indicator.
+- **Headless chat:** opening or resuming a parent thread starts the same `ParentRunSession` and Pi
+  completion adapter without the footer or picker. Initial completion delivery is unbatched and
+  awaited before the explicit prompt, and shutdown drains current delivery before closing the
+  subscription, so a short-lived process cannot strand a retained terminal row.
 - **Widget:** its live delegated-run client behavior is owned by [Widget](widget.md).
 - **RPC:** Owner Operator does not expose a Pi RPC frontend today. A future conversation UI can
   use RPC for turns and tool events, but background runs should remain a Gateway resource so they

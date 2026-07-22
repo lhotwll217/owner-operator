@@ -10,14 +10,8 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { resolveBackend } from "../gateway/client";
-import {
-  AGENT_RUN_COMPLETION_MESSAGE_TYPE,
-  PiParentCompletionAdapter,
-  renderAgentRunCompletionMessage,
-} from "./agent-run-completion";
+import { registerAgentRunDelivery } from "./agent-run-delivery-extension";
 import { formatAgentElapsed } from "./format-agent-elapsed";
-import { ParentRunSession, gatewayParentRunAdapter } from "./parent-run-session";
 
 export type AgentStatePickerAction =
   | { kind: "close" }
@@ -155,74 +149,24 @@ interface AgentStateExtensionOptions {
 
 /** Pi adapter: a literal footer/status entry plus the `/agent-state` focused picker. */
 export function createAgentStateExtension(options: AgentStateExtensionOptions = {}): ExtensionFactory {
-  const getGateway = options.resolveGateway ?? resolveBackend;
   const retryDelayMs = options.retryDelayMs ?? 1_000;
   return (pi: ExtensionAPI) => {
-    pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
-    let session: ParentRunSession | undefined;
-    let unsubscribeView: (() => void) | undefined;
     let picker: AgentStatePicker | undefined;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let generation = 0;
-
-    const stopSession = (): void => {
-      if (retryTimer) clearTimeout(retryTimer);
-      retryTimer = undefined;
-      unsubscribeView?.();
-      unsubscribeView = undefined;
-      session?.stop();
-      session = undefined;
-    };
-
-    pi.on("session_start", async (_event, ctx) => {
-      generation += 1;
-      const ownGeneration = generation;
-      stopSession();
-      let notified = false;
-      const start = async (): Promise<void> => {
-        if (ownGeneration !== generation) return;
-        let candidate: ParentRunSession | undefined;
-        let unsubscribe: (() => void) | undefined;
-        try {
-          const gateway = await getGateway();
-          if (ownGeneration !== generation) return;
-          candidate = new ParentRunSession(ctx.sessionManager.getSessionId(), gatewayParentRunAdapter(gateway), {
-            completionAdapter: new PiParentCompletionAdapter(pi, ctx.sessionManager),
-          });
-          unsubscribe = candidate.subscribe((view) => {
-            if (ownGeneration !== generation) return;
-            ctx.ui.setStatus("agent-state", view.footer ?? undefined);
-            picker?.update(view);
-          });
-          await candidate.start();
-          if (ownGeneration !== generation) {
-            unsubscribe();
-            candidate.stop();
-            return;
-          }
-          session = candidate;
-          unsubscribeView = unsubscribe;
-        } catch (error) {
-          unsubscribe?.();
-          candidate?.stop();
-          if (ownGeneration !== generation) return;
-          stopSession();
-          ctx.ui.setStatus("agent-state", undefined);
-          if (!notified) {
-            notified = true;
-            ctx.ui.notify(`Agent state unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
-          }
-          retryTimer = setTimeout(() => { void start(); }, retryDelayMs);
-        }
-      };
-      await start();
-    });
-
-    pi.on("session_shutdown", (_event, ctx) => {
-      generation += 1;
-      picker = undefined;
-      stopSession();
-      ctx.ui.setStatus("agent-state", undefined);
+    const delivery = registerAgentRunDelivery(pi, {
+      resolveGateway: options.resolveGateway,
+      retryDelayMs,
+      onView: (view, ctx) => {
+        ctx.ui.setStatus("agent-state", view.footer ?? undefined);
+        picker?.update(view);
+      },
+      onUnavailable: (error, ctx) => {
+        ctx.ui.setStatus("agent-state", undefined);
+        ctx.ui.notify(`Agent state unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+      },
+      onStopped: (ctx) => {
+        picker = undefined;
+        ctx.ui.setStatus("agent-state", undefined);
+      },
     });
 
     pi.registerCommand("agent-state", {
@@ -232,6 +176,7 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
           ctx.ui.notify("/agent-state requires interactive mode", "error");
           return;
         }
+        const session = delivery.session;
         if (!session) {
           ctx.ui.notify("Agent state is unavailable", "warning");
           return;

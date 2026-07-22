@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
 import {
+  createOwnerOperatorSession,
   evalSettingsOverrides,
   lastAssistantError,
   ownerOperatorPrompt,
@@ -14,8 +15,10 @@ import {
   repoRoot,
   runScheduledPrompt,
 } from "./agent";
+import { AGENT_RUN_COMPLETION_MESSAGE_TYPE } from "../agent-runs/agent-run-completion";
 
 const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
+const priorOoHome = process.env.OO_HOME;
 try {
   const ooHome = join(configRoot, "oo-home");
   const task = join(configRoot, "task");
@@ -29,13 +32,21 @@ try {
   assert.equal(services.settingsManager.getDefaultProvider(), "owned");
   assert.equal(services.settingsManager.getDefaultModel(), "owned-model");
   assert.equal(services.settingsManager.isProjectTrusted(), false, "project Pi settings cannot alter harness policy");
+  process.env.OO_HOME = ooHome;
+  const headless = await createOwnerOperatorSession("chat", { ephemeral: true });
+  assert.ok(
+    headless.session.extensionRunner.getMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE),
+    "the shared headless session path registers delegated-run completion delivery",
+  );
+  headless.session.dispose();
 } finally {
+  if (priorOoHome === undefined) delete process.env.OO_HOME;
+  else process.env.OO_HOME = priorOoHome;
   rmSync(configRoot, { recursive: true, force: true });
 }
 
 assert.deepEqual(evalSettingsOverrides({}), {}, "product sessions keep their configured transport");
 
-const priorOoHome = process.env.OO_HOME;
 const setupGateHome = join(configRoot, "setup-gate-home");
 process.env.OO_HOME = setupGateHome;
 const setupGateResult = await runScheduledPrompt({
