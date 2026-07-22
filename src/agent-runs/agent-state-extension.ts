@@ -1,5 +1,9 @@
 import type { GatewayApi } from "@owner-operator/core";
-import type { AgentRunView, ParentAgentStateView } from "@owner-operator/core/agent-state";
+import {
+  formatAgentRunIdentity,
+  type AgentRunView,
+  type ParentAgentStateView,
+} from "@owner-operator/core/agent-state";
 import {
   type ExtensionAPI,
   type ExtensionFactory,
@@ -95,7 +99,7 @@ export class AgentStatePicker {
       lines.push(line(`${statusColor(this.theme, selected)} · ${this.theme.fg("text", selected.task)}`));
       lines.push("", line(this.theme.fg("borderMuted", "─".repeat(safeWidth))));
       lines.push(line(`${this.theme.fg("dim", "Task:")} ${selected.task}`));
-      lines.push(line(`${this.theme.fg("dim", "Harness:")} ${selected.harness}`));
+      lines.push(line(`${this.theme.fg("dim", "Harness:")} ${formatAgentRunIdentity(selected.harness, selected.model)}`));
       lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
       lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
       lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
@@ -116,7 +120,9 @@ export class AgentStatePicker {
       const selected = index === this.selectedIndex;
       const prefix = selected ? this.theme.fg("accent", "› Selected · ") : "  ";
       const task = selected ? this.theme.fg("text", run.task) : this.theme.fg("muted", run.task);
-      const wideContext = safeWidth >= 60 ? ` · ${run.harness} · ${formatAgentElapsed(run.elapsedMs)}` : "";
+      const wideContext = safeWidth >= 60
+        ? ` · ${formatAgentRunIdentity(run.harness, run.model)} · ${formatAgentElapsed(run.elapsedMs)}`
+        : "";
       lines.push(line(`${prefix}${statusColor(this.theme, run)} · ${task}${this.theme.fg("dim", wideContext)}`));
     }
 
@@ -241,7 +247,9 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
           if (selected.kind === "cancel") {
             const confirmed = await ctx.ui.confirm(
               "Cancel delegated agent?",
-              run ? `${run.status.glyph} ${run.status.text} · ${run.harness} · ${run.task}` : selected.runId,
+              run
+                ? `${run.status.glyph} ${run.status.text} · ${run.task} · ${formatAgentRunIdentity(run.harness, run.model)}`
+                : selected.runId,
             );
             if (!confirmed) return;
             await session.cancel(selected.runId);

@@ -5,6 +5,7 @@ import { agentRunToolResult } from "./agent-run-result";
 
 const internal = run("run-safe-result", AgentRunStatus.Failed, {
   task: "Research the delegated runner",
+  model: "sonnet",
   activity: "Retrying a provider request",
   resultTail: "RAW_RESULT_SENTINEL",
   error: "RAW_FAILURE_SENTINEL",
@@ -16,6 +17,7 @@ const fallbackText = result.content.map((part) => part.type === "text" ? part.te
 
 assert.match(fallbackText, /run-safe-result/);
 assert.match(fallbackText, /Research the delegated runner/);
+assert.match(fallbackText, /Claude Code · sonnet/);
 assert.doesNotMatch(fallbackText, /RAW_RESULT_SENTINEL|RAW_FAILURE_SENTINEL|internal-child-id|internal-acpx-id/);
 assert.doesNotMatch(fallbackText, /[{"}]/, "renderer failure or expansion cannot reveal an internal JSON record");
 assert.equal(result.details, internal, "typed details remain available to the compact renderer");

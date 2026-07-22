@@ -5,6 +5,7 @@ import { formatAgentRunRow, type AgentRunRowView } from "../../shared/oo-present
 export function toAgentRunRowView(run: AgentRun): AgentRunRowView {
   return {
     harness: run.harness,
+    model: run.model,
     task: run.task,
     status: run.status,
     createdAt: run.createdAt,

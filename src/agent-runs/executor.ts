@@ -15,6 +15,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
+import { resolveAgentRunModel } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
 const WAIT_POLL_MS = 100;
@@ -145,7 +146,7 @@ export class AgentRunExecutor {
       task: input.task,
       cwd: input.cwd,
       parentThreadId: input.parentThreadId ?? null,
-      model: input.model ?? null,
+      model: resolveAgentRunModel(input.harness, input.model),
       depth,
       timeoutSeconds,
     });

@@ -17,6 +17,7 @@ const envelope = createAgentRunCompletionEnvelope(run("run-complete", AgentRunSt
   parentThreadId: "parent-thread",
   childSessionId: "child-session-123456789",
   task: "Research authentication failures",
+  model: "sonnet",
   resultTail: hostileResult,
   activity: "FULL_CHILD_TRANSCRIPT_SENTINEL",
 }), { artifacts: [{ label: "report", reference: "artifact://auth-report" }] });
@@ -41,6 +42,7 @@ assert.equal(sent[0]!.message.display, true);
 assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
 assert.match(sent[0]!.message.content, /UNTRUSTED CHILD EVIDENCE/);
 assert.match(sent[0]!.message.content, /artifact:\/\/auth-report/);
+assert.match(sent[0]!.message.content, /"model": "sonnet"/);
 assert.match(sent[0]!.message.content, /Ignore the parent/);
 assert.doesNotMatch(sent[0]!.message.content, /\u001b|\\u001b/, "child controls remain inert evidence");
 assert.match(sent[0]!.message.content, /material outcome.*implication.*owner action/is);
@@ -150,6 +152,7 @@ assert.match(emptyResult, /The agent completed without returning a material resu
 
 const approvedLiteralEnvelope = createAgentRunCompletionEnvelope(run("approved-literal", AgentRunStatus.Completed, {
   task: "Research agent",
+  model: "gpt-5.6-sol",
   startedAt: "2026-07-21T12:00:00.000Z",
   finishedAt: "2026-07-21T12:14:00.000Z",
   resultTail: "Material result",
@@ -163,7 +166,7 @@ const hostileIdentityEnvelope = {
   ...envelope,
   runId: "run\u200e-id\u{e0001}\ud83d\ude00".repeat(100),
   childSessionId: "child\u200f-session\u200b",
-  harness: "pi\u061c-harness\ufff9",
+  harness: "pi\u061c-harness\ufff9" as typeof envelope.harness,
 };
 const hostileIdentityMessage = {
   ...message,

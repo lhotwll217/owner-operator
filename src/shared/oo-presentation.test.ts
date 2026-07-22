@@ -6,7 +6,7 @@
 // src/cli/oo-args.test.ts.
 import assert from "node:assert";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { AgentRunStatus } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import {
   OO_NAME,
   buildOoTheme,
@@ -74,8 +74,8 @@ const toolRow = (toolName: string, rendered = `RAW ${toolName} /secret/path resu
   render(): string[] { return [rendered]; },
 });
 const genericToolRow = toolRow("read");
-const delegateToolRow = toolRow("delegate_agent", "claude-code · research · running · 30s");
-const manageRunToolRow = toolRow("manage_agent_run", "codex · audit · completed · 1m");
+const delegateToolRow = toolRow("delegate_agent", "Claude Code · sonnet · research · running · 30s");
+const manageRunToolRow = toolRow("manage_agent_run", "Codex · gpt-5.6-sol · audit · completed · 1m");
 class CustomEntryComponent {
   entry = { customType: "owner-operator.turn-activity.v1" };
   expanded = false;
@@ -97,8 +97,8 @@ genericToolRow.expanded = false; // Pi's updateDisplay mutates internal fields, 
 assert.deepEqual(genericToolRow.render(), ["RAW read /secret/path result body"], "tool updates cannot bypass an explicit raw-detail expansion");
 genericToolRow.setExpanded(false);
 assert.deepEqual(genericToolRow.render(), [], "the separate expansion closes raw detail again");
-assert.deepEqual(delegateToolRow.render(), ["claude-code · research · running · 30s"], "the compact delegated-run snapshot stays visible by default");
-assert.deepEqual(manageRunToolRow.render(), ["codex · audit · completed · 1m"], "the compact run-management snapshot stays visible by default");
+assert.deepEqual(delegateToolRow.render(), ["Claude Code · sonnet · research · running · 30s"], "the compact delegated-run snapshot stays visible by default");
+assert.deepEqual(manageRunToolRow.render(), ["Codex · gpt-5.6-sol · audit · completed · 1m"], "the compact run-management snapshot stays visible by default");
 assert.doesNotMatch(delegateToolRow.render().join("\n") + manageRunToolRow.render().join("\n"), /RAW|result body|failure|retry/i);
 fakeMode.toggleToolOutputExpansion();
 assert.equal(turnTraceRow.expanded, true, "the first Pi expansion reveals the semantic turn trace");
@@ -195,28 +195,30 @@ assert.equal(elapsedLabel("2026-07-17T10:00:00.000Z", "2026-07-17T10:00:09.000Z"
 assert.equal(elapsedLabel(undefined, "2026-07-17T10:00:09.000Z"), "", "elapsed needs both stamps");
 assert.equal(
   formatAgentRunRow({
-    harness: "claude-code",
+    harness: AgentRunHarness.ClaudeCode,
+    model: "sonnet",
     task: "research the flaky retry logic in the scheduler",
     status: AgentRunStatus.Running,
     createdAt: "2026-07-17T10:00:00.000Z",
   }, "2026-07-17T10:00:30.000Z"),
-  "claude-code · research the flaky retry logic in the scheduler · running · 30s",
+  "Claude Code · sonnet · research the flaky retry logic in the scheduler · running · 30s",
 );
 assert.equal(
   formatAgentRunRow({
-    harness: "codex", task: "audit deps", status: AgentRunStatus.Completed,
+    harness: AgentRunHarness.Codex, model: "gpt-5.6-sol", task: "audit deps", status: AgentRunStatus.Completed,
     createdAt: "2026-07-17T10:00:00.000Z", finishedAt: "2026-07-17T10:01:00.000Z",
   }),
-  "codex · audit deps · completed · 1m",
+  "Codex · gpt-5.6-sol · audit deps · completed · 1m",
   "a terminal row omits result and stale activity bodies",
 );
 assert.equal(
   formatAgentRunRow({
-    harness: "codex",
+    harness: AgentRunHarness.Codex,
+    model: null,
     task: "x",
     status: AgentRunStatus.Failed,
   }),
-  "codex · x · failed",
+  "Codex · x · failed",
   "a failed row omits error and partial-result bodies",
 );
 

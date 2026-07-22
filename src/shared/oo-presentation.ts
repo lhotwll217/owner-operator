@@ -16,8 +16,9 @@
 // the chat scrollback — are handled by the `quietOoInteractiveMode` shim at the bottom.
 
 import { Text, type Component } from "@earendil-works/pi-tui";
-import type { AgentRunStatus } from "@owner-operator/core";
+import type { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import { formatTurnDuration } from "@owner-operator/core/activity";
+import { formatAgentRunIdentity } from "@owner-operator/core/agent-state";
 import { OO_TURN_ACTIVITY_ENTRY, turnTraceExtension } from "./turn-trace";
 import {
   Theme,
@@ -125,12 +126,13 @@ export function buildOoTheme(mode: "truecolor" | "256color" = "truecolor"): Them
 
 // ---- Delegated-run row -------------------------------------------------------------------
 // Issue #69: a delegated run must not read as a generic tool call. The delegate/manage tools
-// render a compact agent row — harness · task · state · elapsed — so the terminal shows what
+// render a compact agent row — harness/model · task · state · elapsed — so the terminal shows what
 // the child is and where it stands without activity, result, failure, or retry dumps.
 
 /** The wire AgentRun fields read by the compact terminal presentation. */
 export interface AgentRunRowView {
-  harness?: string;
+  harness?: AgentRunHarness;
+  model?: string | null;
   task?: string;
   status?: AgentRunStatus;
   createdAt?: string | null;
@@ -147,7 +149,7 @@ export function elapsedLabel(fromIso?: string | null, toIso?: string | null): st
 /** One compact line for a delegated run. Activity/result/error bodies never enter this view. */
 export function formatAgentRunRow(run: AgentRunRowView, nowIso?: string): string {
   const parts: string[] = [];
-  if (run.harness) parts.push(run.harness);
+  if (run.harness) parts.push(formatAgentRunIdentity(run.harness, run.model ?? null));
   if (run.task) parts.push(truncate(run.task, 60));
   if (run.status) parts.push(run.status);
   const elapsed = elapsedLabel(run.createdAt, run.finishedAt ?? nowIso ?? null);

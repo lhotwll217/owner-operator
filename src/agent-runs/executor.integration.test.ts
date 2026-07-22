@@ -74,12 +74,14 @@ try {
   });
   assert.equal(first.status, AgentRunStatus.Pending, "launch returns before execution starts");
   assert.equal(first.depth, 1, "operator launches are depth 1");
+  assert.equal(first.model, "sonnet", "Claude delegated work uses the configured non-1M default");
   const second = executor.launch({
     harness: AgentRunHarness.Codex,
     task: "audit dependencies",
     cwd: dir,
     parentThreadId: "parent-1",
   });
+  assert.equal(second.model, "gpt-5.6-sol", "Codex delegated work uses the configured default");
 
   // --- queue under cap: one runs, the other waits as pending ------------------------------
   await waitFor(() => launches.length === 1, "first run to start");
@@ -108,7 +110,13 @@ try {
   assert.equal(secondFinal.error, "turn failed: tool error");
 
   // --- cancel: running run aborts and records cancelled ------------------------------------
-  const third = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "third", cwd: dir });
+  const third = executor.launch({
+    harness: AgentRunHarness.ClaudeCode,
+    task: "third",
+    cwd: dir,
+    model: "caller-selected-model",
+  });
+  assert.equal(third.model, "caller-selected-model", "a caller-pinned model always wins");
   await waitFor(() => launches.length === 3, "third run to start");
   const cancelledThird = await executor.cancel(third.id);
   assert.equal(cancelledThird.status, AgentRunStatus.Cancelled, "cancel resolves with the finalized row");

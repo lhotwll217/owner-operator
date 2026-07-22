@@ -62,6 +62,7 @@ function completionContext(envelopes: readonly AgentRunCompletionEnvelope[]): st
       runId: envelope.runId,
       childSessionId: envelope.childSessionId,
       harness: envelope.harness,
+      model: envelope.model,
       task: envelope.task,
       outcome: envelope.outcome,
       completedAt: envelope.completedAt,

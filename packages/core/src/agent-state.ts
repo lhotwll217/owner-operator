@@ -21,7 +21,8 @@ export interface AgentRunStatusView {
 
 export interface AgentRunView {
   id: string;
-  harness: string;
+  harness: AgentRun["harness"];
+  model: string | null;
   task: string;
   status: AgentRunStatusView;
   category: AgentRunViewCategory;
@@ -64,6 +65,18 @@ export function bounded(value: string | null | undefined, maxLength: number): st
   return codePoints.length > maxLength
     ? `${codePoints.slice(0, maxLength - 1).join("")}…`
     : compact;
+}
+
+const AGENT_RUN_HARNESS_NAMES: Readonly<Record<AgentRun["harness"], string>> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+};
+
+export function formatAgentRunIdentity(harness: AgentRun["harness"], model: string | null): string {
+  const harnessName = AGENT_RUN_HARNESS_NAMES[harness]
+    ?? bounded(String(harness), AGENT_STATE_TASK_MAX_LENGTH);
+  const boundedModel = bounded(model, AGENT_STATE_TASK_MAX_LENGTH);
+  return boundedModel ? `${harnessName} · ${boundedModel}` : harnessName;
 }
 
 function statusView(status: AgentRunStatus, category: AgentRunViewCategory): AgentRunStatusView {
@@ -111,6 +124,7 @@ function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<st
   return {
     id: run.id,
     harness: run.harness,
+    model: run.model,
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
     status: statusView(run.status, category),
     category,
@@ -165,7 +179,8 @@ export interface AgentRunCompletionEnvelope {
   parentThreadId: string | null;
   runId: string;
   childSessionId: string | null;
-  harness: string;
+  harness: AgentRun["harness"];
+  model: string | null;
   task: string;
   outcome: AgentRunStatus;
   completedAt: string;
@@ -197,6 +212,7 @@ export function createAgentRunCompletionEnvelope(
     runId: run.id,
     childSessionId: run.childSessionId,
     harness: run.harness,
+    model: run.model,
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
     outcome: run.status,
     completedAt: run.finishedAt,

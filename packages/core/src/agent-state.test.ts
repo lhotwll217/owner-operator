@@ -14,6 +14,7 @@ import {
   bounded,
   createAgentRunCompletionEnvelope,
   deriveParentAgentState,
+  formatAgentRunIdentity,
 } from "./agent-state";
 import { agentRunFixture as run } from "../../../test/fixtures/agent-run";
 
@@ -26,6 +27,7 @@ const fleet = [
   }),
   run("running", AgentRunStatus.Running, {
     harness: AgentRunHarness.Codex,
+    model: "gpt-5.6-sol",
     activity: `Reading ${"nested/".repeat(30)}file.ts`,
     lastActivityAt: "2026-07-21T12:09:30.000Z",
     childSessionId: "codex-child",
@@ -63,8 +65,17 @@ assert.deepEqual(
     canCancel: running.canCancel,
     canResume: running.canResume,
     elapsedMs: running.elapsedMs,
+    model: running.model,
   },
-  { glyph: "●", text: "running", category: "active", canCancel: true, canResume: false, elapsedMs: 540_000 },
+  {
+    glyph: "●",
+    text: "running",
+    category: "active",
+    canCancel: true,
+    canResume: false,
+    elapsedMs: 540_000,
+    model: "gpt-5.6-sol",
+  },
 );
 assert.ok(running.latestActivity.length <= AGENT_STATE_ACTIVITY_MAX_LENGTH);
 assert.ok(!running.latestActivity.includes("/tmp/repo"), "detail does not invent or expose cwd");
@@ -183,6 +194,7 @@ assert.equal(approvedFooter.footer, "◦ 1 queued · ● 2 running    /agent-sta
 
 const terminal = run("completed-new", AgentRunStatus.Completed, {
   task: "Summarize authentication findings",
+  model: "sonnet",
   childSessionId: "child-123",
   resultTail: "z".repeat(2_000),
   finishedAt: "2026-07-21T12:09:00.000Z",
@@ -198,6 +210,7 @@ const envelope = createAgentRunCompletionEnvelope(terminal, {
 });
 assert.equal(envelope.version, 1);
 assert.equal(envelope.eventId, agentRunCompletionEventId(terminal.id));
+assert.equal(envelope.model, "sonnet");
 assert.equal(envelope.elapsedMs, 480_000);
 assert.equal(envelope.evidence.trust, "untrusted");
 assert.ok(envelope.evidence.result.length <= AGENT_STATE_RESULT_MAX_LENGTH, "child result is bounded");
@@ -212,6 +225,8 @@ assert.equal(hostileEnvelope.evidence.trust, "untrusted");
 assert.doesNotMatch(hostileEnvelope.evidence.result, /[\p{Cc}\p{Cf}]/u, "control and format characters stay inert in every adapter");
 assert.doesNotMatch(hostileEnvelope.parentInstruction, /approve destructive work/);
 assert.equal(bounded("😀😀😀", 2), "😀…", "truncation counts code points instead of splitting a surrogate pair");
+assert.equal(formatAgentRunIdentity(AgentRunHarness.Codex, "gpt-5.6-sol"), "Codex · gpt-5.6-sol");
+assert.equal(formatAgentRunIdentity(AgentRunHarness.ClaudeCode, "sonnet"), "Claude Code · sonnet");
 assert.throws(
   () => createAgentRunCompletionEnvelope(run("not-done", AgentRunStatus.Running)),
   /terminal run/,

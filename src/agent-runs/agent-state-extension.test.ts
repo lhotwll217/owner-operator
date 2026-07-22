@@ -21,10 +21,12 @@ const rows = [
   run("running", AgentRunStatus.Running, {
     task: "Task running",
     harness: AgentRunHarness.Codex,
+    model: "gpt-5.6-sol",
     activity: "Reviewing the gateway reconnect path",
   }),
   run("failed", AgentRunStatus.Failed, {
     task: "Investigate ACP startup",
+    model: "sonnet",
     error: "Handshake failed",
     childSessionId: "failed-child",
   }),
@@ -42,12 +44,14 @@ assert.match(wide, /! attention/);
 assert.match(wide, /● running/);
 assert.match(wide, /✓ completed/);
 assert.match(wide, /enter inspect/);
+assert.match(wide, /Codex · gpt-5\.6-sol/);
 assert.doesNotMatch(wide, /Task:/, "details require explicit inspection");
 
 picker.handleInput("\r");
 const inspected = picker.render(100).join("\n");
 assert.match(inspected, /Task:/);
 assert.match(inspected, /Harness:/);
+assert.match(inspected, /Claude Code · sonnet/);
 assert.match(inspected, /Status:/);
 assert.match(inspected, /Elapsed:/);
 assert.match(inspected, /Activity:/);
@@ -75,7 +79,7 @@ assert.deepEqual(actions, [{ kind: "resume", runId: "failed" }]);
 // footer and picker, cancellation is confirmed, and shutdown clears both subscription/footer.
 const calls: string[] = [];
 let gatewayListener: ((event: { kind: GatewayEventKind }) => void) | undefined;
-let gatewayRows = [run("running", AgentRunStatus.Running)];
+let gatewayRows = [run("running", AgentRunStatus.Running, { model: "sonnet" })];
 const gateway = {
   listAgentRuns: async (parent?: string) => { calls.push(`list:${parent}`); return gatewayRows; },
   cancelAgentRun: async (id: string) => {
@@ -106,6 +110,7 @@ extension({
 
 const statuses: Array<string | undefined> = [];
 let confirmed = false;
+const confirmationDetails: string[] = [];
 const notices: string[] = [];
 const ctx = {
   mode: "tui",
@@ -114,7 +119,7 @@ const ctx = {
     theme,
     setStatus(_key: string, text: string | undefined) { statuses.push(text); },
     notify(message: string) { notices.push(message); },
-    confirm: async () => confirmed,
+    confirm: async (_title: string, details: string) => { confirmationDetails.push(details); return confirmed; },
     custom: async (factory: Function) => await new Promise((resolve) => {
       const component = factory({ requestRender() {} }, theme, {}, resolve);
       component.handleInput("c");
@@ -127,6 +132,8 @@ assert.ok(statuses.includes("● 1 running    /agent-state"));
 assert.ok(command);
 await command!.handler("", ctx);
 assert.ok(!calls.includes("cancel:running"), "declined confirmation does not cancel");
+assert.match(confirmationDetails.at(-1) ?? "", /Task running|task running/);
+assert.match(confirmationDetails.at(-1) ?? "", /Claude Code · sonnet/);
 confirmed = true;
 await command!.handler("", ctx);
 assert.ok(calls.includes("cancel:running"), "confirmed picker action cancels through the parent session");

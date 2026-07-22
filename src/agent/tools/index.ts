@@ -25,7 +25,7 @@ export const ownerOperatorCustomTools = [
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
   withOoRenderers(manageScheduleTool, "manage schedule", { summarizeCall: (args) => args.id ?? "" }),
   withOoRenderers(delegateAgentTool, "delegate", {
-    summarizeCall: (args) => [args.harness, args.task].filter(Boolean).join(" · "),
+    summarizeCall: (args) => args.task ?? "",
     summarizeResult: (result) => formatAgentRunRow(result?.details ? toAgentRunRowView(result.details) : {}),
   }),
   withOoRenderers(manageAgentRunTool, "manage run", {
