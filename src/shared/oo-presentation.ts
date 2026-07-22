@@ -261,57 +261,21 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
 };
 
 // ---- Zero-dump shim ------------------------------------------------------------------
-// Three things pi renders into the chat scrollback with no extension hook to stop them:
-// tool-execution rows (`chatContainer.addChild(new ToolExecutionComponent(...))`), thinking
+// Two things pi renders into the chat scrollback with no extension hook to stop them: thinking
 // blocks inside assistant messages (`hideThinkingBlock` still renders a label line — and an
 // empty label is ANSI-wrapped, so pi-tui emits a blank padded line, ~2 blank lines per
 // reasoning turn), and package/version update notifications on launch. We own the
-// InteractiveMode construction site (interactive.ts), so we quiet all three at its one chat
+// InteractiveMode construction site (interactive.ts), so we quiet both at its one chat
 // seam: every chat component passes through `chatContainer.addChild`. #34's PRD sanctioned
 // exactly this kind of thin shim for the pieces pi exposes no API for. Components are matched
 // by class name, so a pi rename fails loudly in the unit test (which renders pi's real
 // components) rather than silently letting the dump back in.
-const TOOL_EXECUTION_COMPONENT = "ToolExecutionComponent";
+// Tool-row rendering is now owned by the pi-tool-display extension (supported override API),
+// so the raw tool-row gate that #89 required is gone.
 const ASSISTANT_MESSAGE_COMPONENT = "AssistantMessageComponent";
-const VISIBLE_TOOL_ROWS = new Set(["delegate_agent", "manage_agent_run"]);
 
 const className = (child: unknown): string | undefined =>
   (child as { constructor?: { name?: string } } | null)?.constructor?.name;
-
-/** True for Pi's tool-row component. */
-export function isToolExecutionRow(child: unknown): boolean {
-  return className(child) === TOOL_EXECUTION_COMPONENT;
-}
-
-/** Delegated-run tools own compact snapshot rendering, so their rows remain visible without raw
- * expansion. Pi's pinned ToolExecutionComponent constructor stores `toolName` on the component;
- * see node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js. */
-function isVisibleToolExecutionRow(child: unknown): boolean {
-  const toolName = (child as { toolName?: unknown } | null)?.toolName;
-  return typeof toolName === "string" && VISIBLE_TOOL_ROWS.has(toolName);
-}
-
-/** Keep raw tool components in their source position, but render zero lines until Pi's separate
- * tool-detail expansion is explicitly enabled. The pinned Pi expansion contract and the reason
- * this narrow construction-site shim exists are recorded in docs/inspiration.md. */
-function gateRawToolDetail(child: unknown): void {
-  const component = child as {
-    expanded?: boolean;
-    render?: (width: number) => string[];
-    setExpanded?: (expanded: boolean) => void;
-  };
-  let rawExpanded = component.expanded === true;
-  if (typeof component.render === "function") {
-    const render = component.render.bind(component);
-    component.render = (width: number): string[] => rawExpanded ? render(width) : [];
-  }
-  if (typeof component.setExpanded !== "function") return;
-  const setExpanded = component.setExpanded.bind(component);
-  component.setExpanded = (expanded: boolean): void => {
-    rawExpanded = expanded;
-    setExpanded(expanded);
-  };
-}
 
 /** True for the pi assistant-message component whose thinking rendering we mute. */
 export function isAssistantMessageRow(child: unknown): boolean {
@@ -348,9 +312,9 @@ function muteThinkingRendering(child: unknown): void {
   if (component.lastMessage) component.updateContent(component.lastMessage);
 }
 
-/** Quiet a constructed pi InteractiveMode in place: raw tool rows render only under Pi's
- * explicit tool expansion, thinking blocks never render, and startup notices stay silent.
- * Structural (duck-typed) so it never imports Pi internals; a no-op if Pi's shape shifts. */
+/** Quiet a constructed pi InteractiveMode in place: thinking blocks never render, and startup
+ * notices stay silent. Structural (duck-typed) so it never imports Pi internals; a no-op if
+ * Pi's shape shifts. */
 export function quietOoInteractiveMode(mode: unknown): void {
   if (typeof mode !== "object" || mode === null) return;
   const m = mode as {
@@ -362,7 +326,6 @@ export function quietOoInteractiveMode(mode: unknown): void {
   if (chat && typeof chat.addChild === "function") {
     const original = chat.addChild.bind(chat);
     chat.addChild = (child: unknown): void => {
-      if (isToolExecutionRow(child) && !isVisibleToolExecutionRow(child)) gateRawToolDetail(child);
       if (isAssistantMessageRow(child)) muteThinkingRendering(child); // reasoning renders nothing
       original(child);
     };
