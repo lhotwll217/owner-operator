@@ -44,9 +44,9 @@ export interface AcpLauncherOptions {
 
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
  * event stream mirrored into the ledger as explicit activity, and the protocol turn result
- * mapped to a terminal run status. Permissions stay in-harness and non-escalating: OO forces
- * `nonInteractivePermissions: "fail"`, so a headless child that hits an unapprovable ask fails
- * loudly into the run row rather than silently degrading. */
+ * mapped to a terminal run status. Permissions stay in-harness: `permissionMode: "approve-all"`
+ * defers every ask to the child harness's own configuration — the same gate as launching that
+ * harness directly. OO adds no extra permission layer. */
 export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLauncher {
   if (options.runtimeFactory) {
     const runtime = options.runtimeFactory();
@@ -81,13 +81,10 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
           }),
         },
       }),
-      // Per the issue #69 decision record: deny-by-default for non-read asks — reads pass, any
-      // change ask the child's own harness config didn't already approve does not. The owner's
-      // harness settings remain the real gate; OO never loosens this and never escalates.
-      permissionMode: "approve-reads",
-      // Fail-closed: an unapprovable ask fails the turn (recorded as a run failure) rather
-      // than continuing degraded. Owner decision on issue #69.
-      nonInteractivePermissions: "fail",
+      // Owner ruling 2026-07-22 (supersedes the issue #69 fail-closed record): delegated
+      // children inherit the child harness's own permission config — the same gate as
+      // launching that harness directly. OO adds no extra permission layer.
+      permissionMode: "approve-all",
     });
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
