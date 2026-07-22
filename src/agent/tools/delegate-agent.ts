@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import {
+  AGENT_RUN_EFFORTS,
   AgentRunHarness,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
@@ -14,6 +15,11 @@ import { agentRunToolResult } from "./agent-run-result";
 const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
   { description: "Child harness to delegate to: claude-code | codex." },
+);
+
+const EffortSchema = Type.Union(
+  AGENT_RUN_EFFORTS.map((effort) => Type.Literal(effort)),
+  { description: `Reasoning effort: ${AGENT_RUN_EFFORTS.join(" | ")}.` },
 );
 
 type DelegateAgentGateway = Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
@@ -41,6 +47,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
         minLength: 1,
         description: "Pin the child's model. Omit to use Owner Operator's configured default for the harness.",
       })),
+      effort: Type.Optional(EffortSchema),
       timeoutSeconds: Type.Optional(Type.Integer({
         minimum: 1,
         maximum: MAX_AGENT_RUN_TIMEOUT_SECONDS,
@@ -64,6 +71,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
         cwd,
         parentThreadId: ctx.sessionManager.getSessionId(),
         ...(params.model !== undefined ? { model: params.model } : {}),
+        ...(params.effort !== undefined ? { effort: params.effort } : {}),
         ...(params.timeoutSeconds ? { timeoutSeconds: params.timeoutSeconds } : {}),
       });
       if (params.waitSeconds && params.waitSeconds > 0) {

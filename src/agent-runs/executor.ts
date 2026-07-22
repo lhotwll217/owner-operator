@@ -6,6 +6,7 @@ import {
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
+  isAgentRunEffort,
   isTerminalAgentRunStatus,
   type AgentRun,
   type AgentRunCreateInput,
@@ -15,7 +16,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
-import { resolveAgentRunModel } from "./launch-config";
+import { resolveAgentRunEffort, resolveAgentRunModel } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
 const WAIT_POLL_MS = 100;
@@ -130,6 +131,9 @@ export class AgentRunExecutor {
     }
     if (!input.task.trim()) throw new Error("delegation task is required");
     if (!isAbsolute(input.cwd)) throw new Error("delegation cwd must be an absolute path");
+    if (input.effort != null && !isAgentRunEffort(input.effort)) {
+      throw new Error(`unknown delegation effort: ${String(input.effort)}`);
+    }
     const timeoutSeconds = input.timeoutSeconds ?? DEFAULT_AGENT_RUN_TIMEOUT_SECONDS;
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > MAX_AGENT_RUN_TIMEOUT_SECONDS) {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
@@ -147,6 +151,7 @@ export class AgentRunExecutor {
       cwd: input.cwd,
       parentThreadId: input.parentThreadId ?? null,
       model: resolveAgentRunModel(input.harness, input.model),
+      effort: resolveAgentRunEffort(input.harness, input.effort),
       depth,
       timeoutSeconds,
     });
@@ -213,6 +218,7 @@ export class AgentRunExecutor {
       cwd: run.cwd,
       parentThreadId: run.parentThreadId,
       model: run.model,
+      effort: run.effort,
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
       resumeOfRunId: run.id,

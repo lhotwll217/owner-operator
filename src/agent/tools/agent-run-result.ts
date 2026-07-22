@@ -6,6 +6,7 @@ export function toAgentRunRowView(run: AgentRun): AgentRunRowView {
   return {
     harness: run.harness,
     model: run.model,
+    effort: run.effort,
     task: run.task,
     status: run.status,
     createdAt: run.createdAt,

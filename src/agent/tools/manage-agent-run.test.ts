@@ -9,6 +9,8 @@ const run: AgentRun = {
   cwd: "/tmp/example-repo",
   parentThreadId: "parent-1",
   model: null,
+  effort: null,
+  effortApplied: false,
   depth: 1,
   status: AgentRunStatus.Running,
   createdAt: "2026-07-17T10:00:00.000Z",

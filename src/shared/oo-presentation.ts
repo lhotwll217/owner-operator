@@ -16,7 +16,7 @@
 // the chat scrollback — are handled by the `quietOoInteractiveMode` shim at the bottom.
 
 import { Text, type Component } from "@earendil-works/pi-tui";
-import type { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
+import type { AgentRun, AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import { formatTurnDuration } from "@owner-operator/core/activity";
 import { formatAgentRunIdentity } from "@owner-operator/core/agent-state";
 import { OO_TURN_ACTIVITY_ENTRY, turnTraceExtension } from "./turn-trace";
@@ -133,6 +133,7 @@ export function buildOoTheme(mode: "truecolor" | "256color" = "truecolor"): Them
 export interface AgentRunRowView {
   harness?: AgentRunHarness;
   model?: string | null;
+  effort?: AgentRun["effort"];
   task?: string;
   status?: AgentRunStatus;
   createdAt?: string | null;
@@ -149,7 +150,7 @@ export function elapsedLabel(fromIso?: string | null, toIso?: string | null): st
 /** One compact line for a delegated run. Activity/result/error bodies never enter this view. */
 export function formatAgentRunRow(run: AgentRunRowView, nowIso?: string): string {
   const parts: string[] = [];
-  if (run.harness) parts.push(formatAgentRunIdentity(run.harness, run.model ?? null));
+  if (run.harness) parts.push(formatAgentRunIdentity(run.harness, run.model ?? null, run.effort ?? null));
   if (run.task) parts.push(truncate(run.task, 60));
   if (run.status) parts.push(run.status);
   const elapsed = elapsedLabel(run.createdAt, run.finishedAt ?? nowIso ?? null);

@@ -22,11 +22,14 @@ const rows = [
     task: "Task running",
     harness: AgentRunHarness.Codex,
     model: "gpt-5.6-sol",
+    effort: "high",
+    effortApplied: true,
     activity: "Reviewing the gateway reconnect path",
   }),
   run("failed", AgentRunStatus.Failed, {
     task: "Investigate ACP startup",
     model: "sonnet",
+    effort: "low",
     error: "Handshake failed",
     childSessionId: "failed-child",
   }),
@@ -44,14 +47,16 @@ assert.match(wide, /! attention/);
 assert.match(wide, /● running/);
 assert.match(wide, /✓ completed/);
 assert.match(wide, /enter inspect/);
-assert.match(wide, /Codex · gpt-5\.6-sol/);
+assert.match(wide, /Codex · gpt-5\.6-sol · high/);
 assert.doesNotMatch(wide, /Task:/, "details require explicit inspection");
 
 picker.handleInput("\r");
 const inspected = picker.render(100).join("\n");
+const inspectedText = inspected.replace(/\u001b\[[0-9;]*m/g, "");
 assert.match(inspected, /Task:/);
 assert.match(inspected, /Harness:/);
 assert.match(inspected, /Claude Code · sonnet/);
+assert.match(inspectedText, /Effort:\s+low/);
 assert.match(inspected, /Status:/);
 assert.match(inspected, /Elapsed:/);
 assert.match(inspected, /Activity:/);

@@ -14,14 +14,27 @@ assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to a
 
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };
+const appliedOptions: Array<{ key: string; value: string }> = [];
+const runtimeCalls: string[] = [];
 const runtime = {
-  ensureSession: async () => handle,
-  startTurn: () => ({
-    events: (async function* () {
-      yield { type: "text_delta", stream: "output", text: oversized };
-    })(),
-    result: Promise.resolve({ status: "completed" }),
-  }),
+  ensureSession: async () => { runtimeCalls.push("ensure"); return handle; },
+  getCapabilities: async () => {
+    runtimeCalls.push("capabilities");
+    return { controls: ["session/set_config_option"], configOptionKeys: ["model", "reasoning_effort"] };
+  },
+  setConfigOption: async ({ key, value }: { key: string; value: string }) => {
+    runtimeCalls.push("set-effort");
+    appliedOptions.push({ key, value });
+  },
+  startTurn: () => {
+    runtimeCalls.push("turn");
+    return {
+      events: (async function* () {
+        yield { type: "text_delta", stream: "output", text: oversized };
+      })(),
+      result: Promise.resolve({ status: "completed" }),
+    };
+  },
 } as unknown as AcpRuntime;
 
 const run: AgentRun = {
@@ -31,6 +44,8 @@ const run: AgentRun = {
   cwd: process.cwd(),
   parentThreadId: "parent",
   model: null,
+  effort: "high",
+  effortApplied: false,
   depth: 1,
   status: AgentRunStatus.Running,
   createdAt: "2026-07-20T00:00:00.000Z",
@@ -60,6 +75,24 @@ assert.equal(result.acpxRecordId, handle.acpxRecordId);
 assert.ok(Buffer.byteLength(result.resultText) <= 64 * 1024, "one oversized event stays within the launcher cap");
 assert.ok(result.resultText.endsWith("newest-tail"), "the rolling buffer preserves the newest bytes");
 assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "acpx-record" });
+assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "high" }]);
+assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
+assert.deepEqual(runtimeCalls, ["ensure", "capabilities", "set-effort", "turn"], "effort applies after setup and before the turn");
+
+const unadvertisedOptions: Array<{ key: string; value: string }> = [];
+const unadvertisedRuntime = {
+  ensureSession: async () => handle,
+  getCapabilities: async () => ({ controls: ["session/set_config_option"], configOptionKeys: ["model"] }),
+  setConfigOption: async (option: { key: string; value: string }) => { unadvertisedOptions.push(option); },
+  startTurn: runtime.startTurn,
+} as unknown as AcpRuntime;
+await createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
+  run,
+  resumeSessionId: null,
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.deepEqual(unadvertisedOptions, [], "effort is not applied when the session does not advertise reasoning_effort");
 
 const backendOnlyRuntime = {
   ensureSession: async () => ({ backendSessionId: "backend-session", acpxRecordId: "backend-record" }),

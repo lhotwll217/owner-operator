@@ -93,7 +93,10 @@ export class AgentStatePicker {
       lines.push(line(`${statusColor(this.theme, selected)} · ${this.theme.fg("text", selected.task)}`));
       lines.push("", line(this.theme.fg("borderMuted", "─".repeat(safeWidth))));
       lines.push(line(`${this.theme.fg("dim", "Task:")} ${selected.task}`));
-      lines.push(line(`${this.theme.fg("dim", "Harness:")} ${formatAgentRunIdentity(selected.harness, selected.model)}`));
+      lines.push(line(`${this.theme.fg("dim", "Harness:")} ${formatAgentRunIdentity(selected.harness, selected.model, null)}`));
+      if (selected.effort) {
+        lines.push(line(`${this.theme.fg("dim", "Effort:")} ${selected.effort}`));
+      }
       lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
       lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
       lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
@@ -115,7 +118,7 @@ export class AgentStatePicker {
       const prefix = selected ? this.theme.fg("accent", "› Selected · ") : "  ";
       const task = selected ? this.theme.fg("text", run.task) : this.theme.fg("muted", run.task);
       const wideContext = safeWidth >= 60
-        ? ` · ${formatAgentRunIdentity(run.harness, run.model)} · ${formatAgentElapsed(run.elapsedMs)}`
+        ? ` · ${formatAgentRunIdentity(run.harness, run.model, run.effort)} · ${formatAgentElapsed(run.elapsedMs)}`
         : "";
       lines.push(line(`${prefix}${statusColor(this.theme, run)} · ${task}${this.theme.fg("dim", wideContext)}`));
     }
@@ -193,7 +196,7 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
             const confirmed = await ctx.ui.confirm(
               "Cancel delegated agent?",
               run
-                ? `${run.status.glyph} ${run.status.text} · ${run.task} · ${formatAgentRunIdentity(run.harness, run.model)}`
+                ? `${run.status.glyph} ${run.status.text} · ${run.task} · ${formatAgentRunIdentity(run.harness, run.model, run.effort)}`
                 : selected.runId,
             );
             if (!confirmed) return;

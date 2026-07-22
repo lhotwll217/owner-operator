@@ -23,6 +23,8 @@ export interface AgentRunView {
   id: string;
   harness: AgentRun["harness"];
   model: string | null;
+  effort: AgentRun["effort"];
+  effortApplied: boolean;
   task: string;
   status: AgentRunStatusView;
   category: AgentRunViewCategory;
@@ -72,11 +74,16 @@ const AGENT_RUN_HARNESS_NAMES: Readonly<Record<AgentRun["harness"], string>> = {
   codex: "Codex",
 };
 
-export function formatAgentRunIdentity(harness: AgentRun["harness"], model: string | null): string {
+export function formatAgentRunIdentity(
+  harness: AgentRun["harness"],
+  model: string | null,
+  effort: AgentRun["effort"],
+): string {
   const harnessName = AGENT_RUN_HARNESS_NAMES[harness]
     ?? bounded(String(harness), AGENT_STATE_TASK_MAX_LENGTH);
   const boundedModel = bounded(model, AGENT_STATE_TASK_MAX_LENGTH);
-  return boundedModel ? `${harnessName} · ${boundedModel}` : harnessName;
+  const boundedEffort = bounded(effort, AGENT_STATE_TASK_MAX_LENGTH);
+  return [harnessName, boundedModel, boundedEffort].filter(Boolean).join(" · ");
 }
 
 function statusView(status: AgentRunStatus, category: AgentRunViewCategory): AgentRunStatusView {
@@ -125,6 +132,8 @@ function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<st
     id: run.id,
     harness: run.harness,
     model: run.model,
+    effort: run.effort,
+    effortApplied: run.effortApplied,
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
     status: statusView(run.status, category),
     category,
@@ -181,6 +190,8 @@ export interface AgentRunCompletionEnvelope {
   childSessionId: string | null;
   harness: AgentRun["harness"];
   model: string | null;
+  effort: AgentRun["effort"];
+  effortApplied: boolean;
   task: string;
   outcome: AgentRunStatus;
   completedAt: string;
@@ -213,6 +224,8 @@ export function createAgentRunCompletionEnvelope(
     childSessionId: run.childSessionId,
     harness: run.harness,
     model: run.model,
+    effort: run.effort,
+    effortApplied: run.effortApplied,
     task: bounded(run.task, AGENT_STATE_TASK_MAX_LENGTH),
     outcome: run.status,
     completedAt: run.finishedAt,

@@ -125,6 +125,15 @@ and terminal styling are adapters over that contract.
   session options, and a caller pin always wins. When omitted, `delegate_agent` resolves the
   per-harness default from the runtime [launch configuration](../src/agent-runs/launch-config.ts)
   before creating the durable row; it never inherits an unsuitable ambient harness default.
+- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`). Its canonical vocabulary
+  lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts); resolution follows the same caller
+  pin then per-harness [launch configuration](../src/agent-runs/launch-config.ts) order as model and
+  lands in the durable row before launch. Legacy rows and runs with neither a caller pin nor a
+  harness default retain `NULL`; clients omit unknown effort instead of displaying a placeholder.
+- **Effort application** is owned by the [ACP launcher](../src/agent-runs/acp-launcher.ts), which
+  uses only session-advertised config options. The durable `effort_applied` field distinguishes
+  recorded intent from successful application; its contract lives in
+  [schema docs](../src/state/schema-docs.ts).
 - **Process ownership is explicit on POSIX.** Before `acpx` can spawn, the launcher persists a
   lease and puts its unguessable id on a stable Owner Operator wrapper's command line. Normal
   completion closes the ACP process tree and lease; daemon startup reaps only orphaned trees whose
@@ -155,7 +164,7 @@ In the terminal, the `delegate_agent`/`manage_agent_run` tools retain their comp
 snapshot row (`formatAgentRunRow` in `src/shared/oo-presentation.ts`). The parent-scoped live view
 is separate: the footer shows queued, running, and attention counts only while one exists;
 `/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
-harness and model, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
+harness, model and known effort, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
 Cancellation confirms before mutation.
 
 Terminal completion behavior is defined at four linked seams: the browser-safe

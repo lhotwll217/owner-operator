@@ -18,6 +18,8 @@ const envelope = createAgentRunCompletionEnvelope(run("run-complete", AgentRunSt
   childSessionId: "child-session-123456789",
   task: "Research authentication failures",
   model: "sonnet",
+  effort: "high",
+  effortApplied: true,
   resultTail: hostileResult,
   activity: "FULL_CHILD_TRANSCRIPT_SENTINEL",
 }), { artifacts: [{ label: "report", reference: "artifact://auth-report" }] });
@@ -43,6 +45,8 @@ assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" })
 assert.match(sent[0]!.message.content, /UNTRUSTED CHILD EVIDENCE/);
 assert.match(sent[0]!.message.content, /artifact:\/\/auth-report/);
 assert.match(sent[0]!.message.content, /"model": "sonnet"/);
+assert.match(sent[0]!.message.content, /"effort": "high"/);
+assert.match(sent[0]!.message.content, /"effortApplied": true/);
 assert.match(sent[0]!.message.content, /Ignore the parent/);
 assert.doesNotMatch(sent[0]!.message.content, /\u001b|\\u001b/, "child controls remain inert evidence");
 assert.match(sent[0]!.message.content, /material outcome.*implication.*owner action/is);

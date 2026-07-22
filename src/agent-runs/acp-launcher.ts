@@ -21,6 +21,7 @@ import {
  * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
+const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
 
 /** Where acpx persists its per-child session records. Relocated out of the system tmpdir
  * (acpx's default) into OO_HOME per the issue #69 hardening note, so restart reconciliation
@@ -122,6 +123,7 @@ async function runAcpTurn(
 ): Promise<AgentRunLaunchResult> {
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
+  await applyAdvertisedEffort(runtime, handle, request);
 
   // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
@@ -173,6 +175,24 @@ async function runAcpTurn(
     error: result.error.message,
     ...identity,
   };
+}
+
+/** Apply effort only through ACP's self-described config-option control. An absent option is an
+ * honest no-op: the durable row retains the requested effort with effortApplied=false. */
+async function applyAdvertisedEffort(
+  runtime: AcpRuntime,
+  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
+  request: AgentRunLaunchRequest,
+): Promise<void> {
+  if (!request.run.effort || !runtime.getCapabilities || !runtime.setConfigOption) return;
+  const capabilities = await runtime.getCapabilities({ handle });
+  if (!capabilities.configOptionKeys?.includes(REASONING_EFFORT_CONFIG_OPTION)) return;
+  await runtime.setConfigOption({
+    handle,
+    key: REASONING_EFFORT_CONFIG_OPTION,
+    value: request.run.effort,
+  });
+  request.onActivity({ effortApplied: true });
 }
 
 function ensureAcpSession(

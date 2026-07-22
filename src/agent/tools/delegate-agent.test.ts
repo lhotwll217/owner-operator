@@ -18,6 +18,7 @@ const backend = {
       cwd: input.cwd,
       parentThreadId: input.parentThreadId ?? null,
       model: input.model ?? null,
+      effort: input.effort ?? null,
     });
   },
   async waitAgentRun() { throw new Error("wait not expected"); },
@@ -49,4 +50,12 @@ await tool.execute("pinned-codex", {
 }, undefined, undefined, context);
 assert.equal(inputs[2]?.model, "caller-selected-model", "a caller-pinned model always wins");
 
-process.stdout.write("ok — delegate_agent defers defaults while preserving caller pins\n");
+await tool.execute("pinned-effort", {
+  harness: AgentRunHarness.Codex,
+  task: "review changes",
+  cwd: process.cwd(),
+  effort: "xhigh",
+}, undefined, undefined, context);
+assert.equal(inputs[3]?.effort, "xhigh", "the tool preserves a caller-pinned effort");
+
+process.stdout.write("ok — delegate_agent defers defaults while preserving model and effort pins\n");
