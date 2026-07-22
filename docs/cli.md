@@ -29,10 +29,11 @@ prompt.
 
 ## Interactive turn activity
 
-While an interactive turn is active, the thread shows an ordered timeline rail containing only
-provider-supplied reasoning summaries and allowlisted semantic tool labels. Prior actions use the
-muted `│` rail and the current action uses the emphasized `●` marker, so status never depends on
-color alone. Tool arguments, results, retries, and technical failures stay out of this trace.
+While an interactive turn is active, the thread shows provider-supplied reasoning summaries and
+allowlisted semantic tool labels as uniform dim rows in source order. The latest three remain
+visible; older rows fold behind `▶ N earlier activities`, and the current action is the final row
+with a trailing ellipsis. Tool arguments, results, retries, and technical failures stay out of
+this trace.
 
 After settlement, meaningful activity collapses to `▶ Worked for… · N actions`. Pi's expansion key
 (`Ctrl+O` by default) first restores the semantic trace; a second use explicitly reveals raw tool

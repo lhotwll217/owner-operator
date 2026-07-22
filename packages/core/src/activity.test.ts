@@ -26,11 +26,11 @@ assert.deepEqual(active.actions.map(({ label }) => label), [
   "Reading files",
   "Searching code",
 ], "retained summaries and allowlisted tools stay in source order; unknown tools are omitted");
-assert.deepEqual(active.actions.map(({ marker, emphasis }) => ({ marker, emphasis })), [
-  { marker: "│", emphasis: "muted" },
-  { marker: "│", emphasis: "muted" },
-  { marker: "●", emphasis: "current" },
-], "the current action has both a distinct marker and emphasis; prior actions are muted");
+assert.deepEqual(active.actions, [
+  { kind: "thinking_summary", label: "Inspecting the launcher" },
+  { kind: "tool", label: "Reading files" },
+  { kind: "tool", label: "Searching code" },
+], "§5.1 keeps the core view free of presentation markers and per-row emphasis");
 
 const markdownSummary = replayTurnTrace([
   { kind: "turn_started", turnId: "markdown", at: 0 },
@@ -50,6 +50,7 @@ assert.equal(
 );
 
 assert.equal(semanticActionForTool("bash"), "Running commands");
+assert.equal(semanticActionForTool("manage_agent_run.cancel"), "Cancelling an agent");
 assert.equal(semanticActionForTool("not_registered"), undefined, "the deterministic map is an allowlist");
 
 const tenEvents: TurnActivityEvent[] = [
@@ -90,7 +91,7 @@ assert.deepEqual(compact, {
 const expanded = replayTurnTrace(settledEvents, { expanded: true });
 assert.equal(expanded.kind, "settled");
 assert.deepEqual(expanded.actions.map(({ label }) => label), Array.from({ length: 10 }, (_, index) => `Action ${index + 1}`));
-assert.ok(expanded.actions.every(({ marker, emphasis }) => marker === "│" && emphasis === "muted"), "settled expansion restores the trace without claiming a current action");
+assert.ok(expanded.actions.every((action) => Object.keys(action).sort().join(",") === "kind,label"), "§5.1 settled expansion restores semantic rows without styling state");
 assert.deepEqual(
   replayTurnTrace([...settledEvents, { kind: "tool", turnId: "turn-10", eventId: "late", at: 19_000, toolName: "write" }]),
   compact,

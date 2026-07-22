@@ -16,16 +16,17 @@ import { renderInRealPty } from "../../test/fixtures/real-pty";
 import { ooPresentationExtension, quietOoInteractiveMode } from "./oo-presentation";
 import { OO_TURN_ACTIVITY_ENTRY } from "./turn-trace";
 
+const expectedActions = [
+  "Inspecting the delegated-run launcher",
+  "Comparing adapter versions",
+  "Reviewing activity patterns",
+  "Updating the live acceptance test",
+  "Running typecheck and lint",
+  "Running full verification",
+];
+
 if (process.env.OO_TURN_TRACE_PTY_CHILD === "1") {
   const mode = process.argv[2] ?? "active";
-  const actions = [
-    "Inspecting the delegated-run launcher",
-    "Comparing adapter versions",
-    "Reviewing activity patterns",
-    "Updating the live acceptance test",
-    "Running typecheck and lint",
-    "Running full verification",
-  ];
   const root = mkdtempSync(join(tmpdir(), "oo-turn-trace-pty-"));
   try {
     const agentDir = join(root, "agent");
@@ -43,7 +44,7 @@ if (process.env.OO_TURN_TRACE_PTY_CHILD === "1") {
     const sessionManager = SessionManager.inMemory(root);
     const events: TurnActivityEvent[] = [
       { kind: "turn_started", turnId: "pty-turn", at: 0 },
-      ...actions.map((summary, index): TurnActivityEvent => ({
+      ...expectedActions.map((summary, index): TurnActivityEvent => ({
         kind: "thinking_summary",
         turnId: "pty-turn",
         eventId: `action-${index}`,
@@ -141,24 +142,22 @@ async function renderInPty(width: number, mode: "active" | "settled" | "expanded
 const normal = await renderInPty(80, "active");
 assert.deepEqual(normal, [
   "",
-  "│ Inspecting the delegated-run launcher",
-  "│ Comparing adapter versions",
-  "│ Reviewing activity patterns",
-  "│ Updating the live acceptance test",
-  "│ Running typecheck and lint",
-  "● Running full verification",
-], "normal-width PTY matches the approved Timeline rail");
+  "▶ 3 earlier activities",
+  "Updating the live acceptance test",
+  "Running typecheck and lint",
+  "Running full verification…",
+], "§5.1 normal-width PTY matches the normalized folded rows");
 assert.equal(normal.filter((line) => line === "").length, 1, "Pi inserts exactly one spacer before inline activity");
 
 const narrow = await renderInPty(34, "active");
 assert.equal(narrow[0], "", "narrow mode retains exactly one leading transcript spacer");
 assert.ok(narrow.slice(1).every(Boolean), "narrow mode has no manufactured vertical gaps");
-assert.ok(narrow.some((line) => line.startsWith("│ ")), "narrow mode retains the prior-action rail");
-assert.ok(narrow.some((line) => line.startsWith("● ")), "narrow mode retains the non-color current marker");
+assert.ok(narrow.some((line) => line.startsWith("▶ 3 earlier activities")), "narrow mode retains the folded-history count");
+assert.ok(!narrow.some((line) => /^[│●] /.test(line)), "§5.1 removes rail glyphs at narrow widths too");
 for (const line of narrow) assert.ok([...line].length <= 34, `narrow line fits 34 columns: ${line}`);
 let sourceOffset = -1;
-const narrowText = narrow.slice(1).join(" ");
-for (const action of normal.slice(1).map((line) => line.slice(2))) {
+const narrowText = narrow.slice(1).join(" ").replace("…", "");
+for (const action of expectedActions.slice(-3)) {
   const next = narrowText.indexOf(action, sourceOffset + 1);
   assert.ok(next > sourceOffset, `narrow Pi surface retains ordered action: ${action}`);
   sourceOffset = next;
@@ -170,9 +169,9 @@ assert.deepEqual(await renderInPty(80, "settled"), [
 ], "settlement collapses through Pi's real custom-entry host");
 const expanded = await renderInPty(80, "expanded");
 assert.equal(expanded[0], "", "expanded activity keeps the single transcript spacer");
-assert.deepEqual(expanded.slice(1), normal.slice(1).map((line) => line.replace(/^● /, "│ ")), "Pi's first expansion restores the ordered semantic trace");
+assert.deepEqual(expanded.slice(1), expectedActions, "§5.1 Pi's first expansion restores uniform ordered semantic rows");
 const raw = await renderInPty(80, "raw");
 assert.ok(raw.some((line) => line.includes("/private/credential.txt") || line.includes("raw credential result")), "Pi's separate tool expansion restores raw detail explicitly");
 assert.ok(!normal.some((line) => line.includes("credential")), "raw arguments and results stay hidden in the normal Pi surface");
 
-process.stdout.write("ok — real Pi PTY TurnTrace: timeline at 80/34 columns, settlement, semantic/raw expansion\n");
+process.stdout.write("ok — real Pi PTY TurnTrace: normalized rows at 80/34 columns, settlement, semantic/raw expansion\n");

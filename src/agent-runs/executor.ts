@@ -139,8 +139,8 @@ export class AgentRunExecutor {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
     }
     // Enforce the delegation-depth cap, not just structurally: if the delegating thread is
-    // itself some run's child, this launch would sit one level deeper. A child needing a helper
-    // uses its harness's native subagents, which never touch the ledger.
+    // itself some run's child, this launch would sit one level deeper. The ACP task envelope also
+    // tells every delegated child to complete its work directly without native subagents.
     const depth = this.depthFor(input.parentThreadId ?? null);
     if (depth > AGENT_RUN_MAX_DEPTH) {
       throw new Error(`delegation depth ${depth} exceeds the cap of ${AGENT_RUN_MAX_DEPTH}`);

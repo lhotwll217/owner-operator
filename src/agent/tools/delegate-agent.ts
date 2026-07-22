@@ -36,9 +36,9 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
     description:
       "Launch a child coding agent (Claude Code or Codex) as a durable, daemon-owned delegated run. " +
       "Returns immediately with the run row; the child keeps running even if this session is " +
-      "interrupted or closed, and its result is recorded in the agent_runs ledger. Set waitSeconds " +
-      "to block up to that long for the result; otherwise inspect or control the run later with " +
-      "manage_agent_run, or read agent_runs via query_database.",
+      "interrupted or closed. Completion events arrive automatically: after delegation, do not poll " +
+      "or monitor the run. Use waitSeconds only when the owner explicitly requests a blocking wait; " +
+      "use manage_agent_run for cancel/resume control or an explicit owner-requested inspection.",
     parameters: Type.Object({
       harness: HarnessSchema,
       task: Type.String({ minLength: 1, description: "The task the child agent is asked to carry out." }),

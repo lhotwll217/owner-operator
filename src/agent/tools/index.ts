@@ -1,6 +1,5 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
-import { formatAgentRunRow, withOoRenderers } from "../../shared/oo-presentation";
-import { toAgentRunRowView } from "./agent-run-result";
+import { withOoRenderers } from "../../shared/oo-presentation";
 import { delegateAgentTool } from "./delegate-agent";
 import { manageAgentRunTool } from "./manage-agent-run";
 import { manageScheduleTool } from "./manage-schedule";
@@ -24,14 +23,8 @@ export const ownerOperatorCustomTools = [
   withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (args) => args.action ?? "" }),
   withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
   withOoRenderers(manageScheduleTool, "manage schedule", { summarizeCall: (args) => args.id ?? "" }),
-  withOoRenderers(delegateAgentTool, "delegate", {
-    summarizeCall: (args) => args.task ?? "",
-    summarizeResult: (result) => formatAgentRunRow(result?.details ? toAgentRunRowView(result.details) : {}),
-  }),
-  withOoRenderers(manageAgentRunTool, "manage run", {
-    summarizeCall: (args) => `${args.action ?? ""} ${args.id ?? ""}`.trim(),
-    summarizeResult: (result) => formatAgentRunRow(result?.details ? toAgentRunRowView(result.details) : {}),
-  }),
+  delegateAgentTool,
+  manageAgentRunTool,
 ];
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [

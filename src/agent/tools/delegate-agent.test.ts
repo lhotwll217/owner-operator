@@ -24,6 +24,7 @@ const backend = {
   async waitAgentRun() { throw new Error("wait not expected"); },
 } as Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
 const tool = createDelegateAgentTool({ resolveGateway: async () => backend });
+assert.match(tool.description, /do not poll/i, "the tool tells the Operator that completion is delivered automatically");
 const context = {
   sessionManager: { getSessionId: () => "parent-thread" },
 } as Parameters<typeof tool.execute>[4];

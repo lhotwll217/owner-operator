@@ -15,6 +15,7 @@ assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to a
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };
 const appliedOptions: Array<{ key: string; value: string }> = [];
+const turnTexts: string[] = [];
 const runtimeCalls: string[] = [];
 const runtime = {
   ensureSession: async () => { runtimeCalls.push("ensure"); return handle; },
@@ -26,8 +27,9 @@ const runtime = {
     runtimeCalls.push("set-effort");
     appliedOptions.push({ key, value });
   },
-  startTurn: () => {
+  startTurn: ({ text }: { text: string }) => {
     runtimeCalls.push("turn");
+    turnTexts.push(text);
     return {
       events: (async function* () {
         yield { type: "text_delta", stream: "output", text: oversized };
@@ -78,6 +80,9 @@ assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "
 assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "high" }]);
 assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
 assert.deepEqual(runtimeCalls, ["ensure", "capabilities", "set-effort", "turn"], "effort applies after setup and before the turn");
+assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
+assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
+assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
 
 const unadvertisedOptions: Array<{ key: string; value: string }> = [];
 const unadvertisedRuntime = {

@@ -23,6 +23,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
 import { createAgentRunDeliveryExtension } from "../agent-runs/agent-run-delivery-extension";
+import { agentRunLaunchExtension } from "../agent-runs/agent-run-launch";
 import { repoRoot } from "../shared/repo-root";
 import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
 import {
@@ -175,6 +176,10 @@ export async function createOwnerOperatorSession(
       {
         name: "owner-operator-permission-settings",
         factory: createPermissionSettingsExtension({ ooHome: paths.home }),
+      },
+      {
+        name: "owner-operator-agent-run-launch",
+        factory: agentRunLaunchExtension,
       },
       ...(deliveryExtension ? [{
         name: "owner-operator-agent-run-delivery",

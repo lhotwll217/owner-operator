@@ -84,6 +84,8 @@ assert.deepEqual(actions, [{ kind: "resume", runId: "failed" }]);
 // footer and picker, cancellation is confirmed, and shutdown clears both subscription/footer.
 const calls: string[] = [];
 let gatewayListener: ((event: { kind: GatewayEventKind }) => void) | undefined;
+let gatewayConnected: (() => void) | undefined;
+let gatewayDisconnected: (() => void) | undefined;
 let gatewayRows = [run("running", AgentRunStatus.Running, { model: "sonnet" })];
 const gateway = {
   listAgentRuns: async (parent?: string) => { calls.push(`list:${parent}`); return gatewayRows; },
@@ -94,9 +96,11 @@ const gateway = {
     return cancelled;
   },
   resumeAgentRun: async (id: string) => { calls.push(`resume:${id}`); return run(`${id}-resumed`, AgentRunStatus.Pending); },
-  subscribe: (listener: typeof gatewayListener) => {
+  subscribe: (listener: typeof gatewayListener, onConnected?: () => void, onDisconnected?: () => void) => {
     calls.push("subscribe");
     gatewayListener = listener;
+    gatewayConnected = onConnected;
+    gatewayDisconnected = onDisconnected;
     return () => calls.push("unsubscribe");
   },
 } as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "subscribe">;
@@ -134,6 +138,11 @@ const ctx = {
 await handlers.get("session_start")?.({}, ctx);
 assert.deepEqual(calls.slice(0, 2), ["list:parent-90", "subscribe"]);
 assert.ok(statuses.includes("● 1 running    /agent-state"));
+gatewayDisconnected?.();
+assert.equal(statuses.at(-1), undefined, "gateway loss clears stale live counts immediately");
+gatewayConnected?.();
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(statuses.at(-1), "● 1 running    /agent-state", "reconnect restores counts from the durable fleet list");
 assert.ok(command);
 await command!.handler("", ctx);
 assert.ok(!calls.includes("cancel:running"), "declined confirmation does not cancel");

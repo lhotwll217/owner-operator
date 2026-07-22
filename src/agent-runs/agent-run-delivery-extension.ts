@@ -24,6 +24,7 @@ interface AgentRunDeliveryRegistrationOptions {
   retryDelayMs?: number;
   onView?: (view: ParentAgentStateView, ctx: ExtensionContext) => void;
   onUnavailable?: (error: unknown, ctx: ExtensionContext) => void;
+  onDisconnected?: (ctx: ExtensionContext) => void;
   onStopped?: (ctx: ExtensionContext) => void;
 }
 
@@ -66,6 +67,9 @@ export function registerAgentRunDelivery(
         if (ownGeneration !== generation) return;
         candidate = new ParentRunSession(ctx.sessionManager.getSessionId(), gatewayParentRunAdapter(gateway), {
           completionAdapter: new PiParentCompletionAdapter(pi, ctx.sessionManager),
+          onDisconnected: () => {
+            if (ownGeneration === generation) options.onDisconnected?.(ctx);
+          },
           ...(options.successBatchDelayMs === undefined ? {} : { successBatchDelayMs: options.successBatchDelayMs }),
         });
         if (options.onView) {

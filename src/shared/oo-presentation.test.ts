@@ -50,8 +50,8 @@ assert.ok(isAssistantMessageRow({ constructor: { name: "AssistantMessageComponen
 assert.ok(!isAssistantMessageRow({ constructor: { name: "ToolExecutionComponent" } }), "tool rows are not assistant rows");
 assert.ok(!isAssistantMessageRow(null), "null is not an assistant row");
 
-// 4. quietOoInteractiveMode keeps generic raw tool rows hidden until Pi's separate expansion,
-//    while delegated-run rows and non-tool content remain visible and startup notices are silent.
+// 4. quietOoInteractiveMode keeps every raw tool row hidden until Pi's separate expansion,
+//    including delegated-run tools, while non-tool content remains visible and notices are silent.
 //    A fake mode stands in for pi's InteractiveMode (structural, no pi import) — mirrors how pi
 //    calls `chatContainer.addChild(component)` and `showPackageUpdateNotification(...)`.
 const children: unknown[] = [];
@@ -97,14 +97,15 @@ genericToolRow.expanded = false; // Pi's updateDisplay mutates internal fields, 
 assert.deepEqual(genericToolRow.render(), ["RAW read /secret/path result body"], "tool updates cannot bypass an explicit raw-detail expansion");
 genericToolRow.setExpanded(false);
 assert.deepEqual(genericToolRow.render(), [], "the separate expansion closes raw detail again");
-assert.deepEqual(delegateToolRow.render(), ["Claude Code · sonnet · research · running · 30s"], "the compact delegated-run snapshot stays visible by default");
-assert.deepEqual(manageRunToolRow.render(), ["Codex · gpt-5.6-sol · audit · completed · 1m"], "the compact run-management snapshot stays visible by default");
-assert.doesNotMatch(delegateToolRow.render().join("\n") + manageRunToolRow.render().join("\n"), /RAW|result body|failure|retry/i);
+assert.deepEqual(delegateToolRow.render(), [], "§5.1 removes delegate_agent's Pi tool-component exemption");
+assert.deepEqual(manageRunToolRow.render(), [], "§5.1 removes manage_agent_run's Pi tool-component exemption");
 fakeMode.toggleToolOutputExpansion();
 assert.equal(turnTraceRow.expanded, true, "the first Pi expansion reveals the semantic turn trace");
 assert.deepEqual(genericToolRow.render(), [], "semantic expansion does not reveal raw tool detail");
 fakeMode.toggleToolOutputExpansion();
 assert.deepEqual(genericToolRow.render(), ["RAW read /secret/path result body"], "the second Pi expansion explicitly reveals raw detail");
+assert.deepEqual(delegateToolRow.render(), ["Claude Code · sonnet · research · running · 30s"], "explicit raw expansion can inspect the delegate tool record");
+assert.deepEqual(manageRunToolRow.render(), ["Codex · gpt-5.6-sol · audit · completed · 1m"], "explicit raw expansion can inspect the management tool record");
 fakeMode.toggleToolOutputExpansion();
 assert.equal(turnTraceRow.expanded, false, "the third Pi expansion returns to compact turns");
 assert.deepEqual(genericToolRow.render(), [], "returning to compact hides raw detail");

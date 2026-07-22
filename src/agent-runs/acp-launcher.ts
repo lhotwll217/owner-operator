@@ -22,6 +22,13 @@ import {
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
 const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
+const CHILD_TASK_BOUNDARY =
+  "Do the work yourself. Do not launch nested or background agents; delegated children must complete the task directly.";
+
+/** Preserve the durable owner task verbatim while adding execution-only child policy. */
+export function delegatedChildTaskEnvelope(task: string): string {
+  return `${task}\n\n${CHILD_TASK_BOUNDARY}`;
+}
 
 /** Where acpx persists its per-child session records. Relocated out of the system tmpdir
  * (acpx's default) into OO_HOME per the issue #69 hardening note, so restart reconciliation
@@ -129,7 +136,7 @@ async function runAcpTurn(
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
   const turn = runtime.startTurn({
     handle,
-    text: request.run.task,
+    text: delegatedChildTaskEnvelope(request.run.task),
     mode: "prompt",
     requestId: request.run.id,
     signal: request.signal,

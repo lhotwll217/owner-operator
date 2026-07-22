@@ -8,9 +8,16 @@ import {
   TurnTraceStore,
   createTurnTraceExtension,
   renderTurnTraceText,
+  semanticToolNameFromPiCall,
   thinkingSummaryFromPiEvent,
   turnActivityEventsFromSessionEntries,
 } from "./turn-trace";
+
+assert.equal(
+  semanticToolNameFromPiCall("manage_agent_run", { action: "cancel", id: "secret-run-id" }),
+  "manage_agent_run.cancel",
+  "the Pi adapter selects a semantic control label without retaining tool arguments",
+);
 
 const harnessSummaryEvent = {
   type: "thinking_end",
@@ -136,12 +143,34 @@ for (const event of firstTurn.slice(0, -1)) activeStore.ingest(event);
 const activeView = activeStore.view("one");
 assert.ok(activeView);
 const activeText = stripVTControlCharacters(renderTurnTraceText(activeView, theme));
-assert.equal(activeText, "│ Inspecting the adapter\n● Reading files", "timeline rail matches approved variant C");
+assert.equal(activeText, "Inspecting the adapter\nReading files…", "§5.1 renders uniform dim rows with only the current action ellipsis");
 const settledView = replayStore.view("one");
 assert.ok(settledView);
 assert.equal(stripVTControlCharacters(renderTurnTraceText(settledView, theme)), "▶ Worked for 2s · 2 actions");
 const expandedText = stripVTControlCharacters(renderTurnTraceText(replayStore.view("one", true)!, theme));
-assert.equal(expandedText, "│ Inspecting the adapter\n│ Reading files", "Pi expansion restores only the semantic trace");
+assert.equal(expandedText, "Inspecting the adapter\nReading files", "§5.1 expansion restores uniform semantic rows without rail glyphs");
+
+const foldedStore = new TurnTraceStore();
+for (const event of [
+  { kind: "turn_started", turnId: "folded", at: 0 },
+  ...Array.from({ length: 6 }, (_, index) => ({
+    kind: "thinking_summary" as const,
+    turnId: "folded",
+    eventId: `folded-${index}`,
+    at: index + 1,
+    summary: `Action ${index + 1}`,
+  })),
+] satisfies TurnActivityEvent[]) foldedStore.ingest(event);
+assert.equal(
+  stripVTControlCharacters(renderTurnTraceText(foldedStore.view("folded")!, theme)),
+  "▶ 3 earlier activities\nAction 4\nAction 5\nAction 6…",
+  "§5.1 folds active presentation to three uniform rows",
+);
+assert.equal(
+  stripVTControlCharacters(renderTurnTraceText(foldedStore.view("folded")!, theme, { expanded: true })),
+  "Action 1\nAction 2\nAction 3\nAction 4\nAction 5\nAction 6…",
+  "semantic expansion restores every active row in source order",
+);
 
 const narrow = renderTurnTraceText(activeView, theme);
 const { Text } = await import("@earendil-works/pi-tui");
@@ -278,4 +307,4 @@ assert.ok(piExpandedComponent?.render(80).some((line: string) => stripVTControlC
 handlers.get("agent_start")?.({ type: "agent_start" }, ctx);
 assert.equal(workingVisibility.at(-1), true, "the next owner turn restores the working indicator");
 
-process.stdout.write("ok — Pi TurnTrace adapter: signed summaries, post-user placement, persistence/replay, timeline rendering, Pi expansion\n");
+process.stdout.write("ok — Pi TurnTrace adapter: signed summaries, post-user placement, persistence/replay, normalized rows, Pi expansion\n");

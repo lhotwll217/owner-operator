@@ -105,6 +105,13 @@ export function thinkingSummaryFromPiEvent(
   }
 }
 
+/** Reduce the one approved management-action field to an allowlist key before persistence. */
+export function semanticToolNameFromPiCall(toolName: string, args: unknown): string {
+  if (toolName !== "manage_agent_run" || !args || typeof args !== "object") return toolName;
+  const action = (args as { action?: unknown }).action;
+  return typeof action === "string" ? `${toolName}.${action}` : toolName;
+}
+
 /** Session-local adapter state. Core reduction remains pure; this owns only replay and expansion. */
 export class TurnTraceStore {
   private traces = new Map<string, TurnTrace>();
@@ -174,20 +181,25 @@ export class TurnTraceStore {
 
 }
 
-export function renderTurnTraceText(view: TurnTraceView, theme: Theme): string {
+export function renderTurnTraceText(
+  view: TurnTraceView,
+  theme: Theme,
+  options: { expanded?: boolean } = {},
+): string {
   if (view.kind === "hidden") return "";
   if (view.kind === "interrupted") return theme.fg("warning", `! ${view.message}`);
   if (view.kind === "settled" && !view.expanded) {
     return theme.fg("dim", `▶ ${view.summary}`);
   }
 
-  const lines: string[] = [];
-  for (const action of view.actions) {
-    if (action.emphasis === "current") {
-      lines.push(`${theme.fg("accent", action.marker)} ${theme.bold(theme.fg("text", action.label))}`);
-    } else {
-      lines.push(theme.fg("dim", `${action.marker} ${action.label}`));
-    }
+  const actions = view.kind === "active" && !options.expanded ? view.actions.slice(-3) : view.actions;
+  const hiddenCount = view.kind === "active" && !options.expanded ? view.actions.length - actions.length : 0;
+  const lines: string[] = hiddenCount > 0
+    ? [theme.fg("dim", `▶ ${hiddenCount} earlier activities`)]
+    : [];
+  for (const [index, action] of actions.entries()) {
+    const currentSuffix = view.kind === "active" && index === actions.length - 1 ? "…" : "";
+    lines.push(theme.fg("dim", `${action.label}${currentSuffix}`));
   }
   return lines.join("\n");
 }
@@ -203,7 +215,7 @@ class TurnTraceComponent implements Component {
   render(width: number): string[] {
     const view = this.store.view(this.turnId, this.expanded);
     if (!view) return [];
-    const value = renderTurnTraceText(view, this.theme);
+    const value = renderTurnTraceText(view, this.theme, { expanded: this.expanded });
     return value ? new Text(value, 0, 0).render(width) : [];
   }
 
@@ -298,14 +310,15 @@ export function createTurnTraceExtension(options: { now?: () => number } = {}): 
     });
 
     pi.on("tool_execution_start", (event, ctx) => {
-      if (!activeTurnId || !semanticActionForTool(event.toolName)) return;
+      const semanticToolName = semanticToolNameFromPiCall(event.toolName, event.args);
+      if (!activeTurnId || !semanticActionForTool(semanticToolName)) return;
       ensureAnchor();
       if (append({
         kind: "tool",
         turnId: activeTurnId,
         eventId: `${activeTurnId}:tool:${event.toolCallId}`,
         at: now(),
-        toolName: event.toolName,
+        toolName: semanticToolName,
       })) ctx.ui.setWorkingVisible(false);
     });
 

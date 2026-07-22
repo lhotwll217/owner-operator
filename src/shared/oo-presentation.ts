@@ -19,6 +19,7 @@ import { Text, type Component } from "@earendil-works/pi-tui";
 import type { AgentRun, AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import { formatTurnDuration } from "@owner-operator/core/activity";
 import { formatAgentRunIdentity } from "@owner-operator/core/agent-state";
+import { agentRunLaunchExtension } from "../agent-runs/agent-run-launch";
 import { OO_TURN_ACTIVITY_ENTRY, turnTraceExtension } from "./turn-trace";
 import {
   Theme,
@@ -124,10 +125,10 @@ export function buildOoTheme(mode: "truecolor" | "256color" = "truecolor"): Them
   });
 }
 
-// ---- Delegated-run row -------------------------------------------------------------------
-// Issue #69: a delegated run must not read as a generic tool call. The delegate/manage tools
-// render a compact agent row — harness/model · task · state · elapsed — so the terminal shows what
-// the child is and where it stands without activity, result, failure, or retry dumps.
+// ---- Delegated-run fallback serialization --------------------------------------------------
+// Raw tool detail remains inspectable only through Pi's explicit expansion. These helpers keep
+// that fallback payload bounded and free of activity, result, failure, or retry bodies; the compact
+// transcript uses semantic activity plus the dedicated launch/completion components instead.
 
 /** The wire AgentRun fields read by the compact terminal presentation. */
 export interface AgentRunRowView {
@@ -248,6 +249,7 @@ export function ooInteractiveOptions(): InteractiveModeOptions {
 // installs the theme and delegates all turn behavior to the Pi TurnTrace adapter.
 export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
   turnTraceExtension(pi);
+  agentRunLaunchExtension(pi);
   pi.on("session_start", (_event, ctx) => {
     const mode = ctx.ui.theme.getColorMode();
     ctx.ui.setTheme(buildOoTheme(mode));
@@ -268,7 +270,6 @@ export const ooPresentationExtension: ExtensionFactory = (pi: ExtensionAPI) => {
 const TOOL_EXECUTION_COMPONENT = "ToolExecutionComponent";
 const ASSISTANT_MESSAGE_COMPONENT = "AssistantMessageComponent";
 const CUSTOM_ENTRY_COMPONENT = "CustomEntryComponent";
-const VISIBLE_TOOL_ROWS = new Set(["delegate_agent", "manage_agent_run"]);
 
 const className = (child: unknown): string | undefined =>
   (child as { constructor?: { name?: string } } | null)?.constructor?.name;
@@ -276,14 +277,6 @@ const className = (child: unknown): string | undefined =>
 /** True for Pi's tool-row component. */
 export function isToolExecutionRow(child: unknown): boolean {
   return className(child) === TOOL_EXECUTION_COMPONENT;
-}
-
-/** Delegated-run tools own compact snapshot rendering, so their rows remain visible without raw
- * expansion. Pi's pinned ToolExecutionComponent constructor stores `toolName` on the component;
- * see node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js. */
-function isVisibleToolExecutionRow(child: unknown): boolean {
-  const toolName = (child as { toolName?: unknown } | null)?.toolName;
-  return typeof toolName === "string" && VISIBLE_TOOL_ROWS.has(toolName);
 }
 
 /** Keep raw tool components in their source position, but render zero lines until Pi's separate
@@ -371,7 +364,7 @@ export function quietOoInteractiveMode(mode: unknown): void {
   if (chat && typeof chat.addChild === "function") {
     const original = chat.addChild.bind(chat);
     chat.addChild = (child: unknown): void => {
-      if (isToolExecutionRow(child) && !isVisibleToolExecutionRow(child)) gateRawToolDetail(child);
+      if (isToolExecutionRow(child)) gateRawToolDetail(child);
       if (isAssistantMessageRow(child)) muteThinkingRendering(child); // reasoning renders nothing
       setComponentExpansion(child);
       original(child);

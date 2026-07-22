@@ -28,7 +28,9 @@ session; the daemon, not the active chat, owns the timer.
 
 **Delegated runs** — use `delegate_agent`, `manage_agent_run`, and the documented `agent_runs`
 table. Tool schemas own invocation details; the runtime contract lives in
-`docs/delegated-runs.md`.
+`docs/delegated-runs.md`. After delegating, do not poll status: completion arrives automatically,
+and `/agent-state` owns liveness. Use run management for cancel/resume control or when the owner
+explicitly requests inspection, never routine monitoring.
 
 ## Discovery policy
 

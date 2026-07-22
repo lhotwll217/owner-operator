@@ -115,6 +115,9 @@ for (const t of ["get_current_session_state", "mark_thread_done", "query_databas
 assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === "search_sessions"), "session search is a skill, not a duplicate custom tool");
 
 const harnessPrompt = ownerOperatorPrompt();
+assert.match(harnessPrompt, /After delegating, do not poll status/i);
+assert.match(harnessPrompt, /`\/agent-state` owns liveness/i);
+assert.match(harnessPrompt, /never routine monitoring/i);
 const sessionSearchSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "session-search", "SKILL.md"),
   "utf8",

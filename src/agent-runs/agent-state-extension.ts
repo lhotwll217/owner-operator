@@ -166,6 +166,9 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
         ctx.ui.setStatus("agent-state", undefined);
         ctx.ui.notify(`Agent state unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
       },
+      onDisconnected: (ctx) => {
+        ctx.ui.setStatus("agent-state", undefined);
+      },
       onStopped: (ctx) => {
         picker = undefined;
         ctx.ui.setStatus("agent-state", undefined);

@@ -37,8 +37,6 @@ export interface TurnTrace {
 export interface TurnTraceActionView {
   kind: TurnTraceAction["kind"];
   label: string;
-  marker: "│" | "●";
-  emphasis: "muted" | "current";
 }
 
 export type TurnTraceView =
@@ -73,7 +71,10 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
   schedule_prompt: "Scheduling work",
   manage_schedule: "Managing schedules",
   delegate_agent: "Delegating to an agent",
-  manage_agent_run: "Managing a delegated run",
+  "manage_agent_run.status": "Inspecting an agent",
+  "manage_agent_run.cancel": "Cancelling an agent",
+  "manage_agent_run.resume": "Resuming an agent",
+  "manage_agent_run.wait": "Waiting for an agent",
 });
 
 /** Return the stable presentation label for an allowlisted tool, else omit the activity. */
@@ -142,16 +143,8 @@ function plainTextSummary(value: string): string {
     .replace(/([*_])(.*?)\1/g, "$2");
 }
 
-const actionViews = (trace: TurnTrace, active: boolean): TurnTraceActionView[] =>
-  trace.actions.map((action, index) => {
-    const current = active && index === trace.actions.length - 1;
-    return {
-      kind: action.kind,
-      label: action.label,
-      marker: current ? "●" : "│",
-      emphasis: current ? "current" : "muted",
-    };
-  });
+const actionViews = (trace: TurnTrace): TurnTraceActionView[] =>
+  trace.actions.map(({ kind, label }) => ({ kind, label }));
 
 /** Derive the complete presentation view. Expansion is caller-owned per-turn state. */
 export function deriveTurnTraceView(
@@ -162,7 +155,7 @@ export function deriveTurnTraceView(
   const settledAt = trace.settledAt ?? options.interruptedAt;
   const outcome = derivedInterruption ? "interrupted" : trace.outcome;
   if (settledAt === undefined) {
-    return { kind: "active", turnId: trace.turnId, actions: actionViews(trace, true) };
+    return { kind: "active", turnId: trace.turnId, actions: actionViews(trace) };
   }
   if (trace.actions.length === 0) {
     if (trace.hasResponse) return { kind: "hidden", turnId: trace.turnId };
@@ -183,7 +176,7 @@ export function deriveTurnTraceView(
     summary: interrupted
       ? `Worked for ${formatTurnDuration(durationMs)} · interrupted`
       : `Worked for ${formatTurnDuration(durationMs)} · ${actionCount} action${actionCount === 1 ? "" : "s"}`,
-    actions: expanded ? actionViews(trace, false) : [],
+    actions: expanded ? actionViews(trace) : [],
   };
 }
 
