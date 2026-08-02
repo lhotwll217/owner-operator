@@ -3,46 +3,35 @@
 > **Status:** macOS only. A Codex subscription is the only tested model backend; others are
 > unverified. If you're trying it, it is best you have both.
 
-Agents are becoming capable of long-term work, and running many of them in parallel is now the
-norm. For the first time, one person can manage multiple workstreams and converge on multiple
-outcomes at once.
+Owner Operator is an agent that helps you track and manage work across all your local coding
+agents. The harness operates a state machine that tracks ongoing agent sessions and their
+current status: working, waiting, or stale. It also generates summaries, so you can quickly see
+actionable details. Together these act as a high-signal ledger that lets the agent quickly
+understand how work has evolved through a session. All of this is viewable from a persistent
+widget that surfaces the list of ongoing sessions. The goal is to increase visibility while
+promoting the most actionable information.
 
-But this also creates new problems:
+A core capability is searching and finding context across **all** sessions, independent of
+which harness created them. This is built on
+[session-grep](https://github.com/lhotwll217/session-grep), which can also be used as a
+standalone skill if you want session search directly in Claude Code, Codex, or any other
+harness. The harness maintains a directory of session folders, organized by project/repo.
 
-1. **Keeping track of multiple agents is hard.** The state of their work is spread across
-   different threads and tools, which creates cognitive overload and friction. Understanding
-   which agents need attention, what decisions need to be made, and whether work is converging
-   on the intended outcomes becomes increasingly difficult. Things slip through the cracks, and
-   valuable work stalls when an agent just needs a nudge.
+The agent can also delegate work to other coding harnesses. Today only Claude and Codex are
+supported, but the idea is to support any harness that implements the ACP protocol. This lets
+the Owner Operator agent oversee a large piece of work while preserving the overall goal and
+adhering to the standards set by you. This approach is best coupled with an opinionated
+workflow via skills — I use Matt Pocock's skills, for example.
 
-2. **Valuable information is buried in threads and sessions.** It is isolated, noisy, and hard
-   to locate. Each tool, each thread, becomes an information silo.
+Some core principles drive the design and features of this harness:
 
-3. **Most harnesses want to lock you in.** Work should be as uncoupled from specific harnesses
-   as possible. Core primitives like schedules, triggers, and loops should exist outside of any
-   one product.
-
-4. **Long-running threads get poisoned.** Context accumulates, the thread becomes biased, and
-   there is no effective mechanism to pull the valuable work out and start fresh.
-
-Sessions and threads are at the core of any agentic workflow. Take them away, and an agent
-becomes an amnesiac. They hold all the history and context of work done and serve as an
-incredibly detailed ledger of actions, reasoning, and outcomes. Never before has work been so
-auditable.
-
-Owner Operator builds on that ledger. It maintains a durable system of record of every session,
-past and present, across every harness. Specialized tools search across all of it and pull the
-signal from the noise.
-
-The harness knows every running session at any point in time and assigns each a priority. A
-floating widget keeps every session in view at all times, so nothing slips through the cracks.
-
-The end goal is a harness fully aligned with the goal, task, and outcome of each thread, an
-intelligent layer above them that helps you achieve optimal outcomes.
-
-Today the widget is for live triage: read every coding-agent session in one place, rename a
-thread, or mark it done without opening its harness. The Owner Operator agent can inspect durable
-history and create prompt schedules that run in fresh isolated sessions.
+1. **Sessions are the ultimate source of truth** for the work your agents do, and should be
+   leveraged as such.
+2. **Context is everything.** Sessions are easily poisoned and immediately become biased. We
+   want to keep sessions in the
+   [smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone) for as long as possible.
+3. **The more harness-agnostic your workflows are, the better.** Which coding agent actually
+   implements the work should be as trivial a detail as possible.
 
 ## Who this is for
 
@@ -60,6 +49,26 @@ npm install            # once, from the repo root; needs Node 22+
 Setup walks privacy boundaries, credentials, the supported-harness review, permission mode,
 and macOS always-on services: [docs/onboarding.md](docs/onboarding.md).
 
+## Talking to the agent
+
+You talk to Owner Operator through `oo`, a terminal agent. Run `oo` for an interactive
+session; `--continue` picks up your most recent thread. For example:
+
+- "Give me a breakdown of all the projects we worked on last week — any loose ends we need
+  to tie up?"
+- "This claude code session is going in circles, give me a prompt to course-correct it."
+- "Implement gh issue #4 and delegate it to codex; break the work into separate agents if
+  needed, and fire off a claude fable review agent for the overall work."
+
+## Harness-to-harness interaction
+
+As Owner Operator can drill down into other sessions, other harness agents can also "drill
+up" and get context from Owner Operator and even invoke its native tooling. Think of it like
+an IC referring to a manager for context. Any coding agent can shell out to `oo` for a
+headless turn, or invoke certain tools directly — `oo --session-state`, for example, prints
+the current session rows as JSON with no model call. Flags and rules:
+[docs/cli.md](docs/cli.md).
+
 ## The widget
 
 A floating macOS panel that shows your sessions, the ones needing attention first, so you can
@@ -70,19 +79,6 @@ cd apps/widget && make run
 ```
 
 Behavior and boundaries: [docs/widget.md](docs/widget.md).
-
-## The terminal
-
-```bash
-./oo                   # embedded Pi interactive mode; starts setup when needed
-./oo "what's ongoing?" # headless single-turn question, prose on stdout
-./oo --continue "more" # resume the most recent oo thread
-./oo --session-state   # current widget/gateway state, no model call
-./oo doctor            # effective harness configuration, no model call
-```
-
-The terminal starts the background daemon when it needs state. Flags, sessions, and
-provenance: [docs/cli.md](docs/cli.md).
 
 ## The daemon
 
