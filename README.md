@@ -29,7 +29,7 @@ Some core principles drive the design and features of this harness:
    leveraged as such.
 2. **Context is everything.** Sessions are easily poisoned and immediately become biased. We
    want to keep sessions in the
-   [smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone) for as long as possible.
+   [smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone).
 3. **The more harness-agnostic your workflows are, the better.** Which coding agent actually
    implements the work should be as trivial a detail as possible.
 
