@@ -40,7 +40,15 @@ A built-in recurring review of ongoing work that notifies the owner through the
 widget (expand + sound) with a brief, actionable-only message — stalled work to
 move, cleanup to do. A quiet fleet produces no Pulse: the interval (owner-set at
 onboarding, default 25 minutes) caps frequency but guarantees nothing fires.
+A Pulse speaks only about **Threads** the owner can act on in the widget;
+work that is not interactable is not Pulse-eligible.
 _Avoid_: check-in, briefing, standup, status update
+
+**Thread**:
+A unit of ongoing work as the owner sees and interacts with it in the widget,
+backed by session state. Work is always a thread, never a "row" — a row is
+rendering, not the work.
+_Avoid_: row, session-state row
 
 ## Flagged ambiguities
 
