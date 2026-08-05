@@ -35,6 +35,13 @@ How many **Delegated runs** separate a run from the Operator.
 One execution of a durable schedule, triggered by time or events rather than a
 parent agent.
 
+**Pulse**:
+A built-in recurring review of ongoing work that notifies the owner through the
+widget (expand + sound) with a brief, actionable-only message — stalled work to
+move, cleanup to do. A quiet fleet produces no Pulse: the interval (owner-set at
+onboarding, default 25 minutes) caps frequency but guarantees nothing fires.
+_Avoid_: check-in, briefing, standup, status update
+
 ## Flagged ambiguities
 
 - "background agent" — resolved: a **Delegated run** in background mode, never
