@@ -1,5 +1,4 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
-import { withOoRenderers } from "../../shared/oo-presentation";
 import { delegateAgentTool } from "./delegate-agent";
 import { manageAgentRunTool } from "./manage-agent-run";
 import { manageScheduleTool } from "./manage-schedule";
@@ -15,14 +14,11 @@ export { manageAgentRunTool } from "./manage-agent-run";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 
 export const ownerOperatorCustomTools = [
-  withOoRenderers(getCurrentSessionStateTool, "session state"),
-  withOoRenderers(markThreadDoneTool, "mark done", {
-    summarizeCall: (args) =>
-      [...(args.ids ?? []), ...(args.indexes ?? []), ...(args.queries ?? [])].slice(0, 3).join(", "),
-  }),
-  withOoRenderers(queryDatabaseTool, "database", { summarizeCall: (args) => args.action ?? "" }),
-  withOoRenderers(schedulePromptTool, "schedule", { summarizeCall: (args) => args.name ?? "" }),
-  withOoRenderers(manageScheduleTool, "manage schedule", { summarizeCall: (args) => args.id ?? "" }),
+  getCurrentSessionStateTool,
+  markThreadDoneTool,
+  queryDatabaseTool,
+  schedulePromptTool,
+  manageScheduleTool,
   delegateAgentTool,
   manageAgentRunTool,
 ];

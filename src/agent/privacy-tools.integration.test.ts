@@ -1,11 +1,17 @@
-// Integration: blacklist-aware raw file tool overrides reject blocked paths before pi's built-ins
-// execute, covering every Pi file primitive exposed through a configured scheduled session.
+// Integration: the supported Pi tool_call guard rejects blocked file paths while leaving
+// built-in definitions available for pi-tool-display to own.
 
-import assert from "node:assert";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { blacklistedPathVerdict, createBlacklistAwareFileTools, createOwnerOperatorBashTool } from "./privacy-tools";
+import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import {
+  blacklistedPathVerdict,
+  createPrivacyToolGuardExtension,
+  guardOwnerOperatorToolCall,
+} from "./privacy-tools";
 
 const root = mkdtempSync(join(tmpdir(), "oo-privacy-tools-"));
 const ooHome = join(root, "oo-home");
@@ -14,136 +20,92 @@ const privateDir = join(root, "Private");
 const privateFile = join(privateDir, "secret.txt");
 const linkedSecret = join(publicDir, "linked-secret.txt");
 const linkedPrivateDir = join(publicDir, "linked-private");
+const priorOoHome = process.env.OO_HOME;
 
-process.env.OO_HOME = ooHome;
+const event = (toolName: string, input: Record<string, unknown>): ToolCallEvent => ({
+  type: "tool_call",
+  toolCallId: `${toolName}-call`,
+  toolName,
+  input,
+} as ToolCallEvent);
 
 try {
-  await import("node:fs/promises").then(async (fs) => {
-    await fs.mkdir(ooHome, { recursive: true });
-    await fs.mkdir(publicDir, { recursive: true });
-    await fs.mkdir(privateDir, { recursive: true });
-  });
+  process.env.OO_HOME = ooHome;
+  mkdirSync(ooHome, { recursive: true });
+  mkdirSync(publicDir, { recursive: true });
+  mkdirSync(privateDir, { recursive: true });
   writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [privateDir], repos: [] }));
   writeFileSync(privateFile, "SECRET\n");
   symlinkSync(privateFile, linkedSecret);
   symlinkSync(privateDir, linkedPrivateDir);
 
-  const tools = new Map(createBlacklistAwareFileTools().map((tool) => [tool.name, tool]));
-  const fakeSessionManager = {
-    getSessionId: () => "privacy-tools-test",
-    getSessionFile: () => undefined,
-  };
-  const ctx = { cwd: publicDir, sessionManager: fakeSessionManager } as any;
-
-  const bash = createOwnerOperatorBashTool();
-  const pwd = await bash.execute("bash-1", { command: "pwd" }, undefined, undefined, ctx);
-  assert.match((pwd.content[0] as { text: string }).text, new RegExp(publicDir), "bash executes in the task cwd");
-
-  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [], repos: ["Private"] }));
-  const privatePwd = await bash.execute(
-    "bash-2",
-    { command: "pwd" },
-    undefined,
-    undefined,
-    { cwd: privateDir, sessionManager: fakeSessionManager } as any,
-  );
-  assert.match(
-    (privatePwd.content[0] as { text: string }).text,
-    new RegExp(privateDir),
-    "repository-name exclusions do not gate Bash without the OS sandbox",
-  );
-  await assert.doesNotReject(
-    () => tools.get("grep")!.execute(
-      "grep-repo-parent",
-      { pattern: "SECRET", path: root },
-      undefined,
-      undefined,
-      ctx,
-    ),
-    "repository-name exclusions do not gate traversal from an allowed parent",
-  );
-  writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [privateDir], repos: [] }));
-
   assert.equal(
     blacklistedPathVerdict(privateFile, publicDir, { paths: [], repos: ["Private"] }).blacklisted,
     true,
-    "direct tool guards enforce repository-name exclusions without path rules",
+    "direct guards enforce repository-name exclusions",
   );
 
-  await assert.rejects(
-    () => tools.get("read")!.execute("read-1", { path: privateFile }, undefined, undefined, ctx),
-    /blacklisted/,
-    "read blocks an absolute path inside a blacklisted tree",
+  const directCases = [
+    ["read", privateFile],
+    ["read", linkedSecret],
+    ["grep", privateDir],
+    ["find", privateDir],
+    ["ls", privateDir],
+    ["edit", privateFile],
+    ["write", join(privateDir, "new-secret.txt")],
+    ["write", join(linkedPrivateDir, "through-link.txt")],
+  ] as const;
+  for (const [toolName, target] of directCases) {
+    const result = guardOwnerOperatorToolCall(event(toolName, { path: target }), publicDir);
+    assert.equal(result?.block, true, `${toolName} blocks ${target}`);
+    assert.match(result?.reason ?? "", /blacklisted/);
+  }
+
+  // Pi 0.84.1 names the target `path` for every file primitive. Required-path tools fail
+  // closed if a future schema reaches this hook without that recognized target.
+  for (const toolName of ["read", "edit", "write"] as const) {
+    const result = guardOwnerOperatorToolCall(event(toolName, {}), publicDir);
+    assert.equal(result?.block, true, `${toolName} fails closed without its required path`);
+    assert.match(result?.reason ?? "", /requires a path/);
+  }
+  assert.equal(
+    guardOwnerOperatorToolCall(event("constructor", { path: privateFile }), publicDir),
+    undefined,
+    "inherited object keys are not mistaken for guarded Pi tool names",
   );
-  await assert.rejects(
-    () => tools.get("read")!.execute("read-2", { path: linkedSecret }, undefined, undefined, ctx),
-    /blacklisted/,
-    "read resolves symlinks before allowing access",
+
+  for (const toolName of ["grep", "find", "ls"] as const) {
+    const result = guardOwnerOperatorToolCall(event(toolName, { path: root }), publicDir);
+    assert.equal(result?.block, true, `${toolName} blocks traversal through a blacklisted child`);
+    assert.match(result?.reason ?? "", /would traverse blacklisted path/);
+  }
+
+  assert.equal(
+    guardOwnerOperatorToolCall(event("read", { path: join(publicDir, "safe.txt") }), publicDir),
+    undefined,
+    "allowed paths pass through to Pi's built-in tool",
   );
-  await assert.rejects(
-    () => tools.get("grep")!.execute("grep-1", { pattern: "SECRET", path: privateDir }, undefined, undefined, ctx),
-    /blacklisted/,
-    "grep blocks a blacklisted search root",
-  );
-  await assert.rejects(
-    () => tools.get("find")!.execute("find-1", { pattern: "*", path: privateDir }, undefined, undefined, ctx),
-    /blacklisted/,
-    "find blocks a blacklisted search root",
-  );
-  await assert.rejects(
-    () => tools.get("ls")!.execute("ls-1", { path: privateDir }, undefined, undefined, ctx),
-    /blacklisted/,
-    "ls blocks a blacklisted directory",
-  );
-  await assert.rejects(
-    () => tools.get("edit")!.execute(
-      "edit-1",
-      { path: privateFile, oldText: "SECRET", newText: "LEAKED" },
-      undefined,
-      undefined,
-      ctx,
-    ),
-    /blacklisted/,
-    "edit cannot mutate a blacklisted file when explicitly enabled for a scheduled prompt",
-  );
-  await assert.rejects(
-    () => tools.get("write")!.execute(
-      "write-1",
-      { path: join(privateDir, "new-secret.txt"), content: "LEAKED" },
-      undefined,
-      undefined,
-      ctx,
-    ),
-    /blacklisted/,
-    "write cannot create a file in a blacklisted tree when explicitly enabled for a scheduled prompt",
-  );
-  await assert.rejects(
-    () => tools.get("write")!.execute(
-      "write-2",
-      { path: join(linkedPrivateDir, "through-link.txt"), content: "LEAKED" },
-      undefined,
-      undefined,
-      ctx,
-    ),
-    /blacklisted/,
-    "write resolves an existing symlink ancestor before creating a file",
-  );
-  await assert.rejects(
-    () => tools.get("grep")!.execute("grep-2", { pattern: "SECRET", path: root }, undefined, undefined, ctx),
-    /would traverse blacklisted path/,
-    "grep blocks a parent search root that would recurse into a blacklisted tree",
-  );
-  await assert.rejects(
-    () => tools.get("find")!.execute("find-2", { pattern: "*", path: root }, undefined, undefined, ctx),
-    /would traverse blacklisted path/,
-    "find blocks a parent search root that would recurse into a blacklisted tree",
-  );
-  await assert.rejects(
-    () => tools.get("ls")!.execute("ls-2", { path: root }, undefined, undefined, ctx),
-    /would traverse blacklisted path/,
-    "ls blocks a parent directory that would expose a blacklisted child",
-  );
-  process.stdout.write("ok — privacy tools: Pi file primitives reject blacklisted paths\n");
+
+  let registered: ((event: ToolCallEvent, ctx: { cwd: string }) => unknown) | undefined;
+  createPrivacyToolGuardExtension({ callerSessionId: "caller'id" })({
+    on(name: string, handler: typeof registered): void {
+      assert.equal(name, "tool_call");
+      registered = handler;
+    },
+  } as never);
+  assert.ok(registered, "the policy is installed on Pi's supported tool_call hook");
+  const bash = event("bash", { command: "printf command-ok" });
+  assert.equal(registered!(bash, { cwd: publicDir }), undefined);
+  const command = (bash.input as { command: string }).command;
+  const output = execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s' "$OO_INSTALL_ROOT" "$OO_CALLER_SESSION_ID"`], {
+    encoding: "utf8",
+  });
+  assert.match(output, /^command-ok\|.+\|caller'id$/,
+    "the guard preserves the original Bash command and injects shell-safe OO provenance");
+
+  process.stdout.write("ok — privacy guard: supported tool_call preflight blocks every Pi file primitive\n");
 } finally {
+  if (priorOoHome === undefined) delete process.env.OO_HOME;
+  else process.env.OO_HOME = priorOoHome;
   rmSync(root, { recursive: true, force: true });
 }

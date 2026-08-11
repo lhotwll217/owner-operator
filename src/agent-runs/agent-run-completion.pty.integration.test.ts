@@ -18,7 +18,6 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { agentRunFixture as run } from "../../test/fixtures/agent-run";
 import { renderInRealPty } from "../../test/fixtures/real-pty";
-import { quietOoInteractiveMode } from "../shared/oo-presentation";
 import {
   AGENT_RUN_COMPLETION_MESSAGE_TYPE,
   PiParentCompletionAdapter,
@@ -148,7 +147,6 @@ if (process.env.OO_COMPLETION_PTY_CHILD === "1") {
       const runtime = new AgentSessionRuntime(created.session, created.services, createRuntime as any, created.diagnostics);
       initTheme(created.services.settingsManager.getTheme(), true);
       const interactive = new InteractiveMode(runtime, {});
-      quietOoInteractiveMode(interactive);
       await (interactive as any).init();
       return { created, interactive, runtime };
     };

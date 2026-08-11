@@ -64,6 +64,12 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     ([session model](https://github.com/sst/opencode/blob/4a81e8392b4c18cbcc0914527bdab8ff94b9a434/packages/opencode/src/session/session.ts#L57-L118),
     [#16](https://github.com/lhotwll217/owner-operator/issues/16)) and a reference
     [terminal-agent codebase](https://github.com/sst/opencode/blob/4a81e8392b4c18cbcc0914527bdab8ff94b9a434/packages/opencode/src/cli/cmd/tui.ts#L72-L103).
+- **[pi-tool-display](https://github.com/MasuRii/pi-tool-display/tree/91cef7580078371f8dc49a8607222807ad6a424d)** —
+  the pinned Pi extension that owns Owner Operator's ordinary terminal tool presentation.
+  - Borrowed: compact built-in and opt-in custom tool rendering with standard Pi expansion
+    ([features](https://github.com/MasuRii/pi-tool-display/blob/91cef7580078371f8dc49a8607222807ad6a424d/README.md#L17-L32)),
+    plus registration through the package's public consumer adapter
+    ([adapter](https://github.com/MasuRii/pi-tool-display/blob/91cef7580078371f8dc49a8607222807ad6a424d/tool-display-api-consumer.js#L1-L36)).
 - **[session-grep](https://github.com/lhotwll217/session-grep)** — the search primitive we vendor
   ([#20](https://github.com/lhotwll217/owner-operator/issues/20)).
   - Borrowed: the house vendoring model — the skill wrapper owns local policy (sources, blacklist),

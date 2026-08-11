@@ -43,6 +43,14 @@ try {
     "the shared headless session path registers delegated-run completion delivery",
   );
   headless.session.dispose();
+
+  const restricted = await createOwnerOperatorSession("chat", { ephemeral: true, toolsAllow: [] });
+  assert.equal(
+    restricted.session.extensionRunner.getToolDefinition("query_database"),
+    undefined,
+    "an empty toolsAllow does not register excluded custom capabilities through tool display",
+  );
+  restricted.session.dispose();
 } finally {
   if (priorOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorOoHome;
@@ -111,7 +119,7 @@ for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_cur
 }
 
 // Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).
-// The raw file tools are same-name extension overrides, covered by privacy-tools.test.
+// Built-in privacy enforcement is a tool_call guard, covered by privacy-tools.integration.test.
 for (const t of ["get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule"]) {
   assert.ok(ownerOperatorCustomTools.some((tool) => tool.name === t), `owner custom tools must include ${t}`);
 }

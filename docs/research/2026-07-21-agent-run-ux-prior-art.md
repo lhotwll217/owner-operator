@@ -328,23 +328,11 @@ Owner Operator v0.0.1
   ↳ claude-code · review auth PR · completed · LGTM  3m 12s   ← final snapshot, then clears
 ```
 
-### Step 2 — Compact tool result fold
+### Step 2 — Compact tool results
 
-Replace the current raw-JSON `renderResult` for `delegate_agent` / `manage_agent_run`
-with a `formatAgentRunRow`-driven cell. Collapsed by default; expand with pi's existing
-tool-expand key. Pattern: existing `ooRenderResult` in `src/shared/oo-presentation.ts:354`.
-
-```
-› Delegate agent  claude-code · review auth PR
-✓ claude-code · review auth PR · completed · 3m 12s
-  [↵ expand]
-
-— expanded —
-› Delegate agent  claude-code · review auth PR
-✓ claude-code · review auth PR · completed · 3m 12s
-  LGTM, only minor nits on the token refresh path.
-  run id: agt_01HX…
-```
+The current contract is owned by [`docs/cli.md`](../cli.md#interactive-tool-display):
+`pi-tool-display` renders ordinary tool calls and results, while `formatAgentRunRow` remains
+limited to genuine delegated-run lifecycle rows.
 
 ### Step 3 — Completion notification on the working line
 
@@ -397,7 +385,7 @@ Activity: reading session state…
 ## 5. What NOT to adopt
 
 - **onurpi `render-patches.ts`**: patches Pi's internal `ToolExecutionComponent` via
-  `Reflect.get`. OO's `withOoRenderers` is cleaner.
+  `Reflect.get`. Owner Operator uses pi-tool-display's supported extension and consumer surfaces.
 - **pi-subagents full foreground execution**: 80+ imports, acceptance ledger, watchdog,
   tool budget. Overkill for OO's single durable row.
 - **Codex `CollabAgentTool` / v2 protocol**: Codex's collab agents are a v2 protocol

@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness, AgentRunStatus, type AgentRun, type GatewayApi } from "@owner-operator/core";
+import { AgentRunStatus, type AgentRun, type GatewayApi } from "@owner-operator/core";
 import { createAgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import {
   ModelRuntime,
@@ -23,10 +23,6 @@ import {
   renderAgentRunCompletionMessage,
 } from "../src/agent-runs/agent-run-completion";
 import { createAgentRunDeliveryExtension } from "../src/agent-runs/agent-run-delivery-extension";
-import {
-  AGENT_RUN_LAUNCH_ENTRY_TYPE,
-  agentRunLaunchExtension,
-} from "../src/agent-runs/agent-run-launch";
 import { ParentRunSession, type ParentRunAdapter } from "../src/agent-runs/parent-run-session";
 import { bindOwnerOperatorSessionExtensions } from "../src/agent/agent";
 
@@ -127,7 +123,6 @@ try {
             streamSimple: faux.provider.streamSimple.bind(faux.provider),
           });
           pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
-          agentRunLaunchExtension(pi);
         },
       },
       {
@@ -172,23 +167,6 @@ try {
   });
   assert.ok(completionPi, "the real Pi extension runtime registers the completion adapter");
   const adapter = new PiParentCompletionAdapter(completionPi!, sessionManager);
-  const launchRenderer = session.extensionRunner.getEntryRenderer(AGENT_RUN_LAUNCH_ENTRY_TYPE);
-  assert.ok(launchRenderer, "the real Pi extension runtime registers the launch renderer");
-
-  const launchRun = run("durable-launch", AgentRunStatus.Pending, {
-    parentThreadId: sessionManager.getSessionId(),
-    harness: AgentRunHarness.Codex,
-    task: "Review the queued behavior",
-    model: "gpt-5.6-sol",
-    effort: "high",
-  });
-  await session.extensionRunner.emit({
-    type: "tool_execution_end",
-    toolCallId: "delegate-durable-launch",
-    toolName: "delegate_agent",
-    result: { content: [], details: launchRun },
-    isError: false,
-  });
 
   const abortRunningRun = run("abort-cleared-completion", AgentRunStatus.Running, {
     parentThreadId: sessionManager.getSessionId(),
@@ -353,16 +331,6 @@ try {
   session.dispose();
 
   const reopened = SessionManager.open(sessionFile!, sessionsDir, cwd);
-  const replayedLaunch = reopened.getEntries().find(
-    (entry) => entry.type === "custom" && entry.customType === AGENT_RUN_LAUNCH_ENTRY_TYPE,
-  );
-  assert.ok(replayedLaunch && replayedLaunch.type === "custom", "the launch moment survives saved-session reload");
-  const replayedLaunchRow = launchRenderer?.(
-    replayedLaunch!,
-    { expanded: false },
-    buildOoTheme("256color"),
-  )?.render(100).map((line) => line.trimEnd()).join("\n") ?? "";
-  assert.match(replayedLaunchRow, /Delegated to Codex · gpt-5\.6-sol · high — Review the queued behavior/);
   const replayedEntry = reopened.getEntries().find(
     (entry) => entry.type === "custom_message"
       && entry.customType === AGENT_RUN_COMPLETION_MESSAGE_TYPE
@@ -379,11 +347,6 @@ try {
   ).render(100).join("\n");
   assert.match(replayedRow, /✓ Review the queued behavior completed · 4m/);
   assert.doesNotMatch(replayedRow, /child-queued|queued-completion/);
-  assert.equal(
-    reopened.getEntries().filter((entry) => entry.type === "custom" && entry.customType === AGENT_RUN_LAUNCH_ENTRY_TYPE).length,
-    1,
-    "replay contains one launch component rather than a delegated-run tool snapshot",
-  );
   let duplicateContinuation = false;
   const reopenedAdapter = new PiParentCompletionAdapter({
     on() {},

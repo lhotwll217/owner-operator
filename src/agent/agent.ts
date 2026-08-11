@@ -22,9 +22,8 @@ import {
   type ScheduledPromptRunRequest,
 } from "@owner-operator/core";
 import { createAgentRunDeliveryExtension } from "../agent-runs/agent-run-delivery-extension";
-import { agentRunLaunchExtension } from "../agent-runs/agent-run-launch";
 import { repoRoot } from "../shared/repo-root";
-import { createBlacklistAwareFileToolsExtension } from "./privacy-tools";
+import { createPrivacyToolGuardExtension } from "./privacy-tools";
 import {
   configurePermissionSystemEnvironment,
   createPermissionSettingsExtension,
@@ -32,6 +31,7 @@ import {
 } from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
+import { createOwnerOperatorToolDisplayExtension } from "./tool-display";
 
 export { repoRoot };
 export {
@@ -146,6 +146,8 @@ export async function createOwnerOperatorSession(
             AgentToolId.QueryDatabase,
           ]
         : [...configuredTools];
+  const enabledToolNames = new Set<string>(tools);
+  const enabledCustomTools = customTools.filter((tool) => enabledToolNames.has(tool.name));
   const cwd = opts.cwd ?? ownerOperatorTaskCwd();
   let deliveryStartupError: { value: unknown } | undefined;
   const deliveryExtension = surface === "chat"
@@ -155,6 +157,10 @@ export async function createOwnerOperatorSession(
     : undefined;
 
   settingsManager.applyOverrides(evalSettingsOverrides(process.env));
+  const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayExtension(
+    paths.piAgentDir,
+    enabledCustomTools,
+  );
 
   const loader = new DefaultResourceLoader({
     cwd,
@@ -166,16 +172,16 @@ export async function createOwnerOperatorSession(
     additionalExtensionPaths: [permissionSystemExtensionPath()],
     extensionFactories: [
       {
-        name: "owner-operator-privacy-tools",
-        factory: createBlacklistAwareFileToolsExtension({ callerSessionId: opts.callerSessionId }),
+        name: "owner-operator-tool-display",
+        factory: ownerOperatorToolDisplayExtension,
+      },
+      {
+        name: "owner-operator-privacy-guard",
+        factory: createPrivacyToolGuardExtension({ callerSessionId: opts.callerSessionId }),
       },
       {
         name: "owner-operator-permission-settings",
         factory: createPermissionSettingsExtension({ ooHome: paths.home }),
-      },
-      {
-        name: "owner-operator-agent-run-launch",
-        factory: agentRunLaunchExtension,
       },
       ...(deliveryExtension ? [{
         name: "owner-operator-agent-run-delivery",
@@ -192,12 +198,11 @@ export async function createOwnerOperatorSession(
     settingsManager,
     sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(cwd) : createOoSession(ooProvenance(surface))),
     modelRuntime,
-    customTools,
     tools,
   });
 
   // A raw createAgentSession does not emit the extension lifecycle. Bind non-test sessions
-  // so the privacy-aware file-tool overrides are active, then pair with shutdown before dispose.
+  // so extension lifecycle hooks are active, then pair with shutdown before dispose.
   if (!opts.ephemeral) {
     await bindOwnerOperatorSessionExtensions(session);
     if (deliveryStartupError) {
