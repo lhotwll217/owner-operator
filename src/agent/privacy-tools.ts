@@ -1,50 +1,20 @@
-// Owner Operator privacy tool layer. The session scanner/store already enforce the
-// blacklist; these wrappers close the raw pi file-tool gap at the tool boundary.
+// Owner Operator privacy tool guard. The session scanner/store already enforce the
+// blacklist; this supported Pi preflight hook closes the direct file-tool gap without
+// replacing the built-ins that pi-tool-display owns for presentation.
 
 import { existsSync, statSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import {
-  createBashToolDefinition,
-  createFindToolDefinition,
-  createGrepToolDefinition,
-  createLsToolDefinition,
-  createReadToolDefinition,
-  createEditToolDefinition,
-  createWriteToolDefinition,
-  type ExtensionAPI,
-  type ExtensionFactory,
-  type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { isBlacklisted, loadBlacklist, pathIdentities, type Blacklist } from "@owner-operator/core";
-import { ooRenderCall } from "../shared/oo-presentation";
 import { repoRoot } from "../shared/repo-root";
 
-type AnyTool = ToolDefinition<any, any, any>;
 type FileToolName = "read" | "grep" | "find" | "ls" | "edit" | "write";
 
 const ooHome = (): string => process.env.OO_HOME ?? path.join(homedir(), ".owner-operator");
-export interface OwnerOperatorBashToolOptions {
+export interface PrivacyToolGuardOptions {
   callerSessionId?: string;
 }
-const cache = new Map<string, Record<FileToolName, AnyTool>>();
-
-function builtIns(cwd: string): Record<FileToolName, AnyTool> {
-  let tools = cache.get(cwd);
-  if (!tools) {
-    tools = {
-      read: createReadToolDefinition(cwd),
-      grep: createGrepToolDefinition(cwd),
-      find: createFindToolDefinition(cwd),
-      ls: createLsToolDefinition(cwd),
-      edit: createEditToolDefinition(cwd),
-      write: createWriteToolDefinition(cwd),
-    };
-    cache.set(cwd, tools);
-  }
-  return tools;
-}
-
 function normalizeInputPath(raw: string, cwd: string): string {
   let p = raw.trim();
   if (p.startsWith("@")) p = p.slice(1);
@@ -156,82 +126,69 @@ export function blacklistedDescendantVerdict(rawPath: string, cwd: string, bl: B
   return { blacklisted: false };
 }
 
-function assertAllowed(rawPath: string, cwd: string, opts: { mayTraverse?: boolean } = {}): void {
+function deniedReason(rawPath: string, cwd: string, opts: { mayTraverse?: boolean } = {}): string | undefined {
   const verdict = blacklistedPathVerdict(rawPath, cwd);
   if (verdict.blacklisted) {
-    throw new Error(`Access denied: ${verdict.path} is blacklisted by ${path.join(ooHome(), "blacklist.json")}`);
+    return `Access denied: ${verdict.path} is blacklisted by ${path.join(ooHome(), "blacklist.json")}`;
   }
   if (opts.mayTraverse) {
     const descendant = blacklistedDescendantVerdict(rawPath, cwd);
     if (descendant.blacklisted) {
-      throw new Error(`Access denied: ${descendant.root} would traverse blacklisted path ${descendant.path}`);
+      return `Access denied: ${descendant.root} would traverse blacklisted path ${descendant.path}`;
     }
   }
 }
 
-function wrapFileTool(name: FileToolName, defaultPath: (params: any) => string, opts: { mayTraverse?: boolean } = {}): AnyTool {
-  const seed = builtIns(process.cwd())[name];
-  return {
-    ...seed,
-    // Compact the CALL row to a single OO line; keep pi's built-in result renderer, so a
-    // `read` still previews (syntax-highlighted, expandable) — owner-directed file content,
-    // not agent chatter, so we declutter the header without regressing the output.
-    renderCall: ooRenderCall(name, (p) => defaultPath(p)),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const cwd = ctx?.cwd ?? process.cwd();
-      assertAllowed(defaultPath(params), cwd, opts);
-      return builtIns(cwd)[name].execute(toolCallId, params, signal, onUpdate, ctx);
-    },
-  };
-}
-
-export function createBlacklistAwareFileTools(): AnyTool[] {
-  return [
-    wrapFileTool("read", (p) => p.path),
-    wrapFileTool("grep", (p) => p.path ?? ".", { mayTraverse: true }),
-    wrapFileTool("find", (p) => p.path ?? ".", { mayTraverse: true }),
-    wrapFileTool("ls", (p) => p.path ?? ".", { mayTraverse: true }),
-    wrapFileTool("edit", (p) => p.path),
-    wrapFileTool("write", (p) => p.path),
-  ];
-}
-
-export function createOwnerOperatorBashTool(
-  opts: OwnerOperatorBashToolOptions = {},
-): ReturnType<typeof createBashToolDefinition> {
-  const spawnHook = (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => ({
-    ...context,
-    env: {
-      ...context.env,
-      OO_INSTALL_ROOT: repoRoot,
-      ...(opts.callerSessionId ? { OO_CALLER_SESSION_ID: opts.callerSessionId } : {}),
-    },
-  });
-  const seed = createBashToolDefinition(process.cwd(), { spawnHook });
-  const tool: ReturnType<typeof createBashToolDefinition> = {
-    ...seed,
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const cwd = ctx?.cwd ?? process.cwd();
-      return createBashToolDefinition(cwd, { spawnHook }).execute(toolCallId, params, signal, onUpdate, ctx);
-    },
-  };
-  return tool;
-}
-
-export function registerBlacklistAwareFileTools(
-  pi: ExtensionAPI,
-  opts: OwnerOperatorBashToolOptions = {},
-): void {
-  for (const tool of createBlacklistAwareFileTools()) pi.registerTool(tool);
-  pi.registerTool(createOwnerOperatorBashTool(opts));
-}
-
-export const blacklistAwareFileToolsExtension: ExtensionFactory = (pi) => {
-  registerBlacklistAwareFileTools(pi);
+const fileToolPolicy: Record<FileToolName, { defaultPath?: string; mayTraverse: boolean }> = {
+  read: { mayTraverse: false },
+  grep: { defaultPath: ".", mayTraverse: true },
+  find: { defaultPath: ".", mayTraverse: true },
+  ls: { defaultPath: ".", mayTraverse: true },
+  edit: { mayTraverse: false },
+  write: { mayTraverse: false },
 };
 
-export const createBlacklistAwareFileToolsExtension = (
-  opts: OwnerOperatorBashToolOptions = {},
+function isFileToolName(value: string): value is FileToolName {
+  return Object.hasOwn(fileToolPolicy, value);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+export function addOwnerOperatorBashEnvironment(command: string, opts: PrivacyToolGuardOptions = {}): string {
+  const assignments = [`OO_INSTALL_ROOT=${shellQuote(repoRoot)}`];
+  if (opts.callerSessionId) assignments.push(`OO_CALLER_SESSION_ID=${shellQuote(opts.callerSessionId)}`);
+  return `export ${assignments.join(" ")}\n${command}`;
+}
+
+/** Apply Owner Operator's supported tool_call preflight policy. */
+export function guardOwnerOperatorToolCall(
+  event: ToolCallEvent,
+  cwd: string,
+  opts: PrivacyToolGuardOptions = {},
+): { block: true; reason: string } | undefined {
+  const input = event.input as Record<string, unknown>;
+  if (event.toolName === "bash") {
+    if (typeof input.command === "string") {
+      input.command = addOwnerOperatorBashEnvironment(input.command, opts);
+    }
+    return;
+  }
+  if (!isFileToolName(event.toolName)) return;
+  const policy = fileToolPolicy[event.toolName];
+  const rawPath = typeof input.path === "string" ? input.path : policy.defaultPath;
+  if (rawPath === undefined) {
+    return { block: true, reason: `Access denied: ${event.toolName} requires a path` };
+  }
+  const reason = deniedReason(rawPath, cwd, { mayTraverse: policy.mayTraverse });
+  return reason ? { block: true, reason } : undefined;
+}
+
+export const createPrivacyToolGuardExtension = (
+  opts: PrivacyToolGuardOptions = {},
 ): ExtensionFactory => (pi) => {
-  registerBlacklistAwareFileTools(pi, opts);
+  pi.on("tool_call", (event, ctx) => guardOwnerOperatorToolCall(event, ctx.cwd, opts));
 };
+
+export const privacyToolGuardExtension = createPrivacyToolGuardExtension();

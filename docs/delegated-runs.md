@@ -163,11 +163,11 @@ the parent is also visible. Owner Operator conversations are not session-state r
 admitted OO-delegated child currently appears in the widget as an ordinary root session; its
 ledger record remains the canonical provenance.
 
-In the terminal, `delegate_agent`/`manage_agent_run` never render as Pi tool components in the
-compact view; their allowlisted semantic labels participate in ordinary turn activity, and raw
-details require explicit tool expansion. A successful delegation persists one neutral launch line
-derived from the run row; the existing completion message persists the only other inline run
-moment. The parent-scoped live view is separate: the footer shows queued, running, and attention
+In the terminal, `pi-tool-display` owns the compact `delegate_agent`/`manage_agent_run` call and
+result components, with raw results available through Pi's ordinary expansion. A successful
+delegation also persists one neutral launch line derived from the run row; the existing completion
+message persists the other inline lifecycle moment. The parent-scoped live view is separate: the
+footer shows queued, running, and attention
 counts only while one exists and clears whenever the Gateway connection is unavailable;
 `/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
 harness, model and known effort, glyph-plus-text status, elapsed time, activity, and only currently valid controls.

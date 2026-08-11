@@ -14,7 +14,7 @@ Pi uses `OO_HOME/pi` for its auth, settings, custom models, and agent state; it 
 change standalone Pi. The resource loader disables ambient context, extensions, skills,
 prompts, and themes, then adds only the product prompt, bundled skills, workspace
 `AGENTS.md`, workspace skills, and personal skills explicitly selected during onboarding,
-plus the pinned permission-system extension.
+plus the pinned permission-system and tool-display extensions.
 
 ## Roots
 
@@ -33,9 +33,10 @@ fails closed ([onboarding.md](onboarding.md)).
 
 ## Tools and skills
 
-- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`. Same-name direct
-  file-tool guards at the Agent boundary enforce explicit path, repository-name, and symlinked-path
-  blacklists. The Bash wrapper supplies the task cwd and Owner Operator provenance environment.
+- **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`. A supported Pi
+  `tool_call` preflight guard enforces explicit path, repository-name, symlinked-path, and traversal
+  blacklists without replacing Pi's built-ins. The same guard injects Owner Operator provenance
+  into Bash; Pi still supplies the task cwd.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
@@ -81,7 +82,7 @@ Project rules still resolve from the task cwd
 project rules are therefore trusted task policy and may override the global baseline and generated
 Pi path rules.
 
-The direct file-tool privacy guard remains authoritative for explicit paths, repository names,
+The direct `tool_call` privacy guard remains authoritative for explicit paths, repository names,
 symlink resolution, and traversal that could reach a blacklisted descendant. OS enforcement for Bash
 process-internal access, non-literal paths, POSIX case variants, and repository-name entries is scoped
 to [#61](https://github.com/lhotwll217/owner-operator/issues/61).

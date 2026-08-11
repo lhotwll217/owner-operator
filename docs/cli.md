@@ -27,19 +27,13 @@ an unknown flag. The recognized set lives in
 `--json` and one-shot spellings are rejected with guidance instead of being treated as a
 prompt.
 
-## Interactive turn activity
+## Interactive tool display
 
-While an interactive turn is active, the thread shows provider-supplied reasoning summaries and
-allowlisted semantic tool labels as uniform dim rows in source order. The latest three remain
-visible; older rows fold behind `▶ N earlier activities`, and the current action is the final row
-with a trailing ellipsis. Tool arguments, results, retries, and technical failures stay out of
-this trace.
-
-After settlement, meaningful activity collapses to `▶ Worked for… · N actions`. Pi's expansion key
-(`Ctrl+O` by default) first restores the semantic trace; a second use explicitly reveals raw tool
-detail, and a third returns to compact turns. Turns with no meaningful activity add no summary.
-Interrupted turns retain partial response text, use `Worked for… · interrupted` after meaningful
-activity, or show `Operation interrupted` when no response exists.
+The pinned `pi-tool-display` extension owns compact OpenCode-style calls and results for Pi's
+built-ins and Owner Operator's custom tools. Pi's expansion key (`Ctrl+O` by default) reveals the
+raw result; Owner Operator does not add a second folding or replay layer. The native user-message
+box is disabled, while the Owner Operator theme, marker, `/agent-state`, and delegated-run
+launch/completion lifecycle rows remain separate product presentation.
 
 ## Sessions and provenance
 

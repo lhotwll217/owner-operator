@@ -27,7 +27,7 @@ import {
   ownerOperatorPrompt,
   repoRoot,
 } from "../agent/agent";
-import { blacklistAwareFileToolsExtension } from "../agent/privacy-tools";
+import { privacyToolGuardExtension } from "../agent/privacy-tools";
 import {
   configurePermissionSystemEnvironment,
   createPermissionSettingsExtension,
@@ -35,8 +35,9 @@ import {
 } from "../agent/permission-settings";
 import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
+import { createOwnerOperatorToolDisplayExtension } from "../agent/tool-display";
 import { agentStateExtension } from "../agent-runs/agent-state-extension";
-import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension, quietOoInteractiveMode } from "../shared/oo-presentation";
+import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
   console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./oo` in a real terminal, or `./oo \"question\"` for a headless single turn.");
@@ -51,6 +52,10 @@ const standalonePiAgentDir = getAgentDir();
 const { modelRuntime, paths } = await ownerOperatorPiServices();
 configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
+const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayExtension(
+  paths.piAgentDir,
+  ownerOperatorCustomTools,
+);
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
 // whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
@@ -67,7 +72,8 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       appendSystemPromptOverride: () => [],
       additionalExtensionPaths: [permissionSystemExtensionPath()],
       extensionFactories: [
-        { name: "owner-operator-privacy-tools", factory: blacklistAwareFileToolsExtension },
+        { name: "owner-operator-tool-display", factory: ownerOperatorToolDisplayExtension },
+        { name: "owner-operator-privacy-guard", factory: privacyToolGuardExtension },
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },
         { name: "owner-operator-agent-state", factory: agentStateExtension },
@@ -91,7 +97,6 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     sessionManager,
     sessionStartEvent,
     tools: [...interactiveTools],
-    customTools: ownerOperatorCustomTools,
   });
   return { ...created, services, diagnostics: services.diagnostics };
 };
@@ -113,7 +118,4 @@ process.stdout.write(`${ooTheme.fg("accent", ooMarker(ooVersion))}\n`);
 
 // Silent start: no auto model turn. The owner asks; the widget owns the "what's ongoing" view.
 const interactive = new InteractiveMode(runtime, ooInteractiveOptions());
-// Keep raw tool detail behind Pi's explicit expansion, strip reasoning from assistant messages,
-// and silence startup notices. ooPresentationExtension owns the semantic timeline separately.
-quietOoInteractiveMode(interactive);
 await interactive.run();
