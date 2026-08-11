@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AgentRunStatus, type AgentRun } from "@owner-operator/core";
 import {
   AgentSessionRuntime,
-  AuthStorage,
+  ModelRuntime,
   createAgentSessionFromServices,
   createAgentSessionServices,
   initTheme,
@@ -14,6 +14,7 @@ import {
   SettingsManager,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { agentRunFixture as run } from "../../test/fixtures/agent-run";
 import { renderInRealPty } from "../../test/fixtures/real-pty";
@@ -96,15 +97,15 @@ if (process.env.OO_COMPLETION_PTY_CHILD === "1") {
 
     const sessionManager = SessionManager.create(root, sessionsDir);
     const settingsManager = SettingsManager.create(root, agentDir, { projectTrusted: true });
-    const authStorage = AuthStorage.inMemory({
-      "oo-completion-pty": { type: "api_key", key: "test-only" },
-    });
+    const credentials = new InMemoryCredentialStore();
+    await credentials.modify("oo-completion-pty", async () => ({ type: "api_key", key: "test-only" }));
+    const modelRuntime = await ModelRuntime.create({ credentials, modelsPath: null });
     let completionPi: ExtensionAPI | undefined;
     const createRuntime = async ({ sessionManager: target }: { sessionManager: SessionManager }) => {
       const services = await createAgentSessionServices({
         cwd: root,
         agentDir,
-        authStorage,
+        modelRuntime,
         settingsManager,
         resourceLoaderOptions: {
           systemPromptOverride: () => "Review delegated-run lifecycle evidence.",

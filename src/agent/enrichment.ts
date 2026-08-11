@@ -1,5 +1,4 @@
-import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ThreadDetails } from "@owner-operator/core";
 import { ownerOperatorPiServices } from "./agent";
 
@@ -31,25 +30,24 @@ function parseDetails(text: string): ThreadDetails {
   };
 }
 
-async function resolveModel(registry: ModelRegistry, settings: SettingsManager) {
+async function resolveModel(runtime: ModelRuntime, settings: SettingsManager) {
   const provider = settings.getDefaultProvider();
   const modelId = settings.getDefaultModel();
   const candidates = [...PREFERRED_MODELS, ...(provider && modelId ? [[provider, modelId] as const] : [])];
   for (const [candidateProvider, candidateId] of candidates) {
-    const model = registry.find(candidateProvider, candidateId);
+    const model = runtime.getModel(candidateProvider, candidateId);
     if (!model) continue;
-    const auth = await registry.getApiKeyAndHeaders(model);
-    if (auth.ok) return { model, auth };
+    if (await runtime.getAuth(model)) return model;
   }
   throw new Error("no authenticated enrichment model available");
 }
 
 /** One typed completion for a needs-you message; no tools and no agent loop. */
 export async function enrichThread(sample: string): Promise<ThreadDetails> {
-  const { settingsManager: settings, modelRegistry: registry } = ownerOperatorPiServices();
-  const { model, auth } = await resolveModel(registry, settings);
+  const { settingsManager: settings, modelRuntime: runtime } = await ownerOperatorPiServices();
+  const model = await resolveModel(runtime, settings);
 
-  const response = await completeSimple(model, {
+  const response = await runtime.completeSimple(model, {
     systemPrompt: [
       "You brief the human owner of one coding-agent session. Return only JSON with:",
       "topic — noun-phrase title, 3-6 words.",
@@ -60,8 +58,6 @@ export async function enrichThread(sample: string): Promise<ThreadDetails> {
     ].join("\n"),
     messages: [{ role: "user", content: sample, timestamp: Date.now() }],
   }, {
-    apiKey: auth.apiKey,
-    headers: auth.headers,
     reasoning: REASONING,
     maxTokens: MAX_OUTPUT_TOKENS,
     signal: AbortSignal.timeout(TIMEOUT_MS),

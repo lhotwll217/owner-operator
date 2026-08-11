@@ -29,7 +29,11 @@ try {
   symlinkSync(privateDir, linkedPrivateDir);
 
   const tools = new Map(createBlacklistAwareFileTools().map((tool) => [tool.name, tool]));
-  const ctx = { cwd: publicDir } as any;
+  const fakeSessionManager = {
+    getSessionId: () => "privacy-tools-test",
+    getSessionFile: () => undefined,
+  };
+  const ctx = { cwd: publicDir, sessionManager: fakeSessionManager } as any;
 
   const bash = createOwnerOperatorBashTool();
   const pwd = await bash.execute("bash-1", { command: "pwd" }, undefined, undefined, ctx);
@@ -41,7 +45,7 @@ try {
     { command: "pwd" },
     undefined,
     undefined,
-    { cwd: privateDir } as any,
+    { cwd: privateDir, sessionManager: fakeSessionManager } as any,
   );
   assert.match(
     (privatePwd.content[0] as { text: string }).text,

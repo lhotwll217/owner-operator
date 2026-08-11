@@ -48,19 +48,18 @@ const prompt = ownerOperatorPrompt();
 // first so onboarding never offers Owner Operator's own sessions as an external transcript source.
 const standalonePiEnvironment = { ...process.env };
 const standalonePiAgentDir = getAgentDir();
-const { authStorage, paths } = ownerOperatorPiServices();
+const { modelRuntime, paths } = await ownerOperatorPiServices();
 configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
 // whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
 const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
-  const { settingsManager } = ownerOperatorPiServices(paths.home);
-  let refreshRegistry = (): void => undefined;
+  const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
     cwd,
     agentDir: paths.piAgentDir,
-    authStorage,
+    modelRuntime,
     settingsManager,
     resourceLoaderOptions: {
       ...ownerOperatorResourceLoaderOptions(),
@@ -79,16 +78,14 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
             piAgentDir: standalonePiAgentDir,
             sessionSourceEnv: standalonePiEnvironment,
             refreshConfiguration: async () => {
-              authStorage.reload();
               await settingsManager.reload();
-              refreshRegistry();
+              await modelRuntime.refresh();
             },
           }),
         },
       ],
     },
   });
-  refreshRegistry = () => services.modelRegistry.refresh();
   const created = await createAgentSessionFromServices({
     services,
     sessionManager,

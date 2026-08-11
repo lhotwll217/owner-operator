@@ -44,14 +44,14 @@ const gateway = {
   }),
 } as Pick<GatewayApi, "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun">;
 
-const { authStorage, paths } = ownerOperatorPiServices();
+const { modelRuntime, paths } = await ownerOperatorPiServices();
 const prompt = ownerOperatorPrompt();
 const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
-  const { settingsManager } = ownerOperatorPiServices(paths.home);
+  const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
     cwd,
     agentDir: paths.piAgentDir,
-    authStorage,
+    modelRuntime,
     settingsManager,
     resourceLoaderOptions: {
       systemPromptOverride: () => prompt,

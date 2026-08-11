@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus, type AgentRun, type GatewayApi } from "@owner-operator/core";
 import { createAgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import {
-  AuthStorage,
+  ModelRuntime,
   createAgentSession,
   DefaultResourceLoader,
   SessionManager,
@@ -13,6 +13,7 @@ import {
   sessionEntryToContextMessages,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { buildOoTheme } from "../src/shared/oo-presentation";
 import { agentRunFixture as run } from "./fixtures/agent-run";
@@ -82,9 +83,9 @@ try {
 
   const sessionManager = SessionManager.create(cwd, sessionsDir);
   const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-  const authStorage = AuthStorage.inMemory({
-    "oo-completion-test": { type: "api_key", key: "test-only" },
-  });
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("oo-completion-test", async () => ({ type: "api_key", key: "test-only" }));
+  const modelRuntime = await ModelRuntime.create({ credentials, modelsPath: null });
   let completionPi: ExtensionAPI | undefined;
   let headlessRows: AgentRun[] = [];
   let headlessSubscriptions = 0;
@@ -143,7 +144,7 @@ try {
     const { session: headlessSession } = await createAgentSession({
       cwd,
       agentDir,
-      authStorage,
+      modelRuntime,
       model: faux.getModel(),
       noTools: "all",
       resourceLoader: loader,
@@ -162,7 +163,7 @@ try {
   const { session } = await createAgentSession({
     cwd,
     agentDir,
-    authStorage,
+    modelRuntime,
     model: faux.getModel(),
     noTools: "all",
     resourceLoader,

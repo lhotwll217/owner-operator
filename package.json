@@ -34,9 +34,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/codex-acp": "1.1.5",
-    "@earendil-works/pi-ai": "0.80.6",
-    "@earendil-works/pi-coding-agent": "0.80.6",
-    "@earendil-works/pi-tui": "0.80.6",
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1",
     "@gotgenes/pi-permission-system": "20.7.1",
     "@owner-operator/core": "*",
     "acpx": "0.11.2",
