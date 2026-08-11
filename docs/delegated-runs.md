@@ -112,8 +112,9 @@ and terminal styling are adapters over that contract.
 - **Background by default.** `delegate_agent` records the durable `pending` row and returns
   immediately; the parent session is never frozen. The result is carried by the ledger, not the
   parent tool call, and completion arrives through the parent subscription. The Operator does not
-  poll after delegation; `/agent-state` owns liveness. Bounded waits and status reads remain only
-  for explicit owner requests.
+  poll after delegation; `/agent-state` owns liveness. Status reads remain only for explicit
+  owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
+  `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.

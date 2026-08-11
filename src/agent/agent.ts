@@ -11,8 +11,7 @@ import {
   DefaultResourceLoader,
   SessionManager,
   SettingsManager,
-  AuthStorage,
-  ModelRegistry,
+  ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentToolId,
@@ -98,18 +97,15 @@ export function evalSettingsOverrides(
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "src", "prompts", "owner-operator.md"), "utf8");
 
-export function ownerOperatorPiServices(ooHome?: string): {
+export async function ownerOperatorPiServices(ooHome?: string): Promise<{
   paths: ReturnType<typeof ownerOperatorPaths>;
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   settingsManager: SettingsManager;
-} {
+}> {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
-  const authStorage = AuthStorage.create(paths.piAuth);
   return {
     paths,
-    authStorage,
-    modelRegistry: ModelRegistry.create(authStorage, paths.piModels),
+    modelRuntime: await ModelRuntime.create({ authPath: paths.piAuth, modelsPath: paths.piModels }),
     settingsManager: SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false }),
   };
 }
@@ -126,7 +122,7 @@ export async function createOwnerOperatorSession(
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
-  const { authStorage, modelRegistry, paths, settingsManager } = ownerOperatorPiServices();
+  const { modelRuntime, paths, settingsManager } = await ownerOperatorPiServices();
   configurePermissionSystemEnvironment(paths);
   const configuredTools = configuredOwnerOperatorTools(paths.home);
   const readOnlyCustomToolNames = new Set<string>([
@@ -195,8 +191,7 @@ export async function createOwnerOperatorSession(
     resourceLoader: loader,
     settingsManager,
     sessionManager: opts.sessionManager ?? (opts.ephemeral ? SessionManager.inMemory(cwd) : createOoSession(ooProvenance(surface))),
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     customTools,
     tools,
   });

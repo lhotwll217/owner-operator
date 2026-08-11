@@ -27,8 +27,12 @@ try {
   writeFileSync(join(ooHome, "pi", "auth.json"), JSON.stringify({ owned: { type: "api_key", key: "secret" } }));
   writeFileSync(join(ooHome, "pi", "settings.json"), JSON.stringify({ defaultProvider: "owned", defaultModel: "owned-model" }));
   writeFileSync(join(task, ".pi", "settings.json"), JSON.stringify({ defaultProvider: "ambient", defaultModel: "ambient-model" }));
-  const services = ownerOperatorPiServices(ooHome);
-  assert.deepEqual(services.authStorage.list(), ["owned"], "embedded runtime reads only owned credentials");
+  const services = await ownerOperatorPiServices(ooHome);
+  assert.deepEqual(
+    (await services.modelRuntime.listCredentials()).map((credential) => credential.providerId),
+    ["owned"],
+    "embedded runtime reads only owned credentials",
+  );
   assert.equal(services.settingsManager.getDefaultProvider(), "owned");
   assert.equal(services.settingsManager.getDefaultModel(), "owned-model");
   assert.equal(services.settingsManager.isProjectTrusted(), false, "project Pi settings cannot alter harness policy");

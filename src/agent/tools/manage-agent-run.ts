@@ -1,28 +1,19 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import {
-  DEFAULT_AGENT_RUN_WAIT_SECONDS,
-  MAX_AGENT_RUN_WAIT_SECONDS,
-  type AgentRun,
-  type GatewayApi,
-} from "@owner-operator/core";
+import { type AgentRun, type GatewayApi } from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
 import { agentRunToolResult } from "./agent-run-result";
 
 /** The manage_agent_run actions, declared once so the runtime schema and the request type can't
  * drift. The compile-time `action` type and the model-facing Type.Union both derive from this. */
-const MANAGE_AGENT_RUN_ACTIONS = ["status", "cancel", "resume", "wait"] as const;
+const MANAGE_AGENT_RUN_ACTIONS = ["status", "cancel", "resume"] as const;
 type ManageAgentRunAction = (typeof MANAGE_AGENT_RUN_ACTIONS)[number];
 
-type ManageAgentRunBackend = Pick<
-  GatewayApi,
-  "agentRun" | "cancelAgentRun" | "resumeAgentRun" | "waitAgentRun"
->;
+type ManageAgentRunBackend = Pick<GatewayApi, "agentRun" | "cancelAgentRun" | "resumeAgentRun">;
 
 export interface ManageAgentRunRequest {
   action: ManageAgentRunAction;
   id: string;
-  waitSeconds?: number;
 }
 
 export async function manageAgentRun(
@@ -36,8 +27,6 @@ export async function manageAgentRun(
       return backend.cancelAgentRun(request.id);
     case "resume":
       return backend.resumeAgentRun(request.id);
-    case "wait":
-      return backend.waitAgentRun(request.id, request.waitSeconds ?? DEFAULT_AGENT_RUN_WAIT_SECONDS);
   }
 }
 
@@ -46,21 +35,16 @@ export const manageAgentRunTool = defineTool({
   label: "Manage agent run",
   description:
     "Control one delegated run by its exact run id. Completion events arrive automatically; this " +
-    "tool is not for monitoring or polling. Use cancel or resume for control. Use status or wait only " +
-    "when the owner explicitly requests an inspection or blocking wait: status (read the current row), " +
-    "cancel (abort a running or queued run), resume (start a new run continuing an interrupted/lost/failed " +
-    "run's child session), or wait (block for the result). Use query_database on agent_runs to find ids.",
+    "tool is not for monitoring or polling. Use status only when the owner explicitly requests an " +
+    "inspection: status (read the current row), cancel (abort a running or queued run), resume " +
+    "(start a new run continuing an interrupted/lost/failed run's child session). Use " +
+    "query_database on agent_runs to find ids.",
   parameters: Type.Object({
     action: Type.Union(
       MANAGE_AGENT_RUN_ACTIONS.map((action) => Type.Literal(action)),
-      { description: "status | cancel | resume | wait." },
+      { description: "status | cancel | resume." },
     ),
     id: Type.String({ minLength: 1, description: "Exact stable run id from the agent_runs table." }),
-    waitSeconds: Type.Optional(Type.Integer({
-      minimum: 1,
-      maximum: MAX_AGENT_RUN_WAIT_SECONDS,
-      description: `For action=wait: how long to block for the result. Default ${DEFAULT_AGENT_RUN_WAIT_SECONDS}.`,
-    })),
   }),
   async execute(_id, params) {
     const backend = await resolveBackend();
