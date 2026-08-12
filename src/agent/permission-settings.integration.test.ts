@@ -211,6 +211,7 @@ try {
       manage_schedule: "ask",
       delegate_agent: "ask",
       manage_agent_run: "ask",
+      get_harness_details: "allow",
     },
     "every registered tool has an explicit permission classification",
   );

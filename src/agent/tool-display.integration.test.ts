@@ -51,6 +51,7 @@ try {
   assert.deepEqual(Object.keys(config.customToolOverrides).sort(), [
     "delegate_agent",
     "get_current_session_state",
+    "get_harness_details",
     "manage_agent_run",
     "manage_schedule",
     "mark_thread_done",

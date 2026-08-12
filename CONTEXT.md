@@ -28,6 +28,23 @@ Each harness a delegated run may target carries a **Capability record**.
 Per-harness declaration of what Owner Operator can do with a child of that
 harness.
 
+**Harness details**:
+An ephemeral, read-only observation of what a **Harness** currently offers.
+Never stored: a details snapshot is only true as of the moment it was observed.
+_Avoid_: harness config, harness capabilities (that is a **Capability record**)
+
+**Advertised model**:
+A model a **Harness** itself reports in its catalog, with the reasoning levels
+it supports. Distinct from a model Owner Operator assumes or a caller pins.
+
+**Allowance window**:
+One subscription-allowance period a **Harness** reports, with the share of it
+already spent and when it resets. Never a token count or a price.
+
+**Baseline candidate**:
+The model and reasoning level a **Harness** selects for itself when Owner
+Operator pins nothing. A proposal, not a setting — it is reported, never saved.
+
 **Delegation depth**:
 How many **Delegated runs** separate a run from the Operator.
 

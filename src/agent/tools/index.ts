@@ -1,5 +1,6 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
 import { delegateAgentTool } from "./delegate-agent";
+import { getHarnessDetailsTool } from "./get-harness-details";
 import { manageAgentRunTool } from "./manage-agent-run";
 import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
@@ -10,6 +11,7 @@ export { queryDatabaseTool } from "./query-database";
 export { manageScheduleTool } from "./manage-schedule";
 export { schedulePromptTool } from "./schedule-prompt";
 export { delegateAgentTool } from "./delegate-agent";
+export { getHarnessDetailsTool } from "./get-harness-details";
 export { manageAgentRunTool } from "./manage-agent-run";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 
@@ -21,6 +23,7 @@ export const ownerOperatorCustomTools = [
   manageScheduleTool,
   delegateAgentTool,
   manageAgentRunTool,
+  getHarnessDetailsTool,
 ];
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
@@ -31,6 +34,7 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.ManageSchedule,
   AgentToolId.DelegateAgent,
   AgentToolId.ManageAgentRun,
+  AgentToolId.GetHarnessDetails,
 ];
 
 // packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.

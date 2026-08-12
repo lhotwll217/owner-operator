@@ -143,6 +143,36 @@ and terminal styling are adapters over that contract.
   live wrapper path and lease id both match. It fails closed on unavailable process listings and
   never claims a bare Claude, Codex, or `acpx` process.
 
+## Harness details
+
+`get_harness_details` reads what a harness currently offers — its model catalog, the reasoning
+levels each model supports, the subscription plan, and how much of each subscription allowance
+window is spent. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts) owns
+the behavior; the tool is a thin adapter over it.
+
+The boundary is read-only and ephemeral:
+
+- **Nothing is stored.** No cache, no polling, no provider registry, no failure ledger. Every call
+  re-observes, and a snapshot is only true as of its `observedAt`.
+- **`null` means unknown; `[]` means observed-and-none.** A fact the harness exposes no surface for
+  stays `null` rather than being inferred from documentation or pricing pages. Claude Code exposes
+  no first-party catalog, plan, or allowance surface, so those stay unknown.
+- **One harness cannot erase another.** Each harness is observed independently and a failure lands
+  in that harness's own `errors`.
+- **Percentages are subscription allowance**, never token counts and never list-price figures.
+- **No selection happens here.** The details layer reports facts and ranks nothing; choosing a
+  harness or model is the caller's decision.
+
+Codex facts come from its first-party `codex app-server` JSON-RPC surface. The catalog request is
+issued last in the handshake because the app-server only begins refreshing its remote catalog after
+`initialized` and announces nothing when that refresh lands; asking earlier returns a stale local
+copy.
+
+Baseline-candidate discovery is opt-in and separate. It opens one throwaway ACP session pinning
+neither model nor effort, reads back what the harness selected for itself, and reports it as a
+*candidate*. A candidate is never saved: persisting a delegated default requires explicit owner
+approval and is owned by the [launch configuration](../src/agent-runs/launch-config.ts).
+
 ## Permissions
 
 Each child honors its **own harness's** permission system, exactly as any other session of that

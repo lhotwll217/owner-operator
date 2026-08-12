@@ -1,9 +1,16 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAcpRuntime, createRuntimeStore, createAgentRegistry, type AcpRuntime } from "acpx/runtime";
+import {
+  createAcpRuntime,
+  createRuntimeStore,
+  createAgentRegistry,
+  type AcpRuntime,
+  type AcpSessionStore,
+} from "acpx/runtime";
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunStatus,
+  type AgentRunHarness,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
   type ChildIdentity,
@@ -42,6 +49,68 @@ export interface AcpLauncherOptions {
   runtimeFactory?: () => AcpRuntime;
 }
 
+/** The exact wrapper entrypoint every OO-spawned ACP child runs under. Startup cleanup matches on
+ * this path, so discovery and delegated runs must resolve it the same way. */
+export function agentRunWrapperPath(): string {
+  return fileURLToPath(new URL("./acp-process-wrapper.mjs", import.meta.url));
+}
+
+export interface LeasedAcpRuntime {
+  runtime: AcpRuntime;
+  sessionStore: AcpSessionStore;
+  leaseId: string;
+  /** Drop the durable ownership record once the child process tree is closed. */
+  release: () => void;
+}
+
+/** Build an acpx runtime whose child process tree is owned by a durable lease before acpx can
+ * spawn. Delegated runs and read-only harness observation share this seam so a hard daemon crash
+ * always leaves exactly one reapable wrapper identity per spawned child. */
+export function createLeasedAcpRuntime(params: {
+  harness: AgentRunHarness;
+  leaseKey: string;
+  /** Defaults to the durable delegated-run store. Read-only probes pass a throwaway directory so
+   * observing a harness leaves no session record behind. */
+  stateDir?: string;
+}): LeasedAcpRuntime {
+  const capability = AGENT_RUN_CAPABILITIES[params.harness];
+  if (!capability) throw new Error(`unknown delegation harness: ${params.harness}`);
+
+  const wrapperPath = agentRunWrapperPath();
+  // The lease is durable before ensureSession can spawn. The command-line identity plus exact
+  // wrapper path lets startup cleanup fail closed after a hard daemon crash.
+  const lease = createAgentRunProcessLease({ runId: params.leaseKey, wrapperPath });
+  const agentCommand = capability.acpAgent === "codex"
+    ? codexAcpAgentCommand()
+    : createAgentRegistry().resolve(capability.acpAgent);
+  const sessionStore = createRuntimeStore({ stateDir: params.stateDir ?? agentRunStateDir() });
+  const runtime = createAcpRuntime({
+    cwd: ownerOperatorHome(),
+    sessionStore,
+    agentRegistry: createAgentRegistry({
+      overrides: {
+        [capability.acpAgent]: leasedAgentCommand({
+          wrapperPath,
+          leaseId: lease.leaseId,
+          agentCommand,
+          acpAgent: capability.acpAgent,
+        }),
+      },
+    }),
+    // Owner ruling 2026-07-22 (supersedes the issue #69 fail-closed record): delegated
+    // children inherit the child harness's own permission config — the same gate as
+    // launching that harness directly. OO adds no extra permission layer.
+    permissionMode: "approve-all",
+  });
+
+  return {
+    runtime,
+    sessionStore,
+    leaseId: lease.leaseId,
+    release: () => closeAgentRunProcessLease(lease.leaseId),
+  };
+}
+
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
  * event stream mirrored into the ledger as explicit activity, and the protocol turn result
  * mapped to a terminal run status. Permissions stay in-harness: `permissionMode: "approve-all"`
@@ -53,56 +122,30 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
     return (request) => runAcpTurn(runtime, request);
   }
 
-  const wrapperPath = fileURLToPath(new URL("./acp-process-wrapper.mjs", import.meta.url));
   const launcher: AgentRunLauncher = async (
     request: AgentRunLaunchRequest,
   ): Promise<AgentRunLaunchResult> => {
-    const capability = AGENT_RUN_CAPABILITIES[request.run.harness];
-    if (!capability) throw new Error(`unknown delegation harness: ${request.run.harness}`);
-
-    // The lease is durable before ensureSession can spawn. The command-line identity plus exact
-    // wrapper path lets startup cleanup fail closed after a hard daemon crash.
-    const lease = createAgentRunProcessLease({ runId: request.run.id, wrapperPath });
-    const registry = createAgentRegistry();
-    const agentCommand = capability.acpAgent === "codex"
-      ? codexAcpAgentCommand()
-      : registry.resolve(capability.acpAgent);
-    const sessionStore = createRuntimeStore({ stateDir: agentRunStateDir() });
-    const runtime = createAcpRuntime({
-      cwd: ownerOperatorHome(),
-      sessionStore,
-      agentRegistry: createAgentRegistry({
-        overrides: {
-          [capability.acpAgent]: leasedAgentCommand({
-            wrapperPath,
-            leaseId: lease.leaseId,
-            agentCommand,
-            acpAgent: capability.acpAgent,
-          }),
-        },
-      }),
-      // Owner ruling 2026-07-22 (supersedes the issue #69 fail-closed record): delegated
-      // children inherit the child harness's own permission config — the same gate as
-      // launching that harness directly. OO adds no extra permission layer.
-      permissionMode: "approve-all",
+    const leased = createLeasedAcpRuntime({
+      harness: request.run.harness,
+      leaseKey: request.run.id,
     });
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
     let removeLease = false;
     try {
-      handle = await ensureAcpSession(runtime, request);
-      const record = await sessionStore.load(handle.acpxRecordId ?? request.run.id);
+      handle = await ensureAcpSession(leased.runtime, request);
+      const record = await leased.sessionStore.load(handle.acpxRecordId ?? request.run.id);
       if (record?.pid) {
-        updateAgentRunProcessLease(lease.leaseId, {
+        updateAgentRunProcessLease(leased.leaseId, {
           rootPid: record.pid,
           rootCommand: record.agentCommand,
         });
       }
-      return await runAcpTurn(runtime, request, handle);
+      return await runAcpTurn(leased.runtime, request, handle);
     } finally {
       if (handle) {
         try {
-          await runtime.close({ handle, reason: "delegated run finished" });
+          await leased.runtime.close({ handle, reason: "delegated run finished" });
           removeLease = true;
         } catch {
           // Keep the lease: startup cleanup can reap a wrapper that resisted normal close.
@@ -111,11 +154,11 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
         // acpx closes a partially initialized client in ensureSession's own finally block.
         removeLease = true;
       }
-      if (removeLease) closeAgentRunProcessLease(lease.leaseId);
+      if (removeLease) leased.release();
     }
   };
   launcher.reapOrphans = async () => {
-    await reapStaleAgentRunProcesses({ wrapperPath });
+    await reapStaleAgentRunProcesses({ wrapperPath: agentRunWrapperPath() });
   };
   return launcher;
 }
