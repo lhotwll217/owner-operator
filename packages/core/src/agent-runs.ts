@@ -122,6 +122,10 @@ export interface AgentRun {
   effort: AgentRunEffort | null;
   /** True only after the launcher successfully applies effort through an advertised option. */
   effortApplied: boolean;
+  /** Identity independently read back from the live harness after session configuration. */
+  harnessModel?: string | null;
+  harnessEffort?: AgentRunEffort | null;
+  harnessIdentityObserved?: boolean;
   depth: number;
   status: AgentRunStatus;
   createdAt: string;
@@ -156,6 +160,9 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
   activity?: string;
   /** Runtime acknowledgement that the resolved effort was applied. */
   effortApplied?: boolean;
+  harnessModel?: string | null;
+  harnessEffort?: AgentRunEffort | null;
+  harnessIdentityObserved?: boolean;
 }
 
 /** Runtime request passed from the executor to the injected launcher seam. */

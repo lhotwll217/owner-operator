@@ -4,7 +4,7 @@
 // Run: OO_RUN_LIVE_DELEGATED_IDENTITY=1 npm run test:delegated-identity:live
 import assert from "node:assert";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,19 +44,28 @@ assert.ok(model, "set OO_LIVE_IDENTITY_MODEL to an exact harness model id");
 assert.ok(effortText === "null" || AGENT_RUN_EFFORTS.includes(effortText as AgentRunEffort),
   "set OO_LIVE_IDENTITY_EFFORT to null or a supported effort");
 const effort = effortText === "null" ? null : effortText as AgentRunEffort;
+const credentialSource = process.env.OO_LIVE_IDENTITY_CREDENTIAL_SOURCE?.trim();
+const configSource = process.env.OO_LIVE_IDENTITY_CONFIG_SOURCE?.trim();
+assert.ok(credentialSource, "set OO_LIVE_IDENTITY_CREDENTIAL_SOURCE to the explicit harness credential file");
+assert.ok(configSource, "set OO_LIVE_IDENTITY_CONFIG_SOURCE to the explicit harness config file");
 const userHome = mkdtempSync(join(tmpdir(), "oo-live-delegated-identity-"));
-const ooHome = join(userHome, ".owner-operator");
+const ooHome = join(userHome, "state", ".owner-operator");
 const daemonPath = join(ooHome, "daemon.json");
 const testPath = fileURLToPath(import.meta.url);
 let daemon: ChildProcess | undefined;
-let stderr = "";
+let daemonExited: Promise<void> | undefined;
+
+const harnessHome = harness === AgentRunHarness.Codex ? join(userHome, ".codex") : join(userHome, ".claude");
+mkdirSync(harnessHome, { recursive: true });
+copyFileSync(credentialSource, join(harnessHome, harness === AgentRunHarness.Codex ? "auth.json" : ".credentials.json"));
+copyFileSync(configSource, join(harnessHome, harness === AgentRunHarness.Codex ? "config.toml" : "settings.json"));
 
 async function waitFor<T>(read: () => Promise<T | undefined> | T | undefined, label: string, timeoutMs = 300_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}\n${stderr}`);
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
@@ -81,7 +90,9 @@ try {
     env: { ...process.env, HOME: userHome, OO_HOME: ooHome, OO_LIVE_IDENTITY_WORKER: "1" },
     stdio: ["ignore", "ignore", "pipe"],
   });
-  daemon.stderr?.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-8_000); });
+  daemonExited = new Promise((resolve) => { daemon!.once("exit", () => resolve()); daemon!.once("error", () => resolve()); });
+  // Drain without forwarding: a live harness may write credential-bearing diagnostics.
+  daemon.stderr?.resume();
   await waitFor(async () => {
     const daemonInfo = info();
     if (!daemonInfo || daemonInfo.pid !== daemon?.pid) return;
@@ -94,16 +105,26 @@ try {
     const row = await request<AgentRun>(`/agent-runs/${launched.id}`);
     return isTerminalAgentRunStatus(row.status) ? row : undefined;
   }, "real delegated turn");
+  assert.equal(finished.status, "completed");
   assert.deepEqual({ harness: finished.harness, model: finished.model, effort: finished.effort }, { harness, model, effort });
-  if (effort === null) assert.equal(finished.effortApplied, false, "explicit null effort has explicit unapplied semantics");
-  else assert.equal(finished.effortApplied, true, "requested non-null effort was applied by the live harness");
+  assert.equal(finished.harnessIdentityObserved, true, "launcher independently observed live harness identity");
+  assert.equal(finished.harnessModel, model, "live harness resolved the requested model");
+  assert.ok(Object.hasOwn(finished, "harnessEffort"), "live status reports nullable harness effort explicitly");
+  if (effort === null) {
+    assert.equal(finished.effortApplied, false, "explicit null means OO applies no effort override");
+  } else {
+    assert.equal(finished.effortApplied, true, "requested non-null effort was applied by the live harness");
+    assert.equal(finished.harnessEffort, effort, "live harness reports the applied effort");
+  }
   assert.ok(finished.childSessionId, "lifecycle reports the real child identity");
   assert.match(finished.resultTail ?? "", /OO_DELEGATED_IDENTITY_OK/);
   process.stdout.write(`ok — lifecycle retained ${harness} / ${model} / effort ${String(effort)}\n`);
 } finally {
   if (daemon && daemon.exitCode === null && daemon.signalCode === null) {
     daemon.kill("SIGTERM");
-    await waitFor(() => daemon?.exitCode !== null || daemon?.signalCode !== null ? true : undefined, "daemon exit", 15_000).catch(() => daemon?.kill("SIGKILL"));
+    await waitFor(() => daemon?.exitCode !== null || daemon?.signalCode !== null ? true : undefined, "daemon exit", 15_000)
+      .catch(() => daemon?.kill("SIGKILL"));
   }
+  await daemonExited;
   rmSync(userHome, { recursive: true, force: true });
 }

@@ -68,6 +68,8 @@ OO_RUN_LIVE_DELEGATED_IDENTITY=1 \
 OO_LIVE_IDENTITY_HARNESS=codex \
 OO_LIVE_IDENTITY_MODEL=<exact-model-id> \
 OO_LIVE_IDENTITY_EFFORT=high \
+OO_LIVE_IDENTITY_CREDENTIAL_SOURCE=/explicit/harness/credential-file \
+OO_LIVE_IDENTITY_CONFIG_SOURCE=/explicit/harness/config-file \
   npm run test:delegated-identity:live                  # Gateway → real delegated lifecycle
 cd apps/widget && swift test                            # widget (Swift)
 ```

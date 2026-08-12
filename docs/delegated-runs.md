@@ -137,7 +137,9 @@ and terminal styling are adapters over that contract.
 - **Effort application** is owned by the [ACP launcher](../src/agent-runs/acp-launcher.ts), which
   uses only session-advertised config options. The durable `effort_applied` field distinguishes
   recorded intent from successful application; its contract lives in
-  [schema docs](../src/state/schema-docs.ts).
+  [schema docs](../src/state/schema-docs.ts). After configuration, the launcher also reads the
+  effective model and effort back from ACP status into the ledger; this observation is distinct
+  from the prelaunch request fields.
 - **Process ownership is explicit on POSIX.** Before `acpx` can spawn, the launcher persists a
   lease and puts its unguessable id on a stable Owner Operator wrapper's command line. Normal
   completion closes the ACP process tree and lease; daemon startup reaps only orphaned trees whose
@@ -156,8 +158,9 @@ only that invocation and precedence rule.
 
 `get_harness_details` reads what a harness currently offers — its model catalog, the reasoning
 levels each model supports, the subscription plan, and how much of each subscription allowance
-window is spent. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts) owns
-the behavior; the tool is a thin adapter over it.
+window is spent. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts) is the
+stable normalization facade; private sibling modules own the Codex JSON-RPC process and ACP probe
+lifecycle. The tool is a thin adapter over the facade.
 
 The boundary is read-only and ephemeral:
 

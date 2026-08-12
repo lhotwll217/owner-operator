@@ -2,27 +2,14 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
+import { parseDelegationBehaviorFixtures } from "./delegation-selection-fixtures";
 import { requiredReasonTerms } from "./delegation-selection-grading";
 
-interface Identity { harness: string; model: string; effort: string | null }
-interface Case {
-  id: string;
-  prompt: string;
-  roster: string;
-  details: Array<{ harness: string; models: Array<{ id: string; reasoningLevels: string[] }> | null }>;
-  expectedLaunches: Identity[];
-  bypassSelection?: boolean;
-  requiresDetails?: boolean;
-  requiresFallbackReport?: boolean;
-  requiresOwnerQuestion?: boolean;
-  requiresUnknownReport?: boolean;
-  reject?: { harness: string; model: string; reason: string };
-}
-
-const cases = JSON.parse(readFileSync(join(
+const fixtureSource = readFileSync(join(
   repoRoot,
   "src/agent/fixtures/delegation-selection.behavior-cases.json",
-), "utf8")) as Case[];
+), "utf8");
+const cases = parseDelegationBehaviorFixtures(fixtureSource);
 const ids = new Set(cases.map((entry) => entry.id));
 
 assert.equal(ids.size, cases.length, "behavior case ids are unique");
@@ -57,5 +44,11 @@ for (const entry of cases) {
 assert.deepEqual(requiredReasonTerms("account access rejected the advertised model"),
   ["account", "access", "rejected", "advertised", "model"],
   "fallback grading derives independent semantic terms from the actual rejection reason");
+
+for (const malformed of [
+  fixtureSource.replace('"usedPercent": 98', '"usedPercentage": 98'),
+  fixtureSource.replace('"allowanceWindows": null', '"allowanceWindows": [{"id":"weekly","usedPercent":101}]'),
+  fixtureSource.replace('"effort": null', '"effort": "turbo"'),
+]) assert.throws(() => parseDelegationBehaviorFixtures(malformed), /malformed delegation behavior fixture/);
 
 process.stdout.write(`ok — ${cases.length} delegation behavior fixtures cover exact observable contracts\n`);

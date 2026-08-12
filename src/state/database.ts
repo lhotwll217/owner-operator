@@ -170,6 +170,9 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   model TEXT,
   effort TEXT CHECK (effort IS NULL OR effort IN (${AGENT_RUN_EFFORT_SQL})),
   effort_applied INTEGER NOT NULL DEFAULT 0 CHECK (effort_applied IN (0, 1)),
+  harness_model TEXT,
+  harness_effort TEXT CHECK (harness_effort IS NULL OR harness_effort IN (${AGENT_RUN_EFFORT_SQL})),
+  harness_identity_observed INTEGER NOT NULL DEFAULT 0 CHECK (harness_identity_observed IN (0, 1)),
   depth INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN (
     'pending', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'lost'
@@ -199,7 +202,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_parent_created
 
 const AGENT_RUN_COLUMNS = `
   id, harness, task, cwd, parent_thread_id AS parentThreadId, model, effort,
-  effort_applied AS effortApplied, depth, status,
+  effort_applied AS effortApplied, harness_model AS harnessModel,
+  harness_effort AS harnessEffort, harness_identity_observed AS harnessIdentityObserved,
+  depth, status,
   created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt,
   activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
   acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
@@ -220,10 +225,17 @@ export interface AgentRunInsert {
   acpxRecordId?: string | null;
 }
 
-type AgentRunDbRow = Omit<AgentRun, "effortApplied"> & { effortApplied: number };
+type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentityObserved"> & {
+  effortApplied: number;
+  harnessIdentityObserved: number;
+};
 
 function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
-  return row ? { ...row, effortApplied: Boolean(row.effortApplied) } : undefined;
+  return row ? {
+    ...row,
+    effortApplied: Boolean(row.effortApplied),
+    harnessIdentityObserved: Boolean(row.harnessIdentityObserved),
+  } : undefined;
 }
 
 type DetailsPatch = Partial<{
@@ -267,6 +279,15 @@ export class ThreadDb {
         "ALTER TABLE agent_runs ADD COLUMN effort_applied INTEGER NOT NULL DEFAULT 0 "
         + "CHECK (effort_applied IN (0, 1))",
       );
+    }
+    if (!columns.has("harness_model")) this.db.exec("ALTER TABLE agent_runs ADD COLUMN harness_model TEXT");
+    if (!columns.has("harness_effort")) {
+      this.db.exec(`ALTER TABLE agent_runs ADD COLUMN harness_effort TEXT
+        CHECK (harness_effort IS NULL OR harness_effort IN (${AGENT_RUN_EFFORT_SQL}))`);
+    }
+    if (!columns.has("harness_identity_observed")) {
+      this.db.exec("ALTER TABLE agent_runs ADD COLUMN harness_identity_observed INTEGER NOT NULL DEFAULT 0 "
+        + "CHECK (harness_identity_observed IN (0, 1))");
     }
   }
 
@@ -782,12 +803,17 @@ export class ThreadDb {
          last_activity_at = ?,
          child_session_id = COALESCE(?, child_session_id),
          acpx_record_id = COALESCE(?, acpx_record_id),
-         effort_applied = COALESCE(?, effort_applied)
+         effort_applied = COALESCE(?, effort_applied),
+         harness_model = COALESCE(?, harness_model),
+         harness_effort = COALESCE(?, harness_effort),
+         harness_identity_observed = COALESCE(?, harness_identity_observed)
        WHERE id = ? AND status = ?`,
     ).run(
       update.activity ?? null, this.now(), update.childSessionId ?? null,
       update.acpxRecordId ?? null,
       update.effortApplied === undefined ? null : Number(update.effortApplied),
+      update.harnessModel ?? null, update.harnessEffort ?? null,
+      update.harnessIdentityObserved === undefined ? null : Number(update.harnessIdentityObserved),
       id, AgentRunStatus.Running,
     ).changes) > 0;
     return changed ? this.agentRunById(id)! : null;

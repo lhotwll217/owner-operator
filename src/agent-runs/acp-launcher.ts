@@ -10,6 +10,7 @@ import {
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunStatus,
+  isAgentRunEffort,
   type AgentRunHarness,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
@@ -190,6 +191,7 @@ async function runAcpTurn(
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
   await applyAdvertisedEffort(runtime, handle, request);
+  await observeHarnessIdentity(runtime, handle, request);
 
   // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
@@ -259,6 +261,33 @@ async function applyAdvertisedEffort(
     value: request.run.effort,
   });
   request.onActivity({ effortApplied: true });
+}
+
+/** Read back the session's effective identity after configuration. This is deliberately separate
+ * from the persisted launch request, giving status clients live harness evidence. */
+async function observeHarnessIdentity(
+  runtime: AcpRuntime,
+  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
+  request: AgentRunLaunchRequest,
+): Promise<void> {
+  if (!runtime.getStatus) return;
+  let status: Awaited<ReturnType<NonNullable<AcpRuntime["getStatus"]>>>;
+  try {
+    status = await runtime.getStatus({ handle });
+  } catch {
+    // Observation is audit evidence, not a new launch gate. The live proof requires the evidence;
+    // ordinary delegated turns continue if an adapter cannot expose status after configuration.
+    return;
+  }
+  const harnessModel = status.models?.currentModelId?.trim() || null;
+  const configOptions = status.details?.configOptions;
+  const effortOption = Array.isArray(configOptions)
+    ? configOptions.find((option) => option && typeof option === "object" && "id" in option
+      && option.id === REASONING_EFFORT_CONFIG_OPTION)
+    : undefined;
+  const value = effortOption && "currentValue" in effortOption ? effortOption.currentValue : null;
+  const harnessEffort = typeof value === "string" && isAgentRunEffort(value) ? value : null;
+  request.onActivity({ harnessModel, harnessEffort, harnessIdentityObserved: true });
 }
 
 function ensureAcpSession(

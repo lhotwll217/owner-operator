@@ -9,24 +9,20 @@
  * - No task selection or ranking happens here. Callers decide what to do with the facts.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface } from "node:readline";
-import { randomUUID } from "node:crypto";
-import { rmSync } from "node:fs";
-import { join } from "node:path";
-import type { AcpRuntimeHandle } from "acpx/runtime";
 import { AGENT_RUN_CAPABILITIES, AgentRunHarness, isAgentRunEffort } from "@owner-operator/core";
-import { ownerOperatorHome } from "../shared/paths";
-import { agentRunStateDir, createLeasedAcpRuntime, type LeasedAcpRuntime } from "./acp-launcher";
+import {
+  discoverAcpBaselineCandidate,
+  type BaselineProbeDeps,
+  type HarnessBaselineCandidate,
+} from "./harness-details-baseline-probe";
+import {
+  readCodexAppServerPayloads,
+  type CodexAppServerOptions,
+  type CodexAppServerPayloads,
+} from "./harness-details-codex-client";
 
-/** Wall-clock ceiling for one `codex app-server` observation, including process startup. */
-const CODEX_APP_SERVER_TIMEOUT_MS = 20_000;
-/** How long a signalled `codex app-server` gets to exit before the next escalation. */
-const CODEX_APP_SERVER_KILL_GRACE_MS = 2_000;
-/** Wall-clock ceiling for one unpinned ACP session used to read the harness's own defaults. */
-const BASELINE_CANDIDATE_TIMEOUT_MS = 90_000;
-const CODEX_MODEL_LIST_MAX_PAGES = 100;
-const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
+export { discoverAcpBaselineCandidate, readCodexAppServerPayloads };
+export type { BaselineProbeDeps, CodexAppServerOptions, CodexAppServerPayloads };
 
 /** Identifies which first-party protocol produced a harness's facts, so a reader can tell an
  * observation apart from an assumption. `null` on a harness that exposes no such surface. */
@@ -62,11 +58,7 @@ export interface HarnessAccountDetail {
 
 /** What the harness selects for itself when Owner Operator pins nothing. Reported, never saved:
  * persisting an approved baseline is a separate, owner-consented step. */
-export interface HarnessBaselineCandidate {
-  model: string | null;
-  effort: string | null;
-  availableEfforts: string[] | null;
-}
+export type { HarnessBaselineCandidate };
 
 export interface HarnessDetails {
   harness: AgentRunHarness;
@@ -78,12 +70,6 @@ export interface HarnessDetails {
   baselineCandidate: HarnessBaselineCandidate | null;
   notes: string[];
   errors: string[];
-}
-
-export interface CodexAppServerPayloads {
-  account: unknown;
-  rateLimits: unknown;
-  models: unknown;
 }
 
 export interface HarnessDetailsDeps {
@@ -274,292 +260,6 @@ function normalizeCodexWindow(
     resetsAt: numeric(window.resetsAt),
     windowMinutes: numeric(window.windowDurationMins),
   };
-}
-
-export interface BaselineProbeDeps {
-  /** Injectable for tests; production builds the real leased acpx runtime. */
-  createRuntime?: (params: {
-    harness: AgentRunHarness;
-    leaseKey: string;
-    stateDir: string;
-  }) => LeasedAcpRuntime;
-  timeoutMs?: number;
-}
-
-/** Ask the harness what it would run on its own: open one ACP session that pins neither model nor
- * effort, then read back what the harness selected. The result is reported as a candidate —
- * saving a baseline is a separate step that requires explicit owner approval.
- *
- * A `oneshot` session closes its child process inside `ensureSession`. If initialization exceeds
- * the deadline, the owned process lease terminates the wrapper without waiting for a handle. */
-export async function discoverAcpBaselineCandidate(
-  harness: AgentRunHarness,
-  deps: BaselineProbeDeps = {},
-): Promise<HarnessBaselineCandidate> {
-  const probeKey = `harness-details-${randomUUID()}`;
-  const probeStateDir = join(agentRunStateDir(), "probes", probeKey);
-  const leased = (deps.createRuntime ?? createLeasedAcpRuntime)({
-    harness,
-    leaseKey: probeKey,
-    stateDir: probeStateDir,
-  });
-  const session = leased.runtime.ensureSession({
-    sessionKey: probeKey,
-    agent: AGENT_RUN_CAPABILITIES[harness].acpAgent,
-    mode: "oneshot",
-    // A baseline must be the harness's own choice, so the probe runs from one fixed neutral
-    // directory. The caller's cwd could carry project-local harness config that would change
-    // what the harness selects and contaminate a global candidate.
-    cwd: ownerOperatorHome(),
-  });
-  let opened = false;
-  let timedOut = false;
-  try {
-    // acpx applies no startup deadline of its own, so a harness that never finishes initializing
-    // would hang this read indefinitely.
-    const handle = await withDeadline(
-      session,
-      deps.timeoutMs ?? BASELINE_CANDIDATE_TIMEOUT_MS,
-      `${harness} did not finish initializing`,
-    );
-    opened = true;
-    const status = await leased.runtime.getStatus?.({ handle });
-    const effort = readEffortConfigOption(status?.details?.configOptions);
-    const model = status?.models?.currentModelId?.trim() || null;
-    if (!model) throw new Error(`${harness} baseline discovery returned no usable model`);
-    if (effort.currentValue !== null && !isAgentRunEffort(effort.currentValue)) {
-      throw new Error(`${harness} baseline discovery returned unsupported effort: ${effort.currentValue}`);
-    }
-    return {
-      model,
-      effort: effort.currentValue,
-      availableEfforts: effort.values,
-    };
-  } catch (error) {
-    timedOut = error instanceof Error && error.message.includes("did not finish initializing");
-    throw error;
-  } finally {
-    if (opened) discardProbe(leased, probeStateDir);
-    else if (timedOut) await discardAbandonedProbe(leased, session, probeStateDir);
-    else discardProbe(leased, probeStateDir);
-  }
-}
-
-function discardProbe(leased: LeasedAcpRuntime, probeStateDir: string): void {
-  leased.release();
-  rmSync(probeStateDir, { recursive: true, force: true });
-}
-
-/** A probe that timed out may still be initializing a live wrapper, so its traces cannot be
- * dropped while the outcome is unknown. Adopt the abandoned session instead: once it settles,
- * close whatever it opened and drop the same traces a settled probe drops. The lease outlives
- * only a child that resisted close, because startup reaping needs it to find that wrapper. */
-async function discardAbandonedProbe(
-  leased: LeasedAcpRuntime,
-  session: Promise<AcpRuntimeHandle>,
-  probeStateDir: string,
-): Promise<void> {
-  // Observe any eventual rejection so abandoning the initialization promise cannot create an
-  // unhandled rejection. Cleanup itself never awaits this potentially never-settling work.
-  void session.catch(() => undefined);
-  const terminated = await leased.terminate();
-  rmSync(probeStateDir, { recursive: true, force: true });
-  if (terminated) leased.release();
-}
-
-/** The timer is held, not unref'd: an unref'd deadline never fires in an otherwise idle process,
- * which is exactly the case where the work it bounds is stuck. Clearing it on settlement keeps a
- * finished observation from holding the process open. */
-function withDeadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  return Promise.race([
-    work,
-    new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(message)), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
-}
-
-function readEffortConfigOption(
-  payload: unknown,
-): { currentValue: string | null; values: string[] | null } {
-  if (!Array.isArray(payload)) return { currentValue: null, values: null };
-  const option = payload
-    .map((entry) => record(entry))
-    .find((entry) => entry && text(entry.id) === REASONING_EFFORT_CONFIG_OPTION);
-  if (!option) return { currentValue: null, values: null };
-  const values = Array.isArray(option.options)
-    ? option.options.flatMap((entry) => {
-      const choice = record(entry);
-      if (!choice) return [];
-      // A select advertises either flat options or groups of them.
-      if (Array.isArray(choice.options)) return normalizeSelectValues(choice.options);
-      const value = text(choice.value);
-      return value ? [value] : [];
-    })
-    : null;
-  return { currentValue: text(option.currentValue), values };
-}
-
-function normalizeSelectValues(payload: readonly unknown[]): string[] {
-  return payload.flatMap((entry) => {
-    const value = text(record(entry)?.value);
-    return value ? [value] : [];
-  });
-}
-
-interface JsonRpcResponse {
-  id?: unknown;
-  result?: unknown;
-  error?: { message?: unknown };
-}
-
-/** Drive one `codex app-server` process over JSON-RPC on stdio and pull the three read-only
- * surfaces. The request order matters: the app-server only starts refreshing its remote model
- * catalog after the client sends `initialized`, and it emits no notification when the refresh
- * lands, so `model/list` is issued last — the two account round-trips cover that window without a
- * fixed sleep. Asking earlier returns a stale locally cached catalog. */
-export function readCodexAppServerPayloads(
-  options: CodexAppServerOptions = {},
-): Promise<CodexAppServerPayloads> {
-  return withCodexAppServer(options, async (client) => ({
-    account: await client.request("account/read"),
-    rateLimits: await client.request("account/rateLimits/read"),
-    models: await readAllCodexModelPages(client),
-  }));
-}
-
-async function readAllCodexModelPages(client: CodexAppServerClient): Promise<unknown> {
-  const data: unknown[] = [];
-  const seen = new Set<string>();
-  let cursor: string | null = null;
-  for (let page = 0; page < CODEX_MODEL_LIST_MAX_PAGES; page += 1) {
-    const payload = await client.request("model/list", cursor ? { cursor } : {});
-    const result = record(payload);
-    if (!result || !Array.isArray(result.data)) return payload;
-    data.push(...result.data);
-    const nextCursor = text(result.nextCursor);
-    if (!nextCursor) return { ...result, data, nextCursor: null };
-    if (seen.has(nextCursor)) throw new Error(`codex model/list pagination loop at cursor ${nextCursor}`);
-    seen.add(nextCursor);
-    cursor = nextCursor;
-  }
-  throw new Error(`codex model/list exceeded ${CODEX_MODEL_LIST_MAX_PAGES} pages`);
-}
-
-/** Injectable for tests; production drives the real `codex app-server`. */
-export interface CodexAppServerOptions {
-  command?: string;
-  args?: readonly string[];
-  timeoutMs?: number;
-  /** How long a signalled app-server gets to exit before the next escalation. */
-  killGraceMs?: number;
-}
-
-interface CodexAppServerClient {
-  request: (method: string, params?: unknown) => Promise<unknown>;
-}
-
-async function withCodexAppServer<T>(
-  options: CodexAppServerOptions,
-  run: (client: CodexAppServerClient) => Promise<T>,
-): Promise<T> {
-  const child = spawn(options.command ?? "codex", [...options.args ?? ["app-server"]], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-  let nextId = 0;
-  let failure: Error | undefined;
-
-  const fail = (error: Error): void => {
-    failure ??= error;
-    for (const [, entry] of pending) entry.reject(error);
-    pending.clear();
-  };
-
-  child.on("error", (error) => fail(error));
-  child.on("exit", (code) => fail(new Error(`codex app-server exited (code ${code ?? "unknown"})`)));
-  child.stderr.resume();
-
-  const lines = createInterface({ input: child.stdout });
-  lines.on("line", (line) => {
-    let message: JsonRpcResponse;
-    try {
-      message = JSON.parse(line) as JsonRpcResponse;
-    } catch {
-      return; // Notifications and any non-JSON banner text are not responses we await.
-    }
-    if (typeof message.id !== "number") return;
-    const entry = pending.get(message.id);
-    if (!entry) return;
-    pending.delete(message.id);
-    if (message.error) entry.reject(new Error(text(message.error.message) ?? "codex app-server error"));
-    else entry.resolve(message.result);
-  });
-
-  const send = (payload: Record<string, unknown>): void => {
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...payload })}\n`);
-  };
-
-  const request = (method: string, params: unknown = {}): Promise<unknown> => {
-    if (failure) return Promise.reject(failure);
-    const id = nextId++;
-    return new Promise<unknown>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      send({ id, method, params });
-    });
-  };
-
-  try {
-    return await withDeadline(
-      (async () => {
-        await request("initialize", {
-          clientInfo: { name: "owner-operator", title: "Owner Operator", version: "0.0.0" },
-        });
-        send({ method: "initialized", params: {} });
-        return await run({ request });
-      })(),
-      options.timeoutMs ?? CODEX_APP_SERVER_TIMEOUT_MS,
-      "codex app-server timed out",
-    );
-  } finally {
-    lines.close();
-    await terminate(child, options.killGraceMs ?? CODEX_APP_SERVER_KILL_GRACE_MS);
-  }
-}
-
-/** A timed-out app-server is by definition one that is not responding, so SIGTERM alone can leave
- * it running after the observation that spawned it returns. Wait for the exit, escalate to
- * SIGKILL, and bound both waits so cleanup can never hang the caller it is unwinding. */
-async function terminate(child: ChildProcessWithoutNullStreams, graceMs: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
-    child.once("error", () => resolve());
-  });
-  try {
-    child.stdin.end();
-  } catch {
-    // Already gone.
-  }
-  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
-    try {
-      child.kill(signal);
-    } catch {
-      return; // Already reaped.
-    }
-    if (await settlesWithin(exited, graceMs)) return;
-  }
-}
-
-function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  return Promise.race([
-    work.then(() => true),
-    new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
 }
 
 function record(value: unknown): Record<string, unknown> | null {

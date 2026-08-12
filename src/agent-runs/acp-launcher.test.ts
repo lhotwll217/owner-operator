@@ -27,6 +27,13 @@ const runtime = {
     runtimeCalls.push("set-effort");
     appliedOptions.push({ key, value });
   },
+  getStatus: async () => {
+    runtimeCalls.push("status");
+    return {
+      models: { currentModelId: "harness-resolved-model" },
+      details: { configOptions: [{ id: "reasoning_effort", currentValue: "ultra" }] },
+    };
+  },
   startTurn: ({ text }: { text: string }) => {
     runtimeCalls.push("turn");
     turnTexts.push(text);
@@ -79,7 +86,12 @@ assert.ok(result.resultText.endsWith("newest-tail"), "the rolling buffer preserv
 assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "acpx-record" });
 assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "ultra" }], "the launcher applies the exact selected identity");
 assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
-assert.deepEqual(runtimeCalls, ["ensure", "capabilities", "set-effort", "turn"], "effort applies after setup and before the turn");
+assert.deepEqual(activity[2], {
+  harnessModel: "harness-resolved-model",
+  harnessEffort: "ultra",
+  harnessIdentityObserved: true,
+}, "effective identity is independently read back from harness status");
+assert.deepEqual(runtimeCalls, ["ensure", "capabilities", "set-effort", "status", "turn"], "effort and identity observation happen before the turn");
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
