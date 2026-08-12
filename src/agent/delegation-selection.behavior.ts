@@ -3,7 +3,7 @@
 // provide facts and provider outcomes; unlike faux-provider integration tests, no calls are scripted.
 // Run: OO_RUN_DELEGATION_SELECTION_EVAL=1 npm run test:delegation-selection
 import assert from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -22,7 +22,7 @@ import {
 } from "@owner-operator/core";
 import { agentRunFixture } from "../../test/fixtures/agent-run";
 import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
-import { ownerOperatorPiServices, ownerOperatorPrompt } from "./agent";
+import { lastAssistantError, ownerOperatorPiServices, ownerOperatorPrompt } from "./agent";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { createDelegateAgentTool } from "./tools/delegate-agent";
 import { createGetHarnessDetailsTool } from "./tools/get-harness-details";
@@ -45,6 +45,7 @@ interface BehaviorCase {
   roster: string;
   details: DetailFixture[];
   reject?: { harness: AgentRunHarness; model: string; reason: string };
+  rejectionReportTerms?: string[];
   expectedLaunches: Identity[];
   bypassSelection?: boolean;
   requiresDetails?: boolean;
@@ -59,10 +60,21 @@ const selectedIds = new Set((process.env.OO_DELEGATION_SELECTION_CASES ?? "")
   .split(",").map((value) => value.trim()).filter(Boolean));
 const cases = selectedIds.size ? allCases.filter((entry) => selectedIds.has(entry.id)) : allCases;
 assert.ok(cases.length > 0, "OO_DELEGATION_SELECTION_CASES did not match a fixture id");
-const root = mkdtempSync(join(tmpdir(), "oo-delegation-behavior-"));
-const { modelRuntime, settingsManager } = await ownerOperatorPiServices();
 const originalHome = process.env.HOME;
 const originalOoHome = process.env.OO_HOME;
+const root = mkdtempSync(join(tmpdir(), "oo-delegation-behavior-"));
+const evalHome = join(root, "home");
+const evalOoHome = join(evalHome, ".owner-operator");
+process.env.HOME = evalHome;
+process.env.OO_HOME = evalOoHome;
+const evalPaths = ensureOwnerOperatorWorkspace(evalOoHome);
+const authPath = process.env.OO_DELEGATION_SELECTION_AUTH_PATH?.trim();
+assert.ok(authPath, "set OO_DELEGATION_SELECTION_AUTH_PATH to the explicit Pi auth.json used by this paid eval");
+copyFileSync(authPath, evalPaths.piAuth);
+const settingsPath = process.env.OO_DELEGATION_SELECTION_SETTINGS_PATH?.trim();
+if (settingsPath) copyFileSync(settingsPath, evalPaths.piSettings);
+const { modelRuntime, settingsManager } = await ownerOperatorPiServices(evalOoHome);
+const selectionSkillPath = join(process.cwd(), "src/agent/skills/select-harness-for-delegation/SKILL.md");
 
 const identity = (input: AgentRunCreateInput): Identity => ({
   harness: input.harness,
@@ -79,8 +91,8 @@ async function sessionFor(
   delegate: Pick<GatewayApi, "delegateAgent" | "waitAgentRun">,
   baselineCandidate = { model: "harness-candidate", effort: null as AgentRunEffort | null, availableEfforts: null },
 ) {
-  const userHome = join(root, id, "home");
-  const ooHome = join(userHome, ".owner-operator");
+  const userHome = evalHome;
+  const ooHome = evalOoHome;
   const cwd = join(root, id, "task");
   mkdirSync(cwd, { recursive: true });
   process.env.HOME = userHome;
@@ -132,6 +144,8 @@ async function sessionFor(
     appendSystemPromptOverride: () => [],
   });
   await loader.reload();
+  assert.ok(loader.getSkills().skills.some((skill) => skill.name === "select-harness-for-delegation"),
+    `${id}: shipped selection skill is exposed`);
   const sessionManager = SessionManager.inMemory(cwd);
   const { session } = await createAgentSession({
     cwd,
@@ -178,7 +192,8 @@ try {
     await run.session.prompt(entry.prompt);
     const response = run.takeResponse();
     const actual = launches.map(identity);
-    assert.equal(actual.length, entry.expectedLaunches.length, `${entry.id}: launch count\n${response}`);
+    assert.equal(actual.length, entry.expectedLaunches.length,
+      `${entry.id}: launch count; model error: ${lastAssistantError(run.session) ?? "none"}\n${response}`);
     entry.expectedLaunches.forEach((expected, index) => {
       assert.ok(exact(actual[index]!, expected), `${entry.id}: exact launch ${index + 1}: ${JSON.stringify(actual[index])}`);
     });
@@ -187,14 +202,17 @@ try {
       assert.deepEqual(names, ["delegate_agent"], `${entry.id}: complete explicit identity bypasses the skill`);
     }
     if (entry.requiresDetails) {
-      assert.ok(names.includes("read") && names.includes("get_harness_details"), `${entry.id}: consults skill/roster and facts`);
+      const readPaths = run.calls.filter((call) => call.name === "read").map((call) => call.args.path);
+      assert.ok(readPaths.includes(selectionSkillPath), `${entry.id}: reads the shipped selection skill`);
+      assert.ok(readPaths.includes(run.paths.harnessRoster), `${entry.id}: reads the isolated harness roster`);
+      assert.ok(names.includes("get_harness_details"), `${entry.id}: consults current harness facts`);
     }
     if (entry.requiresFallbackReport) {
-      assert.match(response, /advertis|access|reject|capacity|unavailable|availability/i, `${entry.id}: reports material failure reason`);
-      for (const expected of entry.expectedLaunches) {
-        assert.ok(response.includes(expected.harness) && response.includes(expected.model),
-          `${entry.id}: reports failed and actual identity\n${response}`);
-      }
+      assert.ok(entry.reject && entry.rejectionReportTerms?.length, `${entry.id}: fallback fixture defines rejection semantics`);
+      assertReportedIdentity(response, entry.expectedLaunches[0]!, `${entry.id}: reports exact failed identity`);
+      assertReportedIdentity(response, entry.expectedLaunches[1]!, `${entry.id}: reports exact replacement identity`);
+      assert.ok(entry.rejectionReportTerms.every((term) => response.toLowerCase().includes(term.toLowerCase())),
+        `${entry.id}: reports fixture-specific rejection semantics: ${entry.rejectionReportTerms.join(", ")}\n${response}`);
     }
     if (entry.requiresOwnerQuestion) {
       assert.match(response, /\?|choose|please (?:select|approve)|should I|would you/i,
@@ -231,11 +249,24 @@ try {
   await approval.session.prompt("Delegate a quick repository inventory with claude-code. Choose remaining identity details for me.");
   assert.equal(launches.length, 0, "missing baseline: no pre-approval launch");
   assert.equal(approveCalls(approval.calls), 0, "missing baseline: proposal does not mutate baseline");
+  const baselinePath = join(approval.paths.delegatedBaselines, `${AgentRunHarness.ClaudeCode}.json`);
+  assert.equal(existsSync(baselinePath), false, "missing baseline: no baseline file exists before approval");
   assert.match(approval.takeResponse(), /approve|approval/i);
   await approval.session.prompt("I explicitly approve claude-code / discovered-real-default / effort null. Continue.");
   const actual = launches.map(identity);
   assert.deepEqual(actual, [{ harness: AgentRunHarness.ClaudeCode, model: candidate.model, effort: null }]);
   assert.equal(approveCalls(approval.calls), 1, "approval persists exactly once before retry");
+  const approveCall = approval.calls.find((call) => call.name === "manage_delegated_baseline" && call.args.action === "approve");
+  assert.deepEqual(approveCall?.args, {
+    action: "approve",
+    harness: AgentRunHarness.ClaudeCode,
+    model: candidate.model,
+    effort: null,
+  }, "approval persists the exact owner-approved nullable identity");
+  const saved = JSON.parse(readFileSync(baselinePath, "utf8"));
+  assert.ok(typeof saved.approvedAt === "string", "saved baseline records approval time");
+  assert.deepEqual(saved, { model: candidate.model, effort: null, approvedAt: saved.approvedAt },
+    "saved baseline is exactly the approved model, explicit null effort, and approval time");
   const approveIndex = approval.calls.findIndex((call) => call.name === "manage_delegated_baseline" && call.args.action === "approve");
   const launchIndex = approval.calls.findIndex((call) => call.name === "delegate_agent");
   assert.ok(approveIndex >= 0 && launchIndex > approveIndex, "approved baseline persists before launch");
@@ -251,4 +282,10 @@ try {
 
 function approveCalls(calls: Array<{ name: string; args: any }>): number {
   return calls.filter((call) => call.name === "manage_delegated_baseline" && call.args.action === "approve").length;
+}
+
+function assertReportedIdentity(response: string, expected: Identity, message: string): void {
+  const escaped = [expected.harness, expected.model, expected.effort === null ? "null" : expected.effort]
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(response, new RegExp(`${escaped[0]}\\s*(?:/|,|—|-)\\s*${escaped[1]}\\s*(?:/|,|—|-)\\s*(?:effort\\s*)?${escaped[2]}`, "i"), message);
 }

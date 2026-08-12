@@ -15,6 +15,7 @@ interface Case {
   requiresFallbackReport?: boolean;
   requiresOwnerQuestion?: boolean;
   requiresUnknownReport?: boolean;
+  rejectionReportTerms?: string[];
 }
 
 const cases = JSON.parse(readFileSync(join(
@@ -41,7 +42,10 @@ for (const entry of cases) {
     assert.equal(entry.expectedLaunches[0]?.effort, null, "the explicit-null bypass is observable");
     assert.equal(entry.requiresDetails, undefined, "complete explicit identity bypasses evidence lookup");
   }
-  if (entry.requiresFallbackReport) assert.ok(entry.expectedLaunches.length > 1);
+  if (entry.requiresFallbackReport) {
+    assert.ok(entry.expectedLaunches.length > 1);
+    assert.ok(entry.rejectionReportTerms?.length, `${entry.id} defines fixture-specific rejection semantics`);
+  }
   if (entry.requiresOwnerQuestion) assert.equal(entry.expectedLaunches.length, 1, "no fallback launches before owner input");
   for (const launch of entry.expectedLaunches) {
     assert.ok(launch.harness && launch.model && Object.hasOwn(launch, "effort"), `${entry.id} has exact identity`);

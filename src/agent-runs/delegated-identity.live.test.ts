@@ -44,7 +44,8 @@ assert.ok(model, "set OO_LIVE_IDENTITY_MODEL to an exact harness model id");
 assert.ok(effortText === "null" || AGENT_RUN_EFFORTS.includes(effortText as AgentRunEffort),
   "set OO_LIVE_IDENTITY_EFFORT to null or a supported effort");
 const effort = effortText === "null" ? null : effortText as AgentRunEffort;
-const ooHome = mkdtempSync(join(tmpdir(), "oo-live-delegated-identity-"));
+const userHome = mkdtempSync(join(tmpdir(), "oo-live-delegated-identity-"));
+const ooHome = join(userHome, ".owner-operator");
 const daemonPath = join(ooHome, "daemon.json");
 const testPath = fileURLToPath(import.meta.url);
 let daemon: ChildProcess | undefined;
@@ -77,7 +78,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 try {
   daemon = spawn(process.execPath, ["--import", "tsx", testPath], {
     cwd: process.cwd(),
-    env: { ...process.env, OO_HOME: ooHome, OO_LIVE_IDENTITY_WORKER: "1" },
+    env: { ...process.env, HOME: userHome, OO_HOME: ooHome, OO_LIVE_IDENTITY_WORKER: "1" },
     stdio: ["ignore", "ignore", "pipe"],
   });
   daemon.stderr?.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-8_000); });
@@ -94,6 +95,8 @@ try {
     return isTerminalAgentRunStatus(row.status) ? row : undefined;
   }, "real delegated turn");
   assert.deepEqual({ harness: finished.harness, model: finished.model, effort: finished.effort }, { harness, model, effort });
+  if (effort === null) assert.equal(finished.effortApplied, false, "explicit null effort has explicit unapplied semantics");
+  else assert.equal(finished.effortApplied, true, "requested non-null effort was applied by the live harness");
   assert.ok(finished.childSessionId, "lifecycle reports the real child identity");
   assert.match(finished.resultTail ?? "", /OO_DELEGATED_IDENTITY_OK/);
   process.stdout.write(`ok — lifecycle retained ${harness} / ${model} / effort ${String(effort)}\n`);
@@ -102,5 +105,5 @@ try {
     daemon.kill("SIGTERM");
     await waitFor(() => daemon?.exitCode !== null || daemon?.signalCode !== null ? true : undefined, "daemon exit", 15_000).catch(() => daemon?.kill("SIGKILL"));
   }
-  rmSync(ooHome, { recursive: true, force: true });
+  rmSync(userHome, { recursive: true, force: true });
 }

@@ -27,6 +27,7 @@
       { "harness": "codex", "models": [{ "id": "gpt-review", "reasoningLevels": ["high"] }], "allowanceWindows": null }
     ],
     "reject": { "harness": "claude-code", "model": "advertised-opus", "reason": "account access rejected the advertised model" },
+    "rejectionReportTerms": ["access", "advertised"],
     "expectedLaunches": [
       { "harness": "claude-code", "model": "advertised-opus", "effort": "high" },
       { "harness": "codex", "model": "gpt-review", "effort": "high" }
@@ -51,6 +52,7 @@
     "roster": "### Implementation\nPrefer codex / gpt-preview / high. codex / gpt-stable / high is equally suitable when preview is unavailable.\n",
     "details": [{ "harness": "codex", "models": [{ "id": "gpt-preview", "reasoningLevels": ["high"] }, { "id": "gpt-stable", "reasoningLevels": ["high"] }], "allowanceWindows": [{ "id": "weekly", "usedPercent": 30 }] }],
     "reject": { "harness": "codex", "model": "gpt-preview", "reason": "model is temporarily unavailable" },
+    "rejectionReportTerms": ["temporarily", "unavailable"],
     "expectedLaunches": [
       { "harness": "codex", "model": "gpt-preview", "effort": "high" },
       { "harness": "codex", "model": "gpt-stable", "effort": "high" }
@@ -67,6 +69,7 @@
       { "harness": "claude-code", "models": [{ "id": "opus", "reasoningLevels": ["high"] }], "allowanceWindows": null }
     ],
     "reject": { "harness": "codex", "model": "gpt-research", "reason": "provider capacity rejected the launch" },
+    "rejectionReportTerms": ["capacity", "rejected"],
     "expectedLaunches": [
       { "harness": "codex", "model": "gpt-research", "effort": "high" },
       { "harness": "claude-code", "model": "opus", "effort": "high" }
