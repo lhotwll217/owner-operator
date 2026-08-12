@@ -146,6 +146,14 @@ and terminal styling are adapters over that contract.
 
 ## Harness details
 
+Before an implicit delegation, the Operator loads the bundled
+[`select-harness-for-delegation`](../src/agent/skills/select-harness-for-delegation/SKILL.md)
+skill. The skill owns roster interpretation, baseline and owner-defined task-role classification,
+current-details consultation, exact identity selection, approved-baseline consent, and concise
+identity reporting. A complete owner-supplied harness/model/effort choice—including explicit null
+effort—bypasses selection and reaches `delegate_agent` unchanged. The permanent product prompt owns
+only that invocation and precedence rule.
+
 `get_harness_details` reads what a harness currently offers — its model catalog, the reasoning
 levels each model supports, the subscription plan, and how much of each subscription allowance
 window is spent. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts) owns

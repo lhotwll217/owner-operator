@@ -41,6 +41,10 @@ try {
   const isolated = await load();
   const isolatedNames = isolated.getSkills().skills.map((skill) => skill.name);
   assert.ok(isolatedNames.includes("session-search"), "bundled Owner Operator skills are loaded");
+  assert.ok(
+    isolatedNames.includes("select-harness-for-delegation"),
+    "implicit delegation selection is a discoverable bundled skill",
+  );
   assert.ok(isolatedNames.includes("workspace-helper"), "workspace skills are loaded");
   assert.ok(!isolatedNames.includes("project-helper"), "task .pi skills are absent");
   assert.ok(!isolatedNames.includes("pi-user-helper"), "Pi user skills are absent");

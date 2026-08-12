@@ -45,7 +45,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       cwd: Type.Optional(Type.String({ description: "Absolute working directory. Defaults to the caller's cwd." })),
       model: Type.Optional(Type.String({
         minLength: 1,
-        description: "Pin the child's model. Omit to use Owner Operator's configured default for the harness.",
+        description: "Pin the child's model. Omit to use the owner-approved delegated baseline for the harness.",
       })),
       effort: Type.Optional(EffortSchema),
       timeoutSeconds: Type.Optional(Type.Integer({
