@@ -22,7 +22,7 @@ export enum AgentRunStatus {
 }
 
 /** Harness-neutral reasoning-effort intent supported by the durable run contract. */
-export const AGENT_RUN_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export const AGENT_RUN_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type AgentRunEffort = (typeof AGENT_RUN_EFFORTS)[number];
 
 export function isAgentRunEffort(value: unknown): value is AgentRunEffort {

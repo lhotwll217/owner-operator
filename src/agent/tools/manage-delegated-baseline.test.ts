@@ -29,6 +29,13 @@ await tool.execute("3", {
   effort: null,
 }, undefined, undefined, context);
 assert.deepEqual(approvals, [{ model: "opaque/id", effort: null }]);
+await tool.execute("ultra", {
+  action: "approve",
+  harness: AgentRunHarness.Codex,
+  model: "frontier",
+  effort: "ultra",
+}, undefined, undefined, context);
+assert.deepEqual(approvals[1], { model: "frontier", effort: "ultra" });
 await assert.rejects(
   tool.execute("4", {
     action: "approve",

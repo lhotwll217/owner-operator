@@ -15,6 +15,10 @@ try {
     { model: "caller-model", effort: "minimal" },
   );
   assert.deepEqual(
+    resolveAgentRunLaunch(AgentRunHarness.Codex, { model: "frontier", effort: "ultra" }, ooHome),
+    { model: "frontier", effort: "ultra" },
+  );
+  assert.deepEqual(
     resolveAgentRunLaunch(AgentRunHarness.Codex, { effort: null }, ooHome),
     { model: "approved-model", effort: null },
   );
@@ -33,6 +37,24 @@ try {
   assert.equal(failed.candidate, null);
   assert.match(failed.error ?? "", /harness unavailable/);
   assert.equal(failed.approved, null);
+  for (const [candidate, message] of [
+    [{ model: null, effort: null, availableEfforts: null }, /no usable model/],
+    [{ model: "candidate", effort: "turbo", availableEfforts: ["turbo"] as string[] }, /unsupported effort/],
+  ] as const) {
+    const unusable = await proposeDelegatedBaseline(AgentRunHarness.Codex, {
+      ooHome,
+      discover: async () => candidate,
+    });
+    assert.equal(unusable.candidate, null, "a non-approvable identity is never returned as a candidate");
+    assert.match(unusable.error ?? "", message);
+  }
+  const nullable = await proposeDelegatedBaseline(AgentRunHarness.ClaudeCode, {
+    ooHome,
+    discover: async () => ({ model: "claude-default", effort: null, availableEfforts: null }),
+  });
+  assert.deepEqual(nullable.candidate, {
+    model: "claude-default", effort: null, availableEfforts: null,
+  }, "a usable model with nullable effort remains approvable");
   process.stdout.write("ok — delegated launch baselines require approval and preserve explicit pins\n");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });

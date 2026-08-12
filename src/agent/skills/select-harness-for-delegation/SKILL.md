@@ -12,7 +12,8 @@ while selecting only the missing parts.
 
 ## Select
 
-1. Read `~/.owner-operator/workspace/harness-roster.md`. It is owner-controlled guidance; never
+1. Read `$OO_HOME/workspace/harness-roster.md` through `bash`; Owner Operator supplies `OO_HOME`
+   from its authoritative configured home even when it is not the default. It is owner-controlled guidance; never
    edit it. Treat its baseline role headings and any owner-added role headings uniformly. Classify
    the requested task by meaning, not by a fixed heading allowlist. A matching custom role can
    therefore extend the taxonomy without product changes.

@@ -93,6 +93,40 @@ function listLeases(): AgentRunProcessLease[] {
   }
 }
 
+async function processesForLease(
+  leaseId: string,
+  wrapperPath: string,
+  deps?: AgentRunProcessCleanupDeps,
+): Promise<ProcessInfo[] | null> {
+  try {
+    const processes = await (deps?.listProcesses ?? listPlatformProcesses)();
+    const roots = processes.filter((entry) =>
+      entry.command.includes(wrapperPath) && leaseIdFromCommand(entry.command) === leaseId
+    );
+    return roots.flatMap((root) => collectProcessTree(processes, root.pid));
+  } catch {
+    return null;
+  }
+}
+
+/** Terminate the live process tree owned by one lease, including during initialization before
+ * acpx has produced a session handle. The lease is removed only after a second process snapshot
+ * confirms that the exact wrapper identity is gone. */
+export async function terminateAgentRunProcessLease(params: {
+  leaseId: string;
+  wrapperPath: string;
+  deps?: AgentRunProcessCleanupDeps;
+}): Promise<boolean> {
+  if (process.platform === "win32") return false;
+  const before = await processesForLease(params.leaseId, params.wrapperPath, params.deps);
+  if (before === null) return false;
+  await terminatePids(uniquePids([...before].reverse()), params.deps);
+  const after = await processesForLease(params.leaseId, params.wrapperPath, params.deps);
+  if (after === null || after.length > 0) return false;
+  closeAgentRunProcessLease(params.leaseId);
+  return true;
+}
+
 /** Persist ownership before acpx can spawn. The root PID is filled after ACP initialization. */
 export function createAgentRunProcessLease(params: {
   runId: string;

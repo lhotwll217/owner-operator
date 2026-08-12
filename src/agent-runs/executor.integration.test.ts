@@ -121,10 +121,10 @@ try {
     task: "third",
     cwd: dir,
     model: "caller-selected-model",
-    effort: "minimal",
+    effort: "max",
   });
   assert.equal(third.model, "caller-selected-model", "a caller-pinned model always wins");
-  assert.equal(third.effort, "minimal", "a caller-pinned effort always wins");
+  assert.equal(third.effort, "max", "a caller-pinned advertised frontier effort always wins");
   await waitFor(() => launches.length === 3, "third run to start");
   const cancelledThird = await executor.cancel(third.id);
   assert.equal(cancelledThird.status, AgentRunStatus.Cancelled, "cancel resolves with the finalized row");

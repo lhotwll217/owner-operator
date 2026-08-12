@@ -21,6 +21,7 @@ import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
   reapStaleAgentRunProcesses,
+  terminateAgentRunProcessLease,
   updateAgentRunProcessLease,
 } from "./process-lease";
 
@@ -61,6 +62,8 @@ export interface LeasedAcpRuntime {
   leaseId: string;
   /** Drop the durable ownership record once the child process tree is closed. */
   release: () => void;
+  /** Terminate an owned wrapper even when initialization never yielded a session handle. */
+  terminate: () => Promise<boolean>;
 }
 
 /** Build an acpx runtime whose child process tree is owned by a durable lease before acpx can
@@ -109,6 +112,10 @@ export function createLeasedAcpRuntime(params: {
       sessionStore,
       leaseId: lease.leaseId,
       release: () => closeAgentRunProcessLease(lease.leaseId),
+      terminate: () => terminateAgentRunProcessLease({
+        leaseId: lease.leaseId,
+        wrapperPath,
+      }),
     };
   } catch (error) {
     // Resolving the adapter or building the runtime can fail before anything is spawned, and a

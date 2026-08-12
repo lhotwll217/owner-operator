@@ -97,11 +97,11 @@ try {
   const bash = event("bash", { command: "printf command-ok" });
   assert.equal(registered!(bash, { cwd: publicDir }), undefined);
   const command = (bash.input as { command: string }).command;
-  const output = execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s' "$OO_INSTALL_ROOT" "$OO_CALLER_SESSION_ID"`], {
+  const output = execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s|%s' "$OO_INSTALL_ROOT" "$OO_CALLER_SESSION_ID" "$OO_HOME"`], {
     encoding: "utf8",
   });
-  assert.match(output, /^command-ok\|.+\|caller'id$/,
-    "the guard preserves the original Bash command and injects shell-safe OO provenance");
+  assert.equal(output, `command-ok|${process.cwd()}|caller'id|${ooHome}`,
+    "the guard injects the authoritative non-default OO_HOME with shell-safe provenance");
 
   process.stdout.write("ok — privacy guard: supported tool_call preflight blocks every Pi file primitive\n");
 } finally {

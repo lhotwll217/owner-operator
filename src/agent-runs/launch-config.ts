@@ -6,6 +6,7 @@
  * the launch asks instead of inventing one. */
 
 import {
+  isAgentRunEffort,
   loadDelegatedBaseline,
   type AgentRunEffort,
   type AgentRunHarness,
@@ -71,6 +72,12 @@ export async function proposeDelegatedBaseline(
   const approved = loadDelegatedBaseline(harness, options.ooHome);
   try {
     const candidate = await (options.discover ?? discoverAcpBaselineCandidate)(harness);
+    if (!candidate.model?.trim()) {
+      throw new Error(`${harness} baseline discovery returned no usable model`);
+    }
+    if (candidate.effort !== null && !isAgentRunEffort(candidate.effort)) {
+      throw new Error(`${harness} baseline discovery returned unsupported effort: ${candidate.effort}`);
+    }
     return {
       harness,
       approved,

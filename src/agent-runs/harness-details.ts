@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { AcpRuntimeHandle } from "acpx/runtime";
-import { AGENT_RUN_CAPABILITIES, AgentRunHarness } from "@owner-operator/core";
+import { AGENT_RUN_CAPABILITIES, AgentRunHarness, isAgentRunEffort } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import { agentRunStateDir, createLeasedAcpRuntime, type LeasedAcpRuntime } from "./acp-launcher";
 
@@ -25,6 +25,7 @@ const CODEX_APP_SERVER_TIMEOUT_MS = 20_000;
 const CODEX_APP_SERVER_KILL_GRACE_MS = 2_000;
 /** Wall-clock ceiling for one unpinned ACP session used to read the harness's own defaults. */
 const BASELINE_CANDIDATE_TIMEOUT_MS = 90_000;
+const CODEX_MODEL_LIST_MAX_PAGES = 100;
 const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
 
 /** Identifies which first-party protocol produced a harness's facts, so a reader can tell an
@@ -37,6 +38,8 @@ export interface HarnessModelDetail {
   /** Reasoning levels the harness advertises for this model. `null` = the catalog entry carried
    * no readable levels (unknown); `[]` = it advertised the levels and there are none. */
   reasoningLevels: string[] | null;
+  /** Advertised values the public delegation contract cannot apply. Never selectable. */
+  unsupportedReasoningLevels: string[];
   /** The level the harness itself picks for this model when the caller pins nothing. */
   defaultReasoningLevel: string | null;
   isDefault: boolean;
@@ -204,11 +207,15 @@ function normalizeCodexModels(payload: unknown): HarnessModelDetail[] | null {
     const id = model && text(model.id);
     // A catalog entry without an id cannot be selected later, so it is not a fact worth carrying.
     if (!model || !id || model.hidden === true) return [];
+    const advertisedLevels = normalizeReasoningLevels(model.supportedReasoningEfforts);
     return [{
       id,
       displayName: text(model.displayName) ?? id,
-      reasoningLevels: normalizeReasoningLevels(model.supportedReasoningEfforts),
-      defaultReasoningLevel: text(model.defaultReasoningEffort),
+      reasoningLevels: advertisedLevels?.filter(isAgentRunEffort) ?? advertisedLevels,
+      unsupportedReasoningLevels: advertisedLevels?.filter((level) => !isAgentRunEffort(level)) ?? [],
+      defaultReasoningLevel: isAgentRunEffort(text(model.defaultReasoningEffort))
+        ? text(model.defaultReasoningEffort)
+        : null,
       isDefault: model.isDefault === true,
     }];
   });
@@ -283,9 +290,8 @@ export interface BaselineProbeDeps {
  * effort, then read back what the harness selected. The result is reported as a candidate —
  * saving a baseline is a separate step that requires explicit owner approval.
  *
- * A `oneshot` session closes its child process inside `ensureSession`, and both the lease and the
- * throwaway session directory are dropped once the session settles — including when it settles
- * after this call already gave up — so a probe leaves nothing durable behind. */
+ * A `oneshot` session closes its child process inside `ensureSession`. If initialization exceeds
+ * the deadline, the owned process lease terminates the wrapper without waiting for a handle. */
 export async function discoverAcpBaselineCandidate(
   harness: AgentRunHarness,
   deps: BaselineProbeDeps = {},
@@ -307,6 +313,7 @@ export async function discoverAcpBaselineCandidate(
     cwd: ownerOperatorHome(),
   });
   let opened = false;
+  let timedOut = false;
   try {
     // acpx applies no startup deadline of its own, so a harness that never finishes initializing
     // would hang this read indefinitely.
@@ -318,14 +325,23 @@ export async function discoverAcpBaselineCandidate(
     opened = true;
     const status = await leased.runtime.getStatus?.({ handle });
     const effort = readEffortConfigOption(status?.details?.configOptions);
+    const model = status?.models?.currentModelId?.trim() || null;
+    if (!model) throw new Error(`${harness} baseline discovery returned no usable model`);
+    if (effort.currentValue !== null && !isAgentRunEffort(effort.currentValue)) {
+      throw new Error(`${harness} baseline discovery returned unsupported effort: ${effort.currentValue}`);
+    }
     return {
-      model: status?.models?.currentModelId ?? null,
+      model,
       effort: effort.currentValue,
       availableEfforts: effort.values,
     };
+  } catch (error) {
+    timedOut = error instanceof Error && error.message.includes("did not finish initializing");
+    throw error;
   } finally {
     if (opened) discardProbe(leased, probeStateDir);
-    else void discardAbandonedProbe(leased, session, probeStateDir);
+    else if (timedOut) await discardAbandonedProbe(leased, session, probeStateDir);
+    else discardProbe(leased, probeStateDir);
   }
 }
 
@@ -343,23 +359,12 @@ async function discardAbandonedProbe(
   session: Promise<AcpRuntimeHandle>,
   probeStateDir: string,
 ): Promise<void> {
-  let handle: AcpRuntimeHandle | undefined;
-  try {
-    handle = await session;
-  } catch {
-    // acpx closes a partially initialized client inside ensureSession, so nothing is left running.
-  }
-  let closed = handle === undefined;
-  if (handle) {
-    try {
-      await leased.runtime.close({ handle, reason: "baseline candidate probe abandoned" });
-      closed = true;
-    } catch {
-      // Keep the lease so startup cleanup can reap a wrapper that resisted normal close.
-    }
-  }
+  // Observe any eventual rejection so abandoning the initialization promise cannot create an
+  // unhandled rejection. Cleanup itself never awaits this potentially never-settling work.
+  void session.catch(() => undefined);
+  const terminated = await leased.terminate();
   rmSync(probeStateDir, { recursive: true, force: true });
-  if (closed) leased.release();
+  if (terminated) leased.release();
 }
 
 /** The timer is held, not unref'd: an unref'd deadline never fires in an otherwise idle process,
@@ -420,8 +425,26 @@ export function readCodexAppServerPayloads(
   return withCodexAppServer(options, async (client) => ({
     account: await client.request("account/read"),
     rateLimits: await client.request("account/rateLimits/read"),
-    models: await client.request("model/list"),
+    models: await readAllCodexModelPages(client),
   }));
+}
+
+async function readAllCodexModelPages(client: CodexAppServerClient): Promise<unknown> {
+  const data: unknown[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < CODEX_MODEL_LIST_MAX_PAGES; page += 1) {
+    const payload = await client.request("model/list", cursor ? { cursor } : {});
+    const result = record(payload);
+    if (!result || !Array.isArray(result.data)) return payload;
+    data.push(...result.data);
+    const nextCursor = text(result.nextCursor);
+    if (!nextCursor) return { ...result, data, nextCursor: null };
+    if (seen.has(nextCursor)) throw new Error(`codex model/list pagination loop at cursor ${nextCursor}`);
+    seen.add(nextCursor);
+    cursor = nextCursor;
+  }
+  throw new Error(`codex model/list exceeded ${CODEX_MODEL_LIST_MAX_PAGES} pages`);
 }
 
 /** Injectable for tests; production drives the real `codex app-server`. */

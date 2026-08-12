@@ -46,7 +46,7 @@ const run: AgentRun = {
   cwd: process.cwd(),
   parentThreadId: "parent",
   model: null,
-  effort: "high",
+  effort: "ultra",
   effortApplied: false,
   depth: 1,
   status: AgentRunStatus.Running,
@@ -77,7 +77,7 @@ assert.equal(result.acpxRecordId, handle.acpxRecordId);
 assert.ok(Buffer.byteLength(result.resultText) <= 64 * 1024, "one oversized event stays within the launcher cap");
 assert.ok(result.resultText.endsWith("newest-tail"), "the rolling buffer preserves the newest bytes");
 assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "acpx-record" });
-assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "high" }]);
+assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "ultra" }], "the launcher applies the exact selected identity");
 assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
 assert.deepEqual(runtimeCalls, ["ensure", "capabilities", "set-effort", "turn"], "effort applies after setup and before the turn");
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);

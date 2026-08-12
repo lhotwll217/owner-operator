@@ -27,6 +27,29 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
+const PAGED_SERVER = `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+writeFileSync(process.argv[2], String(process.pid));
+const mode = process.argv[3];
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialized") return;
+  let result = { method: message.method };
+  if (message.method === "model/list") {
+    const cursor = message.params?.cursor ?? null;
+    if (mode === "failure" && cursor === "page-2") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { message: "page two failed" } }) + "\\n");
+      return;
+    }
+    result = cursor === null
+      ? { data: [{ id: "first" }], nextCursor: "page-2" }
+      : { data: [{ id: "second" }], nextCursor: mode === "loop" ? "page-2" : null };
+  }
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
+});
+`;
+
 /** Never answers and refuses SIGTERM: the shape of a hung app-server. */
 const STUBBORN_SERVER = `
 import { writeFileSync } from "node:fs";
@@ -77,6 +100,26 @@ try {
     false,
     "a finished observation leaves no app-server behind",
   );
+
+  // --- model/list follows every cursor and fails closed on broken pagination -------------------
+
+  const paged = server("paged", PAGED_SERVER);
+  paged.args.push("complete");
+  const complete = await readCodexAppServerPayloads({
+    command: process.execPath, args: paged.args, timeoutMs: TIMEOUT_MS, killGraceMs: KILL_GRACE_MS,
+  });
+  assert.deepEqual(complete.models, {
+    data: [{ id: "first" }, { id: "second" }], nextCursor: null,
+  }, "all captured model pages are combined in advertised order");
+
+  for (const [mode, message] of [["failure", /page two failed/], ["loop", /pagination loop/]] as const) {
+    const broken = server(`paged-${mode}`, PAGED_SERVER);
+    broken.args.push(mode);
+    await assert.rejects(readCodexAppServerPayloads({
+      command: process.execPath, args: broken.args, timeoutMs: TIMEOUT_MS, killGraceMs: KILL_GRACE_MS,
+    }), message, `${mode} pagination cannot return a partial successful catalog`);
+    assert.equal(alive(broken.pid()), false, `${mode} pagination still terminates its app-server`);
+  }
 
   // --- A hung app-server is timed out and killed, not left running ------------------------------
 

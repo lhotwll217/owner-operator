@@ -27,6 +27,8 @@ const tool = createDelegateAgentTool({ resolveGateway: async () => backend });
 assert.match(tool.description, /do not poll/i, "the tool tells the Operator that completion is delivered automatically");
 const effortSchema = (tool.parameters as { properties: { effort: { anyOf: Array<{ type?: string }> } } }).properties.effort;
 assert.ok(effortSchema.anyOf.some((option) => option.type === "null"), "the public schema accepts explicit null effort");
+const effortLiterals = (effortSchema.anyOf as Array<{ const?: string }>).flatMap((option) => option.const ? [option.const] : []);
+assert.ok(effortLiterals.includes("max") && effortLiterals.includes("ultra"), "the public schema exposes every advertised Codex effort");
 const context = {
   sessionManager: { getSessionId: () => "parent-thread" },
 } as Parameters<typeof tool.execute>[4];
@@ -61,13 +63,21 @@ await tool.execute("pinned-effort", {
 }, undefined, undefined, context);
 assert.equal(inputs[3]?.effort, "xhigh", "the tool preserves a caller-pinned effort");
 
+await tool.execute("frontier-effort", {
+  harness: AgentRunHarness.Codex,
+  task: "review changes",
+  cwd: process.cwd(),
+  effort: "ultra",
+}, undefined, undefined, context);
+assert.equal(inputs[4]?.effort, "ultra", "the tool preserves an advertised frontier effort exactly");
+
 await tool.execute("null-effort", {
   harness: AgentRunHarness.Codex,
   task: "override approved effort",
   cwd: process.cwd(),
   effort: null,
 }, undefined, undefined, context);
-assert.ok(Object.hasOwn(inputs[4] ?? {}, "effort"), "explicit null remains distinguishable from omission");
-assert.equal(inputs[4]?.effort, null, "the tool forwards explicit null effort");
+assert.ok(Object.hasOwn(inputs[5] ?? {}, "effort"), "explicit null remains distinguishable from omission");
+assert.equal(inputs[5]?.effort, null, "the tool forwards explicit null effort");
 
 process.stdout.write("ok — delegate_agent schema and forwarding preserve model and nullable effort pins\n");

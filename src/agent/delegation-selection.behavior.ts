@@ -112,6 +112,7 @@ async function sessionFor(
           id: model.id,
           displayName: model.id,
           reasoningLevels: model.reasoningLevels,
+          unsupportedReasoningLevels: [],
           defaultReasoningLevel: null,
           isDefault: false,
         })) ?? null,

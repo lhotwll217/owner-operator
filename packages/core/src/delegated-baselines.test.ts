@@ -16,6 +16,8 @@ try {
   assert.equal(loadDelegatedBaseline(AgentRunHarness.ClaudeCode, ooHome)?.model, claudeModel);
   assert.equal(loadDelegatedBaseline(AgentRunHarness.ClaudeCode, ooHome)?.effort, null);
   assert.equal(loadDelegatedBaseline(AgentRunHarness.Codex, ooHome)?.effort, "high");
+  approveDelegatedBaseline(AgentRunHarness.Codex, { model: "codex-frontier", effort: "ultra" }, ooHome);
+  assert.equal(loadDelegatedBaseline(AgentRunHarness.Codex, ooHome)?.effort, "ultra");
   const baselinesDirectory = ownerOperatorPaths(ooHome).delegatedBaselines;
   assert.match(readFileSync(join(baselinesDirectory, "claude-code.json"), "utf8"), /\\u0020| claude-opaque-id:2026\/08@account /);
   assert.throws(

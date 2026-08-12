@@ -49,17 +49,19 @@ interface Rig {
   stateDirs: string[];
   openSession: () => void;
   failSession: (error: Error) => void;
+  terminationCalls: () => number;
 }
 
 /** A fake leased runtime whose session opening is driven by the test. It writes the same durable
  * traces the real one does — a process lease and a session directory — so their removal is
  * observable. */
-function probeRig(params: { openImmediately: boolean; closeFails?: boolean }): Rig {
+function probeRig(params: { openImmediately: boolean; terminationFails?: boolean; status?: unknown }): Rig {
   const ensureInputs: AcpRuntimeEnsureInput[] = [];
   const closeReasons: string[] = [];
   const stateDirs: string[] = [];
   let openSession = (): void => {};
   let failSession = (_error: Error): void => {};
+  let terminationCalls = 0;
   const session = new Promise<AcpRuntimeHandle>((resolve, reject) => {
     openSession = () => resolve(HANDLE);
     failSession = reject;
@@ -76,10 +78,9 @@ function probeRig(params: { openImmediately: boolean; closeFails?: boolean }): R
         ensureInputs.push(input);
         return session;
       },
-      getStatus: async () => STATUS,
+      getStatus: async () => params.status ?? STATUS,
       close: async (input: { reason: string }) => {
         closeReasons.push(input.reason);
-        if (params.closeFails) throw new Error("child resisted close");
       },
     } as unknown as AcpRuntime;
     return {
@@ -87,10 +88,19 @@ function probeRig(params: { openImmediately: boolean; closeFails?: boolean }): R
       sessionStore: {} as AcpSessionStore,
       leaseId: lease.leaseId,
       release: () => closeAgentRunProcessLease(lease.leaseId),
+      terminate: async () => {
+        terminationCalls += 1;
+        if (params.terminationFails) return false;
+        closeAgentRunProcessLease(lease.leaseId);
+        return true;
+      },
     };
   };
 
-  return { createRuntime, ensureInputs, closeReasons, stateDirs, openSession, failSession };
+  return {
+    createRuntime, ensureInputs, closeReasons, stateDirs, openSession, failSession,
+    terminationCalls: () => terminationCalls,
+  };
 }
 
 const leaseFiles = (): string[] => {
@@ -100,14 +110,6 @@ const leaseFiles = (): string[] => {
     return [];
   }
 };
-
-async function waitFor(what: string, condition: () => boolean): Promise<void> {
-  const until = Date.now() + 5_000;
-  while (!condition()) {
-    if (Date.now() > until) throw new Error(`timeout waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 // Resolved: macOS hands out a symlinked temp path, and process.cwd() reports the real one.
 const home = realpathSync(mkdtempSync(join(tmpdir(), "oo-baseline-probe-home-")));
@@ -149,9 +151,22 @@ try {
   assert.deepEqual(leaseFiles(), [], "a settled probe drops its lease");
   assert.equal(existsSync(settled.stateDirs[0] ?? ""), false, "a settled probe deletes its session directory");
 
+  for (const [status, message] of [
+    [{ models: { currentModelId: null }, details: {} }, /no usable model/],
+    [{ models: { currentModelId: "model" }, details: { configOptions: [
+      { id: "reasoning_effort", currentValue: "turbo", options: [{ value: "turbo" }] },
+    ] } }, /unsupported effort/],
+  ] as const) {
+    const invalid = probeRig({ openImmediately: true, status });
+    await assert.rejects(discoverAcpBaselineCandidate(AgentRunHarness.Codex, {
+      createRuntime: invalid.createRuntime, timeoutMs: PROBE_TIMEOUT_MS,
+    }), message);
+    assert.equal(existsSync(invalid.stateDirs[0] ?? ""), false, "invalid discovery still cleans its probe directory");
+  }
+
   process.chdir(previousCwd);
 
-  // --- A timed-out probe keeps its traces until the abandoned session settles ------------------
+  // --- A never-settling initialization is actively terminated at the deadline -----------------
 
   const late = probeRig({ openImmediately: false });
   await assert.rejects(
@@ -162,38 +177,14 @@ try {
     /did not finish initializing/,
     "a harness that never initializes fails the probe rather than hanging it",
   );
-  assert.equal(leaseFiles().length, 1, "an in-flight probe keeps its lease: the wrapper may still be coming up");
-  assert.equal(existsSync(late.stateDirs[0] ?? ""), true, "and keeps its session directory");
-  assert.deepEqual(late.closeReasons, [], "there is nothing to close before the session opens");
-
-  // The session opens after the probe already gave up: that late child is still ours to close.
-  late.openSession();
-  await waitFor("the late-settling probe to clean up", () =>
-    leaseFiles().length === 0 && !existsSync(late.stateDirs[0] ?? ""));
-  assert.deepEqual(
-    late.closeReasons,
-    ["baseline candidate probe abandoned"],
-    "the child opened after the timeout is closed, not stranded",
-  );
-
-  // --- A probe whose session fails after the timeout also cleans up ----------------------------
-
-  const failed = probeRig({ openImmediately: false });
-  await assert.rejects(
-    discoverAcpBaselineCandidate(AgentRunHarness.Codex, {
-      createRuntime: failed.createRuntime,
-      timeoutMs: PROBE_TIMEOUT_MS,
-    }),
-    /did not finish initializing/,
-  );
-  failed.failSession(new Error("harness never initialized"));
-  await waitFor("the failed probe to clean up", () =>
-    leaseFiles().length === 0 && !existsSync(failed.stateDirs[0] ?? ""));
-  assert.deepEqual(failed.closeReasons, [], "a session that never opened has no child to close");
+  assert.equal(late.terminationCalls(), 1, "timeout invokes the owned pre-handle termination seam");
+  assert.deepEqual(leaseFiles(), [], "confirmed termination drops the lease before returning");
+  assert.equal(existsSync(late.stateDirs[0] ?? ""), false, "timeout deletes the probe session directory");
+  assert.deepEqual(late.closeReasons, [], "pre-handle termination does not require a session handle");
 
   // --- Only a child that resisted close keeps its lease ----------------------------------------
 
-  const stuck = probeRig({ openImmediately: false, closeFails: true });
+  const stuck = probeRig({ openImmediately: false, terminationFails: true });
   await assert.rejects(
     discoverAcpBaselineCandidate(AgentRunHarness.Codex, {
       createRuntime: stuck.createRuntime,
@@ -201,13 +192,12 @@ try {
     }),
     /did not finish initializing/,
   );
-  stuck.openSession();
-  await waitFor("the stuck probe to drop its session directory", () =>
-    !existsSync(stuck.stateDirs[0] ?? ""));
+  assert.equal(stuck.terminationCalls(), 1);
+  assert.equal(existsSync(stuck.stateDirs[0] ?? ""), false);
   assert.equal(
     leaseFiles().length,
     1,
-    "a wrapper that resisted close keeps its lease so startup reaping can still find it",
+    "a wrapper whose termination could not be confirmed keeps its lease for startup reaping",
   );
 
   process.stdout.write("ok — a baseline probe runs neutral and strands no lease, session, or child\n");

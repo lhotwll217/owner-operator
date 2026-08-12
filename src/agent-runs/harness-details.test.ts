@@ -38,6 +38,7 @@ assert.deepEqual(codex.models?.[0], {
   id: "gpt-5.6-sol",
   displayName: "GPT-5.6-Sol",
   reasoningLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
+  unsupportedReasoningLevels: [],
   defaultReasoningLevel: "low",
   isDefault: true,
 });
@@ -104,6 +105,7 @@ const reasoning = normalizeCodexHarnessDetails({
         id: "partly-readable",
         supportedReasoningEfforts: [{ reasoningEffort: "high" }, { description: "no level here" }],
       },
+      { id: "unsupported", supportedReasoningEfforts: [{ reasoningEffort: "turbo" }] },
     ],
   },
 }, OBSERVED_AT);
@@ -119,6 +121,12 @@ assert.equal(
   "entries carrying no readable level leave the list unknown rather than claiming none",
 );
 assert.deepEqual(levelsOf("partly-readable"), ["high"], "readable levels survive an unreadable sibling");
+assert.deepEqual(levelsOf("unsupported"), [], "an effort the adapter cannot apply is not advertised as selectable");
+assert.deepEqual(
+  reasoning.models?.find((model) => model.id === "unsupported")?.unsupportedReasoningLevels,
+  ["turbo"],
+  "an advertised but inapplicable effort is represented honestly as unsupported",
+);
 
 const partial = normalizeCodexHarnessDetails({
   account: CODEX_ACCOUNT_READ,

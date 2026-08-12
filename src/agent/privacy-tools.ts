@@ -157,7 +157,10 @@ function shellQuote(value: string): string {
 }
 
 export function addOwnerOperatorBashEnvironment(command: string, opts: PrivacyToolGuardOptions = {}): string {
-  const assignments = [`OO_INSTALL_ROOT=${shellQuote(repoRoot)}`];
+  const assignments = [
+    `OO_INSTALL_ROOT=${shellQuote(repoRoot)}`,
+    `OO_HOME=${shellQuote(ooHome())}`,
+  ];
   if (opts.callerSessionId) assignments.push(`OO_CALLER_SESSION_ID=${shellQuote(opts.callerSessionId)}`);
   return `export ${assignments.join(" ")}\n${command}`;
 }
