@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
 import { parseDelegationBehaviorFixtures } from "./delegation-selection-fixtures";
-import { relevantDetailsCallIndex, requiredReasonTerms } from "./delegation-selection-grading";
+import {
+  relevantDetailsCallIndex,
+  requiredReasonTerms,
+  successfulCallCompletionIndex,
+} from "./delegation-selection-grading";
 
 const fixtureSource = readFileSync(join(
   repoRoot,
@@ -71,6 +75,26 @@ const concurrent = [
 ];
 assert.equal(relevantDetailsCallIndex(concurrent, "codex", -1, 2), -1,
   "a concurrent details start that completes after launch is not evidence");
+
+const straddlingBoundary = [
+  { phase: "start" as const, toolCallId: "details", name: "get_harness_details", args: { harnesses: ["codex"] } },
+  { phase: "end" as const, toolCallId: "rejection", name: "delegate_agent", args: {}, succeeded: false },
+  { phase: "end" as const, toolCallId: "details", name: "get_harness_details", args: {}, succeeded: true },
+  { phase: "start" as const, toolCallId: "replacement", name: "delegate_agent", args: { harness: "codex" } },
+];
+assert.equal(relevantDetailsCallIndex(straddlingBoundary, "codex", 1, 3), -1,
+  "a refresh that starts before rejection completion cannot grade fallback evidence");
+
+for (const path of ["/tmp/selection-skill", "/tmp/roster"]) {
+  const lateRead = [
+    { phase: "start" as const, toolCallId: "launch", name: "delegate_agent", args: { harness: "codex" } },
+    { phase: "start" as const, toolCallId: "read", name: "read", args: { path } },
+    { phase: "end" as const, toolCallId: "read", name: "read", args: {}, succeeded: true },
+  ];
+  assert.equal(successfulCallCompletionIndex(lateRead,
+    (event) => event.name === "read" && event.args.path === path, -1, 0), -1,
+  `${path}: a read that starts and completes after launch cannot grade prelaunch ordering`);
+}
 
 for (const malformed of [
   fixtureSource.replace('"usedPercent": 98', '"usedPercentage": 98'),

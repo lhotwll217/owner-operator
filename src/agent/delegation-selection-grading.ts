@@ -13,7 +13,28 @@ export interface DelegationTrajectoryEvent {
   succeeded?: boolean;
 }
 
-/** Return the exact details-call index that covers a launch, bounded to the current selection
+/** Return the successful completion index of a paired call wholly inside an ordering boundary. */
+export function successfulCallCompletionIndex(
+  events: DelegationTrajectoryEvent[],
+  matchesStart: (event: DelegationTrajectoryEvent) => boolean,
+  afterExclusive: number,
+  beforeExclusive: number,
+): number {
+  for (let endIndex = beforeExclusive - 1; endIndex > afterExclusive; endIndex -= 1) {
+    const end = events[endIndex];
+    if (end?.phase !== "end" || end.succeeded !== true) continue;
+    const startIndex = events.findIndex((candidate, index) =>
+      index > afterExclusive
+      && index < endIndex
+      && candidate.phase === "start"
+      && candidate.toolCallId === end.toolCallId
+      && matchesStart(candidate));
+    if (startIndex >= 0) return endIndex;
+  }
+  return -1;
+}
+
+/** Return the exact details-call completion that covers a launch, bounded to the current selection
  * attempt. A call for a different harness is not evidence for the launched harness. */
 export function relevantDetailsCallIndex(
   events: DelegationTrajectoryEvent[],
@@ -21,12 +42,9 @@ export function relevantDetailsCallIndex(
   afterExclusive: number,
   beforeExclusive: number,
 ): number {
-  for (let index = beforeExclusive - 1; index > afterExclusive; index -= 1) {
-    const event = events[index];
-    if (event?.phase !== "end" || event.name !== "get_harness_details" || event.succeeded !== true) continue;
-    const start = events.find((candidate) => candidate.phase === "start" && candidate.toolCallId === event.toolCallId);
-    const harnesses = start?.args.harnesses;
-    if (Array.isArray(harnesses) && harnesses.includes(harness)) return index;
-  }
-  return -1;
+  return successfulCallCompletionIndex(events, (start) => {
+    if (start.name !== "get_harness_details") return false;
+    const harnesses = start.args.harnesses;
+    return Array.isArray(harnesses) && harnesses.includes(harness);
+  }, afterExclusive, beforeExclusive);
 }

@@ -28,7 +28,11 @@ import {
   type DelegationDetailFixture,
   type DelegationFixtureIdentity,
 } from "./delegation-selection-fixtures";
-import { relevantDetailsCallIndex, requiredReasonTerms } from "./delegation-selection-grading";
+import {
+  relevantDetailsCallIndex,
+  requiredReasonTerms,
+  successfulCallCompletionIndex,
+} from "./delegation-selection-grading";
 import type { DelegationTrajectoryEvent } from "./delegation-selection-grading";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { createDelegateAgentTool } from "./tools/delegate-agent";
@@ -199,8 +203,10 @@ try {
     if (entry.requiresDetails) {
       const launchIndexes = run.trajectory.flatMap((event, index) => event.phase === "start" && event.name === "delegate_agent" ? [index] : []);
       const firstLaunch = launchIndexes[0] ?? -1;
-      const skillRead = run.calls.findIndex((call) => call.name === "read" && call.args.path === selectionSkillPath);
-      const rosterRead = run.calls.findIndex((call) => call.name === "read" && call.args.path === run.paths.harnessRoster);
+      const skillRead = successfulCallCompletionIndex(run.trajectory,
+        (event) => event.name === "read" && event.args.path === selectionSkillPath, -1, firstLaunch);
+      const rosterRead = successfulCallCompletionIndex(run.trajectory,
+        (event) => event.name === "read" && event.args.path === run.paths.harnessRoster, -1, firstLaunch);
       assert.ok(firstLaunch >= 0, `${entry.id}: implicit selection delegates`);
       assert.ok(skillRead >= 0 && skillRead < firstLaunch, `${entry.id}: reads shipped skill before first delegation`);
       assert.ok(rosterRead >= 0 && rosterRead < firstLaunch, `${entry.id}: reads isolated roster before first delegation`);
