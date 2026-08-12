@@ -25,6 +25,8 @@ const backend = {
 } as Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
 const tool = createDelegateAgentTool({ resolveGateway: async () => backend });
 assert.match(tool.description, /do not poll/i, "the tool tells the Operator that completion is delivered automatically");
+const effortSchema = (tool.parameters as { properties: { effort: { anyOf: Array<{ type?: string }> } } }).properties.effort;
+assert.ok(effortSchema.anyOf.some((option) => option.type === "null"), "the public schema accepts explicit null effort");
 const context = {
   sessionManager: { getSessionId: () => "parent-thread" },
 } as Parameters<typeof tool.execute>[4];
@@ -59,4 +61,13 @@ await tool.execute("pinned-effort", {
 }, undefined, undefined, context);
 assert.equal(inputs[3]?.effort, "xhigh", "the tool preserves a caller-pinned effort");
 
-process.stdout.write("ok — delegate_agent defers defaults while preserving model and effort pins\n");
+await tool.execute("null-effort", {
+  harness: AgentRunHarness.Codex,
+  task: "override approved effort",
+  cwd: process.cwd(),
+  effort: null,
+}, undefined, undefined, context);
+assert.ok(Object.hasOwn(inputs[4] ?? {}, "effort"), "explicit null remains distinguishable from omission");
+assert.equal(inputs[4]?.effort, null, "the tool forwards explicit null effort");
+
+process.stdout.write("ok — delegate_agent schema and forwarding preserve model and nullable effort pins\n");

@@ -176,8 +176,9 @@ approval and is owned by the [launch configuration](../src/agent-runs/launch-con
 
 `manage_delegated_baseline` is the narrow consent seam. `propose` performs initial discovery or a
 refresh and only compares the ephemeral candidate with the current approval. `approve` stores the
-exact owner-approved model and nullable effort in `delegated_baselines.json`, separate from the
-owner-edited roster and the run ledger. Declining a proposal performs no write.
+exact owner-approved model and nullable effort in one atomically replaced file per harness under
+`delegated-baselines/`, separate from the owner-edited roster and the run ledger. Declining a
+proposal performs no write.
 
 The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
 harness config cannot contaminate a global candidate. Its process lease and session directory are

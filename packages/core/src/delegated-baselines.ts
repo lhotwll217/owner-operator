@@ -1,5 +1,6 @@
 /** The owner-approved model and reasoning effort a delegated run falls back to when its call pins
- * none — one baseline per harness, in `delegated_baselines.json` under the Owner Operator home.
+ * none — one atomically replaced file per harness under `delegated-baselines/` in the Owner
+ * Operator home. Independent files make concurrent approvals independent across processes.
  *
  * Three durable records stay separate on purpose: the harness roster holds the task preferences
  * the owner writes by hand, the `agent_runs` ledger holds what actually ran, and this holds the
@@ -11,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { AgentRunHarness, isAgentRunEffort, type AgentRunEffort } from "./agent-runs";
 import { ensureOwnerOperatorWorkspace, ownerOperatorPaths } from "./harness.mjs";
 
@@ -21,25 +22,23 @@ export interface DelegatedBaseline {
   model: string;
   /** null when the harness exposes no reasoning-effort control, as Claude Code does not. */
   effort: AgentRunEffort | null;
-  /** null on a hand-written entry that carries no approval time. */
-  approvedAt: string | null;
+  approvedAt: string;
 }
 
 export type DelegatedBaselines = Partial<Record<AgentRunHarness, DelegatedBaseline>>;
 
-/** What an owner approves. `effort` omitted and `effort: null` both mean "no effort intent". */
+/** What an owner approves. Effort is an explicit decision; null means "no effort intent". */
 export interface DelegatedBaselineApproval {
   model: string;
-  effort?: AgentRunEffort | null;
+  effort: AgentRunEffort | null;
 }
 
 const HARNESSES: readonly AgentRunHarness[] = Object.values(AgentRunHarness);
 
 export function loadDelegatedBaselines(ooHome?: string): DelegatedBaselines {
-  const raw = readRecord(ownerOperatorPaths(ooHome).delegatedBaselines);
   const baselines: DelegatedBaselines = {};
   for (const harness of HARNESSES) {
-    const baseline = normalizeBaseline(raw[harness]);
+    const baseline = normalizeBaseline(readValue(baselinePath(harness, ooHome)));
     if (baseline) baselines[harness] = baseline;
   }
   return baselines;
@@ -61,7 +60,10 @@ export function approveDelegatedBaseline(
 ): DelegatedBaseline {
   const model = typeof approval.model === "string" ? approval.model : "";
   if (!model.trim()) throw new Error("an approved delegated baseline requires a model");
-  const effort = approval.effort ?? null;
+  if (!Object.hasOwn(approval, "effort")) {
+    throw new Error("an approved delegated baseline requires an explicit effort (null is allowed)");
+  }
+  const effort = approval.effort;
   // A harness can report an effort outside the durable run vocabulary. Refuse it rather than
   // storing a value no delegated run could ever apply.
   if (effort !== null && !isAgentRunEffort(effort)) {
@@ -69,36 +71,20 @@ export function approveDelegatedBaseline(
   }
   const baseline: DelegatedBaseline = { model, effort, approvedAt: new Date().toISOString() };
   const paths = ensureOwnerOperatorWorkspace(ooHome);
-  const merged = { ...readRecordForUpdate(paths.delegatedBaselines), [harness]: baseline };
-  writeJsonAtomic(paths.delegatedBaselines, merged);
+  writeJsonAtomic(join(paths.delegatedBaselines, `${harness}.json`), baseline);
   return baseline;
 }
 
-function readRecord(path: string): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
+function baselinePath(harness: AgentRunHarness, ooHome?: string): string {
+  return join(ownerOperatorPaths(ooHome).delegatedBaselines, `${harness}.json`);
 }
 
-/** A read can fail closed to "no baseline"; a write must not replace unreadable approved state. */
-function readRecordForUpdate(path: string): Record<string, unknown> {
-  let raw: string;
+function readValue(path: string): unknown {
   try {
-    raw = readFileSync(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
   }
-  const value: unknown = JSON.parse(raw);
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`invalid delegated baseline configuration at ${path}`);
-  }
-  return value as Record<string, unknown>;
 }
 
 /** An unreadable entry is dropped, not repaired: with no baseline the caller asks the owner, which
@@ -106,17 +92,20 @@ function readRecordForUpdate(path: string): Record<string, unknown> {
 function normalizeBaseline(value: unknown): DelegatedBaseline | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const entry = value as Record<string, unknown>;
+  if (!Object.hasOwn(entry, "model") || !Object.hasOwn(entry, "effort")
+    || !Object.hasOwn(entry, "approvedAt")) return null;
   const model = typeof entry.model === "string" ? entry.model : "";
   if (!model.trim()) return null;
-  if (entry.effort != null && !isAgentRunEffort(entry.effort)) return null;
+  if (entry.effort !== null && !isAgentRunEffort(entry.effort)) return null;
+  if (typeof entry.approvedAt !== "string" || !entry.approvedAt) return null;
   return {
     model,
-    effort: (entry.effort as AgentRunEffort | undefined) ?? null,
-    approvedAt: typeof entry.approvedAt === "string" ? entry.approvedAt : null,
+    effort: entry.effort as AgentRunEffort | null,
+    approvedAt: entry.approvedAt,
   };
 }
 
-function writeJsonAtomic(path: string, value: Record<string, unknown>): void {
+function writeJsonAtomic(path: string, value: DelegatedBaseline): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {

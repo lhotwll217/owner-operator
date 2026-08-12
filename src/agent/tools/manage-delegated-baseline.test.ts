@@ -29,4 +29,12 @@ await tool.execute("3", {
   effort: null,
 }, undefined, undefined, context);
 assert.deepEqual(approvals, [{ model: "opaque/id", effort: null }]);
+await assert.rejects(
+  tool.execute("4", {
+    action: "approve",
+    harness: AgentRunHarness.Codex,
+    model: "opaque/id",
+  } as never, undefined, undefined, context),
+  /explicit effort/,
+);
 process.stdout.write("ok — delegated baseline tool separates proposal from explicit approval\n");

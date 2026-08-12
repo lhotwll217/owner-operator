@@ -34,25 +34,32 @@ export function createManageDelegatedBaselineTool(options: ManageDelegatedBaseli
       "session, compares its candidate with the approved baseline, and never saves. If discovery " +
       "fails, ask the owner to choose. Use approve only after the owner explicitly approves the " +
       "exact model and effort; declining needs no action and leaves the approved baseline unchanged.",
-    parameters: Type.Object({
-      action: Type.Union([Type.Literal("propose"), Type.Literal("approve")]),
-      harness: HarnessSchema,
-      model: Type.Optional(Type.String({ minLength: 1, description: "Exact harness model id approved by the owner." })),
-      effort: Type.Optional(Type.Union([EffortSchema, Type.Null()], {
-        description: "Exact approved effort, or null when the baseline has no effort intent.",
-      })),
-    }),
+    parameters: Type.Union([
+      Type.Object({
+        action: Type.Literal("propose"),
+        harness: HarnessSchema,
+      }),
+      Type.Object({
+        action: Type.Literal("approve"),
+        harness: HarnessSchema,
+        model: Type.String({ minLength: 1, description: "Exact harness model id approved by the owner." }),
+        effort: Type.Union([EffortSchema, Type.Null()], {
+          description: "Exact approved effort, or null when the baseline has no effort intent.",
+        }),
+      }),
+    ]),
     async execute(_id, params) {
       if (params.action === "propose") {
-        if (params.model !== undefined || params.effort !== undefined) {
+        if ("model" in params || "effort" in params) {
           throw new Error("propose discovers an unpinned candidate; omit model and effort");
         }
         return result(await propose(params.harness as AgentRunHarness));
       }
       if (params.model === undefined) throw new Error("approve requires the exact owner-approved model");
+      if (params.effort === undefined) throw new Error("approve requires explicit effort (null is allowed)");
       return result(approve(params.harness as AgentRunHarness, {
         model: params.model,
-        effort: (params.effort ?? null) as AgentRunEffort | null,
+        effort: params.effort as AgentRunEffort | null,
       }));
     },
   });

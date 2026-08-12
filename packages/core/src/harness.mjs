@@ -23,7 +23,7 @@ export function ownerOperatorPaths(ooHome = defaultHome()) {
     workspaceSkills: join(workspace, "skills"),
     workspaceArtifacts: join(workspace, "artifacts"),
     harnessRoster: join(workspace, "harness-roster.md"),
-    delegatedBaselines: join(ooHome, "delegated_baselines.json"),
+    delegatedBaselines: join(ooHome, "delegated-baselines"),
     piAgentDir,
     piAuth: join(piAgentDir, "auth.json"),
     piSettings: join(piAgentDir, "settings.json"),
@@ -53,7 +53,7 @@ function writeMissing(path, content) {
 /** The roster is the owner's file. Seeding seeds rules and empty roles only: a guessed harness,
  * model, or effort here would read as a decision the owner made, and the owner would then have to
  * discover and undo it. Delegated model/effort baselines are approved separately and stored in
- * delegated_baselines.json, so nothing the product decides is ever written into this file. */
+ * delegated-baselines/, so nothing the product decides is ever written into this file. */
 export const HARNESS_ROSTER_TEMPLATE = `# Harness roster
 
 Your preferences for the coding agents Owner Operator delegates work to. This file is yours.

@@ -18,8 +18,8 @@ const HarnessSchema = Type.Union(
 );
 
 const EffortSchema = Type.Union(
-  AGENT_RUN_EFFORTS.map((effort) => Type.Literal(effort)),
-  { description: `Reasoning effort: ${AGENT_RUN_EFFORTS.join(" | ")}.` },
+  [...AGENT_RUN_EFFORTS.map((effort) => Type.Literal(effort)), Type.Null()],
+  { description: `Reasoning effort: ${AGENT_RUN_EFFORTS.join(" | ")}, or null to override an approved effort.` },
 );
 
 type DelegateAgentGateway = Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;

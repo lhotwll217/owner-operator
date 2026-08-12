@@ -106,7 +106,7 @@ export interface AgentRunCreateInput {
   parentThreadId?: string | null;
   /** Model the child should run, when the owner pins one; null lets the harness pick. */
   model?: string | null;
-  /** Reasoning effort requested for the child; null lets launch configuration decide. */
+  /** Reasoning effort requested for the child; omission uses the baseline, explicit null clears it. */
   effort?: AgentRunEffort | null;
   timeoutSeconds?: number;
 }
