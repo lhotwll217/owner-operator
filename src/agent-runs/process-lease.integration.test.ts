@@ -35,23 +35,25 @@ try {
     rootCommand: `node ${wrapperPath} --oo-agent-run-lease ${lease.leaseId}`,
   });
 
+  let snapshot = 0;
+  const liveTree = [
+    {
+      pid: 410,
+      ppid: 1,
+      command: `node ${wrapperPath} --oo-agent-run-lease ${lease.leaseId}`,
+    },
+    { pid: 411, ppid: 410, command: "node claude-agent-acp" },
+    {
+      pid: 420,
+      ppid: 1,
+      command: `node ${wrapperPath} --oo-agent-run-lease another-lease`,
+    },
+    { pid: 430, ppid: 1, command: "node unrelated.mjs" },
+  ];
   const result = await reapStaleAgentRunProcesses({
     wrapperPath,
     deps: {
-      listProcesses: async () => [
-        {
-          pid: 410,
-          ppid: 1,
-          command: `node ${wrapperPath} --oo-agent-run-lease ${lease.leaseId}`,
-        },
-        { pid: 411, ppid: 410, command: "node claude-agent-acp" },
-        {
-          pid: 420,
-          ppid: 1,
-          command: `node ${wrapperPath} --oo-agent-run-lease another-lease`,
-        },
-        { pid: 430, ppid: 1, command: "node unrelated.mjs" },
-      ],
+      listProcesses: async () => snapshot++ === 0 ? liveTree : liveTree.filter(({ pid }) => pid !== 410 && pid !== 411),
       killProcess: (pid, signal) => {
         killed.push({ pid, signal });
       },
@@ -70,6 +72,22 @@ try {
   );
   assert.equal(result.terminatedPids.includes(420), false, "an unknown lease is never claimed");
   assert.throws(() => readFileSync(lease.path), /ENOENT/, "a reaped lease is removed");
+
+  const resistant = createAgentRunProcessLease({ runId: "run-resistant", wrapperPath });
+  updateAgentRunProcessLease(resistant.leaseId, {
+    rootPid: 510,
+    rootCommand: `node ${wrapperPath} --oo-agent-run-lease ${resistant.leaseId}`,
+  });
+  const resistantTree = [{
+    pid: 510, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${resistant.leaseId}`,
+  }];
+  const failed = await reapStaleAgentRunProcesses({
+    wrapperPath,
+    deps: { listProcesses: async () => resistantTree, killProcess: () => undefined, sleep: async () => undefined },
+  });
+  assert.deepEqual(failed.terminatedPids, [], "a process still live after SIGKILL is not reported terminated");
+  assert.equal(JSON.parse(readFileSync(resistant.path, "utf8")).leaseId, resistant.leaseId,
+    "failed termination retains durable ownership evidence");
 
   const closed = createAgentRunProcessLease({ runId: "run-2", wrapperPath });
   closeAgentRunProcessLease(closed.leaseId);

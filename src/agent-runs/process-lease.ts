@@ -291,9 +291,28 @@ export async function reapStaleAgentRunProcesses(params: {
     uniquePids(trees.flatMap((tree) => [...tree].reverse())),
     params.deps,
   );
+  let after: ProcessInfo[];
+  try {
+    after = await (params.deps?.listProcesses ?? listPlatformProcesses)();
+  } catch {
+    return { inspectedPids, terminatedPids: [], skippedReason: "process-list-unavailable" };
+  }
+  const confirmedTerminated = new Set<number>();
   for (const root of roots) {
     const leaseId = leaseIdFromCommand(root.command);
-    if (leaseId) closeAgentRunProcessLease(leaseId);
+    if (!leaseId) continue;
+    const originalTree = trees.find((tree) => tree[0]?.pid === root.pid) ?? [];
+    const originalPids = new Set(originalTree.map(({ pid }) => pid));
+    const remaining = after.filter((entry) =>
+      (entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === leaseId)
+      || originalPids.has(entry.pid)
+    );
+    if (remaining.length === 0) {
+      closeAgentRunProcessLease(leaseId);
+      for (const pid of uniquePids(originalTree)) {
+        confirmedTerminated.add(pid);
+      }
+    }
   }
-  return { inspectedPids, terminatedPids };
+  return { inspectedPids, terminatedPids: terminatedPids.filter((pid) => confirmedTerminated.has(pid)) };
 }

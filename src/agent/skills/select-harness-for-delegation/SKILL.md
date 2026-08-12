@@ -42,7 +42,8 @@ Do not treat an unknown window as unused or constrained.
 
 If `delegate_agent` rejects a choice for capacity, access, entitlement, an invalid harness/model
 pairing, or availability—or a delivered run-completion reports that rejection—consult the roster
-and the latest relevant harness details again before retrying. A stale advertisement can explain a
+and refresh `get_harness_details` after the rejection for both the rejected harness and every
+replacement harness under consideration before retrying. A stale advertisement can explain a
 rejection; never describe advertisement as demonstrated access.
 
 Retry automatically only with an exact harness/model/effort that preserves or improves the quality
@@ -69,7 +70,8 @@ When fallback is needed and `manage_delegated_baseline` reports no approved base
    on silence, prior general preferences, or your own judgment.
 3. After approval, call `manage_delegated_baseline` with `action: "approve"` and the exact accepted
    model and effort, including `effort: null` when that is the candidate.
-4. Retry selection, then call `delegate_agent` with the newly approved exact identity.
+4. Retry selection: refresh `get_harness_details` for the approved harness after approval, then
+   call `delegate_agent` with the newly approved exact identity.
 
 ## Report
 

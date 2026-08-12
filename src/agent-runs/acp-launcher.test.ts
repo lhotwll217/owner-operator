@@ -87,11 +87,24 @@ assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "
 assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "ultra" }], "the launcher applies the exact selected identity");
 assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
 assert.deepEqual(activity[2], {
-  harnessModel: "harness-resolved-model",
-  harnessEffort: "ultra",
-  harnessIdentityObserved: true,
+  harnessIdentity: { observed: true, model: "harness-resolved-model", effort: "ultra" },
 }, "effective identity is independently read back from harness status");
-assert.deepEqual(runtimeCalls, ["ensure", "capabilities", "set-effort", "status", "turn"], "effort and identity observation happen before the turn");
+
+for (const [status, expected] of [
+  [{}, { observed: false }],
+  [{ models: { currentModelId: "  " }, details: { configOptions: [{ id: "reasoning_effort", currentValue: "turbo" }] } }, { observed: false }],
+  [{ models: { currentModelId: "model-only" } }, { observed: true, model: "model-only" }],
+  [{ details: { configOptions: [{ id: "reasoning_effort", currentValue: "max" }] } }, { observed: true, effort: "max" }],
+] as const) {
+  const observed: AgentRunActivityUpdate[] = [];
+  const statusRuntime = { ...runtime, getStatus: async () => status } as unknown as AcpRuntime;
+  await createAcpLauncher({ runtimeFactory: () => statusRuntime })({
+    run: { ...run, effort: null }, resumeSessionId: null, signal: new AbortController().signal,
+    onActivity: (update) => observed.push(update),
+  });
+  assert.deepEqual(observed[1], { harnessIdentity: expected }, "status observation preserves only actual supported facts");
+}
+assert.deepEqual(runtimeCalls.slice(0, 5), ["ensure", "capabilities", "set-effort", "status", "turn"], "effort and identity observation happen before the turn");
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");

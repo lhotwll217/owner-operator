@@ -7,6 +7,7 @@ import {
   ScheduleRunStatus,
   ScheduleRunTrigger,
   formatRelative,
+  harnessIdentityObservation,
   isSessionBoilerplate,
   type AgentRun,
   type AgentRunActivityUpdate,
@@ -231,6 +232,12 @@ type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentityObserved">
 };
 
 function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
+  if (row) {
+    const identity = harnessIdentityObservation({ model: row.harnessModel, effort: row.harnessEffort });
+    if (Boolean(row.harnessIdentityObserved) !== identity.observed) {
+      throw new Error(`invalid persisted harness identity observation for agent run ${row.id}`);
+    }
+  }
   return row ? {
     ...row,
     effortApplied: Boolean(row.effortApplied),
@@ -288,6 +295,44 @@ export class ThreadDb {
     if (!columns.has("harness_identity_observed")) {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN harness_identity_observed INTEGER NOT NULL DEFAULT 0 "
         + "CHECK (harness_identity_observed IN (0, 1))");
+    }
+    const tableSql = (this.db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'",
+    ).get() as { sql: string }).sql;
+    if (columns.has("effort") && (!tableSql.includes("'max'") || !tableSql.includes("'ultra'"))) {
+      this.rebuildAgentRunsForCurrentEfforts();
+    }
+  }
+
+  /** SQLite cannot alter a CHECK constraint. Rebuild only this table, copying every column and
+   * recreating its documented indexes; rows and self-referential resume lineage are preserved. */
+  private rebuildAgentRunsForCurrentEfforts(): void {
+    const createTable = SCHEMA.match(/CREATE TABLE IF NOT EXISTS agent_runs \([\s\S]*?\n\);/)?.[0];
+    const indexes = [...SCHEMA.matchAll(/CREATE INDEX IF NOT EXISTS idx_agent_runs_[\s\S]*?;/g)]
+      .map(([sql]) => sql);
+    if (!createTable || indexes.length !== 3) throw new Error("agent_runs schema definition is incomplete");
+    const columns = (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
+      .map(({ name }) => name);
+    this.db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      this.db.exec("BEGIN IMMEDIATE");
+      for (const index of indexes) {
+        const name = /idx_agent_runs_[a-z_]+/.exec(index)?.[0];
+        if (name) this.db.exec(`DROP INDEX IF EXISTS ${name}`);
+      }
+      this.db.exec("ALTER TABLE agent_runs RENAME TO agent_runs_prior_effort_constraint");
+      this.db.exec(createTable.replace("agent_runs (", "agent_runs_current ("));
+      const names = columns.map((name) => `"${name}"`).join(", ");
+      this.db.exec(`INSERT INTO agent_runs_current (${names}) SELECT ${names} FROM agent_runs_prior_effort_constraint`);
+      this.db.exec("DROP TABLE agent_runs_prior_effort_constraint");
+      this.db.exec("ALTER TABLE agent_runs_current RENAME TO agent_runs");
+      for (const index of indexes) this.db.exec(index);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    } finally {
+      this.db.exec("PRAGMA foreign_keys = ON");
     }
   }
 
@@ -797,6 +842,7 @@ export class ThreadDb {
 
   /** Explicit activity from the child's runtime; rejected once the row is terminal. */
   recordAgentRunActivity(id: string, update: AgentRunActivityUpdate): AgentRun | null {
+    const identity = update.harnessIdentity;
     const changed = Number(this.db.prepare(
       `UPDATE agent_runs SET
          activity = COALESCE(?, activity),
@@ -804,16 +850,17 @@ export class ThreadDb {
          child_session_id = COALESCE(?, child_session_id),
          acpx_record_id = COALESCE(?, acpx_record_id),
          effort_applied = COALESCE(?, effort_applied),
-         harness_model = COALESCE(?, harness_model),
-         harness_effort = COALESCE(?, harness_effort),
+         harness_model = CASE WHEN ? IS NULL THEN harness_model ELSE ? END,
+         harness_effort = CASE WHEN ? IS NULL THEN harness_effort ELSE ? END,
          harness_identity_observed = COALESCE(?, harness_identity_observed)
        WHERE id = ? AND status = ?`,
     ).run(
       update.activity ?? null, this.now(), update.childSessionId ?? null,
       update.acpxRecordId ?? null,
       update.effortApplied === undefined ? null : Number(update.effortApplied),
-      update.harnessModel ?? null, update.harnessEffort ?? null,
-      update.harnessIdentityObserved === undefined ? null : Number(update.harnessIdentityObserved),
+      identity === undefined ? null : Number(identity.observed), identity?.observed ? identity.model ?? null : null,
+      identity === undefined ? null : Number(identity.observed), identity?.observed ? identity.effort ?? null : null,
+      identity === undefined ? null : Number(identity.observed),
       id, AgentRunStatus.Running,
     ).changes) > 0;
     return changed ? this.agentRunById(id)! : null;

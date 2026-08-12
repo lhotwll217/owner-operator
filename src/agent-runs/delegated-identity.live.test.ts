@@ -3,8 +3,8 @@
 // Required: OO_LIVE_IDENTITY_HARNESS, OO_LIVE_IDENTITY_MODEL, OO_LIVE_IDENTITY_EFFORT
 // Run: OO_RUN_LIVE_DELEGATED_IDENTITY=1 npm run test:delegated-identity:live
 import assert from "node:assert";
-import { spawn, type ChildProcess } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,13 +50,18 @@ assert.ok(credentialSource, "set OO_LIVE_IDENTITY_CREDENTIAL_SOURCE to the expli
 assert.ok(configSource, "set OO_LIVE_IDENTITY_CONFIG_SOURCE to the explicit harness config file");
 const userHome = mkdtempSync(join(tmpdir(), "oo-live-delegated-identity-"));
 const ooHome = join(userHome, "state", ".owner-operator");
+const neutralCwd = join(userHome, "neutral-cwd");
 const daemonPath = join(ooHome, "daemon.json");
 const testPath = fileURLToPath(import.meta.url);
 let daemon: ChildProcess | undefined;
 let daemonExited: Promise<void> | undefined;
+let teardownError: unknown;
+let isolatedLeaseIds: string[] = [];
+let isolatedProcessPids: number[] = [];
 
 const harnessHome = harness === AgentRunHarness.Codex ? join(userHome, ".codex") : join(userHome, ".claude");
 mkdirSync(harnessHome, { recursive: true });
+mkdirSync(neutralCwd, { recursive: true });
 copyFileSync(credentialSource, join(harnessHome, harness === AgentRunHarness.Codex ? "auth.json" : ".credentials.json"));
 copyFileSync(configSource, join(harnessHome, harness === AgentRunHarness.Codex ? "config.toml" : "settings.json"));
 
@@ -85,9 +90,21 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 }
 
 try {
+  const cleanEnv: NodeJS.ProcessEnv = {
+    HOME: userHome,
+    OO_HOME: ooHome,
+    OO_LIVE_IDENTITY_WORKER: "1",
+    PATH: process.env.PATH,
+    TMPDIR: process.env.TMPDIR,
+    LANG: process.env.LANG,
+    LC_ALL: process.env.LC_ALL,
+    // Explicit copied sources are authoritative even when the caller has ambient harness homes.
+    CODEX_HOME: harness === AgentRunHarness.Codex ? harnessHome : join(userHome, "unused-codex"),
+    CLAUDE_CONFIG_DIR: harness === AgentRunHarness.ClaudeCode ? harnessHome : join(userHome, "unused-claude"),
+  };
   daemon = spawn(process.execPath, ["--import", "tsx", testPath], {
-    cwd: process.cwd(),
-    env: { ...process.env, HOME: userHome, OO_HOME: ooHome, OO_LIVE_IDENTITY_WORKER: "1" },
+    cwd: neutralCwd,
+    env: cleanEnv,
     stdio: ["ignore", "ignore", "pipe"],
   });
   daemonExited = new Promise((resolve) => { daemon!.once("exit", () => resolve()); daemon!.once("error", () => resolve()); });
@@ -98,7 +115,7 @@ try {
     if (!daemonInfo || daemonInfo.pid !== daemon?.pid) return;
     try { return (await request<{ ok: boolean }>("/health")).ok ? true : undefined; } catch { return; }
   }, "daemon readiness", 60_000);
-  const requested = { harness, model, effort, task: "Reply with exactly OO_DELEGATED_IDENTITY_OK. Do not use tools.", cwd: process.cwd(), timeoutSeconds: 240 };
+  const requested = { harness, model, effort, task: "Reply with exactly OO_DELEGATED_IDENTITY_OK. Do not use tools.", cwd: neutralCwd, timeoutSeconds: 240 };
   const launched = await request<AgentRun>("/agent-runs", requested);
   assert.deepEqual({ harness: launched.harness, model: launched.model, effort: launched.effort }, { harness, model, effort });
   const finished = await waitFor(async () => {
@@ -118,13 +135,51 @@ try {
   }
   assert.ok(finished.childSessionId, "lifecycle reports the real child identity");
   assert.match(finished.resultTail ?? "", /OO_DELEGATED_IDENTITY_OK/);
+  const leaseDir = join(ooHome, "agent-runs", "process-leases");
+  isolatedLeaseIds = existsSync(leaseDir)
+    ? readdirSync(leaseDir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5))
+    : [];
   process.stdout.write(`ok — lifecycle retained ${harness} / ${model} / effort ${String(effort)}\n`);
 } finally {
+  if (daemon?.pid) isolatedProcessPids = processTreePids(processList(), daemon.pid);
   if (daemon && daemon.exitCode === null && daemon.signalCode === null) {
     daemon.kill("SIGTERM");
     await waitFor(() => daemon?.exitCode !== null || daemon?.signalCode !== null ? true : undefined, "daemon exit", 15_000)
       .catch(() => daemon?.kill("SIGKILL"));
   }
   await daemonExited;
-  rmSync(userHome, { recursive: true, force: true });
+  try {
+    assert.ok(!daemon?.pid || !isAlive(daemon.pid), "daemon remains gone after teardown");
+    const ownedProcesses = processList().filter(({ pid, command }) =>
+      isolatedProcessPids.includes(pid) || isolatedLeaseIds.some((leaseId) => command.includes(leaseId)));
+    assert.deepEqual(ownedProcesses, [], "no isolated daemon wrapper or descendant remains live");
+    const leaseDir = join(ooHome, "agent-runs", "process-leases");
+    assert.deepEqual(existsSync(leaseDir) ? readdirSync(leaseDir).filter((name) => name.endsWith(".json")) : [], [],
+      "no process lease remains before isolation is deleted");
+    rmSync(userHome, { recursive: true, force: true });
+  } catch (error) {
+    process.stderr.write(`live identity teardown failed; preserved isolation evidence at ${userHome}\n`);
+    teardownError = error;
+  }
+}
+if (teardownError) throw teardownError;
+
+function isAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function processList(): Array<{ pid: number; ppid: number; command: string }> {
+  return execFileSync("ps", ["-axo", "pid=,ppid=,command="], { encoding: "utf8" }).split(/\r?\n/).flatMap((line) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+    return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3]! }] : [];
+  });
+}
+
+function processTreePids(processes: ReturnType<typeof processList>, rootPid: number): number[] {
+  const found = new Set([rootPid]);
+  for (;;) {
+    const before = found.size;
+    for (const entry of processes) if (found.has(entry.ppid)) found.add(entry.pid);
+    if (found.size === before) return [...found];
+  }
 }

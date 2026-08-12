@@ -10,6 +10,7 @@ import {
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunStatus,
+  harnessIdentityObservation,
   isAgentRunEffort,
   type AgentRunHarness,
   type AgentRunLaunchRequest,
@@ -279,15 +280,15 @@ async function observeHarnessIdentity(
     // ordinary delegated turns continue if an adapter cannot expose status after configuration.
     return;
   }
-  const harnessModel = status.models?.currentModelId?.trim() || null;
+  const harnessModel = status.models?.currentModelId;
   const configOptions = status.details?.configOptions;
   const effortOption = Array.isArray(configOptions)
     ? configOptions.find((option) => option && typeof option === "object" && "id" in option
       && option.id === REASONING_EFFORT_CONFIG_OPTION)
     : undefined;
   const value = effortOption && "currentValue" in effortOption ? effortOption.currentValue : null;
-  const harnessEffort = typeof value === "string" && isAgentRunEffort(value) ? value : null;
-  request.onActivity({ harnessModel, harnessEffort, harnessIdentityObserved: true });
+  const harnessEffort = typeof value === "string" && isAgentRunEffort(value) ? value : undefined;
+  request.onActivity({ harnessIdentity: harnessIdentityObservation({ model: harnessModel, effort: harnessEffort }) });
 }
 
 function ensureAcpSession(

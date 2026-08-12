@@ -192,9 +192,10 @@ exact owner-approved model and nullable effort in one atomically replaced file p
 proposal performs no write.
 
 The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
-harness config cannot contaminate a global candidate. Its process lease and session directory are
-dropped once the session settles — including a session that settles after the probe already timed
-out, whose late child is closed as well.
+harness config cannot contaminate a global candidate. The active probe owns termination: timeout
+requests close, then verifies the leased wrapper tree is absent before releasing its process lease
+and disposable session directory. Failed verification retains both as ownership evidence for
+startup orphan reaping.
 
 ### Manual baseline-consent proof
 

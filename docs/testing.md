@@ -74,5 +74,11 @@ OO_LIVE_IDENTITY_CONFIG_SOURCE=/explicit/harness/config-file \
 cd apps/widget && swift test                            # widget (Swift)
 ```
 
+The delegated-identity live test requires only the six `OO_*` inputs shown above. Credential and
+config source paths must name explicit files; the test copies them into a disposable harness home,
+discards ambient provider keys, ACP overrides, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR`, and runs from
+a neutral disposable directory. It preserves that directory when teardown cannot prove the daemon,
+leased process tree, and process lease are all gone. Never put secret values in these variables.
+
 CI runs on every PR and every landing on `main`: [`ci.yml`](../.github/workflows/ci.yml);
 the widget suite: [`widget.yml`](../.github/workflows/widget.yml) (macOS, path-filtered).

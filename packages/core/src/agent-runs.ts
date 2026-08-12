@@ -29,6 +29,25 @@ export function isAgentRunEffort(value: unknown): value is AgentRunEffort {
   return typeof value === "string" && AGENT_RUN_EFFORTS.includes(value as AgentRunEffort);
 }
 
+/** Live harness identity evidence. An observed value always contains at least one supported fact;
+ * this makes an empty or wholly unsupported status impossible to report as observed. */
+export type HarnessIdentityObservation =
+  | { observed: false }
+  | { observed: true; model: string; effort?: AgentRunEffort }
+  | { observed: true; model?: string; effort: AgentRunEffort };
+
+export function harnessIdentityObservation(input: {
+  model?: unknown;
+  effort?: unknown;
+}): HarnessIdentityObservation {
+  const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : undefined;
+  const effort = isAgentRunEffort(input.effort) ? input.effort : undefined;
+  if (model && effort) return { observed: true, model, effort };
+  if (model) return { observed: true, model };
+  if (effort) return { observed: true, effort };
+  return { observed: false };
+}
+
 /** Terminal states are monotonic: once reached, a run row never changes status again,
  * except that `interrupted` and `lost` may be resumed — which creates a NEW run under
  * the same child identity, never a status downgrade on the old row. */
@@ -160,9 +179,7 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
   activity?: string;
   /** Runtime acknowledgement that the resolved effort was applied. */
   effortApplied?: boolean;
-  harnessModel?: string | null;
-  harnessEffort?: AgentRunEffort | null;
-  harnessIdentityObserved?: boolean;
+  harnessIdentity?: HarnessIdentityObservation;
 }
 
 /** Runtime request passed from the executor to the injected launcher seam. */

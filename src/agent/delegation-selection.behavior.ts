@@ -28,7 +28,7 @@ import {
   type DelegationDetailFixture,
   type DelegationFixtureIdentity,
 } from "./delegation-selection-fixtures";
-import { requiredReasonTerms } from "./delegation-selection-grading";
+import { relevantDetailsCallIndex, requiredReasonTerms } from "./delegation-selection-grading";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { createDelegateAgentTool } from "./tools/delegate-agent";
 import { createGetHarnessDetailsTool } from "./tools/get-harness-details";
@@ -188,14 +188,19 @@ try {
       assert.deepEqual(names, ["delegate_agent"], `${entry.id}: complete explicit identity bypasses the skill`);
     }
     if (entry.requiresDetails) {
-      const firstLaunch = run.calls.findIndex((call) => call.name === "delegate_agent");
+      const launchIndexes = run.calls.flatMap((call, index) => call.name === "delegate_agent" ? [index] : []);
+      const firstLaunch = launchIndexes[0] ?? -1;
       const skillRead = run.calls.findIndex((call) => call.name === "read" && call.args.path === selectionSkillPath);
       const rosterRead = run.calls.findIndex((call) => call.name === "read" && call.args.path === run.paths.harnessRoster);
-      const detailsRead = run.calls.findIndex((call) => call.name === "get_harness_details");
       assert.ok(firstLaunch >= 0, `${entry.id}: implicit selection delegates`);
       assert.ok(skillRead >= 0 && skillRead < firstLaunch, `${entry.id}: reads shipped skill before first delegation`);
       assert.ok(rosterRead >= 0 && rosterRead < firstLaunch, `${entry.id}: reads isolated roster before first delegation`);
-      assert.ok(detailsRead >= 0 && detailsRead < firstLaunch, `${entry.id}: reads current harness facts before first delegation`);
+      launchIndexes.forEach((launchIndex, index) => {
+        const after = index === 0 ? -1 : launchIndexes[index - 1]!;
+        const detailsIndex = relevantDetailsCallIndex(run.calls, actual[index]!.harness, after, launchIndex);
+        assert.ok(detailsIndex > after && detailsIndex < launchIndex,
+          `${entry.id}: details call ${detailsIndex} covers launch ${launchIndex} harness ${actual[index]!.harness}`);
+      });
     }
     if (entry.requiresFallbackReport) {
       assert.ok(entry.reject, `${entry.id}: fallback fixture defines a rejection`);
@@ -204,6 +209,14 @@ try {
       const reasonTerms = requiredReasonTerms(entry.reject.reason);
       assert.ok(reasonTerms.every((term) => response.toLowerCase().includes(term)),
         `${entry.id}: reports actual fixture rejection semantics: ${reasonTerms.join(", ")}\n${response}`);
+      const launchIndexes = run.calls.flatMap((call, index) => call.name === "delegate_agent" ? [index] : []);
+      const replacementIndex = launchIndexes[1]!;
+      const rejectedIndex = launchIndexes[0]!;
+      for (const harness of new Set([entry.expectedLaunches[0]!.harness, entry.expectedLaunches[1]!.harness])) {
+        const refreshIndex = relevantDetailsCallIndex(run.calls, harness, rejectedIndex, replacementIndex);
+        assert.ok(refreshIndex > rejectedIndex && refreshIndex < replacementIndex,
+          `${entry.id}: refreshed ${harness} details call ${refreshIndex} follows rejection ${rejectedIndex} and precedes replacement ${replacementIndex}`);
+      }
     }
     if (entry.requiresOwnerQuestion) {
       assert.match(response, /\?|choose|please (?:select|approve)|should I|would you/i,
@@ -266,7 +279,10 @@ try {
   const retryIndex = approval.calls.findIndex((call, index) => index > approveIndex && call.name === "get_harness_details");
   assert.ok(proposeIndex >= 0 && approveIndex > proposeIndex, "proposal precedes owner-approved persistence");
   assert.ok(launchIndex > approveIndex, "approved baseline persists before delegation");
-  if (retryIndex >= 0) assert.ok(launchIndex > retryIndex, "post-approval selection retry precedes delegation");
+  assert.ok(retryIndex > approveIndex && launchIndex > retryIndex,
+    "relevant post-approval details evidence is required before delegation");
+  assert.equal(relevantDetailsCallIndex(approval.calls, AgentRunHarness.ClaudeCode, approveIndex, launchIndex), retryIndex,
+    "post-approval evidence covers the harness actually launched");
   approval.session.dispose();
   process.stdout.write("ok — model-driven missing baseline proposes, asks, persists, retries, and preserves effort null\n");
 } finally {
