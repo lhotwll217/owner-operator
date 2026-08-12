@@ -22,6 +22,8 @@ export function ownerOperatorPaths(ooHome = defaultHome()) {
     workspaceMemory: join(workspace, "MEMORY.md"),
     workspaceSkills: join(workspace, "skills"),
     workspaceArtifacts: join(workspace, "artifacts"),
+    harnessRoster: join(workspace, "harness-roster.md"),
+    delegatedBaselines: join(ooHome, "delegated_baselines.json"),
     piAgentDir,
     piAuth: join(piAgentDir, "auth.json"),
     piSettings: join(piAgentDir, "settings.json"),
@@ -48,6 +50,53 @@ function writeMissing(path, content) {
   }
 }
 
+/** The roster is the owner's file. Seeding seeds rules and empty roles only: a guessed harness,
+ * model, or effort here would read as a decision the owner made, and the owner would then have to
+ * discover and undo it. Delegated model/effort baselines are approved separately and stored in
+ * delegated_baselines.json, so nothing the product decides is ever written into this file. */
+export const HARNESS_ROSTER_TEMPLATE = `# Harness roster
+
+Your preferences for the coding agents Owner Operator delegates work to. This file is yours.
+Owner Operator reads it and never writes to it, and product upgrades leave it alone.
+
+Under a role, name a harness, a model, and a reasoning effort, or write the preference in plain
+language. Model identifiers belong to one harness and are not interchangeable between harnesses;
+Owner Operator can report what each harness currently advertises before you name one.
+
+## Rules
+
+- A harness, model, or effort you state in a request always wins over this roster.
+- Owner Operator reads current harness facts before delegating without an explicit choice.
+- When a preferred choice is unavailable, Owner Operator may use an alternative only if it
+  preserves the quality the work needs, and says so in the conversation.
+- Where no role below applies, Owner Operator falls back to the delegated baseline you approved
+  for that harness, which is stored outside this file.
+- Owner Operator never edits this roster. It changes only when you change it.
+
+## Task roles
+
+### Implementation
+
+_No preference configured._
+
+### Research
+
+_No preference configured._
+
+### Review
+
+_No preference configured._
+
+### Quick mechanical work
+
+_No preference configured._
+
+## Custom roles
+
+Add roles of your own below, as headings in the same shape. Owner Operator reads them alongside
+the roles above.
+`;
+
 export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
   const paths = ownerOperatorPaths(ooHome);
   mkdirSync(paths.workspaceSkills, { recursive: true });
@@ -55,6 +104,7 @@ export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
   mkdirSync(paths.piAgentDir, { recursive: true });
   writeMissing(paths.workspaceInstructions, "# Owner Operator instructions\n\nRecord persistent instructions for the Operator here.\n");
   writeMissing(paths.workspaceMemory, "# Memory\n\nRecord durable facts for the Operator here.\n");
+  writeMissing(paths.harnessRoster, HARNESS_ROSTER_TEMPLATE);
   return paths;
 }
 

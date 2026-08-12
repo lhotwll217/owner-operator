@@ -126,13 +126,14 @@ and terminal styling are adapters over that contract.
   harness-native sub-agents.
 - **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, `delegate_agent` resolves the
-  per-harness default from the runtime [launch configuration](../src/agent-runs/launch-config.ts)
-  before creating the durable row; it never inherits an unsuitable ambient harness default.
-- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`). Its canonical vocabulary
-  lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts); resolution follows the same caller
-  pin then per-harness [launch configuration](../src/agent-runs/launch-config.ts) order as model and
-  lands in the durable row before launch. Legacy rows and runs with neither a caller pin nor a
-  harness default retain `NULL`; clients omit unknown effort instead of displaying a placeholder.
+  owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
+  before creating the durable row. With no approved baseline it asks instead of inheriting an
+  ambient harness default or inventing a product default.
+- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`), including explicit
+  `null`. Its canonical vocabulary lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts);
+  resolution follows the same caller pin then approved-baseline order as model and lands in the
+  durable row before launch. Legacy rows retain `NULL`; clients omit unknown effort instead of
+  displaying a placeholder.
 - **Effort application** is owned by the [ACP launcher](../src/agent-runs/acp-launcher.ts), which
   uses only session-advertised config options. The durable `effort_applied` field distinguishes
   recorded intent from successful application; its contract lives in
@@ -172,6 +173,11 @@ Baseline-candidate discovery is opt-in and separate. It opens one throwaway ACP 
 neither model nor effort, reads back what the harness selected for itself, and reports it as a
 *candidate*. A candidate is never saved: persisting a delegated default requires explicit owner
 approval and is owned by the [launch configuration](../src/agent-runs/launch-config.ts).
+
+`manage_delegated_baseline` is the narrow consent seam. `propose` performs initial discovery or a
+refresh and only compares the ephemeral candidate with the current approval. `approve` stores the
+exact owner-approved model and nullable effort in `delegated_baselines.json`, separate from the
+owner-edited roster and the run ledger. Declining a proposal performs no write.
 
 The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
 harness config cannot contaminate a global candidate. Its process lease and session directory are

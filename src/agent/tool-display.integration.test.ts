@@ -53,6 +53,7 @@ try {
     "get_current_session_state",
     "get_harness_details",
     "manage_agent_run",
+    "manage_delegated_baseline",
     "manage_schedule",
     "mark_thread_done",
     "query_database",

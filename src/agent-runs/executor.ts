@@ -16,7 +16,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
-import { resolveAgentRunEffort, resolveAgentRunModel } from "./launch-config";
+import { resolveAgentRunLaunch } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
 const WAIT_POLL_MS = 100;
@@ -145,13 +145,17 @@ export class AgentRunExecutor {
     if (depth > AGENT_RUN_MAX_DEPTH) {
       throw new Error(`delegation depth ${depth} exceeds the cap of ${AGENT_RUN_MAX_DEPTH}`);
     }
+    const launch = resolveAgentRunLaunch(input.harness, {
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.effort !== undefined ? { effort: input.effort } : {}),
+    });
     const run = this.state.createAgentRun({
       harness: input.harness,
       task: input.task,
       cwd: input.cwd,
       parentThreadId: input.parentThreadId ?? null,
-      model: resolveAgentRunModel(input.harness, input.model),
-      effort: resolveAgentRunEffort(input.harness, input.effort),
+      model: launch.model,
+      effort: launch.effort,
       depth,
       timeoutSeconds,
     });
