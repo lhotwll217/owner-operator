@@ -6,6 +6,7 @@ import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
   reapStaleAgentRunProcesses,
+  terminateAgentRunProcessLease,
   updateAgentRunProcessLease,
 } from "./process-lease";
 
@@ -88,6 +89,25 @@ try {
   assert.deepEqual(failed.terminatedPids, [], "a process still live after SIGKILL is not reported terminated");
   assert.equal(JSON.parse(readFileSync(resistant.path, "utf8")).leaseId, resistant.leaseId,
     "failed termination retains durable ownership evidence");
+
+  const reparented = createAgentRunProcessLease({ runId: "run-reparented", wrapperPath });
+  let terminationSnapshot = 0;
+  const originalTree = [
+    { pid: 610, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${reparented.leaseId}` },
+    { pid: 611, ppid: 610, command: "node surviving-child" },
+  ];
+  const terminated = await terminateAgentRunProcessLease({
+    leaseId: reparented.leaseId,
+    wrapperPath,
+    deps: {
+      listProcesses: async () => terminationSnapshot++ === 0 ? originalTree : [{ ...originalTree[1]!, ppid: 1 }],
+      killProcess: () => undefined,
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(terminated, false, "a descendant reparented after wrapper exit remains detectable by its original PID");
+  assert.equal(JSON.parse(readFileSync(reparented.path, "utf8")).leaseId, reparented.leaseId,
+    "reparented-survivor evidence retains its lease");
 
   const closed = createAgentRunProcessLease({ runId: "run-2", wrapperPath });
   closeAgentRunProcessLease(closed.leaseId);

@@ -46,19 +46,31 @@ assert.deepEqual(requiredReasonTerms("account access rejected the advertised mod
   "fallback grading derives independent semantic terms from the actual rejection reason");
 
 const trajectory = [
-  { name: "get_harness_details", args: { harnesses: ["claude-code"] } },
-  { name: "delegate_agent", args: { harness: "claude-code" } },
-  { name: "get_harness_details", args: { harnesses: ["claude-code", "codex"] } },
-  { name: "delegate_agent", args: { harness: "codex" } },
+  { phase: "start" as const, toolCallId: "details-1", name: "get_harness_details", args: { harnesses: ["claude-code"] } },
+  { phase: "end" as const, toolCallId: "details-1", name: "get_harness_details", args: {}, succeeded: true },
+  { phase: "start" as const, toolCallId: "launch-1", name: "delegate_agent", args: { harness: "claude-code" } },
+  { phase: "end" as const, toolCallId: "launch-1", name: "delegate_agent", args: {}, succeeded: false },
+  { phase: "start" as const, toolCallId: "details-2", name: "get_harness_details", args: { harnesses: ["claude-code", "codex"] } },
+  { phase: "end" as const, toolCallId: "details-2", name: "get_harness_details", args: {}, succeeded: true },
+  { phase: "start" as const, toolCallId: "launch-2", name: "delegate_agent", args: { harness: "codex" } },
 ];
-assert.equal(relevantDetailsCallIndex(trajectory, "claude-code", -1, 1), 0,
+assert.equal(relevantDetailsCallIndex(trajectory, "claude-code", -1, 2), 1,
   "prelaunch evidence is tied to the exact first harness and call index");
-assert.equal(relevantDetailsCallIndex(trajectory, "codex", 1, 3), 2,
+assert.equal(relevantDetailsCallIndex(trajectory, "codex", 3, 6), 5,
   "replacement evidence is refreshed after rejection and before its exact launch index");
-assert.equal(relevantDetailsCallIndex(trajectory, "codex", -1, 1), -1,
+assert.equal(relevantDetailsCallIndex(trajectory, "codex", -1, 2), -1,
   "details for another harness cannot grade a launch");
-assert.equal(relevantDetailsCallIndex(trajectory, "codex", 2, 3), -1,
+assert.equal(relevantDetailsCallIndex(trajectory, "codex", 5, 6), -1,
   "stale/pre-rejection details cannot grade fallback evidence");
+
+const concurrent = [
+  { phase: "start" as const, toolCallId: "details", name: "get_harness_details", args: { harnesses: ["codex"] } },
+  { phase: "start" as const, toolCallId: "sibling", name: "read", args: { path: "/tmp/roster" } },
+  { phase: "start" as const, toolCallId: "launch", name: "delegate_agent", args: { harness: "codex" } },
+  { phase: "end" as const, toolCallId: "details", name: "get_harness_details", args: {}, succeeded: true },
+];
+assert.equal(relevantDetailsCallIndex(concurrent, "codex", -1, 2), -1,
+  "a concurrent details start that completes after launch is not evidence");
 
 for (const malformed of [
   fixtureSource.replace('"usedPercent": 98', '"usedPercentage": 98'),

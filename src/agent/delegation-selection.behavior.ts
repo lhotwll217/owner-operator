@@ -29,6 +29,7 @@ import {
   type DelegationFixtureIdentity,
 } from "./delegation-selection-fixtures";
 import { relevantDetailsCallIndex, requiredReasonTerms } from "./delegation-selection-grading";
+import type { DelegationTrajectoryEvent } from "./delegation-selection-grading";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { createDelegateAgentTool } from "./tools/delegate-agent";
 import { createGetHarnessDetailsTool } from "./tools/get-harness-details";
@@ -144,9 +145,17 @@ async function sessionFor(
     customTools: tools,
   });
   const calls: Array<{ name: string; args: any; error?: boolean }> = [];
+  const trajectory: DelegationTrajectoryEvent[] = [];
   let response = "";
   session.subscribe((event: any) => {
-    if (event.type === "tool_execution_start") calls.push({ name: event.toolName, args: event.args });
+    if (event.type === "tool_execution_start") {
+      calls.push({ name: event.toolName, args: event.args });
+      trajectory.push({ phase: "start", toolCallId: event.toolCallId, name: event.toolName, args: event.args });
+    }
+    if (event.type === "tool_execution_end") {
+      const start = trajectory.find((entry) => entry.phase === "start" && entry.toolCallId === event.toolCallId);
+      trajectory.push({ phase: "end", toolCallId: event.toolCallId, name: event.toolName ?? start?.name ?? "", args: start?.args ?? {}, succeeded: !event.isError });
+    }
     if (event.type === "tool_execution_end" && event.isError) {
       const call = [...calls].reverse().find((entry) => entry.name === event.toolName && entry.error === undefined);
       if (call) call.error = true;
@@ -154,7 +163,7 @@ async function sessionFor(
     const update = event.assistantMessageEvent;
     if (event.type === "message_update" && update?.type === "text_delta") response += update.delta;
   });
-  return { session, calls, detailCalls, paths, takeResponse: () => { const value = response; response = ""; return value; } };
+  return { session, calls, trajectory, detailCalls, paths, takeResponse: () => { const value = response; response = ""; return value; } };
 }
 
 try {
@@ -188,7 +197,7 @@ try {
       assert.deepEqual(names, ["delegate_agent"], `${entry.id}: complete explicit identity bypasses the skill`);
     }
     if (entry.requiresDetails) {
-      const launchIndexes = run.calls.flatMap((call, index) => call.name === "delegate_agent" ? [index] : []);
+      const launchIndexes = run.trajectory.flatMap((event, index) => event.phase === "start" && event.name === "delegate_agent" ? [index] : []);
       const firstLaunch = launchIndexes[0] ?? -1;
       const skillRead = run.calls.findIndex((call) => call.name === "read" && call.args.path === selectionSkillPath);
       const rosterRead = run.calls.findIndex((call) => call.name === "read" && call.args.path === run.paths.harnessRoster);
@@ -197,7 +206,7 @@ try {
       assert.ok(rosterRead >= 0 && rosterRead < firstLaunch, `${entry.id}: reads isolated roster before first delegation`);
       launchIndexes.forEach((launchIndex, index) => {
         const after = index === 0 ? -1 : launchIndexes[index - 1]!;
-        const detailsIndex = relevantDetailsCallIndex(run.calls, actual[index]!.harness, after, launchIndex);
+        const detailsIndex = relevantDetailsCallIndex(run.trajectory, actual[index]!.harness, after, launchIndex);
         assert.ok(detailsIndex > after && detailsIndex < launchIndex,
           `${entry.id}: details call ${detailsIndex} covers launch ${launchIndex} harness ${actual[index]!.harness}`);
       });
@@ -209,11 +218,12 @@ try {
       const reasonTerms = requiredReasonTerms(entry.reject.reason);
       assert.ok(reasonTerms.every((term) => response.toLowerCase().includes(term)),
         `${entry.id}: reports actual fixture rejection semantics: ${reasonTerms.join(", ")}\n${response}`);
-      const launchIndexes = run.calls.flatMap((call, index) => call.name === "delegate_agent" ? [index] : []);
+      const launchIndexes = run.trajectory.flatMap((event, index) => event.phase === "start" && event.name === "delegate_agent" ? [index] : []);
       const replacementIndex = launchIndexes[1]!;
-      const rejectedIndex = launchIndexes[0]!;
+      const rejectedId = run.trajectory[launchIndexes[0]!]!.toolCallId;
+      const rejectedIndex = run.trajectory.findIndex((event) => event.phase === "end" && event.toolCallId === rejectedId);
       for (const harness of new Set([entry.expectedLaunches[0]!.harness, entry.expectedLaunches[1]!.harness])) {
-        const refreshIndex = relevantDetailsCallIndex(run.calls, harness, rejectedIndex, replacementIndex);
+        const refreshIndex = relevantDetailsCallIndex(run.trajectory, harness, rejectedIndex, replacementIndex);
         assert.ok(refreshIndex > rejectedIndex && refreshIndex < replacementIndex,
           `${entry.id}: refreshed ${harness} details call ${refreshIndex} follows rejection ${rejectedIndex} and precedes replacement ${replacementIndex}`);
       }
@@ -273,15 +283,17 @@ try {
   assert.ok(typeof saved.approvedAt === "string", "saved baseline records approval time");
   assert.deepEqual(saved, { model: candidate.model, effort: null, approvedAt: saved.approvedAt },
     "saved baseline is exactly the approved model, explicit null effort, and approval time");
-  const approveIndex = approval.calls.findIndex((call) => call.name === "manage_delegated_baseline" && call.args.action === "approve");
-  const proposeIndex = approval.calls.findIndex((call) => call.name === "manage_delegated_baseline" && call.args.action === "propose");
-  const launchIndex = approval.calls.findIndex((call) => call.name === "delegate_agent");
-  const retryIndex = approval.calls.findIndex((call, index) => index > approveIndex && call.name === "get_harness_details");
+  const approveStart = approval.trajectory.findIndex((event) => event.phase === "start" && event.name === "manage_delegated_baseline" && event.args.action === "approve");
+  const approveId = approval.trajectory[approveStart]!.toolCallId;
+  const approveIndex = approval.trajectory.findIndex((event) => event.phase === "end" && event.toolCallId === approveId && event.succeeded);
+  const proposeIndex = approval.trajectory.findIndex((event) => event.phase === "end" && event.name === "manage_delegated_baseline" && event.succeeded);
+  const launchIndex = approval.trajectory.findIndex((event) => event.phase === "start" && event.name === "delegate_agent");
+  const retryIndex = relevantDetailsCallIndex(approval.trajectory, AgentRunHarness.ClaudeCode, approveIndex, launchIndex);
   assert.ok(proposeIndex >= 0 && approveIndex > proposeIndex, "proposal precedes owner-approved persistence");
   assert.ok(launchIndex > approveIndex, "approved baseline persists before delegation");
   assert.ok(retryIndex > approveIndex && launchIndex > retryIndex,
     "relevant post-approval details evidence is required before delegation");
-  assert.equal(relevantDetailsCallIndex(approval.calls, AgentRunHarness.ClaudeCode, approveIndex, launchIndex), retryIndex,
+  assert.equal(relevantDetailsCallIndex(approval.trajectory, AgentRunHarness.ClaudeCode, approveIndex, launchIndex), retryIndex,
     "post-approval evidence covers the harness actually launched");
   approval.session.dispose();
   process.stdout.write("ok — model-driven missing baseline proposes, asks, persists, retries, and preserves effort null\n");

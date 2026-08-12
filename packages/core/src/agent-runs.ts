@@ -141,10 +141,8 @@ export interface AgentRun {
   effort: AgentRunEffort | null;
   /** True only after the launcher successfully applies effort through an advertised option. */
   effortApplied: boolean;
-  /** Identity independently read back from the live harness after session configuration. */
-  harnessModel?: string | null;
-  harnessEffort?: AgentRunEffort | null;
-  harnessIdentityObserved?: boolean;
+  /** Canonical identity independently read back from the live harness after configuration. */
+  harnessIdentity: HarnessIdentityObservation;
   depth: number;
   status: AgentRunStatus;
   createdAt: string;

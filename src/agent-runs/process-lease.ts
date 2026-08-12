@@ -115,16 +115,42 @@ async function processesForLease(
 export async function terminateAgentRunProcessLease(params: {
   leaseId: string;
   wrapperPath: string;
+  trackedPids?: readonly number[];
   deps?: AgentRunProcessCleanupDeps;
 }): Promise<boolean> {
   if (process.platform === "win32") return false;
-  const before = await processesForLease(params.leaseId, params.wrapperPath, params.deps);
-  if (before === null) return false;
-  await terminatePids(uniquePids([...before].reverse()), params.deps);
-  const after = await processesForLease(params.leaseId, params.wrapperPath, params.deps);
-  if (after === null || after.length > 0) return false;
+  let processes: ProcessInfo[];
+  try {
+    processes = await (params.deps?.listProcesses ?? listPlatformProcesses)();
+  } catch {
+    return false;
+  }
+  const roots = processes.filter((entry) =>
+    entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId);
+  const liveTree = roots.flatMap((root) => collectProcessTree(processes, root.pid));
+  const originalPids = new Set([...(params.trackedPids ?? []), ...uniquePids(liveTree)]);
+  const owned = processes.filter((entry) => originalPids.has(entry.pid));
+  await terminatePids(uniquePids([...owned].reverse()), params.deps);
+  let after: ProcessInfo[];
+  try {
+    after = await (params.deps?.listProcesses ?? listPlatformProcesses)();
+  } catch {
+    return false;
+  }
+  if (after.some((entry) => originalPids.has(entry.pid)
+    || (entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId))) return false;
   closeAgentRunProcessLease(params.leaseId);
   return true;
+}
+
+/** Snapshot the exact live PID tree before requesting a graceful runtime close. */
+export async function agentRunProcessTreePids(params: {
+  leaseId: string;
+  wrapperPath: string;
+  deps?: AgentRunProcessCleanupDeps;
+}): Promise<number[] | null> {
+  const tree = await processesForLease(params.leaseId, params.wrapperPath, params.deps);
+  return tree === null ? null : uniquePids(tree);
 }
 
 /** Persist ownership before acpx can spawn. The root PID is filled after ACP initialization. */

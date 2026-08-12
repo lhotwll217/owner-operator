@@ -14,6 +14,7 @@ const run: AgentRun = {
   model: null,
   effort: null,
   effortApplied: false,
+  harnessIdentity: { observed: false },
   depth: 1,
   status: AgentRunStatus.Running,
   createdAt: "2026-07-17T10:00:00.000Z",

@@ -55,8 +55,10 @@ function discard(leased: LeasedAcpRuntime, stateDir: string): void { leased.rele
 async function discardAbandoned(leased: LeasedAcpRuntime, session: Promise<AcpRuntimeHandle>, stateDir: string): Promise<void> {
   void session.catch(() => undefined);
   const terminated = await leased.terminate();
-  rmSync(stateDir, { recursive: true, force: true });
-  if (terminated) leased.release();
+  if (terminated) {
+    leased.release();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
 }
 function readEffort(payload: unknown): { currentValue: string | null; values: string[] | null } {
   if (!Array.isArray(payload)) return { currentValue: null, values: null };

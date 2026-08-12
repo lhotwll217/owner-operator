@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { absoluteTsxLoaderPath } from "../shared/tsx-loader";
 import {
   AGENT_RUN_EFFORTS,
   AgentRunHarness,
@@ -102,7 +103,7 @@ try {
     CODEX_HOME: harness === AgentRunHarness.Codex ? harnessHome : join(userHome, "unused-codex"),
     CLAUDE_CONFIG_DIR: harness === AgentRunHarness.ClaudeCode ? harnessHome : join(userHome, "unused-claude"),
   };
-  daemon = spawn(process.execPath, ["--import", "tsx", testPath], {
+  daemon = spawn(process.execPath, ["--import", absoluteTsxLoaderPath(), testPath], {
     cwd: neutralCwd,
     env: cleanEnv,
     stdio: ["ignore", "ignore", "pipe"],
@@ -124,14 +125,15 @@ try {
   }, "real delegated turn");
   assert.equal(finished.status, "completed");
   assert.deepEqual({ harness: finished.harness, model: finished.model, effort: finished.effort }, { harness, model, effort });
-  assert.equal(finished.harnessIdentityObserved, true, "launcher independently observed live harness identity");
-  assert.equal(finished.harnessModel, model, "live harness resolved the requested model");
-  assert.ok(Object.hasOwn(finished, "harnessEffort"), "live status reports nullable harness effort explicitly");
+  assert.equal(finished.harnessIdentity.observed, true, "launcher independently observed live harness identity");
+  assert.equal("model" in finished.harnessIdentity ? finished.harnessIdentity.model : undefined, model,
+    "live harness resolved the requested model");
   if (effort === null) {
     assert.equal(finished.effortApplied, false, "explicit null means OO applies no effort override");
   } else {
     assert.equal(finished.effortApplied, true, "requested non-null effort was applied by the live harness");
-    assert.equal(finished.harnessEffort, effort, "live harness reports the applied effort");
+    assert.equal("effort" in finished.harnessIdentity ? finished.harnessIdentity.effort : undefined, effort,
+      "live harness reports the applied effort");
   }
   assert.ok(finished.childSessionId, "lifecycle reports the real child identity");
   assert.match(finished.resultTail ?? "", /OO_DELEGATED_IDENTITY_OK/);

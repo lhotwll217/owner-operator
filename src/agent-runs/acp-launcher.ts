@@ -22,6 +22,7 @@ import type { AgentRunLauncher } from "./executor";
 import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
+  agentRunProcessTreePids,
   reapStaleAgentRunProcesses,
   terminateAgentRunProcessLease,
   updateAgentRunProcessLease,
@@ -50,6 +51,8 @@ export function agentRunStateDir(): string {
 export interface AcpLauncherOptions {
   /** Injectable for tests; production builds the real acpx runtime. */
   runtimeFactory?: () => AcpRuntime;
+  /** Injectable leased runtime for deterministic lifecycle tests. */
+  leasedRuntimeFactory?: typeof createLeasedAcpRuntime;
 }
 
 /** The exact wrapper entrypoint every OO-spawned ACP child runs under. Startup cleanup matches on
@@ -65,7 +68,9 @@ export interface LeasedAcpRuntime {
   /** Drop the durable ownership record once the child process tree is closed. */
   release: () => void;
   /** Terminate an owned wrapper even when initialization never yielded a session handle. */
-  terminate: () => Promise<boolean>;
+  terminate: (trackedPids?: readonly number[]) => Promise<boolean>;
+  /** Capture descendants before a graceful close can reparent them. */
+  processTreePids: () => Promise<number[] | null>;
 }
 
 /** Build an acpx runtime whose child process tree is owned by a durable lease before acpx can
@@ -114,10 +119,12 @@ export function createLeasedAcpRuntime(params: {
       sessionStore,
       leaseId: lease.leaseId,
       release: () => closeAgentRunProcessLease(lease.leaseId),
-      terminate: () => terminateAgentRunProcessLease({
+      terminate: (trackedPids) => terminateAgentRunProcessLease({
         leaseId: lease.leaseId,
         wrapperPath,
+        trackedPids,
       }),
+      processTreePids: () => agentRunProcessTreePids({ leaseId: lease.leaseId, wrapperPath }),
     };
   } catch (error) {
     // Resolving the adapter or building the runtime can fail before anything is spawned, and a
@@ -146,13 +153,12 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
   const launcher: AgentRunLauncher = async (
     request: AgentRunLaunchRequest,
   ): Promise<AgentRunLaunchResult> => {
-    const leased = createLeasedAcpRuntime({
+    const leased = (options.leasedRuntimeFactory ?? createLeasedAcpRuntime)({
       harness: request.run.harness,
       leaseKey: request.run.id,
     });
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
-    let removeLease = false;
     try {
       handle = await ensureAcpSession(leased.runtime, request);
       const record = await leased.sessionStore.load(handle.acpxRecordId ?? request.run.id);
@@ -166,16 +172,18 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
     } finally {
       if (handle) {
         try {
+          const trackedPids = await leased.processTreePids();
           await leased.runtime.close({ handle, reason: "delegated run finished" });
-          removeLease = true;
+          if (trackedPids !== null) {
+            await leased.terminate(trackedPids);
+          }
         } catch {
           // Keep the lease: startup cleanup can reap a wrapper that resisted normal close.
         }
       } else {
         // acpx closes a partially initialized client in ensureSession's own finally block.
-        removeLease = true;
+        await leased.terminate();
       }
-      if (removeLease) leased.release();
     }
   };
   launcher.reapOrphans = async () => {

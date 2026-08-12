@@ -52,12 +52,9 @@ assert.equal(active?.lastActivityAt, nowIso, "activity stamps last_activity_at")
 const modelObserved = db.recordAgentRunActivity("run-1", {
   harnessIdentity: { observed: true, model: "observed-model" },
 });
-assert.equal(modelObserved?.harnessIdentityObserved, true);
-assert.equal(modelObserved?.harnessModel, "observed-model");
-assert.equal(modelObserved?.harnessEffort, null);
+assert.deepEqual(modelObserved?.harnessIdentity, { observed: true, model: "observed-model" });
 const unobserved = db.recordAgentRunActivity("run-1", { harnessIdentity: { observed: false } });
-assert.equal(unobserved?.harnessIdentityObserved, false, "unobserved status cannot retain contradictory observed evidence");
-assert.equal(unobserved?.harnessModel, null);
+assert.deepEqual(unobserved?.harnessIdentity, { observed: false }, "unobserved status cannot retain contradictory observed evidence");
 
 // --- protocol result finalizes; terminal states are monotonic ----------------------------
 const finished = db.finishAgentRun("run-1", {

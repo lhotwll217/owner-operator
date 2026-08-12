@@ -65,7 +65,7 @@ try {
       effort TEXT CHECK (effort IS NULL OR effort IN ('minimal','low','medium','high','xhigh')),
       effort_applied INTEGER NOT NULL DEFAULT 0 CHECK (effort_applied IN (0,1)),
       harness_model TEXT,
-      harness_effort TEXT CHECK (harness_effort IS NULL OR harness_effort IN ('minimal','low','medium','high','xhigh')),
+      harness_effort TEXT CHECK (harness_effort IS NULL OR harness_effort IN ('minimal','low','medium','high','xhigh','max','ultra')),
       harness_identity_observed INTEGER NOT NULL DEFAULT 0 CHECK (harness_identity_observed IN (0,1)),
       depth INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT,
       finished_at TEXT, activity TEXT, last_activity_at TEXT, child_session_id TEXT,
@@ -83,6 +83,9 @@ try {
   assert.equal(upgraded.agentRunById("prior-row")?.task, "kept", "constraint upgrade preserves existing rows");
   assert.equal(upgraded.createAgentRun({ id: "max-row", harness: AgentRunHarness.Codex, task: "max", cwd: "/tmp/repo", effort: "max", depth: 1, timeoutSeconds: 60 }).effort, "max");
   assert.equal(upgraded.createAgentRun({ id: "ultra-row", harness: AgentRunHarness.Codex, task: "ultra", cwd: "/tmp/repo", effort: "ultra", depth: 1, timeoutSeconds: 60 }).effort, "ultra");
+  upgraded.claimNextPendingAgentRun(3);
+  const maxObserved = upgraded.recordAgentRunActivity("max-row", { harnessIdentity: { observed: true, effort: "max" } });
+  assert.deepEqual(maxObserved?.harnessIdentity, { observed: true, effort: "max" }, "new harness effort remains writable and readable after mixed-schema rebuild");
   upgraded.close();
   const inspect = new DatabaseSync(dbPath);
   const indexNames = (inspect.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_agent_runs_%' ORDER BY name").all() as Array<{ name: string }>).map(({ name }) => name);

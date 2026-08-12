@@ -88,6 +88,7 @@ function probeRig(params: { openImmediately: boolean; terminationFails?: boolean
       sessionStore: {} as AcpSessionStore,
       leaseId: lease.leaseId,
       release: () => closeAgentRunProcessLease(lease.leaseId),
+      processTreePids: async () => [],
       terminate: async () => {
         terminationCalls += 1;
         if (params.terminationFails) return false;
@@ -193,14 +194,15 @@ try {
     /did not finish initializing/,
   );
   assert.equal(stuck.terminationCalls(), 1);
-  assert.equal(existsSync(stuck.stateDirs[0] ?? ""), false);
+  assert.equal(existsSync(stuck.stateDirs[0] ?? ""), true,
+    "failed termination retains the disposable probe directory as evidence");
   assert.equal(
     leaseFiles().length,
     1,
     "a wrapper whose termination could not be confirmed keeps its lease for startup reaping",
   );
 
-  process.stdout.write("ok — a baseline probe runs neutral and strands no lease, session, or child\n");
+  process.stdout.write("ok — baseline probes clean confirmed trees and retain failed-termination evidence\n");
 } finally {
   process.chdir(previousCwd);
   if (previousOoHome === undefined) delete process.env.OO_HOME;

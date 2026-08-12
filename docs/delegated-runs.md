@@ -138,11 +138,15 @@ and terminal styling are adapters over that contract.
   uses only session-advertised config options. The durable `effort_applied` field distinguishes
   recorded intent from successful application; its contract lives in
   [schema docs](../src/state/schema-docs.ts). After configuration, the launcher also reads the
-  effective model and effort back from ACP status into the ledger; this observation is distinct
-  from the prelaunch request fields.
+  effective model and supported effort back from ACP status into the ledger; this observation is
+  distinct from the prelaunch request fields. Public `AgentRun` values expose one discriminated
+  `harnessIdentity`: unobserved, model-only, effort-only, or model-and-effort. Empty status and
+  wholly unsupported status decode as unobserved, so contradictory public representations cannot
+  be constructed. The three SQL columns are only that value's storage encoding.
 - **Process ownership is explicit on POSIX.** Before `acpx` can spawn, the launcher persists a
   lease and puts its unguessable id on a stable Owner Operator wrapper's command line. Normal
-  completion closes the ACP process tree and lease; daemon startup reaps only orphaned trees whose
+  completion closes the ACP process tree, then confirms every PID from the original tree is gone
+  before releasing its lease; daemon startup reaps only orphaned trees whose
   live wrapper path and lease id both match. It fails closed on unavailable process listings and
   never claims a bare Claude, Codex, or `acpx` process.
 
@@ -194,8 +198,9 @@ proposal performs no write.
 The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
 harness config cannot contaminate a global candidate. The active probe owns termination: timeout
 requests close, then verifies the leased wrapper tree is absent before releasing its process lease
-and disposable session directory. Failed verification retains both as ownership evidence for
-startup orphan reaping.
+and disposable session directory. Failed verification retains both the lease and probe session
+directory as termination evidence for startup orphan reaping; neither is presented as a usable
+baseline candidate.
 
 ### Manual baseline-consent proof
 

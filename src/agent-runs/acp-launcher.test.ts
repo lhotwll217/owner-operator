@@ -55,6 +55,7 @@ const run: AgentRun = {
   model: null,
   effort: "ultra",
   effortApplied: false,
+  harnessIdentity: { observed: false },
   depth: 1,
   status: AgentRunStatus.Running,
   createdAt: "2026-07-20T00:00:00.000Z",
@@ -142,5 +143,23 @@ assert.equal(
   "backend-session",
   "ACP backends without a separate native id still retain their resumable session identity",
 );
+
+let terminationChecks = 0;
+let releases = 0;
+let verifiedPids: readonly number[] | undefined;
+const closeVerifiedRuntime = { ...runtime, close: async () => undefined } as unknown as AcpRuntime;
+await createAcpLauncher({
+  leasedRuntimeFactory: () => ({
+    runtime: closeVerifiedRuntime,
+    sessionStore: { load: async () => null } as never,
+    leaseId: "lease-close-proof",
+    release: () => { releases += 1; },
+    processTreePids: async () => [701, 702],
+    terminate: async (trackedPids) => { terminationChecks += 1; verifiedPids = trackedPids; return false; },
+  }),
+})({ run, resumeSessionId: null, signal: new AbortController().signal, onActivity: () => undefined });
+assert.equal(terminationChecks, 1, "normal runtime close independently verifies process-tree termination");
+assert.deepEqual(verifiedPids, [701, 702], "normal close verifies the PID set captured before wrapper exit");
+assert.equal(releases, 0, "failed close verification retains the process lease");
 
 process.stdout.write("ok — ACP launcher maps native/backend identity, outcome, and bounded output\n");

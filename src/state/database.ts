@@ -226,23 +226,25 @@ export interface AgentRunInsert {
   acpxRecordId?: string | null;
 }
 
-type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentityObserved"> & {
+type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity"> & {
   effortApplied: number;
+  harnessModel: string | null;
+  harnessEffort: AgentRunEffort | null;
   harnessIdentityObserved: number;
 };
 
 function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
-  if (row) {
-    const identity = harnessIdentityObservation({ model: row.harnessModel, effort: row.harnessEffort });
-    if (Boolean(row.harnessIdentityObserved) !== identity.observed) {
+  if (!row) return undefined;
+  const { harnessModel, harnessEffort, harnessIdentityObserved, ...run } = row;
+  const harnessIdentity = harnessIdentityObservation({ model: harnessModel, effort: harnessEffort });
+  if (Boolean(harnessIdentityObserved) !== harnessIdentity.observed) {
       throw new Error(`invalid persisted harness identity observation for agent run ${row.id}`);
-    }
   }
-  return row ? {
-    ...row,
+  return {
+    ...run,
     effortApplied: Boolean(row.effortApplied),
-    harnessIdentityObserved: Boolean(row.harnessIdentityObserved),
-  } : undefined;
+    harnessIdentity,
+  };
 }
 
 type DetailsPatch = Partial<{
@@ -299,7 +301,12 @@ export class ThreadDb {
     const tableSql = (this.db.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'",
     ).get() as { sql: string }).sql;
-    if (columns.has("effort") && (!tableSql.includes("'max'") || !tableSql.includes("'ultra'"))) {
+    const currentEffortCheck = (column: "effort" | "harness_effort"): boolean => {
+      const definition = new RegExp(`(?:^|[,\\n])\\s*${column}\\s+TEXT\\s+CHECK\\s*\\([^\\n]*`, "i").exec(tableSql)?.[0] ?? "";
+      return definition.includes("'max'") && definition.includes("'ultra'");
+    };
+    if ((columns.has("effort") && !currentEffortCheck("effort"))
+      || (columns.has("harness_effort") && !currentEffortCheck("harness_effort"))) {
       this.rebuildAgentRunsForCurrentEfforts();
     }
   }

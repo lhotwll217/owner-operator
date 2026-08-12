@@ -26,6 +26,7 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
     model: process.env.OO_CODEX_ACP_LIVE_MODEL?.trim() || null,
     effort: "high",
     effortApplied: false,
+    harnessIdentity: { observed: false },
     depth: 1,
     status: AgentRunStatus.Running,
     createdAt: now,
