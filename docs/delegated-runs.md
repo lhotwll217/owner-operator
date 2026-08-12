@@ -173,6 +173,11 @@ neither model nor effort, reads back what the harness selected for itself, and r
 *candidate*. A candidate is never saved: persisting a delegated default requires explicit owner
 approval and is owned by the [launch configuration](../src/agent-runs/launch-config.ts).
 
+The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
+harness config cannot contaminate a global candidate. Its process lease and session directory are
+dropped once the session settles — including a session that settles after the probe already timed
+out, whose late child is closed as well.
+
 ## Permissions
 
 Each child honors its **own harness's** permission system, exactly as any other session of that

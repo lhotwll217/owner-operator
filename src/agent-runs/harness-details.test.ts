@@ -90,6 +90,36 @@ assert.equal(unknownFacts.models, null, "an unreadable catalog is unknown, not e
 assert.equal(unknownFacts.allowanceWindows, null, "unreadable allowances are unknown, not empty");
 assert.equal(unknownFacts.account, null);
 
+// Reasoning levels follow the same rule per model: only an advertised empty list is "none".
+const reasoning = normalizeCodexHarnessDetails({
+  account: null,
+  rateLimits: null,
+  models: {
+    data: [
+      { id: "advertised-none", supportedReasoningEfforts: [] },
+      { id: "absent-field" },
+      { id: "not-a-list", supportedReasoningEfforts: "high" },
+      { id: "unreadable-entries", supportedReasoningEfforts: [{ description: "no level here" }] },
+      {
+        id: "partly-readable",
+        supportedReasoningEfforts: [{ reasoningEffort: "high" }, { description: "no level here" }],
+      },
+    ],
+  },
+}, OBSERVED_AT);
+const levelsOf = (id: string): string[] | null | undefined =>
+  reasoning.models?.find((model) => model.id === id)?.reasoningLevels;
+
+assert.deepEqual(levelsOf("advertised-none"), [], "an advertised empty list is observed-none");
+assert.equal(levelsOf("absent-field"), null, "a model that advertises no levels is unknown, not none");
+assert.equal(levelsOf("not-a-list"), null, "a malformed levels field is unknown, not none");
+assert.equal(
+  levelsOf("unreadable-entries"),
+  null,
+  "entries carrying no readable level leave the list unknown rather than claiming none",
+);
+assert.deepEqual(levelsOf("partly-readable"), ["high"], "readable levels survive an unreadable sibling");
+
 const partial = normalizeCodexHarnessDetails({
   account: CODEX_ACCOUNT_READ,
   rateLimits: null,

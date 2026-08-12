@@ -72,6 +72,8 @@ export function createLeasedAcpRuntime(params: {
   /** Defaults to the durable delegated-run store. Read-only probes pass a throwaway directory so
    * observing a harness leaves no session record behind. */
   stateDir?: string;
+  /** Injectable for tests; production resolves the harness's real adapter command. */
+  resolveAgentCommand?: (acpAgent: string) => string;
 }): LeasedAcpRuntime {
   const capability = AGENT_RUN_CAPABILITIES[params.harness];
   if (!capability) throw new Error(`unknown delegation harness: ${params.harness}`);
@@ -80,35 +82,45 @@ export function createLeasedAcpRuntime(params: {
   // The lease is durable before ensureSession can spawn. The command-line identity plus exact
   // wrapper path lets startup cleanup fail closed after a hard daemon crash.
   const lease = createAgentRunProcessLease({ runId: params.leaseKey, wrapperPath });
-  const agentCommand = capability.acpAgent === "codex"
-    ? codexAcpAgentCommand()
-    : createAgentRegistry().resolve(capability.acpAgent);
-  const sessionStore = createRuntimeStore({ stateDir: params.stateDir ?? agentRunStateDir() });
-  const runtime = createAcpRuntime({
-    cwd: ownerOperatorHome(),
-    sessionStore,
-    agentRegistry: createAgentRegistry({
-      overrides: {
-        [capability.acpAgent]: leasedAgentCommand({
-          wrapperPath,
-          leaseId: lease.leaseId,
-          agentCommand,
-          acpAgent: capability.acpAgent,
-        }),
-      },
-    }),
-    // Owner ruling 2026-07-22 (supersedes the issue #69 fail-closed record): delegated
-    // children inherit the child harness's own permission config — the same gate as
-    // launching that harness directly. OO adds no extra permission layer.
-    permissionMode: "approve-all",
-  });
+  try {
+    const agentCommand = (params.resolveAgentCommand ?? defaultAgentCommand)(capability.acpAgent);
+    const sessionStore = createRuntimeStore({ stateDir: params.stateDir ?? agentRunStateDir() });
+    const runtime = createAcpRuntime({
+      cwd: ownerOperatorHome(),
+      sessionStore,
+      agentRegistry: createAgentRegistry({
+        overrides: {
+          [capability.acpAgent]: leasedAgentCommand({
+            wrapperPath,
+            leaseId: lease.leaseId,
+            agentCommand,
+            acpAgent: capability.acpAgent,
+          }),
+        },
+      }),
+      // Owner ruling 2026-07-22 (supersedes the issue #69 fail-closed record): delegated
+      // children inherit the child harness's own permission config — the same gate as
+      // launching that harness directly. OO adds no extra permission layer.
+      permissionMode: "approve-all",
+    });
 
-  return {
-    runtime,
-    sessionStore,
-    leaseId: lease.leaseId,
-    release: () => closeAgentRunProcessLease(lease.leaseId),
-  };
+    return {
+      runtime,
+      sessionStore,
+      leaseId: lease.leaseId,
+      release: () => closeAgentRunProcessLease(lease.leaseId),
+    };
+  } catch (error) {
+    // Resolving the adapter or building the runtime can fail before anything is spawned, and a
+    // lease with no process to own would be reaped by nobody. Roll it back so a failed setup
+    // leaves no durable trace.
+    closeAgentRunProcessLease(lease.leaseId);
+    throw error;
+  }
+}
+
+function defaultAgentCommand(acpAgent: string): string {
+  return acpAgent === "codex" ? codexAcpAgentCommand() : createAgentRegistry().resolve(acpAgent);
 }
 
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's

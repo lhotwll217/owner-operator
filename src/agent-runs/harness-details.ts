@@ -14,11 +14,15 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import type { AcpRuntimeHandle } from "acpx/runtime";
 import { AGENT_RUN_CAPABILITIES, AgentRunHarness } from "@owner-operator/core";
-import { agentRunStateDir, createLeasedAcpRuntime } from "./acp-launcher";
+import { ownerOperatorHome } from "../shared/paths";
+import { agentRunStateDir, createLeasedAcpRuntime, type LeasedAcpRuntime } from "./acp-launcher";
 
 /** Wall-clock ceiling for one `codex app-server` observation, including process startup. */
 const CODEX_APP_SERVER_TIMEOUT_MS = 20_000;
+/** How long a signalled `codex app-server` gets to exit before the next escalation. */
+const CODEX_APP_SERVER_KILL_GRACE_MS = 2_000;
 /** Wall-clock ceiling for one unpinned ACP session used to read the harness's own defaults. */
 const BASELINE_CANDIDATE_TIMEOUT_MS = 90_000;
 const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
@@ -30,8 +34,9 @@ export const CODEX_DETAILS_SOURCE = "codex-app-server";
 export interface HarnessModelDetail {
   id: string;
   displayName: string;
-  /** Reasoning levels the harness advertises for this model; `[]` = advertised none. */
-  reasoningLevels: string[];
+  /** Reasoning levels the harness advertises for this model. `null` = the catalog entry carried
+   * no readable levels (unknown); `[]` = it advertised the levels and there are none. */
+  reasoningLevels: string[] | null;
   /** The level the harness itself picks for this model when the caller pins nothing. */
   defaultReasoningLevel: string | null;
   isDefault: boolean;
@@ -209,12 +214,17 @@ function normalizeCodexModels(payload: unknown): HarnessModelDetail[] | null {
   });
 }
 
-function normalizeReasoningLevels(payload: unknown): string[] {
-  if (!Array.isArray(payload)) return [];
-  return payload.flatMap((entry) => {
+/** Only an advertised empty list means "this model has no reasoning levels". An absent or
+ * unreadable field is unknown: collapsing it to `[]` would let a caller conclude the harness
+ * offers no levels when in fact none were observed. */
+function normalizeReasoningLevels(payload: unknown): string[] | null {
+  if (!Array.isArray(payload)) return null;
+  if (!payload.length) return [];
+  const levels = payload.flatMap((entry) => {
     const level = text(record(entry)?.reasoningEffort);
     return level ? [level] : [];
   });
+  return levels.length ? levels : null;
 }
 
 /** Codex reports allowance either as one snapshot or keyed by limit id, and each entry carries up
@@ -259,33 +269,53 @@ function normalizeCodexWindow(
   };
 }
 
+export interface BaselineProbeDeps {
+  /** Injectable for tests; production builds the real leased acpx runtime. */
+  createRuntime?: (params: {
+    harness: AgentRunHarness;
+    leaseKey: string;
+    stateDir: string;
+  }) => LeasedAcpRuntime;
+  timeoutMs?: number;
+}
+
 /** Ask the harness what it would run on its own: open one ACP session that pins neither model nor
  * effort, then read back what the harness selected. The result is reported as a candidate —
  * saving a baseline is a separate step that requires explicit owner approval.
  *
- * A `oneshot` session closes its child process inside `ensureSession`, and the session record is
- * written to a throwaway directory that is deleted here, so a probe leaves nothing durable. */
+ * A `oneshot` session closes its child process inside `ensureSession`, and both the lease and the
+ * throwaway session directory are dropped once the session settles — including when it settles
+ * after this call already gave up — so a probe leaves nothing durable behind. */
 export async function discoverAcpBaselineCandidate(
   harness: AgentRunHarness,
+  deps: BaselineProbeDeps = {},
 ): Promise<HarnessBaselineCandidate> {
   const probeKey = `harness-details-${randomUUID()}`;
   const probeStateDir = join(agentRunStateDir(), "probes", probeKey);
-  const leased = createLeasedAcpRuntime({ harness, leaseKey: probeKey, stateDir: probeStateDir });
-  let childClosed = false;
+  const leased = (deps.createRuntime ?? createLeasedAcpRuntime)({
+    harness,
+    leaseKey: probeKey,
+    stateDir: probeStateDir,
+  });
+  const session = leased.runtime.ensureSession({
+    sessionKey: probeKey,
+    agent: AGENT_RUN_CAPABILITIES[harness].acpAgent,
+    mode: "oneshot",
+    // A baseline must be the harness's own choice, so the probe runs from one fixed neutral
+    // directory. The caller's cwd could carry project-local harness config that would change
+    // what the harness selects and contaminate a global candidate.
+    cwd: ownerOperatorHome(),
+  });
+  let opened = false;
   try {
     // acpx applies no startup deadline of its own, so a harness that never finishes initializing
     // would hang this read indefinitely.
     const handle = await withDeadline(
-      leased.runtime.ensureSession({
-        sessionKey: probeKey,
-        agent: AGENT_RUN_CAPABILITIES[harness].acpAgent,
-        mode: "oneshot",
-        cwd: process.cwd(),
-      }),
-      BASELINE_CANDIDATE_TIMEOUT_MS,
+      session,
+      deps.timeoutMs ?? BASELINE_CANDIDATE_TIMEOUT_MS,
       `${harness} did not finish initializing`,
     );
-    childClosed = true;
+    opened = true;
     const status = await leased.runtime.getStatus?.({ handle });
     const effort = readEffortConfigOption(status?.details?.configOptions);
     return {
@@ -294,23 +324,55 @@ export async function discoverAcpBaselineCandidate(
       availableEfforts: effort.values,
     };
   } finally {
-    // An abandoned initialization may still hold a live wrapper. Keep its lease and state so
-    // daemon startup can reap the tree; only a settled probe cleans itself up.
-    if (childClosed) {
-      leased.release();
-      rmSync(probeStateDir, { recursive: true, force: true });
-    }
+    if (opened) discardProbe(leased, probeStateDir);
+    else void discardAbandonedProbe(leased, session, probeStateDir);
   }
 }
 
+function discardProbe(leased: LeasedAcpRuntime, probeStateDir: string): void {
+  leased.release();
+  rmSync(probeStateDir, { recursive: true, force: true });
+}
+
+/** A probe that timed out may still be initializing a live wrapper, so its traces cannot be
+ * dropped while the outcome is unknown. Adopt the abandoned session instead: once it settles,
+ * close whatever it opened and drop the same traces a settled probe drops. The lease outlives
+ * only a child that resisted close, because startup reaping needs it to find that wrapper. */
+async function discardAbandonedProbe(
+  leased: LeasedAcpRuntime,
+  session: Promise<AcpRuntimeHandle>,
+  probeStateDir: string,
+): Promise<void> {
+  let handle: AcpRuntimeHandle | undefined;
+  try {
+    handle = await session;
+  } catch {
+    // acpx closes a partially initialized client inside ensureSession, so nothing is left running.
+  }
+  let closed = handle === undefined;
+  if (handle) {
+    try {
+      await leased.runtime.close({ handle, reason: "baseline candidate probe abandoned" });
+      closed = true;
+    } catch {
+      // Keep the lease so startup cleanup can reap a wrapper that resisted normal close.
+    }
+  }
+  rmSync(probeStateDir, { recursive: true, force: true });
+  if (closed) leased.release();
+}
+
+/** The timer is held, not unref'd: an unref'd deadline never fires in an otherwise idle process,
+ * which is exactly the case where the work it bounds is stuck. Clearing it on settlement keeps a
+ * finished observation from holding the process open. */
 function withDeadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
   return Promise.race([
     work,
     new Promise<never>((_resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(message)), ms);
-      timer.unref();
+      timer = setTimeout(() => reject(new Error(message)), ms);
     }),
-  ]);
+  ]).finally(() => clearTimeout(timer));
 }
 
 function readEffortConfigOption(
@@ -352,12 +414,23 @@ interface JsonRpcResponse {
  * catalog after the client sends `initialized`, and it emits no notification when the refresh
  * lands, so `model/list` is issued last — the two account round-trips cover that window without a
  * fixed sleep. Asking earlier returns a stale locally cached catalog. */
-export function readCodexAppServerPayloads(): Promise<CodexAppServerPayloads> {
-  return withCodexAppServer(async (client) => ({
+export function readCodexAppServerPayloads(
+  options: CodexAppServerOptions = {},
+): Promise<CodexAppServerPayloads> {
+  return withCodexAppServer(options, async (client) => ({
     account: await client.request("account/read"),
     rateLimits: await client.request("account/rateLimits/read"),
     models: await client.request("model/list"),
   }));
+}
+
+/** Injectable for tests; production drives the real `codex app-server`. */
+export interface CodexAppServerOptions {
+  command?: string;
+  args?: readonly string[];
+  timeoutMs?: number;
+  /** How long a signalled app-server gets to exit before the next escalation. */
+  killGraceMs?: number;
 }
 
 interface CodexAppServerClient {
@@ -365,9 +438,12 @@ interface CodexAppServerClient {
 }
 
 async function withCodexAppServer<T>(
+  options: CodexAppServerOptions,
   run: (client: CodexAppServerClient) => Promise<T>,
 ): Promise<T> {
-  const child = spawn("codex", ["app-server"], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(options.command ?? "codex", [...options.args ?? ["app-server"]], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   let nextId = 0;
   let failure: Error | undefined;
@@ -420,22 +496,47 @@ async function withCodexAppServer<T>(
         send({ method: "initialized", params: {} });
         return await run({ request });
       })(),
-      CODEX_APP_SERVER_TIMEOUT_MS,
+      options.timeoutMs ?? CODEX_APP_SERVER_TIMEOUT_MS,
       "codex app-server timed out",
     );
   } finally {
     lines.close();
-    terminate(child);
+    await terminate(child, options.killGraceMs ?? CODEX_APP_SERVER_KILL_GRACE_MS);
   }
 }
 
-function terminate(child: ChildProcessWithoutNullStreams): void {
+/** A timed-out app-server is by definition one that is not responding, so SIGTERM alone can leave
+ * it running after the observation that spawned it returns. Wait for the exit, escalate to
+ * SIGKILL, and bound both waits so cleanup can never hang the caller it is unwinding. */
+async function terminate(child: ChildProcessWithoutNullStreams, graceMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
   try {
     child.stdin.end();
-    child.kill("SIGTERM");
   } catch {
     // Already gone.
   }
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    try {
+      child.kill(signal);
+    } catch {
+      return; // Already reaped.
+    }
+    if (await settlesWithin(exited, graceMs)) return;
+  }
+}
+
+function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    work.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 function record(value: unknown): Record<string, unknown> | null {
