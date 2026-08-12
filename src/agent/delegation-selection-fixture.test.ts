@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
+import { requiredReasonTerms } from "./delegation-selection-grading";
 
 interface Identity { harness: string; model: string; effort: string | null }
 interface Case {
@@ -15,7 +16,7 @@ interface Case {
   requiresFallbackReport?: boolean;
   requiresOwnerQuestion?: boolean;
   requiresUnknownReport?: boolean;
-  rejectionReportTerms?: string[];
+  reject?: { harness: string; model: string; reason: string };
 }
 
 const cases = JSON.parse(readFileSync(join(
@@ -44,12 +45,17 @@ for (const entry of cases) {
   }
   if (entry.requiresFallbackReport) {
     assert.ok(entry.expectedLaunches.length > 1);
-    assert.ok(entry.rejectionReportTerms?.length, `${entry.id} defines fixture-specific rejection semantics`);
+    assert.ok(entry.reject, `${entry.id} defines a fallback rejection`);
+    assert.ok(requiredReasonTerms(entry.reject.reason).length, `${entry.id} rejection has gradeable semantics`);
   }
   if (entry.requiresOwnerQuestion) assert.equal(entry.expectedLaunches.length, 1, "no fallback launches before owner input");
   for (const launch of entry.expectedLaunches) {
     assert.ok(launch.harness && launch.model && Object.hasOwn(launch, "effort"), `${entry.id} has exact identity`);
   }
 }
+
+assert.deepEqual(requiredReasonTerms("account access rejected the advertised model"),
+  ["account", "access", "rejected", "advertised", "model"],
+  "fallback grading derives independent semantic terms from the actual rejection reason");
 
 process.stdout.write(`ok — ${cases.length} delegation behavior fixtures cover exact observable contracts\n`);

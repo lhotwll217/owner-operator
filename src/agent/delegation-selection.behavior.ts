@@ -23,6 +23,7 @@ import {
 import { agentRunFixture } from "../../test/fixtures/agent-run";
 import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
 import { lastAssistantError, ownerOperatorPiServices, ownerOperatorPrompt } from "./agent";
+import { requiredReasonTerms } from "./delegation-selection-grading";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { createDelegateAgentTool } from "./tools/delegate-agent";
 import { createGetHarnessDetailsTool } from "./tools/get-harness-details";
@@ -45,7 +46,6 @@ interface BehaviorCase {
   roster: string;
   details: DetailFixture[];
   reject?: { harness: AgentRunHarness; model: string; reason: string };
-  rejectionReportTerms?: string[];
   expectedLaunches: Identity[];
   bypassSelection?: boolean;
   requiresDetails?: boolean;
@@ -208,11 +208,12 @@ try {
       assert.ok(names.includes("get_harness_details"), `${entry.id}: consults current harness facts`);
     }
     if (entry.requiresFallbackReport) {
-      assert.ok(entry.reject && entry.rejectionReportTerms?.length, `${entry.id}: fallback fixture defines rejection semantics`);
+      assert.ok(entry.reject, `${entry.id}: fallback fixture defines a rejection`);
       assertReportedIdentity(response, entry.expectedLaunches[0]!, `${entry.id}: reports exact failed identity`);
       assertReportedIdentity(response, entry.expectedLaunches[1]!, `${entry.id}: reports exact replacement identity`);
-      assert.ok(entry.rejectionReportTerms.every((term) => response.toLowerCase().includes(term.toLowerCase())),
-        `${entry.id}: reports fixture-specific rejection semantics: ${entry.rejectionReportTerms.join(", ")}\n${response}`);
+      const reasonTerms = requiredReasonTerms(entry.reject.reason);
+      assert.ok(reasonTerms.every((term) => response.toLowerCase().includes(term)),
+        `${entry.id}: reports actual fixture rejection semantics: ${reasonTerms.join(", ")}\n${response}`);
     }
     if (entry.requiresOwnerQuestion) {
       assert.match(response, /\?|choose|please (?:select|approve)|should I|would you/i,
