@@ -29,9 +29,33 @@ while selecting only the missing parts.
    `manage_delegated_baseline` with `action: "propose"` to inspect its `approved` value; the
    unpinned ACP candidate returned alongside it is only a proposal and never replaces an approved
    baseline. Pass the approved model and nullable effort explicitly to `delegate_agent`.
-5. Call `delegate_agent` once with the exact selected harness, model, and effort. Keep the owner's
+5. Call `delegate_agent` with the exact selected harness, model, and effort. Keep the owner's
    task and working directory intact. The existing delegated-run lifecycle is the execution record;
    do not create another record and do not poll after launch.
+
+## Constrained or rejected selections
+
+Allowance pressure is pre-launch evidence, not merely a failure-recovery signal. When a current
+allowance window is materially spent, consider another acceptable roster choice before launching.
+Do not treat an unknown window as unused or constrained.
+
+If `delegate_agent` rejects a choice for capacity, access, entitlement, an invalid harness/model
+pairing, or availability—or a delivered run-completion reports that rejection—consult the roster
+and the latest relevant harness details again before retrying. A stale advertisement can explain a
+rejection; never describe advertisement as demonstrated access.
+
+Retry automatically only with an exact harness/model/effort that preserves or improves the quality
+required for the task. Cross-harness fallback is allowed on that basis. Never reduce the required
+model capability or reasoning effort merely to obtain a successful launch. If the available
+evidence does not support an acceptable replacement, ask the owner to choose and do not launch.
+
+For an automatic retry, state all three facts in the transcript: the failed exact identity, the
+replacement exact identity, and the material capacity/access/availability reason. The failed call
+or existing delegated-run row remains the execution evidence. Do not edit the harness roster,
+approved baseline, or any other durable preference, and do not create a failure ledger.
+Before finishing that turn, verify the report literally identifies both triples as
+`harness / model / effort`; a generic provider name or “the preferred model” is not the failed
+exact identity.
 
 ## Missing delegated baseline
 
@@ -48,7 +72,7 @@ When fallback is needed and `manage_delegated_baseline` reports no approved base
 
 ## Report
 
-After launch, state the actual `harness / model / effort` concisely. Say `effort null` when null was
-selected. Explain a material departure from a matching roster preference, but do not claim that the
-roster changed. Launch rejection and constrained fallback policy belongs to the follow-up workflow;
-never silently lower required quality merely to make a launch succeed.
+After launch, state the actual `harness / model / effort` returned by the launch lifecycle concisely;
+do not report an intended identity as actual when the returned row differs. Say `effort null` when
+null was selected. Explain a material departure from a matching roster preference, but do not claim
+that the roster changed. Never silently lower required quality merely to make a launch succeed.

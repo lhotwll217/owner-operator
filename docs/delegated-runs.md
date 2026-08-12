@@ -193,6 +193,33 @@ harness config cannot contaminate a global candidate. Its process lease and sess
 dropped once the session settles — including a session that settles after the probe already timed
 out, whose late child is closed as well.
 
+### Manual baseline-consent proof
+
+Use a disposable home so discovery and approval cannot touch the owner's normal configuration.
+This is a paid, real-harness check; it is not part of `npm test`.
+
+```sh
+PROOF_USER_HOME="$(mktemp -d)"
+PROOF_OO_HOME="$PROOF_USER_HOME/.owner-operator"
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo
+```
+
+Complete setup for the real harness credentials in that isolated home. Then use one saved headless
+conversation for the consent loop (replace `claude-code` with `codex` when proving that harness):
+
+```sh
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "I approve exactly the proposed model and effort. Persist it, then delegate a child that replies OO_BASELINE_PROOF_OK using the approved baseline explicitly."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "Refresh the claude-code baseline candidate, show the candidate and current approval, but do not approve the refresh. I decline any replacement."
+```
+
+Inspect the transcript named on stderr and
+`$PROOF_OO_HOME/delegated-baselines/claude-code.json`. The first turn must show an unpinned
+candidate with no baseline file or delegated launch. The second must show explicit owner approval,
+the persisted exact nullable identity, and a later run row reporting the same harness/model/effort.
+The third must show a fresh proposal while the file remains byte-for-byte unchanged. Remove only
+the printed disposable directory after retaining any sanitized proof needed for acceptance.
+
 ## Permissions
 
 Each child honors its **own harness's** permission system, exactly as any other session of that

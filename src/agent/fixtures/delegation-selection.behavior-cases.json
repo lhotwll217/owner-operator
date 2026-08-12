@@ -1,0 +1,99 @@
+[
+  {
+    "id": "explicit-null-bypass",
+    "prompt": "Delegate a release review with harness codex, model gpt-owner, and effort null.",
+    "roster": "### Review\nPrefer claude-code / opus / high.\n",
+    "details": [],
+    "expectedLaunches": [{ "harness": "codex", "model": "gpt-owner", "effort": null }],
+    "bypassSelection": true
+  },
+  {
+    "id": "allowance-pressure",
+    "prompt": "Delegate this implementation. Choose the execution identity for me.",
+    "roster": "### Implementation\nPrefer codex / gpt-primary / high. When its allowance is pressured, claude-code / opus / high preserves required quality.\n",
+    "details": [
+      { "harness": "codex", "models": [{ "id": "gpt-primary", "reasoningLevels": ["high"] }], "allowanceWindows": [{ "id": "weekly", "usedPercent": 98 }] },
+      { "harness": "claude-code", "models": [{ "id": "opus", "reasoningLevels": ["high"] }], "allowanceWindows": null }
+    ],
+    "expectedLaunches": [{ "harness": "claude-code", "model": "opus", "effort": "high" }],
+    "requiresDetails": true
+  },
+  {
+    "id": "stale-advertisement-fallback",
+    "prompt": "Delegate this architecture review. Follow the roster's required first attempt and keep the required high quality if that launch is rejected.",
+    "roster": "### Review\nFirst attempt must be claude-code / advertised-opus / high because it is currently preferred. After an actual rejection, codex / gpt-review / high is an equally capable fallback.\n",
+    "details": [
+      { "harness": "claude-code", "models": [{ "id": "advertised-opus", "reasoningLevels": ["high"] }], "allowanceWindows": null },
+      { "harness": "codex", "models": [{ "id": "gpt-review", "reasoningLevels": ["high"] }], "allowanceWindows": null }
+    ],
+    "reject": { "harness": "claude-code", "model": "advertised-opus", "reason": "account access rejected the advertised model" },
+    "expectedLaunches": [
+      { "harness": "claude-code", "model": "advertised-opus", "effort": "high" },
+      { "harness": "codex", "model": "gpt-review", "effort": "high" }
+    ],
+    "requiresDetails": true,
+    "requiresFallbackReport": true
+  },
+  {
+    "id": "invalid-harness-model-pairing",
+    "prompt": "Delegate implementation of the repository migration. Apply the configured Implementation role after validating its harness/model pairing.",
+    "roster": "### Implementation\nThe old preference claude-code / gpt-codex-only / high may be paired to the wrong harness. When current catalogs confirm that mismatch, the configured exact correction is codex / gpt-codex-only / high; use it without falling back to a delegated baseline.\n",
+    "details": [
+      { "harness": "claude-code", "models": [{ "id": "sonnet", "reasoningLevels": ["high"] }], "allowanceWindows": null },
+      { "harness": "codex", "models": [{ "id": "gpt-codex-only", "reasoningLevels": ["high"] }], "allowanceWindows": null }
+    ],
+    "expectedLaunches": [{ "harness": "codex", "model": "gpt-codex-only", "effort": "high" }],
+    "requiresDetails": true
+  },
+  {
+    "id": "availability-rejection",
+    "prompt": "Delegate this implementation. Preserve high reasoning quality if the preferred model is unavailable.",
+    "roster": "### Implementation\nPrefer codex / gpt-preview / high. codex / gpt-stable / high is equally suitable when preview is unavailable.\n",
+    "details": [{ "harness": "codex", "models": [{ "id": "gpt-preview", "reasoningLevels": ["high"] }, { "id": "gpt-stable", "reasoningLevels": ["high"] }], "allowanceWindows": [{ "id": "weekly", "usedPercent": 30 }] }],
+    "reject": { "harness": "codex", "model": "gpt-preview", "reason": "model is temporarily unavailable" },
+    "expectedLaunches": [
+      { "harness": "codex", "model": "gpt-preview", "effort": "high" },
+      { "harness": "codex", "model": "gpt-stable", "effort": "high" }
+    ],
+    "requiresDetails": true,
+    "requiresFallbackReport": true
+  },
+  {
+    "id": "cross-harness-fallback",
+    "prompt": "Delegate this research synthesis. Preserve high quality if capacity rejects the preference.",
+    "roster": "### Research\nPrefer codex / gpt-research / high. claude-code / opus / high is equally capable across harnesses.\n",
+    "details": [
+      { "harness": "codex", "models": [{ "id": "gpt-research", "reasoningLevels": ["high"] }], "allowanceWindows": [{ "id": "weekly", "usedPercent": 70 }] },
+      { "harness": "claude-code", "models": [{ "id": "opus", "reasoningLevels": ["high"] }], "allowanceWindows": null }
+    ],
+    "reject": { "harness": "codex", "model": "gpt-research", "reason": "provider capacity rejected the launch" },
+    "expectedLaunches": [
+      { "harness": "codex", "model": "gpt-research", "effort": "high" },
+      { "harness": "claude-code", "model": "opus", "effort": "high" }
+    ],
+    "requiresDetails": true,
+    "requiresFallbackReport": true
+  },
+  {
+    "id": "unknown-usage-honesty",
+    "prompt": "Delegate a research synthesis of the repository's API migration notes. Apply the configured Research role and tell me what usage evidence was available.",
+    "roster": "### Research\nFor research tasks, use the exact task preference claude-code / opus / high. This task-specific preference applies instead of the delegated baseline.\n",
+    "details": [{ "harness": "claude-code", "models": [{ "id": "opus", "reasoningLevels": ["high"] }], "allowanceWindows": null }],
+    "expectedLaunches": [{ "harness": "claude-code", "model": "opus", "effort": "high" }],
+    "requiresDetails": true,
+    "requiresUnknownReport": true
+  },
+  {
+    "id": "no-quality-preserving-fallback",
+    "prompt": "Delegate this critical architecture decision. Required quality is high; choose for me.",
+    "roster": "### Review\nUse claude-code / opus / high. codex / gpt-fast / low is available but is not acceptable for critical architecture.\n",
+    "details": [
+      { "harness": "claude-code", "models": [{ "id": "opus", "reasoningLevels": ["high"] }], "allowanceWindows": null },
+      { "harness": "codex", "models": [{ "id": "gpt-fast", "reasoningLevels": ["low"] }], "allowanceWindows": null }
+    ],
+    "reject": { "harness": "claude-code", "model": "opus", "reason": "provider capacity exhausted" },
+    "expectedLaunches": [{ "harness": "claude-code", "model": "opus", "effort": "high" }],
+    "requiresDetails": true,
+    "requiresOwnerQuestion": true
+  }
+]

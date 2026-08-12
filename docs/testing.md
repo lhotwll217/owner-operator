@@ -58,9 +58,16 @@ npm run lint                                          # oxlint
 npm run test:integration                              # one tier
 npm run poll:smoke                                    # smoke — reads your live sessions
 npm run test:agent                                     # live — needs model auth, paid
+OO_RUN_DELEGATION_SELECTION_EVAL=1 \
+  npm run test:delegation-selection                    # real model chooses controlled trajectories
 OO_RUN_LIVE_ACP_TEST=1 npm run test:agent-runs:live    # real Claude/acpx kill + resume
 OO_RUN_LIVE_CODEX_ACP_TEST=1 \
   npm run test:agent-runs:codex-live                    # real Codex ACP startup + turn
+OO_RUN_LIVE_DELEGATED_IDENTITY=1 \
+OO_LIVE_IDENTITY_HARNESS=codex \
+OO_LIVE_IDENTITY_MODEL=<exact-model-id> \
+OO_LIVE_IDENTITY_EFFORT=high \
+  npm run test:delegated-identity:live                  # Gateway → real delegated lifecycle
 cd apps/widget && swift test                            # widget (Swift)
 ```
 
