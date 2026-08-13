@@ -40,7 +40,7 @@ if (process.env.OO_RUN_LIVE_DELEGATED_IDENTITY !== "1") {
 const harness = process.env.OO_LIVE_IDENTITY_HARNESS as AgentRunHarness | undefined;
 const model = process.env.OO_LIVE_IDENTITY_MODEL?.trim();
 const effortText = process.env.OO_LIVE_IDENTITY_EFFORT?.trim();
-assert.ok(Object.values(AgentRunHarness).includes(harness!), "set OO_LIVE_IDENTITY_HARNESS to claude-code or codex");
+assert.ok(Object.values(AgentRunHarness).includes(harness!), "set OO_LIVE_IDENTITY_HARNESS to claude-code, codex, or cursor");
 assert.ok(model, "set OO_LIVE_IDENTITY_MODEL to an exact harness model id");
 assert.ok(effortText === "null" || AGENT_RUN_EFFORTS.includes(effortText as AgentRunEffort),
   "set OO_LIVE_IDENTITY_EFFORT to null or a supported effort");
@@ -60,9 +60,18 @@ let teardownError: unknown;
 let isolatedLeaseIds: string[] = [];
 let isolatedProcessPids: number[] = [];
 
-const harnessHome = harness === AgentRunHarness.Codex ? join(userHome, ".codex") : join(userHome, ".claude");
-const copiedCredentialPath = join(harnessHome, harness === AgentRunHarness.Codex ? "auth.json" : ".credentials.json");
-const copiedConfigPath = join(harnessHome, harness === AgentRunHarness.Codex ? "config.toml" : "settings.json");
+/** Where each harness reads its isolated home, and the credential/config filenames it expects
+ * there. Cursor's file names assume `AGENT_CLI_CREDENTIAL_STORE=file` (set below), which moves
+ * auth out of the OS keychain so the copied file is authoritative. */
+const HARNESS_ISOLATION: Record<AgentRunHarness, { home: string; credential: string; config: string }> = {
+  [AgentRunHarness.Codex]: { home: ".codex", credential: "auth.json", config: "config.toml" },
+  [AgentRunHarness.ClaudeCode]: { home: ".claude", credential: ".credentials.json", config: "settings.json" },
+  [AgentRunHarness.Cursor]: { home: ".cursor", credential: "auth.json", config: "cli-config.json" },
+};
+const isolation = HARNESS_ISOLATION[harness!];
+const harnessHome = join(userHome, isolation.home);
+const copiedCredentialPath = join(harnessHome, isolation.credential);
+const copiedConfigPath = join(harnessHome, isolation.config);
 
 async function waitFor<T>(read: () => Promise<T | undefined> | T | undefined, label: string, timeoutMs = 300_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -104,6 +113,8 @@ try {
     // Explicit copied sources are authoritative even when the caller has ambient harness homes.
     CODEX_HOME: harness === AgentRunHarness.Codex ? harnessHome : join(userHome, "unused-codex"),
     CLAUDE_CONFIG_DIR: harness === AgentRunHarness.ClaudeCode ? harnessHome : join(userHome, "unused-claude"),
+    CURSOR_CONFIG_DIR: harness === AgentRunHarness.Cursor ? harnessHome : join(userHome, "unused-cursor"),
+    ...(harness === AgentRunHarness.Cursor ? { AGENT_CLI_CREDENTIAL_STORE: "file" } : {}),
   };
   daemon = spawn(process.execPath, ["--import", absoluteTsxLoaderPath(), testPath], {
     cwd: neutralCwd,

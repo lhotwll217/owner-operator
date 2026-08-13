@@ -6,11 +6,20 @@ import {
   type AgentRun,
   type AgentRunActivityUpdate,
 } from "@owner-operator/core";
-import { codexAcpAgentCommand, createAcpLauncher } from "./acp-launcher";
+import { codexAcpAgentCommand, createAcpLauncher, cursorAcpAgentCommand } from "./acp-launcher";
 
 const codexCommand = codexAcpAgentCommand();
 assert.match(codexCommand, /codex-acp\/dist\/index\.js"?$/, "Codex uses Owner Operator's pinned adapter");
 assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's stale registry command");
+
+// Cursor speaks ACP first-party: the resolved local CLI in server mode, no adapter package.
+try {
+  const cursorCommand = cursorAcpAgentCommand();
+  assert.match(cursorCommand, /^"\/.*cursor-agent" acp$/, "Cursor runs the absolute local CLI as an ACP server");
+} catch (error) {
+  assert.match((error as Error).message, /cursor-agent CLI not found/,
+    "a machine without the Cursor CLI gets the actionable resolution error");
+}
 
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };

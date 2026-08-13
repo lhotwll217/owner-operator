@@ -9,6 +9,7 @@
 export enum AgentRunHarness {
   ClaudeCode = "claude-code",
   Codex = "codex",
+  Cursor = "cursor",
 }
 
 export enum AgentRunStatus {
@@ -95,6 +96,16 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
   [AgentRunHarness.Codex]: {
     harness: AgentRunHarness.Codex,
     acpAgent: "codex",
+    activitySource: "acp-events",
+    steerMidRun: false,
+    asksToParent: false,
+    resume: true,
+  },
+  // Pinned from a live `cursor-agent acp` initialize response (CLI 2026.07.08): the server
+  // advertises loadSession, so resume is confirmed; it advertises no steer or parent-ask surface.
+  [AgentRunHarness.Cursor]: {
+    harness: AgentRunHarness.Cursor,
+    acpAgent: "cursor",
     activitySource: "acp-events",
     steerMidRun: false,
     asksToParent: false,

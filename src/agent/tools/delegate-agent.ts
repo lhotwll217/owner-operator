@@ -14,7 +14,7 @@ import { agentRunToolResult } from "./agent-run-result";
 
 const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
-  { description: "Child harness to delegate to: claude-code | codex." },
+  { description: "Child harness to delegate to: claude-code | codex | cursor." },
 );
 
 const EffortSchema = Type.Union(
@@ -34,7 +34,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
     name: "delegate_agent",
     label: "Delegate agent",
     description:
-      "Launch a child coding agent (Claude Code or Codex) as a durable, daemon-owned delegated run. " +
+      "Launch a child coding agent (Claude Code, Codex, or Cursor) as a durable, daemon-owned delegated run. " +
       "Returns immediately with the run row; the child keeps running even if this session is " +
       "interrupted or closed. Completion events arrive automatically: after delegation, do not poll " +
       "or monitor the run. Use waitSeconds only when the owner explicitly requests a blocking wait; " +

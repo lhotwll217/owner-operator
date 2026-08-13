@@ -71,6 +71,8 @@ Owner Operator can report what each harness currently advertises before you name
   preserves the quality the work needs, and says so in the conversation.
 - Where no role below applies, Owner Operator falls back to the delegated baseline you approved
   for that harness, which is stored outside this file.
+- A delegated run uses whichever account its harness CLI is signed into on this machine; the run
+  is billed to that account and the task's code is sent to it.
 - Owner Operator never edits this roster. It changes only when you change it.
 
 ## Task roles

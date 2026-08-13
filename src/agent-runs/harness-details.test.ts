@@ -5,11 +5,15 @@ import {
   CODEX_MODEL_LIST,
   CODEX_RATE_LIMITS_READ,
 } from "../../test/fixtures/codex-app-server";
+import { CURSOR_ABOUT, CURSOR_MODELS_TEXT, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
 import {
   CODEX_DETAILS_SOURCE,
+  CURSOR_DETAILS_SOURCE,
   normalizeCodexHarnessDetails,
+  normalizeCursorHarnessDetails,
   readHarnessDetails,
   type CodexAppServerPayloads,
+  type CursorCliPayloads,
   type HarnessBaselineCandidate,
 } from "./harness-details";
 
@@ -18,6 +22,12 @@ const capturedPayloads: CodexAppServerPayloads = {
   account: CODEX_ACCOUNT_READ,
   rateLimits: CODEX_RATE_LIMITS_READ,
   models: CODEX_MODEL_LIST,
+};
+const capturedCursorPayloads: CursorCliPayloads = {
+  about: CURSOR_ABOUT,
+  status: CURSOR_STATUS,
+  modelsText: CURSOR_MODELS_TEXT,
+  errors: [],
 };
 
 // --- Codex normalization over the captured first-party payloads -------------------------------
@@ -137,17 +147,64 @@ assert.equal(partial.allowanceWindows, null);
 assert.equal(partial.models?.length, 5, "one unreadable fact does not erase the others");
 assert.deepEqual(partial.account, { plan: "prolite" });
 
-// --- Both harnesses, observed independently ---------------------------------------------------
+// --- Cursor normalization over the captured first-party CLI payloads --------------------------
+
+const cursor = normalizeCursorHarnessDetails(capturedCursorPayloads, OBSERVED_AT);
+assert.equal(cursor.harness, AgentRunHarness.Cursor);
+assert.equal(cursor.source, CURSOR_DETAILS_SOURCE, "facts name the CLI surface that produced them");
+assert.deepEqual(cursor.account, { plan: "Pro" }, "the subscription tier is read, not inferred");
+assert.equal(cursor.models?.length, 14, "every `<id> - <name>` catalog line becomes a model row");
+assert.deepEqual(cursor.models?.[0], {
+  id: "auto",
+  displayName: "Auto",
+  reasoningLevels: null,
+  unsupportedReasoningLevels: [],
+  defaultReasoningLevel: null,
+  isDefault: true,
+}, "the `(default)` marker is stripped into isDefault; effort-in-id models advertise no levels");
+assert.deepEqual(
+  cursor.models?.filter(({ isDefault }) => isDefault).map(({ id }) => id),
+  ["auto"],
+  "exactly the harness-marked default is flagged",
+);
+assert.equal(
+  cursor.models?.find(({ id }) => id === "gpt-5.6-sol-xhigh")?.displayName,
+  "GPT-5.6 Sol 1M Extra High",
+  "header, blank, and tip lines are excluded; catalog lines survive verbatim",
+);
+assert.equal(cursor.allowanceWindows, null, "Cursor exposes no allowance surface, so it stays unknown");
+assert.match(cursor.notes.join(" "), /unknown, not empty/i);
+assert.deepEqual(cursor.errors, [], "an authenticated CLI observation carries no errors");
+
+const cursorUnknown = normalizeCursorHarnessDetails(
+  { about: null, status: null, modelsText: null, errors: ["cursor-agent models: spawn failed"] },
+  OBSERVED_AT,
+);
+assert.equal(cursorUnknown.models, null, "an unreadable catalog is unknown, not empty");
+assert.equal(cursorUnknown.account, null);
+assert.deepEqual(cursorUnknown.errors, ["cursor-agent models: spawn failed"], "client errors surface verbatim");
+
+const cursorUnauthenticated = normalizeCursorHarnessDetails({
+  about: CURSOR_ABOUT,
+  status: { status: "not_authenticated", isAuthenticated: false },
+  modelsText: CURSOR_MODELS_TEXT,
+  errors: [],
+}, OBSERVED_AT);
+assert.match(cursorUnauthenticated.errors.join(" "), /not authenticated/, "signed-out auth is an explicit error");
+assert.equal(cursorUnauthenticated.models?.length, 14, "auth state does not erase facts already read");
+
+// --- All harnesses, observed independently ----------------------------------------------------
 
 const both = await readHarnessDetails({
   deps: {
     now: () => new Date(OBSERVED_AT),
     readCodexPayloads: async () => capturedPayloads,
+    readCursorPayloads: async () => capturedCursorPayloads,
   },
 });
 assert.deepEqual(
   both.map(({ harness }) => harness),
-  [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode],
+  [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode, AgentRunHarness.Cursor],
   "harnesses are returned in a fixed order, never ordered by usage or preference",
 );
 assert.ok(both.every(({ observedAt }) => observedAt === OBSERVED_AT), "one snapshot, one observation time");
@@ -166,6 +223,7 @@ const withFailure = await readHarnessDetails({
   deps: {
     now: () => new Date(OBSERVED_AT),
     readCodexPayloads: async () => { throw new Error("codex app-server unavailable"); },
+    readCursorPayloads: async () => capturedCursorPayloads,
   },
 });
 const failedCodex = withFailure.find(({ harness }) => harness === AgentRunHarness.Codex);
@@ -174,7 +232,12 @@ assert.equal(failedCodex?.models, null, "a failed read leaves facts unknown rath
 assert.equal(
   withFailure.find(({ harness }) => harness === AgentRunHarness.ClaudeCode)?.notes.length,
   1,
-  "the other harness is observed regardless",
+  "the other harnesses are observed regardless",
+);
+assert.equal(
+  withFailure.find(({ harness }) => harness === AgentRunHarness.Cursor)?.models?.length,
+  14,
+  "a Codex failure cannot erase Cursor's facts",
 );
 
 // --- Baseline candidates are reported, never saved --------------------------------------------
@@ -218,4 +281,4 @@ assert.equal(probeFailed[0]?.models?.length, 5, "a failed candidate probe keeps 
 assert.deepEqual(probeFailed[0]?.baselineCandidate, null);
 assert.deepEqual(probeFailed[0]?.errors, ["baseline candidate: session init failed"]);
 
-process.stdout.write("ok — harness details normalize captured Codex payloads and keep unknowns honest\n");
+process.stdout.write("ok — harness details normalize captured Codex and Cursor payloads and keep unknowns honest\n");

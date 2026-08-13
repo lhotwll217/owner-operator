@@ -20,13 +20,19 @@ import {
   type CodexAppServerOptions,
   type CodexAppServerPayloads,
 } from "./harness-details-codex-client";
+import {
+  readCursorCliPayloads,
+  type CursorCliOptions,
+  type CursorCliPayloads,
+} from "./harness-details-cursor-client";
 
-export { discoverAcpBaselineCandidate, readCodexAppServerPayloads };
-export type { BaselineProbeDeps, CodexAppServerOptions, CodexAppServerPayloads };
+export { discoverAcpBaselineCandidate, readCodexAppServerPayloads, readCursorCliPayloads };
+export type { BaselineProbeDeps, CodexAppServerOptions, CodexAppServerPayloads, CursorCliOptions, CursorCliPayloads };
 
 /** Identifies which first-party protocol produced a harness's facts, so a reader can tell an
  * observation apart from an assumption. `null` on a harness that exposes no such surface. */
 export const CODEX_DETAILS_SOURCE = "codex-app-server";
+export const CURSOR_DETAILS_SOURCE = "cursor-agent-cli";
 
 export interface HarnessModelDetail {
   id: string;
@@ -74,6 +80,7 @@ export interface HarnessDetails {
 
 export interface HarnessDetailsDeps {
   readCodexPayloads?: () => Promise<CodexAppServerPayloads>;
+  readCursorPayloads?: () => Promise<CursorCliPayloads>;
   discoverBaselineCandidate?: (harness: AgentRunHarness) => Promise<HarnessBaselineCandidate>;
   now?: () => Date;
 }
@@ -85,7 +92,11 @@ export interface ReadHarnessDetailsOptions {
   deps?: HarnessDetailsDeps;
 }
 
-const ALL_HARNESSES: readonly AgentRunHarness[] = [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode];
+const ALL_HARNESSES: readonly AgentRunHarness[] = [
+  AgentRunHarness.Codex,
+  AgentRunHarness.ClaudeCode,
+  AgentRunHarness.Cursor,
+];
 
 /** Observe each requested harness independently and concurrently. A harness that throws still
  * returns a row carrying its own error, so one broken harness cannot erase another's facts. */
@@ -107,7 +118,9 @@ async function readOneHarness(
 ): Promise<HarnessDetails> {
   const details = harness === AgentRunHarness.Codex
     ? await readCodexDetails(observedAt, options.deps)
-    : claudeCodeDetails(observedAt);
+    : harness === AgentRunHarness.Cursor
+      ? await readCursorDetails(observedAt, options.deps)
+      : claudeCodeDetails(observedAt);
   if (!options.includeBaselineCandidates) return details;
 
   const discover = options.deps?.discoverBaselineCandidate ?? discoverAcpBaselineCandidate;
@@ -130,6 +143,22 @@ async function readCodexDetails(
     return {
       ...emptyDetails(AgentRunHarness.Codex, observedAt),
       source: CODEX_DETAILS_SOURCE,
+      errors: [messageOf(error)],
+    };
+  }
+}
+
+async function readCursorDetails(
+  observedAt: string,
+  deps: HarnessDetailsDeps | undefined,
+): Promise<HarnessDetails> {
+  try {
+    const payloads = await (deps?.readCursorPayloads ?? readCursorCliPayloads)();
+    return normalizeCursorHarnessDetails(payloads, observedAt);
+  } catch (error) {
+    return {
+      ...emptyDetails(AgentRunHarness.Cursor, observedAt),
+      source: CURSOR_DETAILS_SOURCE,
       errors: [messageOf(error)],
     };
   }
@@ -177,6 +206,59 @@ export function normalizeCodexHarnessDetails(
     notes: [],
     errors: [],
   };
+}
+
+/** Map raw `cursor-agent` CLI results onto the normalized shape. Cursor encodes reasoning effort
+ * inside its model ids (`gpt-5.6-sol-xhigh`, bracket overrides), so the catalog carries no
+ * separate reasoning levels; those stay unknown rather than being parsed out of id suffixes. */
+export function normalizeCursorHarnessDetails(
+  payloads: CursorCliPayloads,
+  observedAt: string,
+): HarnessDetails {
+  const status = record(payloads.status);
+  const errors = [...payloads.errors];
+  if (status && status.isAuthenticated !== true) {
+    errors.push("cursor-agent is not authenticated; run `cursor-agent login`");
+  }
+  return {
+    harness: AgentRunHarness.Cursor,
+    observedAt,
+    source: CURSOR_DETAILS_SOURCE,
+    account: normalizeCursorAccount(payloads.about),
+    models: normalizeCursorModels(payloads.modelsText),
+    allowanceWindows: null,
+    baselineCandidate: null,
+    notes: [
+      "Cursor exposes no allowance-window surface; allowance facts are unknown, not empty.",
+      "Reasoning effort is encoded in Cursor model ids (suffixes or bracket overrides), not advertised as separate levels.",
+    ],
+    errors,
+  };
+}
+
+function normalizeCursorAccount(payload: unknown): HarnessAccountDetail | null {
+  const about = record(payload);
+  if (!about) return null;
+  return { plan: text(about.subscriptionTier) };
+}
+
+/** Parse the plain-text `cursor-agent models` catalog: `<id> - <display name>` lines, with the
+ * harness default suffixed `(default)`. Header, blank, and tip lines carry no ` - ` separator. */
+function normalizeCursorModels(payload: string | null): HarnessModelDetail[] | null {
+  if (payload === null) return null;
+  return payload.split(/\r?\n/).flatMap((line) => {
+    const match = /^(\S+) - (.+)$/.exec(line.trim());
+    if (!match) return [];
+    const isDefault = match[2]!.endsWith(" (default)");
+    return [{
+      id: match[1]!,
+      displayName: isDefault ? match[2]!.slice(0, -" (default)".length) : match[2]!,
+      reasoningLevels: null,
+      unsupportedReasoningLevels: [],
+      defaultReasoningLevel: null,
+      isDefault,
+    }];
+  });
 }
 
 function normalizeCodexAccount(payload: unknown): HarnessAccountDetail | null {
