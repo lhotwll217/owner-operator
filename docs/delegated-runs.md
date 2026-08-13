@@ -13,15 +13,15 @@ read_when:
 **Sub-agent** is the broad relationship: an agent launched to help another agent. Owner Operator
 uses the narrower term **delegated run** for a child execution its daemon issues and owns through
 the AgentRun launch path. `delegate_agent` is the Operator-facing route; authenticated Gateway
-clients can use the same path directly. The child is still a Claude Code or Codex session; the
-delegated run is OO's durable lifecycle record for that execution.
+clients can use the same path directly. The child is still a Claude Code, Codex, or Cursor
+session; the delegated run is OO's durable lifecycle record for that execution.
 
 This distinction matters because a harness can launch its own native sub-agents without OO.
 Those helpers are sub-agents, but they are not OO-delegated runs and never enter OO's run ledger.
 A **schedule run** is a separate domain object; the delegated-run name does not imply that
 schedules or triggers launch sub-agents.
 
-Owner Operator launches child coding agents (Claude Code, Codex) as durable, daemon-owned
+Owner Operator launches child coding agents (Claude Code, Codex, Cursor) as durable, daemon-owned
 **delegated runs** ([#69](https://github.com/lhotwll217/owner-operator/issues/69)). A run is
 tracked with explicit lineage, durable status, controls, and presentation — never inferred from
 transcript activity. The domain terms live in [CONTEXT.md](../CONTEXT.md).
@@ -36,7 +36,7 @@ Operator (delegate_agent / manage_agent_run tool)
         │  Gateway HTTP
    AgentRunExecutor ──── State (agent_runs ledger) ──── SSE agent-run.changed
         │
-   ACP launcher (acpx) ──── child harness session (Claude Code / Codex)
+   ACP launcher (acpx) ──── child harness session (Claude Code / Codex / Cursor)
 ```
 
 ## Tracking boundary
@@ -148,7 +148,7 @@ and terminal styling are adapters over that contract.
   completion closes the ACP process tree, then confirms every PID from the original tree is gone
   before releasing its lease; daemon startup reaps only orphaned trees whose
   live wrapper path and lease id both match. It fails closed on unavailable process listings and
-  never claims a bare Claude, Codex, or `acpx` process.
+  never claims a bare Claude, Codex, Cursor, or `acpx` process.
 
 ## Harness details
 
@@ -184,6 +184,17 @@ issued last in the handshake because the app-server only begins refreshing its r
 `initialized` and announces nothing when that refresh lands; asking earlier returns a stale local
 copy.
 
+Cursor facts come from its first-party `cursor-agent` CLI: `models` (catalog), `about` (plan and
+default), and `status` (auth). Cursor speaks ACP natively — the launcher runs the resolved local
+CLI as `cursor-agent acp` through the same registry-override seam as Codex, with no adapter
+package in between. Cursor encodes reasoning effort inside its model ids (suffixes such as
+`-xhigh`, or bracket overrides), so the catalog advertises no separate reasoning levels, and
+allowance windows have no CLI surface — both stay honestly unknown. The CLI is signed into
+whatever Cursor account is active on the machine; a delegated run bills that account and sends
+the task's code to it. A launch can also fail with the server's own `ActionRequiredError` (for
+example an unacknowledged data-retention prompt); the run's failure record carries that message
+verbatim as an owner action.
+
 Baseline-candidate discovery is opt-in and separate. It opens one throwaway ACP session pinning
 neither model nor effort, reads back what the harness selected for itself, and reports it as a
 *candidate*. A candidate is never saved: persisting a delegated default requires explicit owner
@@ -214,7 +225,8 @@ HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo
 ```
 
 Complete setup for the real harness credentials in that isolated home. Then use one saved headless
-conversation for the consent loop (replace `claude-code` with `codex` when proving that harness):
+conversation for the consent loop (replace `claude-code` with `codex` or `cursor` when proving
+that harness):
 
 ```sh
 HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."
@@ -223,7 +235,8 @@ HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "Refresh the cl
 ```
 
 Inspect the transcript named on stderr and
-`$PROOF_OO_HOME/delegated-baselines/claude-code.json`. The first turn must show an unpinned
+`$PROOF_OO_HOME/delegated-baselines/<harness>.json` for the harness being proven. The first turn
+must show an unpinned
 candidate with no baseline file or delegated launch. The second must show explicit owner approval,
 the persisted exact nullable identity, and a later run row reporting the same harness/model/effort.
 The third must show a fresh proposal while the file remains byte-for-byte unchanged. Remove only

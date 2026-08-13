@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { accessSync, constants } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createAcpRuntime,
@@ -136,7 +138,9 @@ export function createLeasedAcpRuntime(params: {
 }
 
 function defaultAgentCommand(acpAgent: string): string {
-  return acpAgent === "codex" ? codexAcpAgentCommand() : createAgentRegistry().resolve(acpAgent);
+  if (acpAgent === "codex") return codexAcpAgentCommand();
+  if (acpAgent === "cursor") return cursorAcpAgentCommand();
+  return createAgentRegistry().resolve(acpAgent);
 }
 
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
@@ -321,6 +325,33 @@ function ensureAcpSession(
 export function codexAcpAgentCommand(): string {
   const entrypoint = fileURLToPath(import.meta.resolve("@agentclientprotocol/codex-acp"));
   return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");
+}
+
+/** Cursor's CLI ships a first-party ACP server (`cursor-agent acp`), so no adapter package sits
+ * between Owner Operator and the harness; acpx has no built-in `cursor` registry entry, so the
+ * command is supplied through the same override seam Codex uses. */
+export function cursorAcpAgentCommand(): string {
+  return `${JSON.stringify(cursorAgentBinaryPath())} acp`;
+}
+
+/** Resolve the locally installed `cursor-agent` launcher to an absolute path: the daemon's PATH
+ * need not include the CLI installer's target directory (`~/.local/bin`). */
+export function cursorAgentBinaryPath(): string {
+  // resolve(), not join(): a relative PATH entry must not yield a relative command that a later
+  // spawn could re-resolve against a different working directory.
+  const candidates = [
+    ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
+    join(homedir(), ".local", "bin"),
+  ].map((dir) => resolve(dir, "cursor-agent"));
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not present or not executable in this directory; keep looking.
+    }
+  }
+  throw new Error("cursor-agent CLI not found on PATH or in ~/.local/bin; install it to delegate to Cursor");
 }
 
 function leasedAgentCommand(params: {

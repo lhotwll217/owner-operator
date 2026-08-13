@@ -8,6 +8,7 @@ import {
   CODEX_MODEL_LIST,
   CODEX_RATE_LIMITS_READ,
 } from "../../test/fixtures/codex-app-server";
+import { CURSOR_ABOUT, CURSOR_MODELS_TEXT, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
 import { readHarnessDetails } from "./harness-details";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-harness-details-"));
@@ -34,6 +35,12 @@ try {
         rateLimits: CODEX_RATE_LIMITS_READ,
         models: CODEX_MODEL_LIST,
       }),
+      readCursorPayloads: async () => ({
+        about: CURSOR_ABOUT,
+        status: CURSOR_STATUS,
+        modelsText: CURSOR_MODELS_TEXT,
+        errors: [],
+      }),
       discoverBaselineCandidate: async () => ({
         model: "gpt-5.6-sol",
         effort: "low",
@@ -42,7 +49,7 @@ try {
     },
     includeBaselineCandidates: true,
   });
-  assert.equal(first.length, 2);
+  assert.equal(first.length, 3);
   assert.equal(first[0]?.baselineCandidate?.model, "gpt-5.6-sol");
   assert.deepEqual(
     listing(),

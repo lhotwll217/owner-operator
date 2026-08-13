@@ -72,6 +72,7 @@ export function bounded(value: string | null | undefined, maxLength: number): st
 const AGENT_RUN_HARNESS_NAMES: Readonly<Record<AgentRun["harness"], string>> = {
   "claude-code": "Claude Code",
   codex: "Codex",
+  cursor: "Cursor",
 };
 
 export function formatAgentRunIdentity(

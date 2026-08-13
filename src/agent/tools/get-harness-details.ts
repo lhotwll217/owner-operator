@@ -9,7 +9,7 @@ import {
 
 const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
-  { description: "Harness to observe: claude-code | codex." },
+  { description: "Harness to observe: claude-code | codex | cursor." },
 );
 
 export interface GetHarnessDetailsResult {

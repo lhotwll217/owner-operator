@@ -100,7 +100,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
     description: "Durable delegated-run ledger. One row per child agent run launched through Owner Operator. For a run's outcome, filter status and inspect result_tail, error, and activity.",
     columns: [
       { name: "id", description: "Stable run id." },
-      { name: "harness", description: "Child harness: claude-code | codex." },
+      { name: "harness", description: "Child harness: claude-code | codex | cursor." },
       { name: "task", description: "Prompt handed to the child agent." },
       { name: "cwd", description: "Absolute working directory the child ran in." },
       { name: "parent_thread_id", description: "Delegating session's thread id; NULL if unattributed. Children nest under this." },

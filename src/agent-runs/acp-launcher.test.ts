@@ -6,11 +6,45 @@ import {
   type AgentRun,
   type AgentRunActivityUpdate,
 } from "@owner-operator/core";
-import { codexAcpAgentCommand, createAcpLauncher } from "./acp-launcher";
+import { codexAcpAgentCommand, createAcpLauncher, cursorAcpAgentCommand } from "./acp-launcher";
 
 const codexCommand = codexAcpAgentCommand();
 assert.match(codexCommand, /codex-acp\/dist\/index\.js"?$/, "Codex uses Owner Operator's pinned adapter");
 assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's stale registry command");
+
+// Cursor speaks ACP first-party: the resolved local CLI in server mode, no adapter package.
+try {
+  const cursorCommand = cursorAcpAgentCommand();
+  assert.match(cursorCommand, /^"\/.*cursor-agent" acp$/, "Cursor runs the absolute local CLI as an ACP server");
+} catch (error) {
+  assert.match((error as Error).message, /cursor-agent CLI not found/,
+    "a machine without the Cursor CLI gets the actionable resolution error");
+}
+
+// A relative PATH entry must still resolve to an absolute command: a later spawn from a
+// different working directory would otherwise re-resolve it against the wrong location.
+{
+  const { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { isAbsolute, join } = await import("node:path");
+  const { cursorAgentBinaryPath } = await import("./acp-launcher");
+  const pathRoot = realpathSync(mkdtempSync(join(tmpdir(), "oo-cursor-path-")));
+  mkdirSync(join(pathRoot, "bin"));
+  writeFileSync(join(pathRoot, "bin", "cursor-agent"), "#!/bin/sh\n", { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(pathRoot);
+    process.env.PATH = "bin";
+    const resolved = cursorAgentBinaryPath();
+    assert.ok(isAbsolute(resolved), "a relative PATH entry still yields an absolute command");
+    assert.equal(resolved, join(pathRoot, "bin", "cursor-agent"));
+  } finally {
+    process.env.PATH = previousPath;
+    process.chdir(previousCwd);
+    rmSync(pathRoot, { recursive: true, force: true });
+  }
+}
 
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };
