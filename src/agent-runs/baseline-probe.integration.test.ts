@@ -22,8 +22,12 @@ import type {
 } from "acpx/runtime";
 import { AgentRunHarness } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
-import { agentRunStateDir, type LeasedAcpRuntime } from "./acp-launcher";
-import { createAgentRunProcessLease, closeAgentRunProcessLease } from "./process-lease";
+import type { LeasedAcpRuntime } from "./acp-launcher";
+import {
+  agentRunProcessLeaseDir,
+  createAgentRunProcessLease,
+  closeAgentRunProcessLease,
+} from "./process-lease";
 import { discoverAcpBaselineCandidate } from "./harness-details";
 
 const WRAPPER_PATH = "/nonexistent/acp-process-wrapper.mjs";
@@ -104,13 +108,8 @@ function probeRig(params: { openImmediately: boolean; terminationFails?: boolean
   };
 }
 
-const leaseFiles = (): string[] => {
-  try {
-    return readdirSync(join(agentRunStateDir(), "process-leases")).filter((n) => n.endsWith(".json"));
-  } catch {
-    return [];
-  }
-};
+const leaseFiles = (): string[] =>
+  readdirSync(agentRunProcessLeaseDir()).filter((n) => n.endsWith(".json"));
 
 // Resolved: macOS hands out a symlinked temp path, and process.cwd() reports the real one.
 const home = realpathSync(mkdtempSync(join(tmpdir(), "oo-baseline-probe-home-")));
@@ -149,6 +148,7 @@ try {
     "the caller's cwd never reaches ensureSession, so project-local config cannot contaminate a global candidate",
   );
   assert.equal(process.cwd(), project, "the probe does not move the caller");
+  assert.equal(settled.terminationCalls(), 1, "a settled probe terminates its child tree before cleanup");
   assert.deepEqual(leaseFiles(), [], "a settled probe drops its lease");
   assert.equal(existsSync(settled.stateDirs[0] ?? ""), false, "a settled probe deletes its session directory");
 

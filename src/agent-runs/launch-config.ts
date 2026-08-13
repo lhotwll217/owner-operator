@@ -33,8 +33,11 @@ export function resolveAgentRunLaunch(
   pins: AgentRunLaunchPins = {},
   ooHome?: string,
 ): ResolvedAgentRunLaunch {
+  if (pins.model === null) {
+    throw new Error(`delegated run for ${harness} requires a model; explicit null does not use the approved baseline`);
+  }
   const baseline = loadDelegatedBaseline(harness, ooHome);
-  const model = pins.model ?? baseline?.model ?? null;
+  const model = pins.model === undefined ? baseline?.model ?? null : pins.model;
   if (!model) {
     throw new Error(
       `no approved delegated baseline for ${harness}: pin a model on this call, or discover a ` +

@@ -237,9 +237,7 @@ function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
   if (!row) return undefined;
   const { harnessModel, harnessEffort, harnessIdentityObserved, ...run } = row;
   const harnessIdentity = harnessIdentityObservation({ model: harnessModel, effort: harnessEffort });
-  if (Boolean(harnessIdentityObserved) !== harnessIdentity.observed) {
-      throw new Error(`invalid persisted harness identity observation for agent run ${row.id}`);
-  }
+  void harnessIdentityObserved;
   return {
     ...run,
     effortApplied: Boolean(row.effortApplied),
@@ -849,7 +847,12 @@ export class ThreadDb {
 
   /** Explicit activity from the child's runtime; rejected once the row is terminal. */
   recordAgentRunActivity(id: string, update: AgentRunActivityUpdate): AgentRun | null {
-    const identity = update.harnessIdentity;
+    const identity = update.harnessIdentity === undefined
+      ? undefined
+      : harnessIdentityObservation({
+          model: update.harnessIdentity.observed ? update.harnessIdentity.model : undefined,
+          effort: update.harnessIdentity.observed ? update.harnessIdentity.effort : undefined,
+        });
     const changed = Number(this.db.prepare(
       `UPDATE agent_runs SET
          activity = COALESCE(?, activity),

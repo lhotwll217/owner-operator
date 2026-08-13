@@ -109,6 +109,43 @@ try {
   assert.equal(JSON.parse(readFileSync(reparented.path, "utf8")).leaseId, reparented.leaseId,
     "reparented-survivor evidence retains its lease");
 
+  const recycled = createAgentRunProcessLease({ runId: "run-recycled", wrapperPath });
+  const recycledSignals: number[] = [];
+  const recycledPid = 701;
+  const recycledResult = await terminateAgentRunProcessLease({
+    leaseId: recycled.leaseId,
+    wrapperPath,
+    trackedPids: [recycledPid],
+    deps: {
+      listProcesses: async () => [{ pid: recycledPid, ppid: 1, command: "node unrelated-reused-pid" }],
+      killProcess: (pid) => { recycledSignals.push(pid); },
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(recycledResult, false, "a reused tracked PID fails closed as unresolved evidence");
+  assert.deepEqual(recycledSignals, [], "a tracked PID is never signaled without current lease ownership proof");
+  assert.equal(JSON.parse(readFileSync(recycled.path, "utf8")).leaseId, recycled.leaseId,
+    "unresolved tracked-PID evidence retains its lease");
+
+  const clean = createAgentRunProcessLease({ runId: "run-clean", wrapperPath });
+  let cleanSnapshot = 0;
+  const cleanTree = [
+    { pid: 710, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${clean.leaseId}` },
+    { pid: 711, ppid: 710, command: "node child" },
+  ];
+  const cleaned = await terminateAgentRunProcessLease({
+    leaseId: clean.leaseId,
+    wrapperPath,
+    trackedPids: [710, 711],
+    deps: {
+      listProcesses: async () => cleanSnapshot++ === 0 ? cleanTree : [],
+      killProcess: () => undefined,
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(cleaned, true, "a fully terminated tree confirms cleanup");
+  assert.throws(() => readFileSync(clean.path), /ENOENT/, "confirmed termination drops the lease");
+
   const closed = createAgentRunProcessLease({ runId: "run-2", wrapperPath });
   closeAgentRunProcessLease(closed.leaseId);
   assert.throws(() => readFileSync(closed.path), /ENOENT/, "normal close removes the lease");

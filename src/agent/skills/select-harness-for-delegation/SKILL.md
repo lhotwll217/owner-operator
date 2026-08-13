@@ -7,8 +7,8 @@ description: Select and report an exact harness, model, and reasoning effort bef
 
 Use this workflow before `delegate_agent` unless the owner explicitly supplied all three parts of
 the execution identity: harness, model, and effort. `effort: null` is an explicit effort. A complete
-owner choice bypasses this workflow and passes through unchanged. Preserve any partial owner choice
-while selecting only the missing parts.
+owner choice bypasses this workflow and passes through unchanged. Preserve every supplied harness,
+model, and effort value—including `effort: null`—while selecting only omitted fields.
 
 ## Select
 
@@ -26,10 +26,12 @@ while selecting only the missing parts.
    they exist. `null` in harness details means unknown, not empty, unavailable, unused, or zero;
    unknown account, catalog, entitlement, or allowance facts do not block an otherwise defensible
    selection.
-4. If no task preference applies, use that harness's owner-approved delegated baseline. Call
+4. If no task preference applies, use that harness's owner-approved delegated baseline only to
+   fill omitted execution-identity fields. Call
    `manage_delegated_baseline` with `action: "propose"` to inspect its `approved` value; the
    unpinned ACP candidate returned alongside it is only a proposal and never replaces an approved
-   baseline. Pass the approved model and nullable effort explicitly to `delegate_agent`.
+   baseline. Merge the approved model and nullable effort into omitted fields without replacing
+   any owner-supplied value.
 5. Call `delegate_agent` with the exact selected harness, model, and effort. Keep the owner's
    task and working directory intact. The existing delegated-run lifecycle is the execution record;
    do not create another record and do not poll after launch.

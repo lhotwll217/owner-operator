@@ -137,9 +137,8 @@ for (const mechanic of [
   "Task roles",
   "allowance",
 ]) {
-  assert.doesNotMatch(
-    harnessPrompt,
-    new RegExp(mechanic, "i"),
+  assert.ok(
+    !harnessPrompt.toLowerCase().includes(mechanic.toLowerCase()),
     `the permanent prompt delegates ${mechanic} mechanics to the bundled skill`,
   );
 }
@@ -165,11 +164,12 @@ for (const mechanic of [
   "actual unpinned ACP candidate",
   "explicitly approve",
   "Retry selection",
+  "fill omitted execution-identity fields",
+  "without replacing",
   "delegate_agent",
 ]) {
-  assert.match(
-    delegationSelectionSkill,
-    new RegExp(mechanic, "i"),
+  assert.ok(
+    delegationSelectionSkill.toLowerCase().includes(mechanic.toLowerCase()),
     `the bundled selection skill owns ${mechanic} mechanics`,
   );
 }

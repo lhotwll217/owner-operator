@@ -60,6 +60,7 @@ async function withServer<T>(options: CodexAppServerOptions, run: (client: Clien
   };
   child.on("error", fail);
   child.on("exit", (code) => fail(new Error(`codex app-server exited (code ${code ?? "unknown"})`)));
+  child.stdin.on("error", fail);
   child.stderr.resume();
   const lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
@@ -73,6 +74,11 @@ async function withServer<T>(options: CodexAppServerOptions, run: (client: Clien
     else entry.resolve(message.result);
   });
   const send = (payload: Record<string, unknown>): void => {
+    if (failure) return;
+    if (child.stdin.destroyed || child.stdin.writableEnded || !child.stdin.writable) {
+      fail(new Error("codex app-server stdin is closed"));
+      return;
+    }
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...payload })}\n`);
   };
   const request = (method: string, params: unknown = {}): Promise<unknown> => {

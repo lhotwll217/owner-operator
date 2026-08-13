@@ -22,6 +22,11 @@ try {
     resolveAgentRunLaunch(AgentRunHarness.Codex, { effort: null }, ooHome),
     { model: "approved-model", effort: null },
   );
+  assert.throws(
+    () => resolveAgentRunLaunch(AgentRunHarness.Codex, { model: null }, ooHome),
+    /explicit null does not use the approved baseline/,
+    "an explicit null model never silently falls back to the approved baseline",
+  );
   const refresh = await proposeDelegatedBaseline(AgentRunHarness.Codex, {
     ooHome,
     discover: async () => ({ model: "candidate-model", effort: "medium", availableEfforts: ["medium"] }),

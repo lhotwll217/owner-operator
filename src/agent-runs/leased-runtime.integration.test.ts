@@ -7,21 +7,26 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness } from "@owner-operator/core";
-import { agentRunStateDir, createLeasedAcpRuntime } from "./acp-launcher";
+import { createLeasedAcpRuntime } from "./acp-launcher";
+import { agentRunProcessLeaseDir } from "./process-lease";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-leased-runtime-"));
 const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
 
 const leaseFiles = (): string[] => {
-  try {
-    return readdirSync(join(agentRunStateDir(), "process-leases")).filter((n) => n.endsWith(".json"));
-  } catch {
-    return [];
-  }
+  return readdirSync(agentRunProcessLeaseDir()).filter((n) => n.endsWith(".json"));
 };
 
 try {
+  const initialized = createLeasedAcpRuntime({
+    harness: AgentRunHarness.Codex,
+    leaseKey: "initialize-directory",
+    stateDir: join(dir, "initialize-directory"),
+    resolveAgentCommand: () => "node /nonexistent/adapter.js",
+  });
+  initialized.release();
+
   // --- Resolving the harness's adapter can fail before anything is spawned ----------------------
 
   // The shape of a broken install: the adapter the harness needs cannot be resolved.

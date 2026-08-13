@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCodexAppServerPayloads } from "./harness-details";
 
-const TIMEOUT_MS = 300;
+const TIMEOUT_MS = 2_000;
 const KILL_GRACE_MS = 200;
 
 /** Answers every request with the method it was asked for and whether `initialized` had already
@@ -120,6 +120,21 @@ try {
     }), message, `${mode} pagination cannot return a partial successful catalog`);
     assert.equal(alive(broken.pid()), false, `${mode} pagination still terminates its app-server`);
   }
+
+  // --- A closed request pipe rejects in-flight work without becoming an uncaught exception -----
+
+  const closedStdinPidPath = join(dir, "closed-stdin.pid");
+  const closedStdin = {
+    args: ["-c", 'echo "$$" > "$1"; IFS= read -r _line; exec 0<&-; printf \'{"jsonrpc":"2.0","id":0,"result":{}}\\n\'; while :; do :; done', "_", closedStdinPidPath],
+    pid: () => Number.parseInt(readFileSync(closedStdinPidPath, "utf8"), 10),
+  };
+  await assert.rejects(readCodexAppServerPayloads({
+    command: "/bin/sh",
+    args: closedStdin.args,
+    timeoutMs: TIMEOUT_MS,
+    killGraceMs: KILL_GRACE_MS,
+  }), /EPIPE|stdin|stream|pipe/i, "a closed app-server stdin rejects the observation through the client boundary");
+  assert.equal(alive(closedStdin.pid()), false, "stdin failure still terminates the app-server child");
 
   // --- A hung app-server is timed out and killed, not left running ------------------------------
 

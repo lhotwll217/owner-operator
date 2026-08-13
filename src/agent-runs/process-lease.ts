@@ -45,11 +45,11 @@ export interface AgentRunProcessCleanupResult {
   skippedReason?: "unsupported-platform" | "process-list-unavailable";
 }
 
-const leaseDir = (): string => join(ownerOperatorHome(), "agent-runs", "process-leases");
-const leasePath = (leaseId: string): string => join(leaseDir(), `${leaseId}.json`);
+export const agentRunProcessLeaseDir = (): string => join(ownerOperatorHome(), "agent-runs", "process-leases");
+const leasePath = (leaseId: string): string => join(agentRunProcessLeaseDir(), `${leaseId}.json`);
 
 function writeLease(lease: AgentRunProcessLease): void {
-  mkdirSync(leaseDir(), { recursive: true });
+  mkdirSync(agentRunProcessLeaseDir(), { recursive: true });
   const path = leasePath(lease.leaseId);
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(temp, `${JSON.stringify(lease, null, 2)}\n`, { mode: 0o600 });
@@ -82,10 +82,10 @@ function readLease(path: string): AgentRunProcessLease | undefined {
 
 function listLeases(): AgentRunProcessLease[] {
   try {
-    return readdirSync(leaseDir())
+    return readdirSync(agentRunProcessLeaseDir())
       .filter((name) => name.endsWith(".json"))
       .flatMap((name) => {
-        const lease = readLease(join(leaseDir(), name));
+        const lease = readLease(join(agentRunProcessLeaseDir(), name));
         return lease ? [lease] : [];
       });
   } catch {
@@ -128,8 +128,9 @@ export async function terminateAgentRunProcessLease(params: {
   const roots = processes.filter((entry) =>
     entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId);
   const liveTree = roots.flatMap((root) => collectProcessTree(processes, root.pid));
-  const originalPids = new Set([...(params.trackedPids ?? []), ...uniquePids(liveTree)]);
-  const owned = processes.filter((entry) => originalPids.has(entry.pid));
+  const livePids = new Set(uniquePids(liveTree));
+  const originalPids = new Set([...(params.trackedPids ?? []), ...livePids]);
+  const owned = processes.filter((entry) => livePids.has(entry.pid));
   await terminatePids(uniquePids([...owned].reverse()), params.deps);
   let after: ProcessInfo[];
   try {

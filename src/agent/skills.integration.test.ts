@@ -46,7 +46,8 @@ try {
     "implicit delegation selection is a discoverable bundled skill",
   );
   const selectionSkill = isolated.getSkills().skills.find((skill) => skill.name === "select-harness-for-delegation");
-  assert.match(selectionSkill ? readFileSync(selectionSkill.filePath, "utf8") : "", /\$OO_HOME\/workspace\/harness-roster\.md/,
+  assert.ok(selectionSkill, "the bundled selection skill resolves to a file");
+  assert.match(readFileSync(selectionSkill.filePath, "utf8"), /\$OO_HOME\/workspace\/harness-roster\.md/,
     "the shipped workflow resolves the roster through configured OO_HOME");
   assert.ok(isolatedNames.includes("workspace-helper"), "workspace skills are loaded");
   assert.ok(!isolatedNames.includes("project-helper"), "task .pi skills are absent");

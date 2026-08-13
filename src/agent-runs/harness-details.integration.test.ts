@@ -24,9 +24,11 @@ const listing = (): string[] => {
 
 try {
   const before = listing();
+  const firstObservedAt = new Date("2026-08-13T08:00:00.000Z");
 
   const first = await readHarnessDetails({
     deps: {
+      now: () => firstObservedAt,
       readCodexPayloads: async () => ({
         account: CODEX_ACCOUNT_READ,
         rateLimits: CODEX_RATE_LIMITS_READ,
@@ -53,6 +55,7 @@ try {
   const second = await readHarnessDetails({
     harnesses: [AgentRunHarness.Codex],
     deps: {
+      now: () => new Date("2026-08-13T08:00:01.000Z"),
       readCodexPayloads: async () => {
         reads.push("codex");
         return { account: null, rateLimits: null, models: { data: [] } };
@@ -63,7 +66,7 @@ try {
   assert.deepEqual(second[0]?.models, [], "the second snapshot reflects the new observation, not the first");
   assert.notEqual(
     second[0]?.observedAt,
-    undefined,
+    first[0]?.observedAt,
     "each snapshot stamps its own observation time",
   );
   assert.deepEqual(listing(), before, "a repeat observation still persists nothing");

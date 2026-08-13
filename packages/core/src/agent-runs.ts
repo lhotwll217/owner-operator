@@ -40,7 +40,7 @@ export function harnessIdentityObservation(input: {
   model?: unknown;
   effort?: unknown;
 }): HarnessIdentityObservation {
-  const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : undefined;
+  const model = typeof input.model === "string" && input.model.trim() ? input.model : undefined;
   const effort = isAgentRunEffort(input.effort) ? input.effort : undefined;
   if (model && effort) return { observed: true, model, effort };
   if (model) return { observed: true, model };

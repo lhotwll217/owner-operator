@@ -50,9 +50,17 @@ assert.equal(active?.acpxRecordId, "acpx-rec-1");
 assert.equal(active?.lastActivityAt, nowIso, "activity stamps last_activity_at");
 
 const modelObserved = db.recordAgentRunActivity("run-1", {
-  harnessIdentity: { observed: true, model: "observed-model" },
+  harnessIdentity: { observed: true, model: " observed-model " },
 });
-assert.deepEqual(modelObserved?.harnessIdentity, { observed: true, model: "observed-model" });
+assert.deepEqual(modelObserved?.harnessIdentity, { observed: true, model: " observed-model " },
+  "non-blank harness model identifiers round-trip verbatim");
+const malformedIdentity = db.recordAgentRunActivity("run-1", {
+  harnessIdentity: { observed: true, model: "   ", effort: "unsupported" } as never,
+});
+assert.deepEqual(malformedIdentity?.harnessIdentity, { observed: false },
+  "malformed runtime identity is normalized before persistence");
+assert.ok(db.listAgentRuns().some(({ id }) => id === "run-1"),
+  "one malformed identity update cannot poison unrelated list reads");
 const unobserved = db.recordAgentRunActivity("run-1", { harnessIdentity: { observed: false } });
 assert.deepEqual(unobserved?.harnessIdentity, { observed: false }, "unobserved status cannot retain contradictory observed evidence");
 

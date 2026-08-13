@@ -61,10 +61,8 @@ let isolatedLeaseIds: string[] = [];
 let isolatedProcessPids: number[] = [];
 
 const harnessHome = harness === AgentRunHarness.Codex ? join(userHome, ".codex") : join(userHome, ".claude");
-mkdirSync(harnessHome, { recursive: true });
-mkdirSync(neutralCwd, { recursive: true });
-copyFileSync(credentialSource, join(harnessHome, harness === AgentRunHarness.Codex ? "auth.json" : ".credentials.json"));
-copyFileSync(configSource, join(harnessHome, harness === AgentRunHarness.Codex ? "config.toml" : "settings.json"));
+const copiedCredentialPath = join(harnessHome, harness === AgentRunHarness.Codex ? "auth.json" : ".credentials.json");
+const copiedConfigPath = join(harnessHome, harness === AgentRunHarness.Codex ? "config.toml" : "settings.json");
 
 async function waitFor<T>(read: () => Promise<T | undefined> | T | undefined, label: string, timeoutMs = 300_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -91,6 +89,10 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 }
 
 try {
+  mkdirSync(harnessHome, { recursive: true });
+  mkdirSync(neutralCwd, { recursive: true });
+  copyFileSync(credentialSource, copiedCredentialPath);
+  copyFileSync(configSource, copiedConfigPath);
   const cleanEnv: NodeJS.ProcessEnv = {
     HOME: userHome,
     OO_HOME: ooHome,
@@ -160,6 +162,8 @@ try {
       "no process lease remains before isolation is deleted");
     rmSync(userHome, { recursive: true, force: true });
   } catch (error) {
+    rmSync(copiedCredentialPath, { force: true });
+    rmSync(copiedConfigPath, { force: true });
     process.stderr.write(`live identity teardown failed; preserved isolation evidence at ${userHome}\n`);
     teardownError = error;
   }

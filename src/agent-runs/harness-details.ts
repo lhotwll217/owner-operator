@@ -31,8 +31,8 @@ export const CODEX_DETAILS_SOURCE = "codex-app-server";
 export interface HarnessModelDetail {
   id: string;
   displayName: string;
-  /** Reasoning levels the harness advertises for this model. `null` = the catalog entry carried
-   * no readable levels (unknown); `[]` = it advertised the levels and there are none. */
+  /** Advertised reasoning levels the delegation contract can apply. `null` = the catalog entry
+   * carried no readable levels (unknown); `[]` = none were advertised or all are unsupported. */
   reasoningLevels: string[] | null;
   /** Advertised values the public delegation contract cannot apply. Never selectable. */
   unsupportedReasoningLevels: string[];

@@ -51,6 +51,9 @@ Committed fixtures must be sanitized: no personal paths, repos, or names.
 
 ## Running
 
+Replace every `/explicit/...` path and `<exact-model-id>` below with a real local value before
+running an opt-in command; they are documentation placeholders, not repository defaults.
+
 ```sh
 npm test                                              # hermetic: unit + integration + e2e
 npm run typecheck                                     # tsc: root src + workspaces
@@ -78,7 +81,8 @@ The delegated-identity live test requires only the six `OO_*` inputs shown above
 config source paths must name explicit files; the test copies them into a disposable harness home,
 discards ambient provider keys, ACP overrides, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR`, and runs from
 a neutral disposable directory. It preserves that directory when teardown cannot prove the daemon,
-leased process tree, and process lease are all gone. Never put secret values in these variables.
+leased process tree, and process lease are all gone, but deletes the copied harness credential and
+configuration first. Never put secret values in these variables.
 
 CI runs on every PR and every landing on `main`: [`ci.yml`](../.github/workflows/ci.yml);
 the widget suite: [`widget.yml`](../.github/workflows/widget.yml) (macOS, path-filtered).

@@ -53,6 +53,14 @@ assert.ok(cases.length > 0, "OO_DELEGATION_SELECTION_CASES did not match a fixtu
 const originalHome = process.env.HOME;
 const originalOoHome = process.env.OO_HOME;
 const root = mkdtempSync(join(tmpdir(), "oo-delegation-behavior-"));
+const cleanupRoot = (): void => {
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  if (originalOoHome === undefined) delete process.env.OO_HOME;
+  else process.env.OO_HOME = originalOoHome;
+  rmSync(root, { recursive: true, force: true });
+};
+process.once("exit", cleanupRoot);
 const evalHome = join(root, "home");
 const evalOoHome = join(evalHome, ".owner-operator");
 process.env.HOME = evalHome;
@@ -252,6 +260,7 @@ try {
   // second turn, retry selection, and explicitly launch the approved nullable identity.
   const launches: AgentRunCreateInput[] = [];
   const candidate = { model: "discovered-real-default", effort: null as AgentRunEffort | null, availableEfforts: null };
+  const baselinePath = join(evalOoHome, "delegated-baselines", `${AgentRunHarness.ClaudeCode}.json`);
   const backend = {
     async delegateAgent(input: AgentRunCreateInput) {
       assert.equal(existsSync(baselinePath), true, "approved baseline is durable before delegation is attempted");
@@ -260,7 +269,6 @@ try {
     },
     async waitAgentRun() { throw new Error("behavior eval must not poll"); },
   } satisfies Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
-  const baselinePath = join(evalOoHome, "delegated-baselines", `${AgentRunHarness.ClaudeCode}.json`);
   const approval = await sessionFor(
     "missing-baseline-approval",
     "### Quick mechanical work\n_No preference configured._\n",
@@ -304,11 +312,8 @@ try {
   approval.session.dispose();
   process.stdout.write("ok — model-driven missing baseline proposes, asks, persists, retries, and preserves effort null\n");
 } finally {
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalOoHome === undefined) delete process.env.OO_HOME;
-  else process.env.OO_HOME = originalOoHome;
-  rmSync(root, { recursive: true, force: true });
+  process.removeListener("exit", cleanupRoot);
+  cleanupRoot();
 }
 
 function approveCalls(calls: Array<{ name: string; args: any }>): number {

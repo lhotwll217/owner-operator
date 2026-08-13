@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { AcpRuntimeHandle } from "acpx/runtime";
 import { AGENT_RUN_CAPABILITIES, type AgentRunHarness, isAgentRunEffort } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import { agentRunStateDir, createLeasedAcpRuntime, type LeasedAcpRuntime } from "./acp-launcher";
@@ -29,11 +28,8 @@ export async function discoverAcpBaselineCandidate(
     mode: "oneshot",
     cwd: ownerOperatorHome(),
   });
-  let opened = false;
-  let timedOut = false;
   try {
     const handle = await withDeadline(session, deps.timeoutMs ?? TIMEOUT_MS, `${harness} did not finish initializing`);
-    opened = true;
     const status = await leased.runtime.getStatus?.({ handle });
     const effort = readEffort(status?.details?.configOptions);
     const model = status?.models?.currentModelId?.trim() || null;
@@ -42,17 +38,12 @@ export async function discoverAcpBaselineCandidate(
       throw new Error(`${harness} baseline discovery returned unsupported effort: ${effort.currentValue}`);
     }
     return { model, effort: effort.currentValue, availableEfforts: effort.values };
-  } catch (error) {
-    timedOut = error instanceof Error && error.message.includes("did not finish initializing");
-    throw error;
   } finally {
-    if (opened || !timedOut) discard(leased, probeStateDir);
-    else await discardAbandoned(leased, session, probeStateDir);
+    await discardAbandoned(leased, session, probeStateDir);
   }
 }
 
-function discard(leased: LeasedAcpRuntime, stateDir: string): void { leased.release(); rmSync(stateDir, { recursive: true, force: true }); }
-async function discardAbandoned(leased: LeasedAcpRuntime, session: Promise<AcpRuntimeHandle>, stateDir: string): Promise<void> {
+async function discardAbandoned(leased: LeasedAcpRuntime, session: Promise<unknown>, stateDir: string): Promise<void> {
   void session.catch(() => undefined);
   const terminated = await leased.terminate();
   if (terminated) {
