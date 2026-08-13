@@ -220,12 +220,18 @@ export function normalizeCursorHarnessDetails(
   if (status && status.isAuthenticated !== true) {
     errors.push("cursor-agent is not authenticated; run `cursor-agent login`");
   }
+  const models = normalizeCursorModels(payloads.modelsText);
+  // Output that parses to zero rows means the format was not recognized, not an empty catalog:
+  // reporting [] would claim "observed and none" for models the parser simply failed to read.
+  if (payloads.modelsText !== null && !models?.length) {
+    errors.push("cursor-agent models: no catalog entries recognized in output");
+  }
   return {
     harness: AgentRunHarness.Cursor,
     observedAt,
     source: CURSOR_DETAILS_SOURCE,
     account: normalizeCursorAccount(payloads.about),
-    models: normalizeCursorModels(payloads.modelsText),
+    models: models?.length ? models : null,
     allowanceWindows: null,
     baselineCandidate: null,
     notes: [

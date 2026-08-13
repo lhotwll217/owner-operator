@@ -225,7 +225,8 @@ HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo
 ```
 
 Complete setup for the real harness credentials in that isolated home. Then use one saved headless
-conversation for the consent loop (replace `claude-code` with `codex` when proving that harness):
+conversation for the consent loop (replace `claude-code` with `codex` or `cursor` when proving
+that harness):
 
 ```sh
 HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."
@@ -234,7 +235,8 @@ HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "Refresh the cl
 ```
 
 Inspect the transcript named on stderr and
-`$PROOF_OO_HOME/delegated-baselines/claude-code.json`. The first turn must show an unpinned
+`$PROOF_OO_HOME/delegated-baselines/<harness>.json` for the harness being proven. The first turn
+must show an unpinned
 candidate with no baseline file or delegated launch. The second must show explicit owner approval,
 the persisted exact nullable identity, and a later run row reporting the same harness/model/effort.
 The third must show a fresh proposal while the file remains byte-for-byte unchanged. Remove only

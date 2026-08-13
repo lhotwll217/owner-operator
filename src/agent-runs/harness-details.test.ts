@@ -184,6 +184,16 @@ assert.equal(cursorUnknown.models, null, "an unreadable catalog is unknown, not 
 assert.equal(cursorUnknown.account, null);
 assert.deepEqual(cursorUnknown.errors, ["cursor-agent models: spawn failed"], "client errors surface verbatim");
 
+// Output that parses to zero rows is a format mismatch, not an observed-empty catalog.
+const cursorUnrecognized = normalizeCursorHarnessDetails({
+  about: CURSOR_ABOUT,
+  status: CURSOR_STATUS,
+  modelsText: "unexpected: output format the parser does not recognize\n",
+  errors: [],
+}, OBSERVED_AT);
+assert.equal(cursorUnrecognized.models, null, "unrecognized non-empty output is unknown, never observed-none");
+assert.deepEqual(cursorUnrecognized.errors, ["cursor-agent models: no catalog entries recognized in output"]);
+
 const cursorUnauthenticated = normalizeCursorHarnessDetails({
   about: CURSOR_ABOUT,
   status: { status: "not_authenticated", isAuthenticated: false },

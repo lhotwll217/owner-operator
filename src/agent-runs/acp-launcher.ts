@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createAcpRuntime,
@@ -337,10 +337,12 @@ export function cursorAcpAgentCommand(): string {
 /** Resolve the locally installed `cursor-agent` launcher to an absolute path: the daemon's PATH
  * need not include the CLI installer's target directory (`~/.local/bin`). */
 export function cursorAgentBinaryPath(): string {
+  // resolve(), not join(): a relative PATH entry must not yield a relative command that a later
+  // spawn could re-resolve against a different working directory.
   const candidates = [
     ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
     join(homedir(), ".local", "bin"),
-  ].map((dir) => join(dir, "cursor-agent"));
+  ].map((dir) => resolve(dir, "cursor-agent"));
   for (const candidate of candidates) {
     try {
       accessSync(candidate, constants.X_OK);

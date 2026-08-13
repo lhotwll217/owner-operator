@@ -21,6 +21,31 @@ try {
     "a machine without the Cursor CLI gets the actionable resolution error");
 }
 
+// A relative PATH entry must still resolve to an absolute command: a later spawn from a
+// different working directory would otherwise re-resolve it against the wrong location.
+{
+  const { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { isAbsolute, join } = await import("node:path");
+  const { cursorAgentBinaryPath } = await import("./acp-launcher");
+  const pathRoot = realpathSync(mkdtempSync(join(tmpdir(), "oo-cursor-path-")));
+  mkdirSync(join(pathRoot, "bin"));
+  writeFileSync(join(pathRoot, "bin", "cursor-agent"), "#!/bin/sh\n", { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(pathRoot);
+    process.env.PATH = "bin";
+    const resolved = cursorAgentBinaryPath();
+    assert.ok(isAbsolute(resolved), "a relative PATH entry still yields an absolute command");
+    assert.equal(resolved, join(pathRoot, "bin", "cursor-agent"));
+  } finally {
+    process.env.PATH = previousPath;
+    process.chdir(previousCwd);
+    rmSync(pathRoot, { recursive: true, force: true });
+  }
+}
+
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };
 const appliedOptions: Array<{ key: string; value: string }> = [];
