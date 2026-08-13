@@ -32,6 +32,10 @@ table. Tool schemas own invocation details; the runtime contract lives in
 and `/agent-state` owns liveness. Use run management for cancel/resume control or when the owner
 explicitly requests inspection, never routine monitoring.
 
+**Harness selection** — before calling `delegate_agent`, follow the
+`select-harness-for-delegation` skill unless the owner explicitly supplied harness, model, and
+effort. Explicit owner choices win.
+
 ## Discovery policy
 
 Choose the shortest discovery mode the known facts justify; after every result, answer if the

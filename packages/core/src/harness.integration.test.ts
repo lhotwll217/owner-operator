@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   DEFAULT_SKILL_POLICY,
   DEFAULT_TOOL_POSTURE,
+  HARNESS_ROSTER_TEMPLATE,
   ensureOwnerOperatorWorkspace,
   loadHarnessSettings,
   ownerOperatorPaths,
@@ -25,14 +26,22 @@ try {
   assert.ok(existsSync(paths.workspaceMemory), "workspace MEMORY.md is seeded");
   assert.ok(existsSync(paths.workspaceSkills), "workspace skills directory exists");
   assert.ok(existsSync(paths.workspaceArtifacts), "workspace artifacts directory exists");
+  assert.equal(readFileSync(paths.harnessRoster, "utf8"), HARNESS_ROSTER_TEMPLATE);
+  assert.doesNotMatch(HARNESS_ROSTER_TEMPLATE, /claude-code|codex|sonnet|gpt-/i);
   assert.ok(existsSync(paths.piAgentDir), "owned Pi config directory exists");
 
   writeFileSync(paths.workspaceInstructions, "Owner instructions stay mine.\n");
+  writeFileSync(paths.harnessRoster, "# My harness roster\n\nKeep this exact preference.\n");
   ensureOwnerOperatorWorkspace(ooHome);
   assert.equal(
     readFileSync(paths.workspaceInstructions, "utf8"),
     "Owner instructions stay mine.\n",
     "re-entry never overwrites owner-edited bootstrap files",
+  );
+  assert.equal(
+    readFileSync(paths.harnessRoster, "utf8"),
+    "# My harness roster\n\nKeep this exact preference.\n",
+    "re-entry never overwrites the owner-edited roster",
   );
 
   const defaults = loadHarnessSettings(ooHome);

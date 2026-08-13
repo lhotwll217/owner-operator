@@ -10,6 +10,7 @@ import {
   AgentRunHarness,
   AgentRunStatus,
   GatewayEventKind,
+  approveDelegatedBaseline,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
   type GatewayEvent,
@@ -20,7 +21,9 @@ import { connectGateway } from "../gateway/client";
 import { tempOoHome, waitFor } from "../gateway/test/helpers";
 import { startDaemon } from "./runtime";
 
-const { cleanup } = tempOoHome("oo-agent-runs-e2e");
+const { dir: ooHome, cleanup } = tempOoHome("oo-agent-runs-e2e");
+approveDelegatedBaseline(AgentRunHarness.ClaudeCode, { model: "test-claude", effort: null }, ooHome);
+approveDelegatedBaseline(AgentRunHarness.Codex, { model: "test-codex", effort: "high" }, ooHome);
 
 // A controllable launcher shared across daemon incarnations: each launch parks on a promise
 // the test resolves (or the executor aborts on stop/cancel). It reports the child's ACP

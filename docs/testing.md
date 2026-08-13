@@ -51,6 +51,9 @@ Committed fixtures must be sanitized: no personal paths, repos, or names.
 
 ## Running
 
+Replace every `/explicit/...` path and `<exact-model-id>` below with a real local value before
+running an opt-in command; they are documentation placeholders, not repository defaults.
+
 ```sh
 npm test                                              # hermetic: unit + integration + e2e
 npm run typecheck                                     # tsc: root src + workspaces
@@ -58,11 +61,28 @@ npm run lint                                          # oxlint
 npm run test:integration                              # one tier
 npm run poll:smoke                                    # smoke — reads your live sessions
 npm run test:agent                                     # live — needs model auth, paid
+OO_RUN_DELEGATION_SELECTION_EVAL=1 \
+OO_DELEGATION_SELECTION_AUTH_PATH=/explicit/eval/auth.json \
+  npm run test:delegation-selection                    # real model chooses controlled trajectories
 OO_RUN_LIVE_ACP_TEST=1 npm run test:agent-runs:live    # real Claude/acpx kill + resume
 OO_RUN_LIVE_CODEX_ACP_TEST=1 \
   npm run test:agent-runs:codex-live                    # real Codex ACP startup + turn
+OO_RUN_LIVE_DELEGATED_IDENTITY=1 \
+OO_LIVE_IDENTITY_HARNESS=codex \
+OO_LIVE_IDENTITY_MODEL=<exact-model-id> \
+OO_LIVE_IDENTITY_EFFORT=high \
+OO_LIVE_IDENTITY_CREDENTIAL_SOURCE=/explicit/harness/credential-file \
+OO_LIVE_IDENTITY_CONFIG_SOURCE=/explicit/harness/config-file \
+  npm run test:delegated-identity:live                  # Gateway → real delegated lifecycle
 cd apps/widget && swift test                            # widget (Swift)
 ```
+
+The delegated-identity live test requires only the six `OO_*` inputs shown above. Credential and
+config source paths must name explicit files; the test copies them into a disposable harness home,
+discards ambient provider keys, ACP overrides, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR`, and runs from
+a neutral disposable directory. It preserves that directory when teardown cannot prove the daemon,
+leased process tree, and process lease are all gone, but deletes the copied harness credential and
+configuration first. Never put secret values in these variables.
 
 CI runs on every PR and every landing on `main`: [`ci.yml`](../.github/workflows/ci.yml);
 the widget suite: [`widget.yml`](../.github/workflows/widget.yml) (macOS, path-filtered).

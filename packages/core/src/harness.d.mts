@@ -18,6 +18,8 @@ export interface OwnerOperatorPaths {
   workspaceMemory: string;
   workspaceSkills: string;
   workspaceArtifacts: string;
+  harnessRoster: string;
+  delegatedBaselines: string;
   piAgentDir: string;
   piAuth: string;
   piSettings: string;
@@ -34,6 +36,7 @@ export interface OwnerOperatorPaths {
 export const DEFAULT_SKILL_POLICY: Readonly<SkillPolicy>;
 export const DEFAULT_TOOL_POSTURE: readonly string[];
 export const DEFAULT_PERMISSION_MODE: PermissionMode;
+export const HARNESS_ROSTER_TEMPLATE: string;
 export function isPermissionMode(value: unknown): value is PermissionMode;
 export function ownerOperatorPaths(ooHome?: string): OwnerOperatorPaths;
 export function ensureOwnerOperatorWorkspace(ooHome?: string): OwnerOperatorPaths;

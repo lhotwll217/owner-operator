@@ -6,6 +6,7 @@ import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
   reapStaleAgentRunProcesses,
+  terminateAgentRunProcessLease,
   updateAgentRunProcessLease,
 } from "./process-lease";
 
@@ -35,23 +36,25 @@ try {
     rootCommand: `node ${wrapperPath} --oo-agent-run-lease ${lease.leaseId}`,
   });
 
+  let snapshot = 0;
+  const liveTree = [
+    {
+      pid: 410,
+      ppid: 1,
+      command: `node ${wrapperPath} --oo-agent-run-lease ${lease.leaseId}`,
+    },
+    { pid: 411, ppid: 410, command: "node claude-agent-acp" },
+    {
+      pid: 420,
+      ppid: 1,
+      command: `node ${wrapperPath} --oo-agent-run-lease another-lease`,
+    },
+    { pid: 430, ppid: 1, command: "node unrelated.mjs" },
+  ];
   const result = await reapStaleAgentRunProcesses({
     wrapperPath,
     deps: {
-      listProcesses: async () => [
-        {
-          pid: 410,
-          ppid: 1,
-          command: `node ${wrapperPath} --oo-agent-run-lease ${lease.leaseId}`,
-        },
-        { pid: 411, ppid: 410, command: "node claude-agent-acp" },
-        {
-          pid: 420,
-          ppid: 1,
-          command: `node ${wrapperPath} --oo-agent-run-lease another-lease`,
-        },
-        { pid: 430, ppid: 1, command: "node unrelated.mjs" },
-      ],
+      listProcesses: async () => snapshot++ === 0 ? liveTree : liveTree.filter(({ pid }) => pid !== 410 && pid !== 411),
       killProcess: (pid, signal) => {
         killed.push({ pid, signal });
       },
@@ -70,6 +73,78 @@ try {
   );
   assert.equal(result.terminatedPids.includes(420), false, "an unknown lease is never claimed");
   assert.throws(() => readFileSync(lease.path), /ENOENT/, "a reaped lease is removed");
+
+  const resistant = createAgentRunProcessLease({ runId: "run-resistant", wrapperPath });
+  updateAgentRunProcessLease(resistant.leaseId, {
+    rootPid: 510,
+    rootCommand: `node ${wrapperPath} --oo-agent-run-lease ${resistant.leaseId}`,
+  });
+  const resistantTree = [{
+    pid: 510, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${resistant.leaseId}`,
+  }];
+  const failed = await reapStaleAgentRunProcesses({
+    wrapperPath,
+    deps: { listProcesses: async () => resistantTree, killProcess: () => undefined, sleep: async () => undefined },
+  });
+  assert.deepEqual(failed.terminatedPids, [], "a process still live after SIGKILL is not reported terminated");
+  assert.equal(JSON.parse(readFileSync(resistant.path, "utf8")).leaseId, resistant.leaseId,
+    "failed termination retains durable ownership evidence");
+
+  const reparented = createAgentRunProcessLease({ runId: "run-reparented", wrapperPath });
+  let terminationSnapshot = 0;
+  const originalTree = [
+    { pid: 610, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${reparented.leaseId}` },
+    { pid: 611, ppid: 610, command: "node surviving-child" },
+  ];
+  const terminated = await terminateAgentRunProcessLease({
+    leaseId: reparented.leaseId,
+    wrapperPath,
+    deps: {
+      listProcesses: async () => terminationSnapshot++ === 0 ? originalTree : [{ ...originalTree[1]!, ppid: 1 }],
+      killProcess: () => undefined,
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(terminated, false, "a descendant reparented after wrapper exit remains detectable by its original PID");
+  assert.equal(JSON.parse(readFileSync(reparented.path, "utf8")).leaseId, reparented.leaseId,
+    "reparented-survivor evidence retains its lease");
+
+  const recycled = createAgentRunProcessLease({ runId: "run-recycled", wrapperPath });
+  const recycledSignals: number[] = [];
+  const recycledPid = 701;
+  const recycledResult = await terminateAgentRunProcessLease({
+    leaseId: recycled.leaseId,
+    wrapperPath,
+    trackedPids: [recycledPid],
+    deps: {
+      listProcesses: async () => [{ pid: recycledPid, ppid: 1, command: "node unrelated-reused-pid" }],
+      killProcess: (pid) => { recycledSignals.push(pid); },
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(recycledResult, false, "a reused tracked PID fails closed as unresolved evidence");
+  assert.deepEqual(recycledSignals, [], "a tracked PID is never signaled without current lease ownership proof");
+  assert.equal(JSON.parse(readFileSync(recycled.path, "utf8")).leaseId, recycled.leaseId,
+    "unresolved tracked-PID evidence retains its lease");
+
+  const clean = createAgentRunProcessLease({ runId: "run-clean", wrapperPath });
+  let cleanSnapshot = 0;
+  const cleanTree = [
+    { pid: 710, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${clean.leaseId}` },
+    { pid: 711, ppid: 710, command: "node child" },
+  ];
+  const cleaned = await terminateAgentRunProcessLease({
+    leaseId: clean.leaseId,
+    wrapperPath,
+    trackedPids: [710, 711],
+    deps: {
+      listProcesses: async () => cleanSnapshot++ === 0 ? cleanTree : [],
+      killProcess: () => undefined,
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(cleaned, true, "a fully terminated tree confirms cleanup");
+  assert.throws(() => readFileSync(clean.path), /ENOENT/, "confirmed termination drops the lease");
 
   const closed = createAgentRunProcessLease({ runId: "run-2", wrapperPath });
   closeAgentRunProcessLease(closed.leaseId);

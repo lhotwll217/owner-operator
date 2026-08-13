@@ -9,6 +9,7 @@ import {
   AgentRunHarness,
   AgentRunStatus,
   DomainEventKind,
+  approveDelegatedBaseline,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
   type DomainEvent,
@@ -20,6 +21,8 @@ import { AgentRunExecutor } from "./executor";
 const dir = mkdtempSync(join(tmpdir(), "oo-agent-runs-"));
 const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
+approveDelegatedBaseline(AgentRunHarness.ClaudeCode, { model: "test-claude", effort: null }, dir);
+approveDelegatedBaseline(AgentRunHarness.Codex, { model: "test-codex", effort: "high" }, dir);
 
 const waitFor = async (predicate: () => boolean, label: string, timeoutMs = 5_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
@@ -74,15 +77,15 @@ try {
   });
   assert.equal(first.status, AgentRunStatus.Pending, "launch returns before execution starts");
   assert.equal(first.depth, 1, "operator launches are depth 1");
-  assert.equal(first.model, "sonnet", "Claude delegated work uses the configured non-1M default");
-  assert.equal(first.effort, null, "Claude records no effort when its adapter has no configured support");
+  assert.equal(first.model, "test-claude", "Claude delegated work uses the approved baseline");
+  assert.equal(first.effort, null, "a nullable approved effort reaches the durable row");
   const second = executor.launch({
     harness: AgentRunHarness.Codex,
     task: "audit dependencies",
     cwd: dir,
     parentThreadId: "parent-1",
   });
-  assert.equal(second.model, "gpt-5.6-sol", "Codex delegated work uses the configured default");
+  assert.equal(second.model, "test-codex", "Codex delegated work uses the approved baseline");
   assert.equal(second.effort, "high", "Codex effort is resolved into the durable pending row before launch");
   assert.equal(second.effortApplied, false, "intent starts distinguishably unapplied");
 
@@ -118,10 +121,10 @@ try {
     task: "third",
     cwd: dir,
     model: "caller-selected-model",
-    effort: "minimal",
+    effort: "max",
   });
   assert.equal(third.model, "caller-selected-model", "a caller-pinned model always wins");
-  assert.equal(third.effort, "minimal", "a caller-pinned effort always wins");
+  assert.equal(third.effort, "max", "a caller-pinned advertised frontier effort always wins");
   await waitFor(() => launches.length === 3, "third run to start");
   const cancelledThird = await executor.cancel(third.id);
   assert.equal(cancelledThird.status, AgentRunStatus.Cancelled, "cancel resolves with the finalized row");

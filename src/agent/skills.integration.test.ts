@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
@@ -41,6 +41,14 @@ try {
   const isolated = await load();
   const isolatedNames = isolated.getSkills().skills.map((skill) => skill.name);
   assert.ok(isolatedNames.includes("session-search"), "bundled Owner Operator skills are loaded");
+  assert.ok(
+    isolatedNames.includes("select-harness-for-delegation"),
+    "implicit delegation selection is a discoverable bundled skill",
+  );
+  const selectionSkill = isolated.getSkills().skills.find((skill) => skill.name === "select-harness-for-delegation");
+  assert.ok(selectionSkill, "the bundled selection skill resolves to a file");
+  assert.match(readFileSync(selectionSkill.filePath, "utf8"), /\$OO_HOME\/workspace\/harness-roster\.md/,
+    "the shipped workflow resolves the roster through configured OO_HOME");
   assert.ok(isolatedNames.includes("workspace-helper"), "workspace skills are loaded");
   assert.ok(!isolatedNames.includes("project-helper"), "task .pi skills are absent");
   assert.ok(!isolatedNames.includes("pi-user-helper"), "Pi user skills are absent");

@@ -126,22 +126,108 @@ and terminal styling are adapters over that contract.
   harness-native sub-agents.
 - **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, `delegate_agent` resolves the
-  per-harness default from the runtime [launch configuration](../src/agent-runs/launch-config.ts)
-  before creating the durable row; it never inherits an unsuitable ambient harness default.
-- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`). Its canonical vocabulary
-  lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts); resolution follows the same caller
-  pin then per-harness [launch configuration](../src/agent-runs/launch-config.ts) order as model and
-  lands in the durable row before launch. Legacy rows and runs with neither a caller pin nor a
-  harness default retain `NULL`; clients omit unknown effort instead of displaying a placeholder.
+  owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
+  before creating the durable row. With no approved baseline it asks instead of inheriting an
+  ambient harness default or inventing a product default.
+- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`), including explicit
+  `null`. Its canonical vocabulary lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts);
+  resolution follows the same caller pin then approved-baseline order as model and lands in the
+  durable row before launch. Legacy rows retain `NULL`; clients omit unknown effort instead of
+  displaying a placeholder.
 - **Effort application** is owned by the [ACP launcher](../src/agent-runs/acp-launcher.ts), which
   uses only session-advertised config options. The durable `effort_applied` field distinguishes
   recorded intent from successful application; its contract lives in
-  [schema docs](../src/state/schema-docs.ts).
+  [schema docs](../src/state/schema-docs.ts). After configuration, the launcher also reads the
+  effective model and supported effort back from ACP status into the ledger; this observation is
+  distinct from the prelaunch request fields. Public `AgentRun` values expose one discriminated
+  `harnessIdentity`: unobserved, model-only, effort-only, or model-and-effort. Empty status and
+  wholly unsupported status decode as unobserved, so contradictory public representations cannot
+  be constructed. The three SQL columns are only that value's storage encoding.
 - **Process ownership is explicit on POSIX.** Before `acpx` can spawn, the launcher persists a
   lease and puts its unguessable id on a stable Owner Operator wrapper's command line. Normal
-  completion closes the ACP process tree and lease; daemon startup reaps only orphaned trees whose
+  completion closes the ACP process tree, then confirms every PID from the original tree is gone
+  before releasing its lease; daemon startup reaps only orphaned trees whose
   live wrapper path and lease id both match. It fails closed on unavailable process listings and
   never claims a bare Claude, Codex, or `acpx` process.
+
+## Harness details
+
+Before an implicit delegation, the Operator loads the bundled
+[`select-harness-for-delegation`](../src/agent/skills/select-harness-for-delegation/SKILL.md)
+skill. The skill owns roster interpretation, baseline and owner-defined task-role classification,
+current-details consultation, exact identity selection, approved-baseline consent, and concise
+identity reporting. A complete owner-supplied harness/model/effort choice—including explicit null
+effort—bypasses selection and reaches `delegate_agent` unchanged. The permanent product prompt owns
+only that invocation and precedence rule.
+
+`get_harness_details` reads what a harness currently offers — its model catalog, the reasoning
+levels each model supports, the subscription plan, and how much of each subscription allowance
+window is spent. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts) is the
+stable normalization facade; private sibling modules own the Codex JSON-RPC process and ACP probe
+lifecycle. The tool is a thin adapter over the facade.
+
+The boundary is read-only and ephemeral:
+
+- **Nothing is stored.** No cache, no polling, no provider registry, no failure ledger. Every call
+  re-observes, and a snapshot is only true as of its `observedAt`.
+- **`null` means unknown; `[]` means observed-and-none.** A fact the harness exposes no surface for
+  stays `null` rather than being inferred from documentation or pricing pages. Claude Code exposes
+  no first-party catalog, plan, or allowance surface, so those stay unknown.
+- **One harness cannot erase another.** Each harness is observed independently and a failure lands
+  in that harness's own `errors`.
+- **Percentages are subscription allowance**, never token counts and never list-price figures.
+- **No selection happens here.** The details layer reports facts and ranks nothing; choosing a
+  harness or model is the caller's decision.
+
+Codex facts come from its first-party `codex app-server` JSON-RPC surface. The catalog request is
+issued last in the handshake because the app-server only begins refreshing its remote catalog after
+`initialized` and announces nothing when that refresh lands; asking earlier returns a stale local
+copy.
+
+Baseline-candidate discovery is opt-in and separate. It opens one throwaway ACP session pinning
+neither model nor effort, reads back what the harness selected for itself, and reports it as a
+*candidate*. A candidate is never saved: persisting a delegated default requires explicit owner
+approval and is owned by the [launch configuration](../src/agent-runs/launch-config.ts).
+
+`manage_delegated_baseline` is the narrow consent seam. `propose` performs initial discovery or a
+refresh and only compares the ephemeral candidate with the current approval. `approve` stores the
+exact owner-approved model and nullable effort in one atomically replaced file per harness under
+`delegated-baselines/`, separate from the owner-edited roster and the run ledger. Declining a
+proposal performs no write.
+
+The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
+harness config cannot contaminate a global candidate. The active probe owns termination: timeout
+requests close, then verifies the leased wrapper tree is absent before releasing its process lease
+and disposable session directory. Failed verification retains both the lease and probe session
+directory as termination evidence for startup orphan reaping; neither is presented as a usable
+baseline candidate.
+
+### Manual baseline-consent proof
+
+Use a disposable home so discovery and approval cannot touch the owner's normal configuration.
+This is a paid, real-harness check; it is not part of `npm test`.
+
+```sh
+PROOF_USER_HOME="$(mktemp -d)"
+PROOF_OO_HOME="$PROOF_USER_HOME/.owner-operator"
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo
+```
+
+Complete setup for the real harness credentials in that isolated home. Then use one saved headless
+conversation for the consent loop (replace `claude-code` with `codex` when proving that harness):
+
+```sh
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "I approve exactly the proposed model and effort. Persist it, then delegate a child that replies OO_BASELINE_PROOF_OK using the approved baseline explicitly."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "Refresh the claude-code baseline candidate, show the candidate and current approval, but do not approve the refresh. I decline any replacement."
+```
+
+Inspect the transcript named on stderr and
+`$PROOF_OO_HOME/delegated-baselines/claude-code.json`. The first turn must show an unpinned
+candidate with no baseline file or delegated launch. The second must show explicit owner approval,
+the persisted exact nullable identity, and a later run row reporting the same harness/model/effort.
+The third must show a fresh proposal while the file remains byte-for-byte unchanged. Remove only
+the printed disposable directory after retaining any sanitized proof needed for acceptance.
 
 ## Permissions
 

@@ -45,11 +45,11 @@ export interface AgentRunProcessCleanupResult {
   skippedReason?: "unsupported-platform" | "process-list-unavailable";
 }
 
-const leaseDir = (): string => join(ownerOperatorHome(), "agent-runs", "process-leases");
-const leasePath = (leaseId: string): string => join(leaseDir(), `${leaseId}.json`);
+export const agentRunProcessLeaseDir = (): string => join(ownerOperatorHome(), "agent-runs", "process-leases");
+const leasePath = (leaseId: string): string => join(agentRunProcessLeaseDir(), `${leaseId}.json`);
 
 function writeLease(lease: AgentRunProcessLease): void {
-  mkdirSync(leaseDir(), { recursive: true });
+  mkdirSync(agentRunProcessLeaseDir(), { recursive: true });
   const path = leasePath(lease.leaseId);
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(temp, `${JSON.stringify(lease, null, 2)}\n`, { mode: 0o600 });
@@ -82,15 +82,76 @@ function readLease(path: string): AgentRunProcessLease | undefined {
 
 function listLeases(): AgentRunProcessLease[] {
   try {
-    return readdirSync(leaseDir())
+    return readdirSync(agentRunProcessLeaseDir())
       .filter((name) => name.endsWith(".json"))
       .flatMap((name) => {
-        const lease = readLease(join(leaseDir(), name));
+        const lease = readLease(join(agentRunProcessLeaseDir(), name));
         return lease ? [lease] : [];
       });
   } catch {
     return [];
   }
+}
+
+async function processesForLease(
+  leaseId: string,
+  wrapperPath: string,
+  deps?: AgentRunProcessCleanupDeps,
+): Promise<ProcessInfo[] | null> {
+  try {
+    const processes = await (deps?.listProcesses ?? listPlatformProcesses)();
+    const roots = processes.filter((entry) =>
+      entry.command.includes(wrapperPath) && leaseIdFromCommand(entry.command) === leaseId
+    );
+    return roots.flatMap((root) => collectProcessTree(processes, root.pid));
+  } catch {
+    return null;
+  }
+}
+
+/** Terminate the live process tree owned by one lease, including during initialization before
+ * acpx has produced a session handle. The lease is removed only after a second process snapshot
+ * confirms that the exact wrapper identity is gone. */
+export async function terminateAgentRunProcessLease(params: {
+  leaseId: string;
+  wrapperPath: string;
+  trackedPids?: readonly number[];
+  deps?: AgentRunProcessCleanupDeps;
+}): Promise<boolean> {
+  if (process.platform === "win32") return false;
+  let processes: ProcessInfo[];
+  try {
+    processes = await (params.deps?.listProcesses ?? listPlatformProcesses)();
+  } catch {
+    return false;
+  }
+  const roots = processes.filter((entry) =>
+    entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId);
+  const liveTree = roots.flatMap((root) => collectProcessTree(processes, root.pid));
+  const livePids = new Set(uniquePids(liveTree));
+  const originalPids = new Set([...(params.trackedPids ?? []), ...livePids]);
+  const owned = processes.filter((entry) => livePids.has(entry.pid));
+  await terminatePids(uniquePids([...owned].reverse()), params.deps);
+  let after: ProcessInfo[];
+  try {
+    after = await (params.deps?.listProcesses ?? listPlatformProcesses)();
+  } catch {
+    return false;
+  }
+  if (after.some((entry) => originalPids.has(entry.pid)
+    || (entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId))) return false;
+  closeAgentRunProcessLease(params.leaseId);
+  return true;
+}
+
+/** Snapshot the exact live PID tree before requesting a graceful runtime close. */
+export async function agentRunProcessTreePids(params: {
+  leaseId: string;
+  wrapperPath: string;
+  deps?: AgentRunProcessCleanupDeps;
+}): Promise<number[] | null> {
+  const tree = await processesForLease(params.leaseId, params.wrapperPath, params.deps);
+  return tree === null ? null : uniquePids(tree);
 }
 
 /** Persist ownership before acpx can spawn. The root PID is filled after ACP initialization. */
@@ -257,9 +318,28 @@ export async function reapStaleAgentRunProcesses(params: {
     uniquePids(trees.flatMap((tree) => [...tree].reverse())),
     params.deps,
   );
+  let after: ProcessInfo[];
+  try {
+    after = await (params.deps?.listProcesses ?? listPlatformProcesses)();
+  } catch {
+    return { inspectedPids, terminatedPids: [], skippedReason: "process-list-unavailable" };
+  }
+  const confirmedTerminated = new Set<number>();
   for (const root of roots) {
     const leaseId = leaseIdFromCommand(root.command);
-    if (leaseId) closeAgentRunProcessLease(leaseId);
+    if (!leaseId) continue;
+    const originalTree = trees.find((tree) => tree[0]?.pid === root.pid) ?? [];
+    const originalPids = new Set(originalTree.map(({ pid }) => pid));
+    const remaining = after.filter((entry) =>
+      (entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === leaseId)
+      || originalPids.has(entry.pid)
+    );
+    if (remaining.length === 0) {
+      closeAgentRunProcessLease(leaseId);
+      for (const pid of uniquePids(originalTree)) {
+        confirmedTerminated.add(pid);
+      }
+    }
   }
-  return { inspectedPids, terminatedPids };
+  return { inspectedPids, terminatedPids: terminatedPids.filter((pid) => confirmedTerminated.has(pid)) };
 }

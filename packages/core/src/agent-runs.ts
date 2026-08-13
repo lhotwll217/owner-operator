@@ -22,11 +22,30 @@ export enum AgentRunStatus {
 }
 
 /** Harness-neutral reasoning-effort intent supported by the durable run contract. */
-export const AGENT_RUN_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export const AGENT_RUN_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type AgentRunEffort = (typeof AGENT_RUN_EFFORTS)[number];
 
 export function isAgentRunEffort(value: unknown): value is AgentRunEffort {
   return typeof value === "string" && AGENT_RUN_EFFORTS.includes(value as AgentRunEffort);
+}
+
+/** Live harness identity evidence. An observed value always contains at least one supported fact;
+ * this makes an empty or wholly unsupported status impossible to report as observed. */
+export type HarnessIdentityObservation =
+  | { observed: false }
+  | { observed: true; model: string; effort?: AgentRunEffort }
+  | { observed: true; model?: string; effort: AgentRunEffort };
+
+export function harnessIdentityObservation(input: {
+  model?: unknown;
+  effort?: unknown;
+}): HarnessIdentityObservation {
+  const model = typeof input.model === "string" && input.model.trim() ? input.model : undefined;
+  const effort = isAgentRunEffort(input.effort) ? input.effort : undefined;
+  if (model && effort) return { observed: true, model, effort };
+  if (model) return { observed: true, model };
+  if (effort) return { observed: true, effort };
+  return { observed: false };
 }
 
 /** Terminal states are monotonic: once reached, a run row never changes status again,
@@ -106,7 +125,7 @@ export interface AgentRunCreateInput {
   parentThreadId?: string | null;
   /** Model the child should run, when the owner pins one; null lets the harness pick. */
   model?: string | null;
-  /** Reasoning effort requested for the child; null lets launch configuration decide. */
+  /** Reasoning effort requested for the child; omission uses the baseline, explicit null clears it. */
   effort?: AgentRunEffort | null;
   timeoutSeconds?: number;
 }
@@ -122,6 +141,8 @@ export interface AgentRun {
   effort: AgentRunEffort | null;
   /** True only after the launcher successfully applies effort through an advertised option. */
   effortApplied: boolean;
+  /** Canonical identity independently read back from the live harness after configuration. */
+  harnessIdentity: HarnessIdentityObservation;
   depth: number;
   status: AgentRunStatus;
   createdAt: string;
@@ -156,6 +177,7 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
   activity?: string;
   /** Runtime acknowledgement that the resolved effort was applied. */
   effortApplied?: boolean;
+  harnessIdentity?: HarnessIdentityObservation;
 }
 
 /** Runtime request passed from the executor to the injected launcher seam. */

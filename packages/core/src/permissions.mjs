@@ -23,9 +23,9 @@ const BLACKLIST_REASON = "Owner Operator privacy blacklist";
 // Keep these explicit defaults aligned with src/agent/tools/index.ts. Unlisted tools safely fall
 // back to the selected mode; the lists identify known reads, bounded OO state changes, and risky
 // generic changes separately.
-const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_session_state", "query_database"];
+const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_session_state", "query_database", "get_harness_details"];
 const NATIVE_STATE_SURFACES = ["mark_thread_done"];
-const CHANGE_SURFACES = ["edit", "write", "schedule_prompt", "manage_schedule", "delegate_agent", "manage_agent_run"];
+const CHANGE_SURFACES = ["edit", "write", "schedule_prompt", "manage_schedule", "delegate_agent", "manage_agent_run", "manage_delegated_baseline"];
 const MANAGED_SURFACES = [...READ_SURFACES, ...NATIVE_STATE_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
 const JSON_FORMAT = { insertSpaces: true, tabSize: 2, eol: "\n" };
 

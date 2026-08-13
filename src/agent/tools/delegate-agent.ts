@@ -18,8 +18,8 @@ const HarnessSchema = Type.Union(
 );
 
 const EffortSchema = Type.Union(
-  AGENT_RUN_EFFORTS.map((effort) => Type.Literal(effort)),
-  { description: `Reasoning effort: ${AGENT_RUN_EFFORTS.join(" | ")}.` },
+  [...AGENT_RUN_EFFORTS.map((effort) => Type.Literal(effort)), Type.Null()],
+  { description: `Reasoning effort: ${AGENT_RUN_EFFORTS.join(" | ")}, or null to override an approved effort.` },
 );
 
 type DelegateAgentGateway = Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
@@ -45,7 +45,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       cwd: Type.Optional(Type.String({ description: "Absolute working directory. Defaults to the caller's cwd." })),
       model: Type.Optional(Type.String({
         minLength: 1,
-        description: "Pin the child's model. Omit to use Owner Operator's configured default for the harness.",
+        description: "Pin the child's model. Omit to use the owner-approved delegated baseline for the harness.",
       })),
       effort: Type.Optional(EffortSchema),
       timeoutSeconds: Type.Optional(Type.Integer({

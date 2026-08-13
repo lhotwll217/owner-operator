@@ -19,6 +19,7 @@ export function agentRunFixture(
     model: null,
     effort: null,
     effortApplied: false,
+    harnessIdentity: { observed: false },
     depth: 1,
     status,
     createdAt: "2026-07-21T12:00:00.000Z",

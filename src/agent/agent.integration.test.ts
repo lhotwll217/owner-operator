@@ -127,6 +127,21 @@ for (const t of ["get_current_session_state", "mark_thread_done", "query_databas
 assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === "search_sessions"), "session search is a skill, not a duplicate custom tool");
 
 const harnessPrompt = ownerOperatorPrompt();
+assert.match(harnessPrompt, /select-harness-for-delegation/);
+assert.match(harnessPrompt, /unless the owner explicitly supplied harness, model, and\s+effort/i);
+assert.match(harnessPrompt, /explicit owner choices win/i);
+for (const mechanic of [
+  "harness-roster.md",
+  "get_harness_details",
+  "manage_delegated_baseline",
+  "Task roles",
+  "allowance",
+]) {
+  assert.ok(
+    !harnessPrompt.toLowerCase().includes(mechanic.toLowerCase()),
+    `the permanent prompt delegates ${mechanic} mechanics to the bundled skill`,
+  );
+}
 assert.match(harnessPrompt, /After delegating, do not poll status/i);
 assert.match(harnessPrompt, /`\/agent-state` owns liveness/i);
 assert.match(harnessPrompt, /never routine monitoring/i);
@@ -134,6 +149,30 @@ const sessionSearchSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "session-search", "SKILL.md"),
   "utf8",
 );
+const delegationSelectionSkill = readFileSync(
+  join(repoRoot, "src", "agent", "skills", "select-harness-for-delegation", "SKILL.md"),
+  "utf8",
+);
+for (const mechanic of [
+  "harness-roster.md",
+  "get_harness_details",
+  "manage_delegated_baseline",
+  "owner-added role",
+  "effort: null",
+  "unknown",
+  "owner-approved delegated baseline",
+  "actual unpinned ACP candidate",
+  "explicitly approve",
+  "Retry selection",
+  "fill omitted execution-identity fields",
+  "without replacing",
+  "delegate_agent",
+]) {
+  assert.ok(
+    delegationSelectionSkill.toLowerCase().includes(mechanic.toLowerCase()),
+    `the bundled selection skill owns ${mechanic} mechanics`,
+  );
+}
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
 }
