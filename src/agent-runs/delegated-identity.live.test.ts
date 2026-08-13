@@ -154,8 +154,10 @@ try {
   await daemonExited;
   try {
     assert.ok(!daemon?.pid || !isAlive(daemon.pid), "daemon remains gone after teardown");
-    const ownedProcesses = processList().filter(({ pid, command }) =>
-      isolatedProcessPids.includes(pid) || isolatedLeaseIds.some((leaseId) => command.includes(leaseId)));
+    const ownedProcesses = daemon?.pid
+      ? processList().filter(({ pid, command }) =>
+        isolatedProcessPids.includes(pid) || isolatedLeaseIds.some((leaseId) => command.includes(leaseId)))
+      : [];
     assert.deepEqual(ownedProcesses, [], "no isolated daemon wrapper or descendant remains live");
     const leaseDir = join(ooHome, "agent-runs", "process-leases");
     assert.deepEqual(existsSync(leaseDir) ? readdirSync(leaseDir).filter((name) => name.endsWith(".json")) : [], [],
