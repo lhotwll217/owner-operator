@@ -5,7 +5,7 @@ import {
   CODEX_MODEL_LIST,
   CODEX_RATE_LIMITS_READ,
 } from "../../test/fixtures/codex-app-server";
-import { CURSOR_ABOUT, CURSOR_MODELS_TEXT, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
+import { CURSOR_ABOUT, CURSOR_ACP_MODELS, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
 import {
   CODEX_DETAILS_SOURCE,
   CURSOR_DETAILS_SOURCE,
@@ -26,7 +26,7 @@ const capturedPayloads: CodexAppServerPayloads = {
 const capturedCursorPayloads: CursorCliPayloads = {
   about: CURSOR_ABOUT,
   status: CURSOR_STATUS,
-  modelsText: CURSOR_MODELS_TEXT,
+  acpModels: CURSOR_ACP_MODELS,
   errors: [],
 };
 
@@ -153,55 +153,61 @@ const cursor = normalizeCursorHarnessDetails(capturedCursorPayloads, OBSERVED_AT
 assert.equal(cursor.harness, AgentRunHarness.Cursor);
 assert.equal(cursor.source, CURSOR_DETAILS_SOURCE, "facts name the CLI surface that produced them");
 assert.deepEqual(cursor.account, { plan: "Pro" }, "the subscription tier is read, not inferred");
-assert.equal(cursor.models?.length, 14, "every `<id> - <name>` catalog line becomes a model row");
+assert.equal(cursor.models?.length, 8, "every ACP-advertised entry becomes a model row");
 assert.deepEqual(cursor.models?.[0], {
-  id: "auto",
+  id: "default[]",
   displayName: "Auto",
   reasoningLevels: null,
   unsupportedReasoningLevels: [],
   defaultReasoningLevel: null,
-  isDefault: true,
-}, "the `(default)` marker is stripped into isDefault; effort-in-id models advertise no levels");
+  isDefault: false,
+}, "ids are the ACP launch vocabulary verbatim; effort-in-id models advertise no levels");
 assert.deepEqual(
   cursor.models?.filter(({ isDefault }) => isDefault).map(({ id }) => id),
-  ["auto"],
-  "exactly the harness-marked default is flagged",
-);
-assert.equal(
-  cursor.models?.find(({ id }) => id === "gpt-5.6-sol-xhigh")?.displayName,
-  "GPT-5.6 Sol 1M Extra High",
-  "header, blank, and tip lines are excluded; catalog lines survive verbatim",
+  ["claude-fable-5[thinking=true,context=300k,effort=high]"],
+  "exactly the entry an unpinned session selected is flagged as default",
 );
 assert.equal(cursor.allowanceWindows, null, "Cursor exposes no allowance surface, so it stays unknown");
 assert.match(cursor.notes.join(" "), /unknown, not empty/i);
+assert.match(cursor.notes.join(" "), /ACP-advertised/, "the catalog names its launch-authoritative source");
 assert.deepEqual(cursor.errors, [], "an authenticated CLI observation carries no errors");
 
 const cursorUnknown = normalizeCursorHarnessDetails(
-  { about: null, status: null, modelsText: null, errors: ["cursor-agent models: spawn failed"] },
+  { about: null, status: null, acpModels: null, errors: ["cursor-agent acp: spawn failed"] },
   OBSERVED_AT,
 );
 assert.equal(cursorUnknown.models, null, "an unreadable catalog is unknown, not empty");
 assert.equal(cursorUnknown.account, null);
-assert.deepEqual(cursorUnknown.errors, ["cursor-agent models: spawn failed"], "client errors surface verbatim");
+assert.deepEqual(cursorUnknown.errors, ["cursor-agent acp: spawn failed"], "client errors surface verbatim");
 
-// Output that parses to zero rows is a format mismatch, not an observed-empty catalog.
+// A session response with no readable catalog is a shape mismatch, not an observed-empty catalog.
 const cursorUnrecognized = normalizeCursorHarnessDetails({
   about: CURSOR_ABOUT,
   status: CURSOR_STATUS,
-  modelsText: "unexpected: output format the parser does not recognize\n",
+  acpModels: { unexpected: "shape" },
   errors: [],
 }, OBSERVED_AT);
-assert.equal(cursorUnrecognized.models, null, "unrecognized non-empty output is unknown, never observed-none");
-assert.deepEqual(cursorUnrecognized.errors, ["cursor-agent models: no catalog entries recognized in output"]);
+assert.equal(cursorUnrecognized.models, null, "an unrecognized session response is unknown, never observed-none");
+assert.deepEqual(cursorUnrecognized.errors, ["cursor-agent acp: no model catalog recognized in session response"]);
+
+// Only an advertised empty list means the account can select nothing.
+const cursorEmpty = normalizeCursorHarnessDetails({
+  about: CURSOR_ABOUT,
+  status: CURSOR_STATUS,
+  acpModels: { currentModelId: null, availableModels: [] },
+  errors: [],
+}, OBSERVED_AT);
+assert.deepEqual(cursorEmpty.models, [], "an advertised empty catalog is empty, not unknown");
+assert.deepEqual(cursorEmpty.errors, []);
 
 const cursorUnauthenticated = normalizeCursorHarnessDetails({
   about: CURSOR_ABOUT,
   status: { status: "not_authenticated", isAuthenticated: false },
-  modelsText: CURSOR_MODELS_TEXT,
+  acpModels: CURSOR_ACP_MODELS,
   errors: [],
 }, OBSERVED_AT);
 assert.match(cursorUnauthenticated.errors.join(" "), /not authenticated/, "signed-out auth is an explicit error");
-assert.equal(cursorUnauthenticated.models?.length, 14, "auth state does not erase facts already read");
+assert.equal(cursorUnauthenticated.models?.length, 8, "auth state does not erase facts already read");
 
 // --- All harnesses, observed independently ----------------------------------------------------
 
@@ -246,7 +252,7 @@ assert.equal(
 );
 assert.equal(
   withFailure.find(({ harness }) => harness === AgentRunHarness.Cursor)?.models?.length,
-  14,
+  8,
   "a Codex failure cannot erase Cursor's facts",
 );
 

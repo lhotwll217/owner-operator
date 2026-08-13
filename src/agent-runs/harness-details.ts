@@ -220,23 +220,24 @@ export function normalizeCursorHarnessDetails(
   if (status && status.isAuthenticated !== true) {
     errors.push("cursor-agent is not authenticated; run `cursor-agent login`");
   }
-  const models = normalizeCursorModels(payloads.modelsText);
-  // Output that parses to zero rows means the format was not recognized, not an empty catalog:
-  // reporting [] would claim "observed and none" for models the parser simply failed to read.
-  if (payloads.modelsText !== null && !models?.length) {
-    errors.push("cursor-agent models: no catalog entries recognized in output");
+  const models = normalizeCursorModels(payloads.acpModels);
+  // A present payload that yields no readable catalog means the shape was not recognized, not an
+  // empty catalog; only an advertised empty list is "observed and none".
+  if (payloads.acpModels !== null && models === null) {
+    errors.push("cursor-agent acp: no model catalog recognized in session response");
   }
   return {
     harness: AgentRunHarness.Cursor,
     observedAt,
     source: CURSOR_DETAILS_SOURCE,
     account: normalizeCursorAccount(payloads.about),
-    models: models?.length ? models : null,
+    models,
     allowanceWindows: null,
     baselineCandidate: null,
     notes: [
+      "Model ids are the ACP-advertised launch catalog; the broader `cursor-agent models` account catalog uses ids a delegated launch cannot select.",
       "Cursor exposes no allowance-window surface; allowance facts are unknown, not empty.",
-      "Reasoning effort is encoded in Cursor model ids (suffixes or bracket overrides), not advertised as separate levels.",
+      "Reasoning effort is encoded in Cursor model ids (bracket parameters), not advertised as separate levels.",
     ],
     errors,
   };
@@ -248,21 +249,24 @@ function normalizeCursorAccount(payload: unknown): HarnessAccountDetail | null {
   return { plan: text(about.subscriptionTier) };
 }
 
-/** Parse the plain-text `cursor-agent models` catalog: `<id> - <display name>` lines, with the
- * harness default suffixed `(default)`. Header, blank, and tip lines carry no ` - ` separator. */
-function normalizeCursorModels(payload: string | null): HarnessModelDetail[] | null {
-  if (payload === null) return null;
-  return payload.split(/\r?\n/).flatMap((line) => {
-    const match = /^(\S+) - (.+)$/.exec(line.trim());
-    if (!match) return [];
-    const isDefault = match[2]!.endsWith(" (default)");
+/** Map the ACP session/new `models` object onto the normalized shape. `isDefault` marks the
+ * entry an unpinned session actually selected (`currentModelId`) — the same semantics as the
+ * baseline candidate, read without a turn. */
+function normalizeCursorModels(payload: unknown): HarnessModelDetail[] | null {
+  const models = record(payload);
+  if (!models || !Array.isArray(models.availableModels)) return null;
+  const currentModelId = text(models.currentModelId);
+  return models.availableModels.flatMap((entry) => {
+    const model = record(entry);
+    const id = model && text(model.modelId);
+    if (!id) return [];
     return [{
-      id: match[1]!,
-      displayName: isDefault ? match[2]!.slice(0, -" (default)".length) : match[2]!,
+      id,
+      displayName: text(model.name) ?? id,
       reasoningLevels: null,
       unsupportedReasoningLevels: [],
       defaultReasoningLevel: null,
-      isDefault,
+      isDefault: id === currentModelId,
     }];
   });
 }
