@@ -93,8 +93,11 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
     headers: { authorization: `Bearer ${daemonInfo.authToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  assert.ok(response.ok, `${path}: ${response.status} ${await response.text()}`);
-  return await response.json() as T;
+  // Read the body exactly once: an assert message that awaited response.text() inline would
+  // consume the body on success too, making the follow-up json() read fail unconditionally.
+  const payload = await response.text();
+  assert.ok(response.ok, `${path}: ${response.status} ${payload}`);
+  return JSON.parse(payload) as T;
 }
 
 try {
