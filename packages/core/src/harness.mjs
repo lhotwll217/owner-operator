@@ -56,8 +56,8 @@ function writeMissing(path, content) {
  * delegated-baselines/, so nothing the product decides is ever written into this file. */
 export const HARNESS_ROSTER_TEMPLATE = `# Harness roster
 
-Your preferences for the coding agents Owner Operator delegates work to. This file is yours.
-Owner Operator reads it and never writes to it, and product upgrades leave it alone.
+Your preferences for the coding agents Owner Operator delegates work to. This file is yours:
+Owner Operator edits it only at your explicit direction, and product upgrades leave it alone.
 
 Under a role, name a harness, a model, and a reasoning effort, or write the preference in plain
 language. Model identifiers belong to one harness and are not interchangeable between harnesses;
@@ -73,7 +73,6 @@ Owner Operator can report what each harness currently advertises before you name
   for that harness, which is stored outside this file.
 - A delegated run uses whichever account its harness CLI is signed into on this machine; the run
   is billed to that account and the task's code is sent to it.
-- Owner Operator never edits this roster. It changes only when you change it.
 
 ## Task roles
 

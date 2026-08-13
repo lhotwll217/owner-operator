@@ -1,11 +1,11 @@
 /** Payloads captured verbatim from the first-party `cursor-agent` CLI (2026.07.08): the JSON
- * results of `about --format json` and `status --format json`, and the plain-text stdout of
- * `models` (truncated to a representative slice; the real catalog is ~200 entries in the same
- * line shape). Only the account email and user identity fields are replaced.
+ * results of `about --format json` and `status --format json`, and the `models` object from a
+ * live `cursor-agent acp` session/new response (truncated to a representative slice). Only the
+ * account email and user identity fields are replaced.
  *
- * Regenerate by running those exact commands against a signed-in `cursor-agent` and pasting the
- * raw output; do not hand-edit field shapes, because these fixtures exist to prove Owner Operator
- * normalizes the CLI surface as it actually is.
+ * Regenerate by running those commands / the ACP initialize+session/new handshake against a
+ * signed-in `cursor-agent` and pasting the raw output; do not hand-edit field shapes, because
+ * these fixtures exist to prove Owner Operator normalizes the surfaces as they actually are.
  */
 
 /** Raw `cursor-agent about --format json` stdout for a signed-in subscription account. */
@@ -35,24 +35,19 @@ export const CURSOR_STATUS = {
   }
 } as const;
 
-/** Raw `cursor-agent models` stdout: a header, `<id> - <display name>` lines with the harness
- * default marked `(default)`, and a trailing usage tip. */
-export const CURSOR_MODELS_TEXT = `Available models
-
-auto - Auto (default)
-gpt-5.3-codex-low - Codex 5.3 Low
-gpt-5.3-codex - Codex 5.3
-gpt-5.3-codex-high - Codex 5.3 High
-gpt-5.3-codex-xhigh - Codex 5.3 Extra High
-composer-2.5 - Composer 2.5
-claude-opus-5-thinking-high - Opus 5 1M Thinking
-gpt-5.6-sol-high - GPT-5.6 Sol 1M High
-gpt-5.6-sol-xhigh - GPT-5.6 Sol 1M Extra High
-claude-fable-5-thinking-high - Fable 5 1M Thinking (NO ZDR)
-claude-sonnet-5-thinking-high - Sonnet 5 1M Thinking
-cursor-grok-4.6-high - Cursor Grok 4.6
-kimi-k3-high - Kimi K3 High
-glm-5.2-max - GLM 5.2 Max
-
-Tip: use --model <id> (or /model <id> in interactive mode) to switch. Parameterized models also accept quoted overrides, e.g. --model 'claude-opus-4-8[context=1m,effort=high,fast=false]'.
-`;
+/** Raw `models` object from a `cursor-agent acp` session/new result: the launch-authoritative
+ * catalog. Ids are bracket-parameterized and differ from the broader `cursor-agent models`
+ * account catalog; `currentModelId` is what an unpinned session selected. */
+export const CURSOR_ACP_MODELS = {
+  "currentModelId": "claude-fable-5[thinking=true,context=300k,effort=high]",
+  "availableModels": [
+    { "modelId": "default[]", "name": "Auto" },
+    { "modelId": "grok-4.6[effort=high,fast=true]", "name": "grok-4.6" },
+    { "modelId": "composer-2.5[fast=true]", "name": "composer-2.5" },
+    { "modelId": "claude-opus-5[thinking=true,context=300k,effort=high,fast=false]", "name": "claude-opus-5" },
+    { "modelId": "gpt-5.6-sol[context=272k,reasoning=medium,fast=false]", "name": "gpt-5.6-sol" },
+    { "modelId": "claude-fable-5[thinking=true,context=300k,effort=high]", "name": "claude-fable-5" },
+    { "modelId": "claude-sonnet-5[thinking=true,context=300k,effort=high]", "name": "claude-sonnet-5" },
+    { "modelId": "gemini-3.1-pro[]", "name": "gemini-3.1-pro" },
+  ],
+} as const;

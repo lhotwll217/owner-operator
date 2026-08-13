@@ -8,7 +8,7 @@ import {
   CODEX_MODEL_LIST,
   CODEX_RATE_LIMITS_READ,
 } from "../../test/fixtures/codex-app-server";
-import { CURSOR_ABOUT, CURSOR_MODELS_TEXT, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
+import { CURSOR_ABOUT, CURSOR_ACP_MODELS, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
 import { readHarnessDetails } from "./harness-details";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-harness-details-"));
@@ -38,7 +38,7 @@ try {
       readCursorPayloads: async () => ({
         about: CURSOR_ABOUT,
         status: CURSOR_STATUS,
-        modelsText: CURSOR_MODELS_TEXT,
+        acpModels: CURSOR_ACP_MODELS,
         errors: [],
       }),
       discoverBaselineCandidate: async () => ({

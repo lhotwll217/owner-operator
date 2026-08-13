@@ -184,12 +184,15 @@ issued last in the handshake because the app-server only begins refreshing its r
 `initialized` and announces nothing when that refresh lands; asking earlier returns a stale local
 copy.
 
-Cursor facts come from its first-party `cursor-agent` CLI: `models` (catalog), `about` (plan and
-default), and `status` (auth). Cursor speaks ACP natively — the launcher runs the resolved local
+Cursor facts come from its first-party `cursor-agent` CLI: the model catalog from a throwaway
+`cursor-agent acp` session (initialize + session/new, no billed turn), `about` (plan), and
+`status` (auth). The ACP-advertised list is the launch-authoritative catalog — the broader
+`cursor-agent models` account catalog uses different ids a delegated launch cannot select, so it
+is deliberately not read. Cursor speaks ACP natively — the launcher runs the resolved local
 CLI as `cursor-agent acp` through the same registry-override seam as Codex, with no adapter
-package in between. Cursor encodes reasoning effort inside its model ids (suffixes such as
-`-xhigh`, or bracket overrides), so the catalog advertises no separate reasoning levels, and
-allowance windows have no CLI surface — both stay honestly unknown. The CLI is signed into
+package in between. Cursor encodes reasoning effort inside its model ids (bracket parameters),
+so the catalog advertises no separate reasoning levels, and allowance windows have no CLI
+surface — both stay honestly unknown. The CLI is signed into
 whatever Cursor account is active on the machine; a delegated run bills that account and sends
 the task's code to it. A launch can also fail with the server's own `ActionRequiredError` (for
 example an unacknowledged data-retention prompt); the run's failure record carries that message

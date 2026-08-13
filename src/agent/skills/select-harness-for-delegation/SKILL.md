@@ -13,8 +13,9 @@ model, and effort value—including `effort: null`—while selecting only omitte
 ## Select
 
 1. Read `$OO_HOME/workspace/harness-roster.md` through `bash`; Owner Operator supplies `OO_HOME`
-   from its authoritative configured home even when it is not the default. It is owner-controlled guidance; never
-   edit it. Treat its baseline role headings and any owner-added role headings uniformly. Classify
+   from its authoritative configured home even when it is not the default. It is owner-controlled
+   guidance; edit it only as the owner explicitly directs. Treat its baseline role headings and
+   any owner-added role headings uniformly. Classify
    the requested task by meaning, not by a fixed heading allowlist. A matching custom role can
    therefore extend the taxonomy without product changes.
 2. Call `get_harness_details` for every harness that remains a plausible choice. Do this before
