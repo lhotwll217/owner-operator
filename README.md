@@ -17,8 +17,9 @@ which harness created them. This is built on
 standalone skill if you want session search directly in Claude Code, Codex, or any other
 harness. The harness maintains a directory of session folders, organized by project/repo.
 
-The agent can also delegate work to other coding harnesses. Today only Claude and Codex are
-supported, but the idea is to support any harness that implements the ACP protocol. This lets
+The agent can also delegate work to other coding harnesses. Today Claude Code, Codex, and the
+Cursor CLI are supported, but the idea is to support any harness that implements the ACP
+protocol. This lets
 the Owner Operator agent oversee a large piece of work while preserving the overall goal and
 adhering to the standards set by you. This approach is best coupled with an opinionated
 workflow via skills — I use Matt Pocock's skills, for example.
