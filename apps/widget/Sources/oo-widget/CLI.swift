@@ -50,11 +50,12 @@ func renderText(rows: [SessionStateRow], agentState: AgentStateView = .empty, po
         lines.append("")
         lines.append(sgr(1, "Agent state"))
         for run in agentState.runs {
-            let resumable = run.canResume ? sgr(33, " · resumable") : ""
-            let continuable = run.canContinue ? sgr(32, " · follow-up available") : ""
-            lines.append("  \(agentGlyphColored(run)) \(run.status.text.rawValue)  \(run.task)  " + sgr(90, "\(run.harness) · \(shortDuration(milliseconds: run.elapsedMs))") + resumable + continuable)
+            let retry = run.canRetry ? sgr(33, " · retry available") : ""
+            let resume = run.canResume ? sgr(32, " · resume available") : ""
+            lines.append("  \(agentGlyphColored(run)) \(run.status.text.rawValue)  \(run.task)  " + sgr(90, "\(run.harness) · \(shortDuration(milliseconds: run.elapsedMs))") + retry + resume)
             if !run.latestActivity.isEmpty { lines.append(sgr(90, "      \(run.latestActivity)")) }
-            if let previous = run.resumeOfRunId { lines.append(sgr(90, "      ↳ \(previous)")) }
+            if let retried = run.retryOfRunId { lines.append(sgr(90, "      Retry of: \(retried)")) }
+            if let resumed = run.resumeOfRunId { lines.append(sgr(90, "      Resume of: \(resumed)")) }
         }
     }
     lines.append("")

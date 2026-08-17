@@ -15,8 +15,8 @@ without opening its harness.
 
 The widget is a pure Gateway client: it renders `/session-state` and `/agent-state`; it never spawns
 a process or reads the `agent_runs` ledger directly. `/agent-state` is derived by the Gateway with
-the browser-safe core run-view contract, so status vocabulary, bounded details, recovery and
-follow-up availability, lineage, and attention-first ordering match the terminal without Swift
+the browser-safe core run-view contract, so status vocabulary, bounded details, retry/resume
+availability and relationships, and attention-first ordering match the terminal without Swift
 lifecycle logic. The literal agent-state
 rail stays hidden when only calm terminal history remains; opening the panel shows bounded recent
 history after attention and active runs.

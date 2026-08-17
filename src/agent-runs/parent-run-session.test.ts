@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import {
-  AGENT_RUN_CONTINUATION_TASK_ERROR,
+  AGENT_RUN_RESUME_TASK_ERROR,
   AgentRunStatus,
   GatewayEventKind,
   type AgentRun,
@@ -44,8 +44,8 @@ class MemoryAdapter implements ParentRunAdapter {
   subscriptions = 0;
   unsubscriptions = 0;
   cancelled: string[] = [];
-  resumed: string[] = [];
-  continued: Array<{ id: string; task: string }> = [];
+  retried: string[] = [];
+  resumed: Array<{ id: string; task: string }> = [];
 
   async list(parentThreadId: string): Promise<AgentRun[]> {
     this.operations.push(`list:${parentThreadId}`);
@@ -70,14 +70,14 @@ class MemoryAdapter implements ParentRunAdapter {
     return { ...row, status: AgentRunStatus.Cancelled, finishedAt: "2026-07-21T12:06:00.000Z" };
   }
 
-  async resume(id: string): Promise<AgentRun> {
-    this.resumed.push(id);
-    return run(`${id}-resumed`, AgentRunStatus.Pending, { resumeOfRunId: id });
+  async retry(id: string): Promise<AgentRun> {
+    this.retried.push(id);
+    return run(`${id}-retried`, AgentRunStatus.Pending, { retryOfRunId: id });
   }
 
-  async continue(id: string, task: string): Promise<AgentRun> {
-    this.continued.push({ id, task });
-    return run(`${id}-continued`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
+  async resume(id: string, task: string): Promise<AgentRun> {
+    this.resumed.push({ id, task });
+    return run(`${id}-resumed`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
   }
 }
 
@@ -194,9 +194,9 @@ await assert.rejects(() => session.cancel("running"), /cannot be cancelled/);
 adapter.rows.push(run("lost", AgentRunStatus.Lost, { childSessionId: "child-lost" }));
 adapter.invalidate();
 await session.settled();
-await session.resume("lost");
-assert.deepEqual(adapter.resumed, ["lost"]);
-await assert.rejects(() => session.resume("running"), /cannot be resumed/);
+await session.retry("lost");
+assert.deepEqual(adapter.retried, ["lost"]);
+await assert.rejects(() => session.retry("running"), /cannot be retried/);
 adapter.rows.push(run("completed-follow-up", AgentRunStatus.Completed, {
   cwd: process.cwd(),
   childSessionId: "completed-child",
@@ -205,27 +205,27 @@ adapter.rows.push(run("completed-follow-up", AgentRunStatus.Completed, {
 adapter.invalidate();
 await session.settled();
 await assert.rejects(
-  () => session.continue("completed-follow-up", "  "),
-  (error: unknown) => error instanceof Error && error.message === AGENT_RUN_CONTINUATION_TASK_ERROR,
+  () => session.resume("completed-follow-up", "  "),
+  (error: unknown) => error instanceof Error && error.message === AGENT_RUN_RESUME_TASK_ERROR,
 );
-await session.continue("completed-follow-up", "explain the next implication");
-assert.deepEqual(adapter.continued, [{ id: "completed-follow-up", task: "explain the next implication" }]);
-await assert.rejects(() => session.continue("running", "invalid"), /cannot be continued/);
+await session.resume("completed-follow-up", "explain the next implication");
+assert.deepEqual(adapter.resumed, [{ id: "completed-follow-up", task: "explain the next implication" }]);
+await assert.rejects(() => session.resume("running", "invalid"), /cannot be resumed/);
 adapter.rows.push(run("completed-missing-cwd", AgentRunStatus.Completed, {
-  cwd: "/missing/owner-operator-continuation-workspace",
+  cwd: "/missing/owner-operator-resume-workspace",
   childSessionId: "missing-cwd-child",
   acpxRecordId: "missing-cwd-acpx",
 }));
 adapter.invalidate();
 await session.settled();
 assert.equal(
-  session.view.runs.find(({ id }) => id === "completed-missing-cwd")?.canContinue,
+  session.view.runs.find(({ id }) => id === "completed-missing-cwd")?.canResume,
   false,
   "the parent TUI cannot offer follow-up for a deleted workspace",
 );
 await assert.rejects(
-  () => session.continue("completed-missing-cwd", "invalid workspace"),
-  /cannot be continued/,
+  () => session.resume("completed-missing-cwd", "invalid workspace"),
+  /cannot be resumed/,
 );
 
 session.stop();
@@ -457,17 +457,20 @@ let gatewayConnected: (() => void) | undefined;
 const gateway = {
   listAgentRuns: async (parent?: string) => { gatewayCalls.push(`list:${parent}`); return []; },
   cancelAgentRun: async (id: string) => { gatewayCalls.push(`cancel:${id}`); return run(id, AgentRunStatus.Cancelled); },
-  resumeAgentRun: async (id: string) => { gatewayCalls.push(`resume:${id}`); return run(`${id}-new`, AgentRunStatus.Pending); },
-  continueAgentRun: async (id: string, task: string) => {
-    gatewayCalls.push(`continue:${id}:${task}`);
-    return run(`${id}-continued`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
+  retryAgentRun: async (id: string) => {
+    gatewayCalls.push(`retry:${id}`);
+    return run(`${id}-retried`, AgentRunStatus.Pending, { retryOfRunId: id });
+  },
+  resumeAgentRun: async (id: string, task: string) => {
+    gatewayCalls.push(`resume:${id}:${task}`);
+    return run(`${id}-resumed`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
   },
   subscribe: (listener: (event: GatewayEvent) => void, onConnected?: () => void) => {
     gatewayListener = listener;
     gatewayConnected = onConnected;
     return () => gatewayCalls.push("stop");
   },
-} as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun" | "subscribe">;
+} as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "retryAgentRun" | "resumeAgentRun" | "subscribe">;
 const gatewayAdapter = gatewayParentRunAdapter(gateway);
 let invalidations = 0;
 const stopGateway = gatewayAdapter.subscribe(() => { invalidations += 1; });
@@ -476,10 +479,10 @@ gatewayConnected?.();
 gatewayListener?.({ kind: GatewayEventKind.StateChanged });
 gatewayListener?.({ kind: GatewayEventKind.AgentRunChanged });
 await gatewayAdapter.cancel("a");
-await gatewayAdapter.resume("b");
-await gatewayAdapter.continue("c", "follow up");
+await gatewayAdapter.retry("b");
+await gatewayAdapter.resume("c", "follow up");
 stopGateway();
 assert.equal(invalidations, 2, "connection and agent-run events both invalidate durable truth");
-assert.deepEqual(gatewayCalls, ["list:parent-gateway", "cancel:a", "resume:b", "continue:c:follow up", "stop"]);
+assert.deepEqual(gatewayCalls, ["list:parent-gateway", "cancel:a", "retry:b", "resume:c:follow up", "stop"]);
 
 process.stdout.write("ok — parent run session reconciles one durable parent fleet\n");

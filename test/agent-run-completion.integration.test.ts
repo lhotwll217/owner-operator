@@ -93,11 +93,11 @@ try {
       return () => { headlessUnsubscriptions += 1; };
     },
     async cancelAgentRun() { throw new Error("not used"); },
+    async retryAgentRun() { throw new Error("not used"); },
     async resumeAgentRun() { throw new Error("not used"); },
-    async continueAgentRun() { throw new Error("not used"); },
   } as Pick<
     GatewayApi,
-    "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun"
+    "listAgentRuns" | "subscribe" | "cancelAgentRun" | "retryAgentRun" | "resumeAgentRun"
   >;
   const createTestResourceLoader = () => new DefaultResourceLoader({
     cwd,
@@ -193,8 +193,8 @@ try {
       return () => { invalidateAbortRuns = undefined; };
     },
     async cancel() { throw new Error("not used"); },
+    async retry() { throw new Error("not used"); },
     async resume() { throw new Error("not used"); },
-    async continue() { throw new Error("not used"); },
   };
   const abortParentSession = new ParentRunSession(sessionManager.getSessionId(), abortRunAdapter, {
     completionAdapter: adapter,

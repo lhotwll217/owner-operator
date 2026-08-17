@@ -100,8 +100,8 @@ export interface GatewayApi {
   agentRun(id: string): Promise<AgentRun>;
   delegateAgent(input: AgentRunCreateInput): Promise<AgentRun>;
   cancelAgentRun(id: string): Promise<AgentRun>;
-  resumeAgentRun(id: string): Promise<AgentRun>;
-  continueAgentRun(id: string, task: string): Promise<AgentRun>;
+  retryAgentRun(id: string): Promise<AgentRun>;
+  resumeAgentRun(id: string, task: string): Promise<AgentRun>;
   waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
   /** Connection callbacks bracket each live SSE stream, including replacement reconnects. */

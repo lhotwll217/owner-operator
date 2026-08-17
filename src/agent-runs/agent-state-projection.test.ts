@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AgentRunStatus } from "@owner-operator/core";
 import { agentRunFixture as run } from "../../test/fixtures/agent-run";
 import {
-  continuationCwdError,
+  resumeCwdError,
   deriveParentAgentStateWithEnvironment,
 } from "./agent-state-projection";
 
@@ -33,13 +33,13 @@ try {
   const view = deriveParentAgentStateWithEnvironment(rows, {
     now: "2026-07-21T12:10:00.000Z",
   });
-  assert.equal(view.runs.find(({ id }) => id === "existing-cwd")?.canContinue, true);
-  assert.equal(view.runs.find(({ id }) => id === "missing-cwd")?.canContinue, false);
-  assert.equal(view.runs.find(({ id }) => id === "file-cwd")?.canContinue, false);
-  assert.match(continuationCwdError(join(root, "missing")) ?? "", /no longer exists/);
-  assert.match(continuationCwdError(file) ?? "", /not a directory/);
+  assert.equal(view.runs.find(({ id }) => id === "existing-cwd")?.canResume, true);
+  assert.equal(view.runs.find(({ id }) => id === "missing-cwd")?.canResume, false);
+  assert.equal(view.runs.find(({ id }) => id === "file-cwd")?.canResume, false);
+  assert.match(resumeCwdError(join(root, "missing")) ?? "", /no longer exists/);
+  assert.match(resumeCwdError(file) ?? "", /not a directory/);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
 
-process.stdout.write("ok — agent-state continuation controls require a live workspace directory\n");
+process.stdout.write("ok — agent-state resume controls require a live workspace directory\n");

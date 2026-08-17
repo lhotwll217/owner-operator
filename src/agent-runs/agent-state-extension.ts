@@ -16,8 +16,8 @@ import { formatAgentElapsed } from "./format-agent-elapsed";
 export type AgentStatePickerAction =
   | { kind: "close" }
   | { kind: "cancel"; runId: string }
-  | { kind: "resume"; runId: string }
-  | { kind: "continue"; runId: string };
+  | { kind: "retry"; runId: string }
+  | { kind: "resume"; runId: string };
 
 function statusColor(theme: Theme, run: AgentRunView): string {
   const value = `${run.status.glyph} ${run.status.text}`;
@@ -30,8 +30,8 @@ function statusColor(theme: Theme, run: AgentRunView): string {
 function runControlLabels(run: AgentRunView): string[] {
   return [
     run.canCancel ? "c cancel" : "",
-    run.canResume ? "r resume" : "",
-    run.canContinue ? "f follow-up" : "",
+    run.canRetry ? "r retry" : "",
+    run.canResume ? "u resume" : "",
   ].filter(Boolean);
 }
 
@@ -82,10 +82,10 @@ export class AgentStatePicker {
     const selected = this.selected;
     if (data === "c" && selected?.canCancel) {
       this.onAction({ kind: "cancel", runId: selected.id });
-    } else if (data === "r" && selected?.canResume) {
+    } else if (data === "r" && selected?.canRetry) {
+      this.onAction({ kind: "retry", runId: selected.id });
+    } else if (data === "u" && selected?.canResume) {
       this.onAction({ kind: "resume", runId: selected.id });
-    } else if (data === "f" && selected?.canContinue) {
-      this.onAction({ kind: "continue", runId: selected.id });
     }
   }
 
@@ -111,9 +111,8 @@ export class AgentStatePicker {
       lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
       lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
       lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
-      if (selected.resumeOfRunId) {
-        lines.push(line(`${this.theme.fg("dim", "Previous run:")} ${selected.resumeOfRunId}`));
-      }
+      if (selected.retryOfRunId) lines.push(line(`${this.theme.fg("dim", "Retry of:")} ${selected.retryOfRunId}`));
+      if (selected.resumeOfRunId) lines.push(line(`${this.theme.fg("dim", "Resume of:")} ${selected.resumeOfRunId}`));
       const controls = [...runControlLabels(selected), "esc back"].join(" · ");
       lines.push("", line(this.theme.fg("dim", controls)));
       return lines;
@@ -218,15 +217,15 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
             );
             if (!confirmed) return;
             await session.cancel(selected.runId);
-          } else if (selected.kind === "resume") {
-            await session.resume(selected.runId);
+          } else if (selected.kind === "retry") {
+            await session.retry(selected.runId);
           } else {
             const task = await ctx.ui.input(
-              "Continue completed delegated session",
+              "Resume completed delegated session",
               "New follow-up task",
             );
             if (task === undefined) return;
-            await session.continue(selected.runId, task);
+            await session.resume(selected.runId, task);
           }
         } catch (error) {
           ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");

@@ -39,17 +39,18 @@ const gateway = {
     rows = [cancelled];
     return cancelled;
   },
-  resumeAgentRun: async (id: string) => agentRunFixture(`${id}-resumed`, AgentRunStatus.Pending, {
+  retryAgentRun: async (id: string) => agentRunFixture(`${id}-retried`, AgentRunStatus.Pending, {
     parentThreadId: sessionManager.getSessionId(),
+    retryOfRunId: id,
   }),
-  continueAgentRun: async (id: string, task: string) => agentRunFixture(`${id}-continued`, AgentRunStatus.Pending, {
+  resumeAgentRun: async (id: string, task: string) => agentRunFixture(`${id}-resumed`, AgentRunStatus.Pending, {
     parentThreadId: sessionManager.getSessionId(),
     task,
     resumeOfRunId: id,
   }),
 } as Pick<
   GatewayApi,
-  "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun"
+  "listAgentRuns" | "subscribe" | "cancelAgentRun" | "retryAgentRun" | "resumeAgentRun"
 >;
 
 const { modelRuntime, paths } = await ownerOperatorPiServices();

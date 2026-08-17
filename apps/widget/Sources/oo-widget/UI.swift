@@ -151,11 +151,11 @@ struct AgentRunRow: View {
                     Text(run.harness)
                     Text("·")
                     Text(shortDuration(milliseconds: run.elapsedMs))
-                    if run.canResume {
-                        Text("· resumable").foregroundStyle(.yellow)
+                    if run.canRetry {
+                        Text("· retry available").foregroundStyle(.yellow)
                     }
-                    if run.canContinue {
-                        Text("· follow-up available").foregroundStyle(.green)
+                    if run.canResume {
+                        Text("· resume available").foregroundStyle(.green)
                     }
                 }
                 .foregroundStyle(.secondary).font(.system(size: 10))
@@ -163,8 +163,12 @@ struct AgentRunRow: View {
                     Text(run.latestActivity)
                         .foregroundStyle(.secondary).font(.system(size: 10)).lineLimit(2)
                 }
-                if let previous = run.resumeOfRunId {
-                    Text("↳ \(previous)")
+                if let retried = run.retryOfRunId {
+                    Text("Retry of: \(retried)")
+                        .foregroundStyle(.secondary).font(.system(size: 10)).lineLimit(1)
+                }
+                if let resumed = run.resumeOfRunId {
+                    Text("Resume of: \(resumed)")
                         .foregroundStyle(.secondary).font(.system(size: 10)).lineLimit(1)
                 }
             }

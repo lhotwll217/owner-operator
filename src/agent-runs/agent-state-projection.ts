@@ -6,15 +6,15 @@ import {
   type ParentAgentStateView,
 } from "@owner-operator/core/agent-state";
 
-/** Runtime-only workspace validation shared by continuation enforcement and projections. */
-export function continuationCwdError(cwd: string): string | null {
+/** Runtime-only workspace validation shared by resume enforcement and projections. */
+export function resumeCwdError(cwd: string): string | null {
   try {
     const stat = statSync(cwd, { throwIfNoEntry: false });
-    if (!stat) return `continuation working directory no longer exists: ${cwd}`;
-    if (!stat.isDirectory()) return `continuation working directory is not a directory: ${cwd}`;
+    if (!stat) return `resume working directory no longer exists: ${cwd}`;
+    if (!stat.isDirectory()) return `resume working directory is not a directory: ${cwd}`;
     return null;
   } catch {
-    return `continuation working directory is unavailable: ${cwd}`;
+    return `resume working directory is unavailable: ${cwd}`;
   }
 }
 
@@ -22,10 +22,10 @@ export function continuationCwdError(cwd: string): string | null {
  * filesystem fact core deliberately cannot observe. */
 export function deriveParentAgentStateWithEnvironment(
   runs: readonly AgentRun[],
-  options: Omit<DeriveParentAgentStateOptions, "isContinuationEnvironmentEligible"> = {},
+  options: Omit<DeriveParentAgentStateOptions, "isResumeEnvironmentEligible"> = {},
 ): ParentAgentStateView {
   return deriveParentAgentState(runs, {
     ...options,
-    isContinuationEnvironmentEligible: (run) => continuationCwdError(run.cwd) === null,
+    isResumeEnvironmentEligible: (run) => resumeCwdError(run.cwd) === null,
   });
 }

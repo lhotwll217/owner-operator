@@ -1,8 +1,8 @@
 import {
   AGENT_RUN_CAPABILITIES,
-  AGENT_RUN_RESUMABLE_STATUSES,
+  AGENT_RUN_RETRYABLE_STATUSES,
   AgentRunStatus,
-  agentRunContinuationError,
+  agentRunResumeError,
   isTerminalAgentRunStatus,
   type AgentRun,
 } from "./agent-runs";
@@ -31,11 +31,11 @@ export interface AgentRunView {
   category: AgentRunViewCategory;
   elapsedMs: number;
   latestActivity: string;
-  /** Immediate predecessor when this row reuses an earlier run's child identity. */
+  retryOfRunId: string | null;
   resumeOfRunId: string | null;
   canCancel: boolean;
+  canRetry: boolean;
   canResume: boolean;
-  canContinue: boolean;
 }
 
 export interface ParentAgentStateView {
@@ -53,9 +53,9 @@ export interface ParentAgentStateView {
 export interface DeriveParentAgentStateOptions {
   now?: string;
   recentLimit?: number;
-  /** Runtime adapter proof for environmental eligibility (currently: cwd exists and is a
+  /** Runtime adapter proof for resume environmental eligibility (currently: cwd exists and is a
    * directory). Omission fails closed because browser-safe core cannot inspect a filesystem. */
-  isContinuationEnvironmentEligible?: (run: AgentRun) => boolean;
+  isResumeEnvironmentEligible?: (run: AgentRun) => boolean;
 }
 
 const ATTENTION_STATUSES = new Set<AgentRunStatus>([
@@ -114,8 +114,8 @@ function statusView(status: AgentRunStatus, category: AgentRunViewCategory): Age
   }
 }
 
-function categoryFor(run: AgentRun, resumedRunIds: ReadonlySet<string>): AgentRunViewCategory {
-  if (ATTENTION_STATUSES.has(run.status) && !resumedRunIds.has(run.id)) return "attention";
+function categoryFor(run: AgentRun, retriedRunIds: ReadonlySet<string>): AgentRunViewCategory {
+  if (ATTENTION_STATUSES.has(run.status) && !retriedRunIds.has(run.id)) return "attention";
   return isTerminalAgentRunStatus(run.status) ? "recent" : "active";
 }
 
@@ -137,13 +137,13 @@ function sortTime(run: AgentRun): number {
 function deriveRunView(
   run: AgentRun,
   now: string,
-  resumedRunIds: ReadonlySet<string>,
-  successorRunIds: ReadonlyMap<string, string>,
+  retriedRunIds: ReadonlySet<string>,
+  resumeRunIds: ReadonlyMap<string, string>,
   activeRunIdsByChild: ReadonlyMap<string, string>,
-  isContinuationEnvironmentEligible: (run: AgentRun) => boolean,
+  isResumeEnvironmentEligible: (run: AgentRun) => boolean,
 ): AgentRunView {
-  const category = categoryFor(run, resumedRunIds);
-  const successorRunId = successorRunIds.get(run.id) ?? null;
+  const category = categoryFor(run, retriedRunIds);
+  const existingResumeRunId = resumeRunIds.get(run.id) ?? null;
   const activeRunId = run.childSessionId
     ? activeRunIdsByChild.get(run.childSessionId) ?? null
     : null;
@@ -158,14 +158,15 @@ function deriveRunView(
     category,
     elapsedMs: elapsedMs(run, now),
     latestActivity: activityFor(run),
+    retryOfRunId: run.retryOfRunId,
     resumeOfRunId: run.resumeOfRunId,
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
-    canResume: AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)
+    canRetry: AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)
       && run.childSessionId !== null
-      && !resumedRunIds.has(run.id)
-      && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
-    canContinue: agentRunContinuationError(run, { successorRunId, activeRunId }) === null
-      && isContinuationEnvironmentEligible(run),
+      && !retriedRunIds.has(run.id)
+      && (AGENT_RUN_CAPABILITIES[run.harness]?.loadSession ?? false),
+    canResume: agentRunResumeError(run, { existingResumeRunId, activeRunId }) === null
+      && isResumeEnvironmentEligible(run),
   };
 }
 
@@ -175,11 +176,13 @@ export function deriveParentAgentState(
 ): ParentAgentStateView {
   const now = options.now ?? new Date().toISOString();
   const recentLimit = Math.max(0, options.recentLimit ?? AGENT_STATE_RECENT_LIMIT);
-  const isContinuationEnvironmentEligible = options.isContinuationEnvironmentEligible ?? (() => false);
-  const successorRunIds = new Map(
+  const isResumeEnvironmentEligible = options.isResumeEnvironmentEligible ?? (() => false);
+  const resumeRunIds = new Map(
     runs.flatMap((run) => run.resumeOfRunId === null ? [] : [[run.resumeOfRunId, run.id] as const]),
   );
-  const resumedRunIds = new Set(successorRunIds.keys());
+  const retriedRunIds = new Set(
+    runs.flatMap((run) => run.retryOfRunId === null ? [] : [run.retryOfRunId]),
+  );
   const activeRunIdsByChild = new Map(
     runs.flatMap((run) => run.childSessionId !== null
       && (run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running)
@@ -187,14 +190,14 @@ export function deriveParentAgentState(
       : []),
   );
   const ordered = [...runs].sort((left, right) => {
-    const categoryDifference = ["attention", "active", "recent"].indexOf(categoryFor(left, resumedRunIds))
-      - ["attention", "active", "recent"].indexOf(categoryFor(right, resumedRunIds));
+    const categoryDifference = ["attention", "active", "recent"].indexOf(categoryFor(left, retriedRunIds))
+      - ["attention", "active", "recent"].indexOf(categoryFor(right, retriedRunIds));
     return categoryDifference || sortTime(right) - sortTime(left) || right.id.localeCompare(left.id);
   });
   const visible = ordered.slice(0, recentLimit);
   const queued = runs.filter(({ status }) => status === AgentRunStatus.Pending).length;
   const running = runs.filter(({ status }) => status === AgentRunStatus.Running).length;
-  const attention = runs.filter((run) => categoryFor(run, resumedRunIds) === "attention").length;
+  const attention = runs.filter((run) => categoryFor(run, retriedRunIds) === "attention").length;
   const footerParts = [
     queued ? `◦ ${queued} queued` : "",
     running ? `● ${running} running` : "",
@@ -206,10 +209,10 @@ export function deriveParentAgentState(
     runs: visible.map((run) => deriveRunView(
       run,
       now,
-      resumedRunIds,
-      successorRunIds,
+      retriedRunIds,
+      resumeRunIds,
       activeRunIdsByChild,
-      isContinuationEnvironmentEligible,
+      isResumeEnvironmentEligible,
     )),
   };
 }

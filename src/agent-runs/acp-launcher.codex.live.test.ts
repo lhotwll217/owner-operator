@@ -38,6 +38,7 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
     acpxRecordId: null,
     resultTail: null,
     error: null,
+    retryOfRunId: null,
     resumeOfRunId: null,
     timeoutSeconds: 180,
   };
@@ -47,7 +48,7 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
   try {
     const result = await createAcpLauncher()({
       run,
-      sessionIntent: { kind: "fresh" },
+      turnIntent: { kind: "fresh" },
       signal: controller.signal,
       onActivity: () => undefined,
     });

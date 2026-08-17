@@ -54,7 +54,7 @@ const fleet = [
 const view = deriveParentAgentState(fleet, {
   now,
   recentLimit: AGENT_STATE_RECENT_LIMIT,
-  isContinuationEnvironmentEligible: (run) => run.id === "completed-new",
+  isResumeEnvironmentEligible: (run) => run.id === "completed-new",
 });
 assert.deepEqual(view.counts, { queued: 1, running: 1, attention: 2 });
 assert.equal(view.footer, "◦ 1 queued · ● 1 running · ! 2 attention    /agent-state");
@@ -71,8 +71,8 @@ assert.deepEqual(
     text: running.status.text,
     category: running.category,
     canCancel: running.canCancel,
+    canRetry: running.canRetry,
     canResume: running.canResume,
-    canContinue: running.canContinue,
     elapsedMs: running.elapsedMs,
     model: running.model,
     effort: running.effort,
@@ -83,8 +83,8 @@ assert.deepEqual(
     text: "running",
     category: "active",
     canCancel: true,
+    canRetry: false,
     canResume: false,
-    canContinue: false,
     elapsedMs: 540_000,
     model: "gpt-5.6-sol",
     effort: "high",
@@ -97,14 +97,14 @@ assert.ok(!running.latestActivity.includes("/tmp/repo"), "detail does not invent
 const queued = view.runs.find(({ id }) => id === "queued")!;
 assert.deepEqual([queued.status.glyph, queued.status.text, queued.canCancel], ["◦", "queued", true]);
 assert.equal(queued.effort, null, "unknown effort stays absent from the derived view");
-assert.equal(view.runs.find(({ id }) => id === "failed")?.canResume, true, "failed child identity is resumable");
+assert.equal(view.runs.find(({ id }) => id === "failed")?.canRetry, true, "failed child identity is retryable");
 assert.deepEqual(
   view.runs.find(({ id }) => id === "failed")?.status,
   { glyph: "!", text: "attention" },
   "attention status is always exposed as an accessible glyph/text pair",
 );
-assert.equal(view.runs.find(({ id }) => id === "lost-no-child")?.canResume, false, "missing child identity blocks resume");
-assert.equal(view.runs.find(({ id }) => id === "completed-new")?.canContinue, true, "the latest completed session can take a follow-up");
+assert.equal(view.runs.find(({ id }) => id === "lost-no-child")?.canRetry, false, "missing child identity blocks retry");
+assert.equal(view.runs.find(({ id }) => id === "completed-new")?.canResume, true, "the latest completed session can take a follow-up");
 assert.ok(view.runs.find(({ id }) => id === "completed-new")!.task.length <= AGENT_STATE_TASK_MAX_LENGTH);
 assert.equal(
   view.runs.find(({ id }) => id === "completed-new")!.latestActivity,
@@ -118,52 +118,52 @@ const idle = deriveParentAgentState([
 ], { now });
 assert.equal(idle.footer, null, "footer hides when no run is active or awaiting attention");
 
-const resumedInterrupted = deriveParentAgentState([
-  run("interrupted-predecessor", AgentRunStatus.Interrupted, { childSessionId: "resumed-child" }),
-  run("resume", AgentRunStatus.Running, {
-    childSessionId: "resumed-child",
-    resumeOfRunId: "interrupted-predecessor",
+const retriedInterrupted = deriveParentAgentState([
+  run("interrupted-run", AgentRunStatus.Interrupted, { childSessionId: "retried-child" }),
+  run("retry", AgentRunStatus.Running, {
+    childSessionId: "retried-child",
+    retryOfRunId: "interrupted-run",
   }),
 ], { now });
 assert.equal(
-  resumedInterrupted.runs.find(({ id }) => id === "interrupted-predecessor")?.category,
+  retriedInterrupted.runs.find(({ id }) => id === "interrupted-run")?.category,
   "recent",
-  "a resumed predecessor becomes terminal history instead of demanding attention",
+  "a retried unsuccessful run becomes terminal history instead of demanding attention",
 );
 assert.equal(
-  resumedInterrupted.runs.find(({ id }) => id === "interrupted-predecessor")?.canResume,
+  retriedInterrupted.runs.find(({ id }) => id === "interrupted-run")?.canRetry,
   false,
-  "a resumed interrupted run cannot be resumed again",
+  "a retried interrupted run cannot be retried again",
 );
-assert.equal(resumedInterrupted.counts.attention, 0);
+assert.equal(retriedInterrupted.counts.attention, 0);
 
-const continuedCompleted = deriveParentAgentState([
-  run("completed-predecessor", AgentRunStatus.Completed, {
-    childSessionId: "continued-child",
-    acpxRecordId: "continued-acpx",
+const resumedCompleted = deriveParentAgentState([
+  run("completed-run", AgentRunStatus.Completed, {
+    childSessionId: "resumed-child",
+    acpxRecordId: "resumed-acpx",
   }),
-  run("continued-turn", AgentRunStatus.Completed, {
-    childSessionId: "continued-child",
-    acpxRecordId: "continued-acpx",
-    resumeOfRunId: "completed-predecessor",
+  run("resumed-run", AgentRunStatus.Completed, {
+    childSessionId: "resumed-child",
+    acpxRecordId: "resumed-acpx",
+    resumeOfRunId: "completed-run",
   }),
-], { now, isContinuationEnvironmentEligible: (run) => run.id === "continued-turn" });
+], { now, isResumeEnvironmentEligible: (run) => run.id === "resumed-run" });
 assert.equal(
-  continuedCompleted.runs.find(({ id }) => id === "completed-predecessor")?.canContinue,
+  resumedCompleted.runs.find(({ id }) => id === "completed-run")?.canResume,
   false,
-  "a completed source with a successor cannot branch the child session",
+  "a completed run that has been resumed cannot branch the child conversation",
 );
-const latestContinuation = continuedCompleted.runs.find(({ id }) => id === "continued-turn")!;
-assert.equal(latestContinuation.canContinue, true, "the latest completed turn can take the next follow-up");
-assert.equal(latestContinuation.resumeOfRunId, "completed-predecessor", "agent state exposes immediate run lineage");
+const latestResume = resumedCompleted.runs.find(({ id }) => id === "resumed-run")!;
+assert.equal(latestResume.canResume, true, "the latest completed run can take the next follow-up");
+assert.equal(latestResume.resumeOfRunId, "completed-run", "agent state exposes exact resume semantics");
 
-const incompleteContinuationIdentity = deriveParentAgentState([
+const incompleteResumeIdentity = deriveParentAgentState([
   run("completed-without-acpx", AgentRunStatus.Completed, { childSessionId: "child-only" }),
-], { now, isContinuationEnvironmentEligible: (run) => run.id === "completed-without-acpx" });
+], { now, isResumeEnvironmentEligible: (run) => run.id === "completed-without-acpx" });
 assert.equal(
-  incompleteContinuationIdentity.runs[0]?.canContinue,
+  incompleteResumeIdentity.runs[0]?.canResume,
   false,
-  "continuation control requires both child and acpx identities",
+  "resume control requires both child and acpx identities",
 );
 
 const environmentNotProven = deriveParentAgentState([
@@ -173,19 +173,19 @@ const environmentNotProven = deriveParentAgentState([
   }),
 ], { now });
 assert.equal(
-  environmentNotProven.runs[0]?.canContinue,
+  environmentNotProven.runs[0]?.canResume,
   false,
   "the browser-safe projection fails closed until an adapter proves environmental eligibility",
 );
 
-const resumedOnlyFailure = deriveParentAgentState([
-  run("only-failure", AgentRunStatus.Failed, { childSessionId: "resumed-child" }),
-  run("successful-resume", AgentRunStatus.Completed, {
-    childSessionId: "resumed-child",
-    resumeOfRunId: "only-failure",
+const retriedOnlyFailure = deriveParentAgentState([
+  run("only-failure", AgentRunStatus.Failed, { childSessionId: "retried-child" }),
+  run("successful-retry", AgentRunStatus.Completed, {
+    childSessionId: "retried-child",
+    retryOfRunId: "only-failure",
   }),
 ], { now });
-assert.equal(resumedOnlyFailure.footer, null, "footer hides when the only failure has been resumed");
+assert.equal(retriedOnlyFailure.footer, null, "footer hides when the only failure has been retried");
 
 const unresumedFailure = deriveParentAgentState([
   run("unresumed-failure", AgentRunStatus.Failed, { childSessionId: "failed-child" }),
@@ -220,7 +220,7 @@ const unknownHarness = deriveParentAgentState([
     childSessionId: "future-child",
   }),
 ], { now });
-assert.equal(unknownHarness.runs[0]?.canResume, false, "unknown harness capabilities fail closed");
+assert.equal(unknownHarness.runs[0]?.canRetry, false, "unknown harness capabilities fail closed");
 
 const lotsOfRecent = Array.from({ length: AGENT_STATE_RECENT_LIMIT + 4 }, (_, index) =>
   run(`recent-${index}`, AgentRunStatus.Completed, {

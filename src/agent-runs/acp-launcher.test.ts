@@ -101,6 +101,7 @@ const run: AgentRun = {
   acpxRecordId: null,
   resultTail: null,
   error: null,
+  retryOfRunId: null,
   resumeOfRunId: null,
   timeoutSeconds: 3_600,
 };
@@ -108,7 +109,7 @@ const run: AgentRun = {
 const activity: AgentRunActivityUpdate[] = [];
 const result = await createAcpLauncher({ runtimeFactory: () => runtime })({
   run,
-  sessionIntent: { kind: "fresh" },
+  turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: (update) => activity.push(update),
 });
@@ -134,7 +135,7 @@ for (const [status, expected] of [
   const observed: AgentRunActivityUpdate[] = [];
   const statusRuntime = { ...runtime, getStatus: async () => status } as unknown as AcpRuntime;
   await createAcpLauncher({ runtimeFactory: () => statusRuntime })({
-    run: { ...run, effort: null }, sessionIntent: { kind: "fresh" }, signal: new AbortController().signal,
+    run: { ...run, effort: null }, turnIntent: { kind: "fresh" }, signal: new AbortController().signal,
     onActivity: (update) => observed.push(update),
   });
   assert.deepEqual(observed[1], { harnessIdentity: expected }, "status observation preserves only actual supported facts");
@@ -153,7 +154,7 @@ const unadvertisedRuntime = {
 } as unknown as AcpRuntime;
 await createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
   run,
-  sessionIntent: { kind: "fresh" },
+  turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
@@ -168,14 +169,14 @@ const backendOnlyRuntime = {
 } as unknown as AcpRuntime;
 const backendIdentity = await createAcpLauncher({ runtimeFactory: () => backendOnlyRuntime })({
   run,
-  sessionIntent: { kind: "fresh" },
+  turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
 assert.equal(
   backendIdentity.childSessionId,
   "backend-session",
-  "ACP backends without a separate native id still retain their resumable session identity",
+  "ACP backends without a separate native id still retain their persistent session identity",
 );
 
 let terminationChecks = 0;
@@ -191,38 +192,38 @@ await createAcpLauncher({
     processTreePids: async () => [701, 702],
     terminate: async (trackedPids) => { terminationChecks += 1; verifiedPids = trackedPids; return false; },
   }),
-})({ run, sessionIntent: { kind: "fresh" }, signal: new AbortController().signal, onActivity: () => undefined });
+})({ run, turnIntent: { kind: "fresh" }, signal: new AbortController().signal, onActivity: () => undefined });
 assert.equal(terminationChecks, 1, "normal runtime close independently verifies process-tree termination");
 assert.deepEqual(verifiedPids, [701, 702], "normal close verifies the PID set captured before wrapper exit");
 assert.equal(releases, 0, "failed close verification retains the process lease");
 
-// A continuation addresses both durable identities. Invalid acpx records fail before
+// A resume addresses both durable identities. Invalid acpx records fail before
 // ensureSession can recreate the record and accidentally turn the follow-up into a fresh session.
-const continuationRun = {
+const resumeRun = {
   ...run,
-  id: "continued-run",
+  id: "resumed-run",
   harness: AgentRunHarness.Codex,
   task: "answer a follow-up",
-  childSessionId: "continued-child",
-  acpxRecordId: "source-acpx-record",
-  resumeOfRunId: "completed-source",
+  childSessionId: "resumed-child",
+  acpxRecordId: "completed-acpx-record",
+  resumeOfRunId: "completed-run",
 };
-const continuationRecord = {
-  acpxRecordId: "source-acpx-record",
+const resumeRecord = {
+  acpxRecordId: "completed-acpx-record",
   acpSessionId: "backend-child",
-  agentSessionId: "continued-child",
-  cwd: continuationRun.cwd,
+  agentSessionId: "resumed-child",
+  cwd: resumeRun.cwd,
   acpx: {},
 };
-let continuationEnsureInput: Record<string, unknown> | undefined;
-const continuationRuntime = {
+let resumeEnsureInput: Record<string, unknown> | undefined;
+const resumeRuntime = {
   ensureSession: async (input: Record<string, unknown>) => {
-    continuationEnsureInput = input;
+    resumeEnsureInput = input;
     return {
-      sessionKey: "source-acpx-record",
-      agentSessionId: "continued-child",
+      sessionKey: "completed-acpx-record",
+      agentSessionId: "resumed-child",
       backendSessionId: "backend-child",
-      acpxRecordId: "source-acpx-record",
+      acpxRecordId: "completed-acpx-record",
     };
   },
   startTurn: () => ({
@@ -233,25 +234,25 @@ const continuationRuntime = {
 } as unknown as AcpRuntime;
 await createAcpLauncher({
   leasedRuntimeFactory: () => ({
-    runtime: continuationRuntime,
-    sessionStore: { load: async () => continuationRecord } as never,
-    leaseId: "continuation-lease",
+    runtime: resumeRuntime,
+    sessionStore: { load: async () => resumeRecord } as never,
+    leaseId: "resume-lease",
     release: () => undefined,
     processTreePids: async () => [],
     terminate: async () => true,
   }),
 })({
-  run: continuationRun,
-  sessionIntent: {
-    kind: "continue",
-    childSessionId: "continued-child",
-    acpxRecordId: "source-acpx-record",
+  run: resumeRun,
+  turnIntent: {
+    kind: "resume",
+    childSessionId: "resumed-child",
+    acpxRecordId: "completed-acpx-record",
   },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
-assert.equal(continuationEnsureInput?.sessionKey, "source-acpx-record", "continuation reuses the exact acpx record id");
-assert.equal(continuationEnsureInput?.resumeSessionId, "backend-child", "continuation loads the record's exact ACP session id");
+assert.equal(resumeEnsureInput?.sessionKey, "completed-acpx-record", "resume reuses the exact acpx record id");
+assert.equal(resumeEnsureInput?.resumeSessionId, "backend-child", "resume loads the record's exact ACP session id");
 
 for (const identityCase of [
   {
@@ -277,14 +278,14 @@ for (const identityCase of [
   },
 ] as const) {
   const record = {
-    ...continuationRecord,
+    ...resumeRecord,
     acpxRecordId: identityCase.recordId,
     acpSessionId: identityCase.acpSessionId,
     ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : { agentSessionId: undefined }),
   };
   let ensureInput: Record<string, unknown> | undefined;
   const exactRuntime = {
-    ...continuationRuntime,
+    ...resumeRuntime,
     ensureSession: async (input: Record<string, unknown>) => {
       ensureInput = input;
       return {
@@ -306,13 +307,13 @@ for (const identityCase of [
     }),
   })({
     run: {
-      ...continuationRun,
+      ...resumeRun,
       harness: identityCase.harness,
       childSessionId: identityCase.childSessionId,
       acpxRecordId: identityCase.recordId,
     },
-    sessionIntent: {
-      kind: "continue",
+    turnIntent: {
+      kind: "resume",
       childSessionId: identityCase.childSessionId,
       acpxRecordId: identityCase.recordId,
     },
@@ -329,10 +330,10 @@ for (const identityCase of [
 
 let fallbackTurnCalls = 0;
 const freshFallbackRuntime = {
-  ...continuationRuntime,
+  ...resumeRuntime,
   ensureSession: async () => ({
-    sessionKey: "source-acpx-record",
-    acpxRecordId: "source-acpx-record",
+    sessionKey: "completed-acpx-record",
+    acpxRecordId: "completed-acpx-record",
     backendSessionId: "fresh-backend-session",
     agentSessionId: "fresh-child-session",
   }),
@@ -348,18 +349,18 @@ await assert.rejects(
   () => createAcpLauncher({
     leasedRuntimeFactory: () => ({
       runtime: freshFallbackRuntime,
-      sessionStore: { load: async () => continuationRecord } as never,
-      leaseId: "continuation-fresh-fallback",
+      sessionStore: { load: async () => resumeRecord } as never,
+      leaseId: "resume-fresh-fallback",
       release: () => undefined,
       processTreePids: async () => [],
       terminate: async () => true,
     }),
   })({
-    run: continuationRun,
-    sessionIntent: {
-      kind: "continue",
-      childSessionId: "continued-child",
-      acpxRecordId: "source-acpx-record",
+    run: resumeRun,
+    turnIntent: {
+      kind: "resume",
+      childSessionId: "resumed-child",
+      acpxRecordId: "completed-acpx-record",
     },
     signal: new AbortController().signal,
     onActivity: () => undefined,
@@ -371,13 +372,13 @@ assert.equal(fallbackTurnCalls, 0, "a fresh fallback never receives the follow-u
 
 for (const [label, record, expected] of [
   ["missing", undefined, /session record not found.*refusing to create a fresh session/i],
-  ["mismatched", { ...continuationRecord, agentSessionId: "some-other-child" }, /identity mismatch/i],
-  ["missing-acp-identity", { ...continuationRecord, acpSessionId: "" }, /no ACP session identity/i],
-  ["closed", { ...continuationRecord, acpx: { reset_on_next_ensure: true } }, /was closed/i],
+  ["mismatched", { ...resumeRecord, agentSessionId: "some-other-child" }, /identity mismatch/i],
+  ["missing-acp-identity", { ...resumeRecord, acpSessionId: "" }, /no ACP session identity/i],
+  ["closed", { ...resumeRecord, acpx: { reset_on_next_ensure: true } }, /was closed/i],
 ] as const) {
   let ensureCalls = 0;
   const invalidRuntime = {
-    ...continuationRuntime,
+    ...resumeRuntime,
     ensureSession: async () => { ensureCalls += 1; return {}; },
   } as unknown as AcpRuntime;
   await assert.rejects(
@@ -385,24 +386,24 @@ for (const [label, record, expected] of [
       leasedRuntimeFactory: () => ({
         runtime: invalidRuntime,
         sessionStore: { load: async () => record } as never,
-        leaseId: `continuation-${label}`,
+        leaseId: `resume-${label}`,
         release: () => undefined,
         processTreePids: async () => [],
         terminate: async () => true,
       }),
     })({
-      run: continuationRun,
-      sessionIntent: {
-        kind: "continue",
-        childSessionId: "continued-child",
-        acpxRecordId: "source-acpx-record",
+      run: resumeRun,
+      turnIntent: {
+        kind: "resume",
+        childSessionId: "resumed-child",
+        acpxRecordId: "completed-acpx-record",
       },
       signal: new AbortController().signal,
       onActivity: () => undefined,
     }),
     expected,
   );
-  assert.equal(ensureCalls, 0, `${label} continuation cannot fall through to fresh-session creation`);
+  assert.equal(ensureCalls, 0, `${label} resume cannot fall through to fresh-session creation`);
 }
 
 process.stdout.write("ok — ACP launcher maps native/backend identity, outcome, and bounded output\n");

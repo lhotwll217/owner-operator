@@ -1,13 +1,13 @@
 // Integration: the delegated-run executor over a real State — queue-under-cap, lifecycle
 // mapping from launcher outcomes, cancel/timeout/stop semantics, restart interruption,
-// the lost sweeper, resume lineage, and bounded wait.
+// the lost sweeper, retry/resume relationships, and bounded wait.
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
-  AGENT_RUN_CONTINUATION_TASK_ERROR,
+  AGENT_RUN_RESUME_TASK_ERROR,
   AgentRunHarness,
   AgentRunStatus,
   DomainEventKind,
@@ -51,9 +51,9 @@ try {
   }> = [];
   const launcher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> =>
     new Promise((resolve, reject) => {
-      const intendedChild = request.sessionIntent.kind === "fresh"
+      const intendedChild = request.turnIntent.kind === "fresh"
         ? `child-${request.run.id}`
-        : request.sessionIntent.childSessionId;
+        : request.turnIntent.childSessionId;
       request.onActivity({
         activity: "child started",
         childSessionId: intendedChild,
@@ -178,88 +178,89 @@ try {
   assert.equal(orphanState.agentRunById(orphan.id)?.status, AgentRunStatus.Interrupted, "restart reconciles running rows");
 
   // --- resume: same child identity, new run row --------------------------------------------
-  assert.throws(() => restarted.resume(orphan.id), /child session/, "resume without identity is rejected");
-  const resumable = state.agentRunById(sixth.id)!;
-  assert.ok(resumable.childSessionId, "interrupted run kept its child identity");
-  const resumedRun = restarted.resume(sixth.id);
-  assert.equal(resumedRun.resumeOfRunId, sixth.id);
-  assert.equal(resumedRun.childSessionId, resumable.childSessionId, "resume reuses the child session identity");
-  await waitFor(() => launches.length === 7, "resumed run to start");
+  assert.throws(() => restarted.retry(orphan.id), /child session/, "retry without identity is rejected");
+  const retryable = state.agentRunById(sixth.id)!;
+  assert.ok(retryable.childSessionId, "interrupted run kept its child identity");
+  const retriedRun = restarted.retry(sixth.id);
+  assert.equal(retriedRun.retryOfRunId, sixth.id);
+  assert.equal(retriedRun.childSessionId, retryable.childSessionId, "retry reuses the child session identity");
+  await waitFor(() => launches.length === 7, "retried run to start");
   assert.equal(
-    launches[6].request.sessionIntent.kind === "resume"
-      ? launches[6].request.sessionIntent.childSessionId
+    launches[6].request.turnIntent.kind === "retry"
+      ? launches[6].request.turnIntent.childSessionId
       : null,
-    resumable.childSessionId,
-    "the launcher is asked to resume the same child session",
+    retryable.childSessionId,
+    "the launcher is asked to retry the same child session",
   );
   launches[6].finish({ status: AgentRunStatus.Completed, resultText: "resumed fine", error: null });
-  await waitFor(() => state.agentRunById(resumedRun.id)?.status === AgentRunStatus.Completed, "resumed run completion");
+  await waitFor(() => state.agentRunById(retriedRun.id)?.status === AgentRunStatus.Completed, "retried run completion");
+  assert.throws(() => restarted.retry(sixth.id), /already been retried/);
 
-  // --- continue: a completed turn gets a new task in a new row under the exact identities ---
-  const completedSource = state.agentRunById(resumedRun.id)!;
-  const continuedRun = restarted.continue(resumedRun.id, "answer the follow-up question");
-  assert.equal(continuedRun.task, "answer the follow-up question", "continue requires and records a new task");
-  assert.equal(continuedRun.resumeOfRunId, resumedRun.id, "continue records immediate lineage");
-  assert.equal(continuedRun.childSessionId, completedSource.childSessionId, "continue reuses the child identity");
-  assert.equal(continuedRun.acpxRecordId, completedSource.acpxRecordId, "continue reuses the acpx record identity");
-  assert.equal(continuedRun.cwd, completedSource.cwd);
-  assert.equal(continuedRun.model, completedSource.model);
-  assert.equal(continuedRun.effort, completedSource.effort);
-  assert.equal(continuedRun.depth, completedSource.depth);
-  assert.equal(continuedRun.timeoutSeconds, completedSource.timeoutSeconds);
-  await waitFor(() => launches.length === 8, "continued run to start");
-  assert.deepEqual(launches[7].request.sessionIntent, {
-    kind: "continue",
-    childSessionId: completedSource.childSessionId,
-    acpxRecordId: completedSource.acpxRecordId,
+  // --- resume: a completed run gets a new task in a new row under the exact identities ---
+  const completedRun = state.agentRunById(retriedRun.id)!;
+  const resumedRun = restarted.resume(retriedRun.id, "answer the follow-up question");
+  assert.equal(resumedRun.task, "answer the follow-up question", "resume requires and records a new task");
+  assert.equal(resumedRun.resumeOfRunId, retriedRun.id, "resume records the exact completed run");
+  assert.equal(resumedRun.childSessionId, completedRun.childSessionId, "resume reuses the child identity");
+  assert.equal(resumedRun.acpxRecordId, completedRun.acpxRecordId, "resume reuses the acpx record identity");
+  assert.equal(resumedRun.cwd, completedRun.cwd);
+  assert.equal(resumedRun.model, completedRun.model);
+  assert.equal(resumedRun.effort, completedRun.effort);
+  assert.equal(resumedRun.depth, completedRun.depth);
+  assert.equal(resumedRun.timeoutSeconds, completedRun.timeoutSeconds);
+  await waitFor(() => launches.length === 8, "resumed run to start");
+  assert.deepEqual(launches[7].request.turnIntent, {
+    kind: "resume",
+    childSessionId: completedRun.childSessionId,
+    acpxRecordId: completedRun.acpxRecordId,
   });
-  assert.equal(launches[7].request.run.acpxRecordId, completedSource.acpxRecordId);
+  assert.equal(launches[7].request.run.acpxRecordId, completedRun.acpxRecordId);
   launches[7].finish({ status: AgentRunStatus.Completed, resultText: "follow-up answered", error: null });
-  await waitFor(() => state.agentRunById(continuedRun.id)?.status === AgentRunStatus.Completed, "continued run completion");
-  assert.equal(state.agentRunById(resumedRun.id)?.resultTail, "resumed fine", "the completed source stays immutable");
+  await waitFor(() => state.agentRunById(resumedRun.id)?.status === AgentRunStatus.Completed, "resumed run completion");
+  assert.equal(state.agentRunById(retriedRun.id)?.resultTail, "resumed fine", "the completed run stays immutable");
 
-  assert.throws(() => restarted.continue(sixth.id, "not completed"), /completed/);
+  assert.throws(() => restarted.resume(sixth.id, "not completed"), /completed/);
   assert.throws(
-    () => restarted.continue(continuedRun.id, "  "),
-    (error: unknown) => error instanceof Error && error.message === AGENT_RUN_CONTINUATION_TASK_ERROR,
+    () => restarted.resume(resumedRun.id, "  "),
+    (error: unknown) => error instanceof Error && error.message === AGENT_RUN_RESUME_TASK_ERROR,
   );
-  assert.throws(() => restarted.continue(resumedRun.id, "branch old context"), /already been continued/);
-  const invalidCompletedSource = state.createAgentRun({
+  assert.throws(() => restarted.resume(retriedRun.id, "reuse completed context"), /already been resumed/);
+  const invalidCompletedRun = state.createAgentRun({
     harness: AgentRunHarness.ClaudeCode,
     task: "legacy completed row",
     cwd: dir,
     depth: 1,
     timeoutSeconds: 60,
   });
-  state.finishAgentRun(invalidCompletedSource.id, {
+  state.finishAgentRun(invalidCompletedRun.id, {
     status: AgentRunStatus.Completed,
     resultTail: "done without identity",
     error: null,
   });
   assert.throws(
-    () => restarted.continue(invalidCompletedSource.id, "follow up"),
+    () => restarted.resume(invalidCompletedRun.id, "follow up"),
     /no child session identity/,
-    "an invalid completed source fails before creating a row",
+    "an invalid completed run fails before creating a row",
   );
   const beforeMissingCwd = state.listAgentRuns().length;
-  const missingCwdSource = state.createAgentRun({
+  const missingCwdRun = state.createAgentRun({
     harness: AgentRunHarness.ClaudeCode,
-    task: "source whose workspace was removed",
+    task: "completed run whose workspace was removed",
     cwd: join(dir, "missing-cwd"),
-    model: completedSource.model,
-    effort: completedSource.effort,
-    depth: completedSource.depth,
-    timeoutSeconds: completedSource.timeoutSeconds,
+    model: completedRun.model,
+    effort: completedRun.effort,
+    depth: completedRun.depth,
+    timeoutSeconds: completedRun.timeoutSeconds,
     childSessionId: "missing-cwd-child",
     acpxRecordId: "missing-cwd-acpx",
   });
-  state.finishAgentRun(missingCwdSource.id, {
+  state.finishAgentRun(missingCwdRun.id, {
     status: AgentRunStatus.Completed,
     resultTail: "done",
     error: null,
   });
-  assert.throws(() => restarted.continue(missingCwdSource.id, "follow up"), /working directory no longer exists/);
-  assert.equal(state.listAgentRuns().length, beforeMissingCwd + 1, "missing cwd fails before a continuation row is created");
+  assert.throws(() => restarted.resume(missingCwdRun.id, "follow up"), /working directory no longer exists/);
+  assert.equal(state.listAgentRuns().length, beforeMissingCwd + 1, "missing cwd fails before a resume row is created");
   await restarted.stop();
 
   // --- lost sweeper: stale running row with no live turn ------------------------------------
@@ -308,7 +309,7 @@ try {
   assert.ok(failedStartup.finishedAt, "startup failure has an actionable terminal timestamp");
   assert.equal(failedStartup.error, "ACP handshake incompatible");
 
-  const staleSource = startupState.createAgentRun({
+  const staleCompletedRun = startupState.createAgentRun({
     harness: AgentRunHarness.Codex,
     task: "completed before its ACP record became stale",
     cwd: dir,
@@ -319,38 +320,38 @@ try {
     childSessionId: "stale-child",
     acpxRecordId: "stale-acpx",
   });
-  startupState.finishAgentRun(staleSource.id, {
+  startupState.finishAgentRun(staleCompletedRun.id, {
     status: AgentRunStatus.Completed,
-    resultTail: "source result",
+    resultTail: "completed result",
     error: null,
   });
-  const staleContinuation = startupExecutor.continue(staleSource.id, "new paid follow-up");
+  const staleResume = startupExecutor.resume(staleCompletedRun.id, "new paid follow-up");
   await waitFor(
-    () => startupState.agentRunById(staleContinuation.id)?.status === AgentRunStatus.Failed,
-    "stale continuation failure to become terminal",
+    () => startupState.agentRunById(staleResume.id)?.status === AgentRunStatus.Failed,
+    "stale resume failure to become terminal",
   );
-  assert.equal(startupState.agentRunById(staleContinuation.id)?.resumeOfRunId, staleSource.id);
-  assert.equal(startupState.agentRunById(staleContinuation.id)?.error, "ACP handshake incompatible");
-  assert.equal(startupState.agentRunById(staleSource.id)?.status, AgentRunStatus.Completed);
-  assert.equal(startupState.agentRunById(staleSource.id)?.resultTail, "source result");
+  assert.equal(startupState.agentRunById(staleResume.id)?.resumeOfRunId, staleCompletedRun.id);
+  assert.equal(startupState.agentRunById(staleResume.id)?.error, "ACP handshake incompatible");
+  assert.equal(startupState.agentRunById(staleCompletedRun.id)?.status, AgentRunStatus.Completed);
+  assert.equal(startupState.agentRunById(staleCompletedRun.id)?.resultTail, "completed result");
   await startupExecutor.stop();
   startupState.close();
 
-  // --- corrupt lineage: a missing immutable source fails closed before launcher dispatch ---
-  const corruptPath = join(dir, "missing-source.db");
+  // --- corrupt resume relationship fails closed before launcher dispatch -----------------
+  const corruptPath = join(dir, "missing-resumed-run.db");
   const corruptState = new State(corruptPath, { bus: new InMemoryEventBus() });
-  const corruptSource = corruptState.createAgentRun({
+  const corruptCompletedRun = corruptState.createAgentRun({
     harness: AgentRunHarness.ClaudeCode,
-    task: "completed source",
+    task: "completed run",
     cwd: dir,
     depth: 1,
     timeoutSeconds: 60,
     childSessionId: "corrupt-child",
     acpxRecordId: "corrupt-acpx",
   });
-  corruptState.finishAgentRun(corruptSource.id, {
+  corruptState.finishAgentRun(corruptCompletedRun.id, {
     status: AgentRunStatus.Completed,
-    resultTail: "source result",
+    resultTail: "completed result",
     error: null,
   });
   const dormantExecutor = new AgentRunExecutor(corruptState, {
@@ -358,10 +359,10 @@ try {
     maxConcurrent: 0,
     logger: () => undefined,
   });
-  const corruptContinuation = dormantExecutor.continue(corruptSource.id, "follow up");
+  const corruptResume = dormantExecutor.resume(corruptCompletedRun.id, "follow up");
   const corruptDb = new DatabaseSync(corruptPath);
   corruptDb.exec("PRAGMA foreign_keys = OFF");
-  corruptDb.prepare("DELETE FROM agent_runs WHERE id = ?").run(corruptSource.id);
+  corruptDb.prepare("DELETE FROM agent_runs WHERE id = ?").run(corruptCompletedRun.id);
   corruptDb.close();
   let corruptLaunchCalls = 0;
   const corruptExecutor = new AgentRunExecutor(corruptState, {
@@ -374,11 +375,11 @@ try {
   });
   corruptExecutor.start();
   await waitFor(
-    () => corruptState.agentRunById(corruptContinuation.id)?.status === AgentRunStatus.Failed,
-    "missing continuation source to fail",
+    () => corruptState.agentRunById(corruptResume.id)?.status === AgentRunStatus.Failed,
+    "missing resumed run to fail",
   );
-  assert.match(corruptState.agentRunById(corruptContinuation.id)?.error ?? "", /references missing source/);
-  assert.equal(corruptLaunchCalls, 0, "missing continuation lineage cannot downgrade into a launcher call");
+  assert.match(corruptState.agentRunById(corruptResume.id)?.error ?? "", /references missing resume run/);
+  assert.equal(corruptLaunchCalls, 0, "missing resume relationship cannot downgrade into a launcher call");
   await corruptExecutor.stop();
   await dormantExecutor.stop();
   corruptState.close();

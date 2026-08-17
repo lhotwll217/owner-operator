@@ -2,15 +2,15 @@ import { isAbsolute } from "node:path";
 import {
   AGENT_RUN_CAPABILITIES,
   AGENT_RUN_MAX_DEPTH,
-  AGENT_RUN_RESUMABLE_STATUSES,
+  AGENT_RUN_RETRYABLE_STATUSES,
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
-  agentRunContinuationError,
-  agentRunSessionIntent,
+  agentRunResumeError,
+  agentRunTurnIntent,
   isAgentRunEffort,
   isTerminalAgentRunStatus,
-  validateAgentRunContinuationTask,
+  validateAgentRunResumeTask,
   type AgentRun,
   type AgentRunCreateInput,
   type AgentRunFinalStatus,
@@ -19,7 +19,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
-import { continuationCwdError } from "./agent-state-projection";
+import { resumeCwdError } from "./agent-state-projection";
 import { resolveAgentRunLaunch } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
@@ -199,28 +199,27 @@ export class AgentRunExecutor {
     return run;
   }
 
-  /** Resume = same child identity, new run. Requires a persisted child session id and a
-   * harness whose capability record allows resumption. */
-  resume(id: string): AgentRun {
+  /** Retry = same task and child identity in a new immutable run. */
+  retry(id: string): AgentRun {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
-    if (!AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)) {
-      throw new Error(`agent run is not resumable from status ${run.status}`);
+    if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
+      throw new Error(`agent run is not retryable from status ${run.status}`);
     }
-    if (!AGENT_RUN_CAPABILITIES[run.harness]?.resume) {
-      throw new Error(`harness ${run.harness} does not support resume`);
+    if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
+      throw new Error(`harness ${run.harness} does not support loading an existing session`);
     }
     if (!run.childSessionId) {
-      throw new Error("agent run has no child session identity to resume");
+      throw new Error("agent run has no child session identity to retry");
     }
-    // Guard concurrent resumes of one child: two resume calls for the same source must not both
-    // start turns on that child session. resume()/createAgentRun() are synchronous over
-    // DatabaseSync, so this check-then-create is atomic in the single-process daemon — if a prior
-    // resume is already pending or running for this child, return it instead of duplicating.
+    // Guard concurrent retries of one child. retry()/createAgentRun() are synchronous over
+    // DatabaseSync, so the single-process daemon makes this check-then-create atomic.
     const inflight = this.state.nonterminalAgentRunByChildSession(run.childSessionId);
     if (inflight) return inflight;
-    const resumed = this.state.createAgentRun({
+    const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
+    if (existingRetry) throw new Error(`agent run ${run.id} has already been retried by ${existingRetry.id}`);
+    const retried = this.state.createAgentRun({
       harness: run.harness,
       task: run.task,
       cwd: run.cwd,
@@ -229,33 +228,32 @@ export class AgentRunExecutor {
       effort: run.effort,
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
-      resumeOfRunId: run.id,
+      retryOfRunId: run.id,
       childSessionId: run.childSessionId,
       acpxRecordId: run.acpxRecordId,
     });
     this.pump();
-    return resumed;
+    return retried;
   }
 
-  /** Continue = one new task on a completed child session, recorded as a new immutable run.
-   * Unlike recovery resume, continuation never replays the source task. */
-  continue(id: string, task: string): AgentRun {
+  /** Resume = one required new task after a completed run, using the same child conversation. */
+  resume(id: string, task: string): AgentRun {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
-    const followUpTask = validateAgentRunContinuationTask(task);
-    const successor = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
+    const followUpTask = validateAgentRunResumeTask(task);
+    const existingResume = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
     const inflight = run.childSessionId
       ? this.state.nonterminalAgentRunByChildSession(run.childSessionId)
       : undefined;
-    const domainError = agentRunContinuationError(run, {
-      successorRunId: successor?.id ?? null,
+    const domainError = agentRunResumeError(run, {
+      existingResumeRunId: existingResume?.id ?? null,
       activeRunId: inflight?.id ?? null,
     });
     if (domainError) throw new Error(domainError);
-    const cwdError = continuationCwdError(run.cwd);
+    const cwdError = resumeCwdError(run.cwd);
     if (cwdError) throw new Error(cwdError);
-    const continued = this.state.createAgentRun({
+    const resumed = this.state.createAgentRun({
       harness: run.harness,
       task: followUpTask,
       cwd: run.cwd,
@@ -269,7 +267,7 @@ export class AgentRunExecutor {
       acpxRecordId: run.acpxRecordId,
     });
     this.pump();
-    return continued;
+    return resumed;
   }
 
   /** Bounded block until the run is terminal; returns the current row either way. */
@@ -323,11 +321,12 @@ export class AgentRunExecutor {
     }, run.timeoutSeconds * 1_000);
     timeout.unref?.();
     try {
-      const source = run.resumeOfRunId ? this.state.agentRunById(run.resumeOfRunId) : undefined;
-      const sessionIntent = agentRunSessionIntent(run, source);
+      const retriedRun = run.retryOfRunId ? this.state.agentRunById(run.retryOfRunId) : undefined;
+      const resumedRun = run.resumeOfRunId ? this.state.agentRunById(run.resumeOfRunId) : undefined;
+      const turnIntent = agentRunTurnIntent(run, retriedRun, resumedRun);
       const result = await this.launcher({
         run,
-        sessionIntent,
+        turnIntent,
         signal: controller.signal,
         onActivity: (update) => {
           this.state.recordAgentRunActivity(run.id, update);
