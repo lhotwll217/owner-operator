@@ -101,6 +101,7 @@ const run: AgentRun = {
   acpxRecordId: null,
   resultTail: null,
   error: null,
+  retryOfRunId: null,
   resumeOfRunId: null,
   timeoutSeconds: 3_600,
 };
@@ -108,7 +109,7 @@ const run: AgentRun = {
 const activity: AgentRunActivityUpdate[] = [];
 const result = await createAcpLauncher({ runtimeFactory: () => runtime })({
   run,
-  resumeSessionId: null,
+  turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: (update) => activity.push(update),
 });
@@ -134,7 +135,7 @@ for (const [status, expected] of [
   const observed: AgentRunActivityUpdate[] = [];
   const statusRuntime = { ...runtime, getStatus: async () => status } as unknown as AcpRuntime;
   await createAcpLauncher({ runtimeFactory: () => statusRuntime })({
-    run: { ...run, effort: null }, resumeSessionId: null, signal: new AbortController().signal,
+    run: { ...run, effort: null }, turnIntent: { kind: "fresh" }, signal: new AbortController().signal,
     onActivity: (update) => observed.push(update),
   });
   assert.deepEqual(observed[1], { harnessIdentity: expected }, "status observation preserves only actual supported facts");
@@ -153,7 +154,7 @@ const unadvertisedRuntime = {
 } as unknown as AcpRuntime;
 await createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
   run,
-  resumeSessionId: null,
+  turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
@@ -168,14 +169,14 @@ const backendOnlyRuntime = {
 } as unknown as AcpRuntime;
 const backendIdentity = await createAcpLauncher({ runtimeFactory: () => backendOnlyRuntime })({
   run,
-  resumeSessionId: null,
+  turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
 assert.equal(
   backendIdentity.childSessionId,
   "backend-session",
-  "ACP backends without a separate native id still retain their resumable session identity",
+  "ACP backends without a separate native id still retain their persistent session identity",
 );
 
 let terminationChecks = 0;
@@ -191,9 +192,410 @@ await createAcpLauncher({
     processTreePids: async () => [701, 702],
     terminate: async (trackedPids) => { terminationChecks += 1; verifiedPids = trackedPids; return false; },
   }),
-})({ run, resumeSessionId: null, signal: new AbortController().signal, onActivity: () => undefined });
+})({ run, turnIntent: { kind: "fresh" }, signal: new AbortController().signal, onActivity: () => undefined });
 assert.equal(terminationChecks, 1, "normal runtime close independently verifies process-tree termination");
 assert.deepEqual(verifiedPids, [701, 702], "normal close verifies the PID set captured before wrapper exit");
 assert.equal(releases, 0, "failed close verification retains the process lease");
+
+// A handled completed turn ends with acpx.close(), which persists an ordinary closed record.
+// Resume must pass that exact record to ensureSession so acpx can reopen it, while invalid records
+// still fail before ensureSession can accidentally turn the follow-up into a fresh session.
+const resumeRun = {
+  ...run,
+  id: "resumed-run",
+  harness: AgentRunHarness.Codex,
+  task: "answer a follow-up",
+  childSessionId: "resumed-child",
+  acpxRecordId: "completed-acpx-record",
+  resumeOfRunId: "completed-run",
+};
+const resumeRecord = {
+  acpxRecordId: "completed-acpx-record",
+  acpSessionId: "backend-child",
+  agentSessionId: "resumed-child",
+  cwd: resumeRun.cwd,
+  closed: true,
+  closedAt: "2026-07-20T00:01:00.000Z",
+  acpx: {},
+};
+let resumeEnsureInput: Record<string, unknown> | undefined;
+const resumeRuntime = {
+  ensureSession: async (input: Record<string, unknown>) => {
+    resumeEnsureInput = input;
+    return {
+      sessionKey: "completed-acpx-record",
+      agentSessionId: "resumed-child",
+      backendSessionId: "backend-child",
+      acpxRecordId: "completed-acpx-record",
+    };
+  },
+  startTurn: () => ({
+    events: (async function* () {})(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+  close: async () => undefined,
+} as unknown as AcpRuntime;
+await createAcpLauncher({
+  leasedRuntimeFactory: () => ({
+    runtime: resumeRuntime,
+    sessionStore: { load: async () => resumeRecord } as never,
+    leaseId: "resume-lease",
+    release: () => undefined,
+    processTreePids: async () => [],
+    terminate: async () => true,
+  }),
+})({
+  run: resumeRun,
+  turnIntent: {
+    kind: "resume",
+    childSessionId: "resumed-child",
+    acpxRecordId: "completed-acpx-record",
+  },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(resumeEnsureInput?.sessionKey, "completed-acpx-record", "resume reuses the exact acpx record id");
+assert.equal(resumeEnsureInput?.resumeSessionId, "backend-child", "resume loads the record's exact ACP session id");
+assert.equal(resumeRecord.closed, true, "Resume accepts the ordinary record state persisted by acpx.close()");
+
+const identityCases = [
+  {
+    harness: AgentRunHarness.ClaudeCode,
+    recordId: "claude-record",
+    acpSessionId: "claude-acp-session",
+    agentSessionId: undefined,
+    childSessionId: "claude-acp-session",
+  },
+  {
+    harness: AgentRunHarness.Codex,
+    recordId: "codex-record",
+    acpSessionId: "codex-acp-session",
+    agentSessionId: "codex-native-session",
+    childSessionId: "codex-native-session",
+  },
+  {
+    harness: AgentRunHarness.Cursor,
+    recordId: "cursor-record",
+    acpSessionId: "cursor-acp-session",
+    agentSessionId: "cursor-native-session",
+    childSessionId: "cursor-native-session",
+  },
+] as const;
+for (const identityCase of identityCases) {
+  const record = {
+    ...resumeRecord,
+    acpxRecordId: identityCase.recordId,
+    acpSessionId: identityCase.acpSessionId,
+    ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : { agentSessionId: undefined }),
+  };
+  let ensureInput: Record<string, unknown> | undefined;
+  const exactRuntime = {
+    ...resumeRuntime,
+    ensureSession: async (input: Record<string, unknown>) => {
+      ensureInput = input;
+      return {
+        sessionKey: identityCase.recordId,
+        acpxRecordId: identityCase.recordId,
+        backendSessionId: identityCase.acpSessionId,
+        ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : {}),
+      };
+    },
+  } as unknown as AcpRuntime;
+  await createAcpLauncher({
+    leasedRuntimeFactory: () => ({
+      runtime: exactRuntime,
+      sessionStore: { load: async () => record } as never,
+      leaseId: `${identityCase.harness}-identity-lease`,
+      release: () => undefined,
+      processTreePids: async () => [],
+      terminate: async () => true,
+    }),
+  })({
+    run: {
+      ...resumeRun,
+      harness: identityCase.harness,
+      childSessionId: identityCase.childSessionId,
+      acpxRecordId: identityCase.recordId,
+    },
+    turnIntent: {
+      kind: "resume",
+      childSessionId: identityCase.childSessionId,
+      acpxRecordId: identityCase.recordId,
+    },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  });
+  assert.equal(ensureInput?.sessionKey, identityCase.recordId, `${identityCase.harness} reuses its acpx record`);
+  assert.equal(
+    ensureInput?.resumeSessionId,
+    identityCase.acpSessionId,
+    `${identityCase.harness} resumes through the record's ACP session identity`,
+  );
+}
+
+// A handled failed turn reaches the same acpx.close() cleanup. Retry must load that normally closed
+// source record under its new run id without weakening either level of identity proof.
+for (const identityCase of identityCases) {
+  const record = {
+    ...resumeRecord,
+    acpxRecordId: identityCase.recordId,
+    acpSessionId: identityCase.acpSessionId,
+    ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : { agentSessionId: undefined }),
+  };
+  const failedRun = {
+    ...resumeRun,
+    id: `${identityCase.harness}-failed-turn`,
+    harness: identityCase.harness,
+    status: AgentRunStatus.Failed,
+    childSessionId: identityCase.childSessionId,
+    acpxRecordId: identityCase.recordId,
+    error: "handled turn failed after loading the exact session",
+  };
+  const retryRun = {
+    ...failedRun,
+    id: `${identityCase.harness}-retry-failed-turn`,
+    status: AgentRunStatus.Running,
+    error: null,
+    retryOfRunId: failedRun.id,
+    resumeOfRunId: null,
+  };
+  let retryEnsureInput: Record<string, unknown> | undefined;
+  let retryTurnCalls = 0;
+  const retryRuntime = {
+    ...resumeRuntime,
+    ensureSession: async (input: Record<string, unknown>) => {
+      retryEnsureInput = input;
+      return {
+        sessionKey: retryRun.id,
+        acpxRecordId: retryRun.id,
+        backendSessionId: identityCase.acpSessionId,
+        ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : {}),
+      };
+    },
+    startTurn: () => {
+      retryTurnCalls += 1;
+      return {
+        events: (async function* () {})(),
+        result: Promise.resolve({ status: "completed" }),
+      };
+    },
+  } as unknown as AcpRuntime;
+  await createAcpLauncher({
+    leasedRuntimeFactory: () => ({
+      runtime: retryRuntime,
+      sessionStore: { load: async (id: string) => id === identityCase.recordId ? record : undefined } as never,
+      leaseId: `${identityCase.harness}-retry-identity-lease`,
+      release: () => undefined,
+      processTreePids: async () => [],
+      terminate: async () => true,
+    }),
+  })({
+    run: retryRun,
+    turnIntent: {
+      kind: "retry",
+      childSessionId: identityCase.childSessionId,
+      acpxRecordId: identityCase.recordId,
+    },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  });
+  assert.equal(retryEnsureInput?.sessionKey, retryRun.id, "retry creates its own acpx record");
+  assert.equal(
+    retryEnsureInput?.resumeSessionId,
+    identityCase.acpSessionId,
+    `${identityCase.harness} retry loads the ACP identity proven by the failed turn's record`,
+  );
+  assert.equal(record.closed, true, `${identityCase.harness} fixture matches acpx.close() persistence`);
+  assert.equal(retryTurnCalls, 1, `${identityCase.harness} Retry runs after an ordinarily closed failed turn`);
+
+  const freshRetryRuntime = {
+    ...retryRuntime,
+    ensureSession: async () => ({
+      sessionKey: retryRun.id,
+      acpxRecordId: retryRun.id,
+      backendSessionId: "fresh-backend-session",
+      ...(identityCase.agentSessionId ? { agentSessionId: "fresh-native-session" } : {}),
+    }),
+    startTurn: () => {
+      retryTurnCalls += 1;
+      return {
+        events: (async function* () {})(),
+        result: Promise.resolve({ status: "completed" }),
+      };
+    },
+  } as unknown as AcpRuntime;
+  await assert.rejects(
+    () => createAcpLauncher({
+      leasedRuntimeFactory: () => ({
+        runtime: freshRetryRuntime,
+        sessionStore: { load: async (id: string) => id === identityCase.recordId ? record : undefined } as never,
+        leaseId: `${identityCase.harness}-retry-fallback-lease`,
+        release: () => undefined,
+        processTreePids: async () => [],
+        terminate: async () => true,
+      }),
+    })({
+      run: retryRun,
+      turnIntent: {
+        kind: "retry",
+        childSessionId: identityCase.childSessionId,
+        acpxRecordId: identityCase.recordId,
+      },
+      signal: new AbortController().signal,
+      onActivity: () => undefined,
+    }),
+    /ACP retry failed.*(?:identity mismatch|fresh session)/i,
+    `${identityCase.harness} Retry refuses a fresh fallback after a failed turn`,
+  );
+  assert.equal(retryTurnCalls, 1, "a rejected Retry fallback never receives a turn");
+}
+
+let legacyRetryTurnCalls = 0;
+await createAcpLauncher({
+  leasedRuntimeFactory: () => ({
+    runtime: {
+      ...resumeRuntime,
+      ensureSession: async () => ({
+        sessionKey: "legacy-child-only-retry",
+        acpxRecordId: "legacy-child-only-retry",
+        backendSessionId: "legacy-child-identity",
+      }),
+      startTurn: () => {
+        legacyRetryTurnCalls += 1;
+        return {
+          events: (async function* () {})(),
+          result: Promise.resolve({ status: "completed" }),
+        };
+      },
+    } as unknown as AcpRuntime,
+    sessionStore: { load: async () => undefined } as never,
+    leaseId: "legacy-child-only-retry-lease",
+    release: () => undefined,
+    processTreePids: async () => [],
+    terminate: async () => true,
+  }),
+})({
+  run: {
+    ...resumeRun,
+    id: "legacy-child-only-retry",
+    status: AgentRunStatus.Running,
+    childSessionId: "legacy-child-identity",
+    acpxRecordId: null,
+    retryOfRunId: "legacy-failure",
+    resumeOfRunId: null,
+  },
+  turnIntent: { kind: "retry", childSessionId: "legacy-child-identity" },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(legacyRetryTurnCalls, 1, "legacy retry remains available from its sole durable child identity");
+
+let fallbackTurnCalls = 0;
+const freshFallbackRuntime = {
+  ...resumeRuntime,
+  ensureSession: async () => ({
+    sessionKey: "completed-acpx-record",
+    acpxRecordId: "completed-acpx-record",
+    backendSessionId: "fresh-backend-session",
+    agentSessionId: "fresh-child-session",
+  }),
+  startTurn: () => {
+    fallbackTurnCalls += 1;
+    return {
+      events: (async function* () {})(),
+      result: Promise.resolve({ status: "completed" }),
+    };
+  },
+} as unknown as AcpRuntime;
+await assert.rejects(
+  () => createAcpLauncher({
+    leasedRuntimeFactory: () => ({
+      runtime: freshFallbackRuntime,
+      sessionStore: { load: async () => resumeRecord } as never,
+      leaseId: "resume-fresh-fallback",
+      release: () => undefined,
+      processTreePids: async () => [],
+      terminate: async () => true,
+    }),
+  })({
+    run: resumeRun,
+    turnIntent: {
+      kind: "resume",
+      childSessionId: "resumed-child",
+      acpxRecordId: "completed-acpx-record",
+    },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  }),
+  /ACP resume failed.*(?:identity mismatch|fresh session)/i,
+  "a valid pre-check cannot authorize a fresh handle returned by ensureSession",
+);
+assert.equal(fallbackTurnCalls, 0, "a fresh fallback never receives the follow-up turn");
+
+await assert.rejects(
+  () => createAcpLauncher({
+    leasedRuntimeFactory: () => ({
+      runtime: {
+        ...resumeRuntime,
+        startTurn: () => { throw new Error("ordinary failure after validated resume identity"); },
+      } as unknown as AcpRuntime,
+      sessionStore: { load: async () => resumeRecord } as never,
+      leaseId: "resume-turn-failure",
+      release: () => undefined,
+      processTreePids: async () => [],
+      terminate: async () => true,
+    }),
+  })({
+    run: resumeRun,
+    turnIntent: {
+      kind: "resume",
+      childSessionId: "resumed-child",
+      acpxRecordId: "completed-acpx-record",
+    },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  }),
+  (error: unknown) => error instanceof Error
+    && error.message.includes("ACP turn failed for resumed-run")
+    && error.message.includes("ordinary failure after validated resume identity")
+    && !error.message.includes("ACP resume failed"),
+  "a post-identity turn failure is not misclassified as a Resume load failure",
+);
+
+for (const [label, record, expected] of [
+  ["missing", undefined, /session record not found.*refusing to create a fresh session/i],
+  ["mismatched", { ...resumeRecord, agentSessionId: "some-other-child" }, /identity mismatch/i],
+  ["missing-acp-identity", { ...resumeRecord, acpSessionId: "" }, /no ACP session identity/i],
+  ["reset-marked", { ...resumeRecord, acpx: { reset_on_next_ensure: true } }, /reset-marked/i],
+] as const) {
+  let ensureCalls = 0;
+  const invalidRuntime = {
+    ...resumeRuntime,
+    ensureSession: async () => { ensureCalls += 1; return {}; },
+  } as unknown as AcpRuntime;
+  await assert.rejects(
+    () => createAcpLauncher({
+      leasedRuntimeFactory: () => ({
+        runtime: invalidRuntime,
+        sessionStore: { load: async () => record } as never,
+        leaseId: `resume-${label}`,
+        release: () => undefined,
+        processTreePids: async () => [],
+        terminate: async () => true,
+      }),
+    })({
+      run: resumeRun,
+      turnIntent: {
+        kind: "resume",
+        childSessionId: "resumed-child",
+        acpxRecordId: "completed-acpx-record",
+      },
+      signal: new AbortController().signal,
+      onActivity: () => undefined,
+    }),
+    expected,
+  );
+  assert.equal(ensureCalls, 0, `${label} resume cannot fall through to fresh-session creation`);
+}
 
 process.stdout.write("ok — ACP launcher maps native/backend identity, outcome, and bounded output\n");

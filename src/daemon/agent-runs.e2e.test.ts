@@ -5,7 +5,10 @@
 // the opt-in acp-launcher.live.test.ts drives the same path through real Claude/acpx. The
 // crash-vs-graceful reconciliation on start() is also covered in executor.integration.test.ts.
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  AGENT_RUN_RESUME_TASK_ERROR,
   type AgentRun,
   AgentRunHarness,
   AgentRunStatus,
@@ -32,9 +35,13 @@ const parked: Array<{ request: AgentRunLaunchRequest; finish: (r: AgentRunLaunch
 let startupReaps = 0;
 const launcher: AgentRunLauncher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> =>
   new Promise((resolve, reject) => {
+    const intendedChild = request.turnIntent.kind === "fresh"
+      ? `child-${request.run.task.replace(/\W+/g, "-")}`
+      : request.turnIntent.childSessionId;
     request.onActivity({
       activity: "child started",
-      childSessionId: `child-${request.run.task.replace(/\W+/g, "-")}`,
+      childSessionId: intendedChild,
+      acpxRecordId: request.run.acpxRecordId ?? `acpx-${request.run.task.replace(/\W+/g, "-")}`,
     });
     const abort = (): void => reject(request.signal.reason ?? new Error("aborted"));
     if (request.signal.aborted) return abort();
@@ -114,24 +121,64 @@ try {
   gateway2 = (await connectGateway())!;
   const afterRestart = await gateway2.agentRun(launched.id);
   assert.equal(afterRestart.status, AgentRunStatus.Interrupted, "the interrupted run survives restart");
-  assert.ok(afterRestart.childSessionId, "the child identity survives for resume");
+  assert.ok(afterRestart.childSessionId, "the child identity survives for retry");
   const restartedView = await gateway2.agentState();
   assert.equal(restartedView.footer, "! 1 attention    /agent-state");
   assert.equal(restartedView.runs[0]?.status.text, "attention");
-  assert.equal(restartedView.runs[0]?.canResume, true, "restart reconstructs the durable resumable outcome");
+  assert.equal(restartedView.runs[0]?.canRetry, true, "restart reconstructs the durable retryable outcome");
 
-  // --- resume over HTTP: a new run under the same child identity --------------------------
-  const resumed = await gateway2.resumeAgentRun(launched.id);
-  assert.equal(resumed.resumeOfRunId, launched.id, "resume records lineage");
-  assert.equal(resumed.childSessionId, afterRestart.childSessionId, "resume reuses the child identity");
-  await waitFor(() => parked.length === 1, 3_000, "resumed child to start");
-  assert.equal(parked[0].request.resumeSessionId, afterRestart.childSessionId, "the launcher is asked to resume it");
+  // --- retry over HTTP: a new run under the same child identity ---------------------------
+  const retried = await gateway2.retryAgentRun(launched.id);
+  assert.equal(retried.retryOfRunId, launched.id, "retry records the exact run");
+  assert.equal(retried.childSessionId, afterRestart.childSessionId, "retry reuses the child identity");
+  await waitFor(() => parked.length === 1, 3_000, "retried child to start");
+  assert.deepEqual(parked[0].request.turnIntent, {
+    kind: "retry",
+    childSessionId: afterRestart.childSessionId,
+    acpxRecordId: afterRestart.acpxRecordId,
+  }, "the launcher is asked to retry it");
 
   // --- receive the durable result ---------------------------------------------------------
   parked[0].finish({ status: AgentRunStatus.Completed, resultText: "found the race", error: null });
-  const done = await gateway2.waitAgentRun(resumed.id, 5);
+  const done = await gateway2.waitAgentRun(retried.id, 5);
   assert.equal(done.status, AgentRunStatus.Completed);
   assert.equal(done.resultTail, "found the race", "the durable result is delivered through the ledger");
+
+  // --- resume a completed run over HTTP with strict task validation ----------------------
+  const daemonInfo = JSON.parse(readFileSync(join(ooHome, "daemon.json"), "utf8")) as {
+    port: number;
+    authToken: string;
+  };
+  const missingTask = await fetch(`http://127.0.0.1:${daemonInfo.port}/agent-runs/${done.id}/resume`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${daemonInfo.authToken}`, "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missingTask.status, 400, "Gateway rejects resume without a new task");
+  assert.equal(
+    (await missingTask.json() as { error?: unknown }).error,
+    AGENT_RUN_RESUME_TASK_ERROR,
+  );
+
+  parked.length = 0;
+  const resumed = await gateway2.resumeAgentRun(done.id, "explain the owner impact");
+  assert.equal(resumed.task, "explain the owner impact");
+  assert.equal(resumed.resumeOfRunId, done.id);
+  assert.equal(resumed.childSessionId, done.childSessionId);
+  assert.equal(resumed.acpxRecordId, done.acpxRecordId);
+  assert.equal(resumed.model, done.model);
+  assert.equal(resumed.effort, done.effort);
+  assert.equal(resumed.timeoutSeconds, done.timeoutSeconds);
+  await waitFor(() => parked.length === 1, 3_000, "resumed child to start");
+  assert.deepEqual(parked[0].request.turnIntent, {
+    kind: "resume",
+    childSessionId: done.childSessionId,
+    acpxRecordId: done.acpxRecordId,
+  });
+  parked[0].finish({ status: AgentRunStatus.Completed, resultText: "owner impact explained", error: null });
+  const resumedDone = await gateway2.waitAgentRun(resumed.id, 5);
+  assert.equal(resumedDone.status, AgentRunStatus.Completed);
+  assert.equal((await gateway2.agentRun(done.id)).resultTail, "found the race", "resume never mutates the completed run");
 
   // --- cancel a fresh run over HTTP -------------------------------------------------------
   parked.length = 0;
@@ -151,7 +198,7 @@ try {
     "the daemon pushed agent-run invalidations over SSE",
   );
 
-  process.stdout.write("ok — delegated run drives launch → interrupt → resume → result → cancel over the daemon HTTP surface\n");
+  process.stdout.write("ok — delegated run drives launch → retry → resume → result → cancel over daemon HTTP\n");
 } finally {
   gateway?.close();
   gateway2?.close();

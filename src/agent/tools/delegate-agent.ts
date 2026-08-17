@@ -38,7 +38,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       "Returns immediately with the run row; the child keeps running even if this session is " +
       "interrupted or closed. Completion events arrive automatically: after delegation, do not poll " +
       "or monitor the run. Use waitSeconds only when the owner explicitly requests a blocking wait; " +
-      "use manage_agent_run for cancel/resume control or an explicit owner-requested inspection.",
+      "use manage_agent_run for cancel, retry, resume, or an explicit owner-requested inspection.",
     parameters: Type.Object({
       harness: HarnessSchema,
       task: Type.String({ minLength: 1, description: "The task the child agent is asked to carry out." }),

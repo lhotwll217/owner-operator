@@ -79,7 +79,10 @@ struct AgentRunView: Decodable, Identifiable {
     let category: AgentRunViewCategory
     let elapsedMs: Int
     let latestActivity: String
+    let retryOfRunId: String?
+    let resumeOfRunId: String?
     let canCancel: Bool
+    let canRetry: Bool
     let canResume: Bool
 
     var tone: AgentRunTone {

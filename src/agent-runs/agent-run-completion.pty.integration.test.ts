@@ -48,6 +48,7 @@ class MemoryParentAdapter implements ParentRunAdapter {
 
   invalidate(): void { this.listener?.(); }
   async cancel(): Promise<AgentRun> { throw new Error("not used"); }
+  async retry(): Promise<AgentRun> { throw new Error("not used"); }
   async resume(): Promise<AgentRun> { throw new Error("not used"); }
 }
 

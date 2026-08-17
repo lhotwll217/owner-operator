@@ -48,6 +48,14 @@ Operator pins nothing. A proposal, not a setting — it is reported, never saved
 **Delegation depth**:
 How many **Delegated runs** separate a run from the Operator.
 
+**Retry**:
+A new **Delegated run** that reruns the same task after a run failed, was
+interrupted, or was lost.
+
+**Resume**:
+A new **Delegated run** that sends a required new task after a run completed,
+using the same **Child agent** conversation.
+
 **Schedule run**:
 One execution of a durable schedule, triggered by time or events rather than a
 parent agent.
@@ -57,5 +65,5 @@ parent agent.
 - "background agent" — resolved: a **Delegated run** in background mode, never
   a scheduler job.
 
-Lifecycle, lineage, capability guarantees, and resume behavior live in
+Lifecycle, retry and resume guarantees, and capability behavior live in
 [docs/delegated-runs.md](docs/delegated-runs.md).

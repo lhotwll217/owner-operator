@@ -48,8 +48,11 @@ private let mockAgentState = AgentStateView(
             category: .attention,
             elapsedMs: 3_000,
             latestActivity: "ACP handshake failed",
+            retryOfRunId: nil,
+            resumeOfRunId: nil,
             canCancel: false,
-            canResume: true
+            canRetry: true,
+            canResume: false
         ),
         AgentRunView(
             id: "running",
@@ -59,7 +62,10 @@ private let mockAgentState = AgentStateView(
             category: .active,
             elapsedMs: 252_000,
             latestActivity: "Reviewing the timeline rail",
+            retryOfRunId: nil,
+            resumeOfRunId: nil,
             canCancel: true,
+            canRetry: false,
             canResume: false
         ),
         AgentRunView(
@@ -70,7 +76,10 @@ private let mockAgentState = AgentStateView(
             category: .active,
             elapsedMs: 18_000,
             latestActivity: "",
+            retryOfRunId: nil,
+            resumeOfRunId: nil,
             canCancel: true,
+            canRetry: false,
             canResume: false
         ),
         AgentRunView(
@@ -81,8 +90,11 @@ private let mockAgentState = AgentStateView(
             category: .recent,
             elapsedMs: 221_000,
             latestActivity: "Done",
+            retryOfRunId: nil,
+            resumeOfRunId: "completed-run",
             canCancel: false,
-            canResume: false
+            canRetry: false,
+            canResume: true
         ),
     ]
 )

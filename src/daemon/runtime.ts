@@ -14,6 +14,7 @@ import { sampleTranscript } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
+import { deriveParentAgentStateWithEnvironment } from "../agent-runs/agent-state-projection";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
 import { daemonInfoPath, stateDatabasePath } from "../shared/paths";
@@ -104,10 +105,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     scheduler,
     agentRuns: {
       list: (parentThreadId) => state.listAgentRuns(parentThreadId ? { parentThreadId } : {}),
+      view: (parentThreadId) => deriveParentAgentStateWithEnvironment(
+        state.listAgentRuns(parentThreadId ? { parentThreadId } : {}),
+      ),
       get: (id) => state.agentRunById(id),
       launch: (input) => agentRuns.launch(input),
       cancel: (id) => agentRuns.cancel(id),
-      resume: (id) => agentRuns.resume(id),
+      retry: (id) => agentRuns.retry(id),
+      resume: (id, task) => agentRuns.resume(id, task),
       wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
     },
     port: options.port,

@@ -187,8 +187,10 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   acpx_record_id TEXT,
   result_tail TEXT,
   error TEXT,
+  retry_of_run_id TEXT REFERENCES agent_runs(id),
   resume_of_run_id TEXT REFERENCES agent_runs(id),
-  timeout_seconds INTEGER NOT NULL
+  timeout_seconds INTEGER NOT NULL,
+  CHECK (retry_of_run_id IS NULL OR resume_of_run_id IS NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status_created
@@ -209,6 +211,7 @@ const AGENT_RUN_COLUMNS = `
   created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt,
   activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
   acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
+  retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
 
 export interface AgentRunInsert {
@@ -221,6 +224,7 @@ export interface AgentRunInsert {
   effort?: AgentRunEffort | null;
   depth: number;
   timeoutSeconds: number;
+  retryOfRunId?: string | null;
   resumeOfRunId?: string | null;
   childSessionId?: string | null;
   acpxRecordId?: string | null;
@@ -296,6 +300,11 @@ export class ThreadDb {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN harness_identity_observed INTEGER NOT NULL DEFAULT 0 "
         + "CHECK (harness_identity_observed IN (0, 1))");
     }
+    this.migrateAgentRunRelationships();
+    const currentColumns = new Set(
+      (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
     const tableSql = (this.db.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'",
     ).get() as { sql: string }).sql;
@@ -303,38 +312,104 @@ export class ThreadDb {
       const definition = new RegExp(`(?:^|[,\\n])\\s*${column}\\s+TEXT\\s+CHECK\\s*\\([^\\n]*`, "i").exec(tableSql)?.[0] ?? "";
       return definition.includes("'max'") && definition.includes("'ultra'");
     };
-    if ((columns.has("effort") && !currentEffortCheck("effort"))
-      || (columns.has("harness_effort") && !currentEffortCheck("harness_effort"))) {
+    if ((currentColumns.has("effort") && !currentEffortCheck("effort"))
+      || (currentColumns.has("harness_effort") && !currentEffortCheck("harness_effort"))) {
       this.rebuildAgentRunsForCurrentEfforts();
     }
   }
 
+  /** Split the former overloaded relationship column by the referenced run's terminal status. The
+   * table rebuild preserves every row, exact self-reference, and documented index. */
+  private migrateAgentRunRelationships(): void {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (columns.has("retry_of_run_id")) {
+      if (!columns.has("resume_of_run_id")) throw new Error("agent_runs resume relationship column is missing");
+      return;
+    }
+    if (!columns.has("resume_of_run_id")) throw new Error("agent_runs legacy relationship column is missing");
+
+    const invalid = this.db.prepare(
+      `SELECT run.id, run.resume_of_run_id AS referencedRunId, referenced.status
+       FROM agent_runs AS run
+       LEFT JOIN agent_runs AS referenced ON referenced.id = run.resume_of_run_id
+       WHERE run.resume_of_run_id IS NOT NULL
+         AND (referenced.id IS NULL OR referenced.status NOT IN ('completed','failed','interrupted','lost'))
+       LIMIT 1`,
+    ).get() as { id: string; referencedRunId: string; status: string | null } | undefined;
+    if (invalid) {
+      throw new Error(
+        `cannot classify agent run ${invalid.id} relationship to ${invalid.referencedRunId}: `
+        + `referenced status is ${invalid.status ?? "missing"}`,
+      );
+    }
+
+    this.rebuildAgentRunsTable("agent_runs_overloaded_relationship", (priorTable, currentTable) => {
+      this.db.exec(`
+        INSERT INTO ${currentTable} (
+          id, harness, task, cwd, parent_thread_id, model, effort, effort_applied,
+          harness_model, harness_effort, harness_identity_observed, depth, status,
+          created_at, started_at, finished_at, activity, last_activity_at, child_session_id,
+          acpx_record_id, result_tail, error, retry_of_run_id, resume_of_run_id, timeout_seconds
+        )
+        SELECT
+          run.id, run.harness, run.task, run.cwd, run.parent_thread_id, run.model, run.effort,
+          run.effort_applied, run.harness_model, run.harness_effort, run.harness_identity_observed,
+          run.depth, run.status, run.created_at, run.started_at, run.finished_at, run.activity,
+          run.last_activity_at, run.child_session_id, run.acpx_record_id, run.result_tail, run.error,
+          CASE WHEN referenced.status IN ('failed','interrupted','lost') THEN run.resume_of_run_id END,
+          CASE WHEN referenced.status = 'completed' THEN run.resume_of_run_id END,
+          run.timeout_seconds
+        FROM ${priorTable} AS run
+        LEFT JOIN ${priorTable} AS referenced ON referenced.id = run.resume_of_run_id
+      `);
+    });
+  }
+
   /** SQLite cannot alter a CHECK constraint. Rebuild only this table, copying every column and
-   * recreating its documented indexes; rows and self-referential resume lineage are preserved. */
+   * recreating its documented indexes; rows and self-referential retry/resume relationships are preserved. */
   private rebuildAgentRunsForCurrentEfforts(): void {
+    const columns = (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
+      .map(({ name }) => name);
+    this.rebuildAgentRunsTable("agent_runs_prior_effort_constraint", (priorTable, currentTable) => {
+      const names = columns.map((name) => `"${name}"`).join(", ");
+      this.db.exec(`INSERT INTO ${currentTable} (${names}) SELECT ${names} FROM ${priorTable}`);
+    });
+  }
+
+  /** Both agent_runs migrations need SQLite's same fail-closed table-rebuild transaction. */
+  private rebuildAgentRunsTable(
+    priorTable: "agent_runs_overloaded_relationship" | "agent_runs_prior_effort_constraint",
+    copyRows: (priorTable: string, currentTable: string) => void,
+  ): void {
+    const currentTable = "agent_runs_current";
     const createTable = SCHEMA.match(/CREATE TABLE IF NOT EXISTS agent_runs \([\s\S]*?\n\);/)?.[0];
     const indexes = [...SCHEMA.matchAll(/CREATE INDEX IF NOT EXISTS idx_agent_runs_[\s\S]*?;/g)]
       .map(([sql]) => sql);
     if (!createTable || indexes.length !== 3) throw new Error("agent_runs schema definition is incomplete");
-    const columns = (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
-      .map(({ name }) => name);
     this.db.exec("PRAGMA foreign_keys = OFF");
+    let transactionStarted = false;
     try {
       this.db.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
       for (const index of indexes) {
         const name = /idx_agent_runs_[a-z_]+/.exec(index)?.[0];
         if (name) this.db.exec(`DROP INDEX IF EXISTS ${name}`);
       }
-      this.db.exec("ALTER TABLE agent_runs RENAME TO agent_runs_prior_effort_constraint");
-      this.db.exec(createTable.replace("agent_runs (", "agent_runs_current ("));
-      const names = columns.map((name) => `"${name}"`).join(", ");
-      this.db.exec(`INSERT INTO agent_runs_current (${names}) SELECT ${names} FROM agent_runs_prior_effort_constraint`);
-      this.db.exec("DROP TABLE agent_runs_prior_effort_constraint");
-      this.db.exec("ALTER TABLE agent_runs_current RENAME TO agent_runs");
+      this.db.exec(`ALTER TABLE agent_runs RENAME TO ${priorTable}`);
+      this.db.exec(createTable.replace("agent_runs (", `${currentTable} (`));
+      copyRows(priorTable, currentTable);
+      this.db.exec(`DROP TABLE ${priorTable}`);
+      this.db.exec(`ALTER TABLE ${currentTable} RENAME TO agent_runs`);
       for (const index of indexes) this.db.exec(index);
+      const violations = this.db.prepare("PRAGMA foreign_key_check(agent_runs)").all();
+      if (violations.length) throw new Error("agent_runs rebuild violated a foreign key");
       this.db.exec("COMMIT");
+      transactionStarted = false;
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      if (transactionStarted) this.db.exec("ROLLBACK");
       throw error;
     } finally {
       this.db.exec("PRAGMA foreign_keys = ON");
@@ -784,13 +859,13 @@ export class ThreadDb {
     this.db.prepare(
       `INSERT INTO agent_runs (
          id, harness, task, cwd, parent_thread_id, model, effort, depth, status, created_at,
-         child_session_id, acpx_record_id, resume_of_run_id, timeout_seconds
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         child_session_id, acpx_record_id, retry_of_run_id, resume_of_run_id, timeout_seconds
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
       insert.model ?? null, insert.effort ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
       insert.childSessionId ?? null, insert.acpxRecordId ?? null,
-      insert.resumeOfRunId ?? null, insert.timeoutSeconds,
+      insert.retryOfRunId ?? null, insert.resumeOfRunId ?? null, insert.timeoutSeconds,
     );
     return this.agentRunById(insert.id)!;
   }
@@ -805,7 +880,7 @@ export class ThreadDb {
     return toAgentRun(row);
   }
 
-  /** A pending-or-running run for this child session, if any — the resume-duplication guard. */
+  /** A pending-or-running run for this child session, if any — the Retry/Resume active-child guard. */
   nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
     const row = this.db.prepare(
       `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs

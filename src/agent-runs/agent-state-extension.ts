@@ -16,6 +16,7 @@ import { formatAgentElapsed } from "./format-agent-elapsed";
 export type AgentStatePickerAction =
   | { kind: "close" }
   | { kind: "cancel"; runId: string }
+  | { kind: "retry"; runId: string }
   | { kind: "resume"; runId: string };
 
 function statusColor(theme: Theme, run: AgentRunView): string {
@@ -24,6 +25,14 @@ function statusColor(theme: Theme, run: AgentRunView): string {
   if (run.status.text === "running") return theme.fg("accent", value);
   if (run.status.text === "completed") return theme.fg("success", value);
   return theme.fg("muted", value);
+}
+
+function runControlLabels(run: AgentRunView): string[] {
+  return [
+    run.canCancel ? "c cancel" : "",
+    run.canRetry ? "r retry" : "",
+    run.canResume ? "u resume" : "",
+  ].filter(Boolean);
 }
 
 /** Focused, surface-only component. All lifecycle meaning arrives in ParentAgentStateView. */
@@ -73,7 +82,9 @@ export class AgentStatePicker {
     const selected = this.selected;
     if (data === "c" && selected?.canCancel) {
       this.onAction({ kind: "cancel", runId: selected.id });
-    } else if (data === "r" && selected?.canResume) {
+    } else if (data === "r" && selected?.canRetry) {
+      this.onAction({ kind: "retry", runId: selected.id });
+    } else if (data === "u" && selected?.canResume) {
       this.onAction({ kind: "resume", runId: selected.id });
     }
   }
@@ -100,9 +111,9 @@ export class AgentStatePicker {
       lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
       lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
       lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
-      const controls = [selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc back"]
-        .filter(Boolean)
-        .join(" · ");
+      if (selected.retryOfRunId) lines.push(line(`${this.theme.fg("dim", "Retry of:")} ${selected.retryOfRunId}`));
+      if (selected.resumeOfRunId) lines.push(line(`${this.theme.fg("dim", "Resume of:")} ${selected.resumeOfRunId}`));
+      const controls = [...runControlLabels(selected), "esc back"].join(" · ");
       lines.push("", line(this.theme.fg("dim", controls)));
       return lines;
     }
@@ -124,9 +135,11 @@ export class AgentStatePicker {
     }
 
     const selected = this.selected!;
-    const controls = ["↑/↓ select", selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc close"]
-      .filter(Boolean)
-      .join(" · ");
+    const controls = [
+      "↑/↓ select",
+      ...runControlLabels(selected),
+      "esc close",
+    ].join(" · ");
     lines.push("", line(this.theme.fg("dim", `enter inspect · ${controls}`)));
     return lines;
   }
@@ -204,8 +217,15 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
             );
             if (!confirmed) return;
             await session.cancel(selected.runId);
+          } else if (selected.kind === "retry") {
+            await session.retry(selected.runId);
           } else {
-            await session.resume(selected.runId);
+            const task = await ctx.ui.input(
+              "Resume completed delegated session",
+              "New follow-up task",
+            );
+            if (task === undefined) return;
+            await session.resume(selected.runId, task);
           }
         } catch (error) {
           ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");

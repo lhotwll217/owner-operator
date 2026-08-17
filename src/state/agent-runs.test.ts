@@ -1,5 +1,5 @@
 // Unit: the agent_runs ledger seam on ThreadDb — lifecycle guards, monotonic terminal
-// states, claim-under-cap, restart interruption, lost reconciliation, resume lineage,
+// states, claim-under-cap, restart interruption, lost reconciliation, retry lineage,
 // and the parent/child join into the session-state projection.
 import assert from "node:assert";
 import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
@@ -26,6 +26,7 @@ assert.equal(created.harness, AgentRunHarness.ClaudeCode);
 assert.equal(created.parentThreadId, "parent-thread");
 assert.equal(created.depth, 1);
 assert.equal(created.startedAt, null, "pending runs have not started");
+assert.equal(created.retryOfRunId, null);
 assert.equal(created.resumeOfRunId, null);
 
 // --- claim-under-cap: oldest pending starts; cap counts running rows ---------------------
@@ -94,7 +95,7 @@ const cancelled = db.finishAgentRun("run-3", {
 });
 assert.equal(cancelled?.status, AgentRunStatus.Cancelled);
 
-// --- restart: running rows become interrupted (resumable), pending stay pending ----------
+// --- restart: running rows become interrupted (retryable), pending stay pending -----------
 db.createAgentRun(input("run-4"));
 assert.equal(db.markRunningAgentRunsInterrupted("daemon restarted").length, 1, "run-2 was running");
 assert.equal(db.agentRunById("run-2")?.status, AgentRunStatus.Interrupted);
@@ -119,16 +120,16 @@ assert.deepEqual(
   "recent activity keeps a row out of lost even without a live turn",
 );
 
-// --- resume: same child identity, new run row with lineage -------------------------------
+// --- retry: same task and child identity, new run row ------------------------------------
 const interrupted = db.agentRunById("run-2")!;
-const resumed = db.createAgentRun(input("run-6", {
-  resumeOfRunId: interrupted.id,
+const retried = db.createAgentRun(input("run-6", {
+  retryOfRunId: interrupted.id,
   childSessionId: "child-session-2",
   acpxRecordId: "acpx-rec-2",
 }));
-assert.equal(resumed.resumeOfRunId, "run-2", "resume records lineage to the interrupted run");
-assert.equal(resumed.childSessionId, "child-session-2", "resume carries the child identity");
-assert.equal(resumed.status, AgentRunStatus.Pending, "a resume is a new run, not a status downgrade");
+assert.equal(retried.retryOfRunId, "run-2", "retry records the exact interrupted run");
+assert.equal(retried.childSessionId, "child-session-2", "retry carries the child identity");
+assert.equal(retried.status, AgentRunStatus.Pending, "a retry is a new run, not a status downgrade");
 
 // --- listing: newest first, parent filter ------------------------------------------------
 const all = db.listAgentRuns();
@@ -148,7 +149,7 @@ assert.equal(withModel.effort, "high", "resolved effort intent round-trips");
 assert.equal(withModel.effortApplied, false, "effort is not claimed as applied before launch");
 assert.equal(db.createAgentRun(input("run-8")).model, null, "an unpinned model is null");
 assert.equal(db.createAgentRun(input("run-9")).effort, null, "an unknown effort remains null");
-assert.equal(db.claimNextPendingAgentRun(10)?.id, "run-6", "the older pending resume claims first");
+assert.equal(db.claimNextPendingAgentRun(10)?.id, "run-6", "the older pending retry claims first");
 assert.equal(db.claimNextPendingAgentRun(10)?.id, "run-7");
 assert.equal(
   db.recordAgentRunActivity("run-7", { effortApplied: true })?.effortApplied,

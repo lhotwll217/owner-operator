@@ -10,8 +10,11 @@
       "category": "attention",
       "elapsedMs": 3000,
       "latestActivity": "ACP handshake failed",
+      "retryOfRunId": null,
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": true
+      "canRetry": true,
+      "canResume": false
     },
     {
       "id": "interrupted-run",
@@ -21,8 +24,11 @@
       "category": "attention",
       "elapsedMs": 62000,
       "latestActivity": "Daemon stopped",
+      "retryOfRunId": null,
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": true
+      "canRetry": true,
+      "canResume": false
     },
     {
       "id": "lost-run",
@@ -32,8 +38,11 @@
       "category": "attention",
       "elapsedMs": 120000,
       "latestActivity": "No live turn",
+      "retryOfRunId": null,
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": true
+      "canRetry": true,
+      "canResume": false
     },
     {
       "id": "running-run",
@@ -43,7 +52,10 @@
       "category": "active",
       "elapsedMs": 250000,
       "latestActivity": "Reading UI.swift",
+      "retryOfRunId": null,
+      "resumeOfRunId": null,
       "canCancel": true,
+      "canRetry": false,
       "canResume": false
     },
     {
@@ -54,7 +66,10 @@
       "category": "active",
       "elapsedMs": 12000,
       "latestActivity": "",
+      "retryOfRunId": null,
+      "resumeOfRunId": null,
       "canCancel": true,
+      "canRetry": false,
       "canResume": false
     },
     {
@@ -65,8 +80,11 @@
       "category": "recent",
       "elapsedMs": 90000,
       "latestActivity": "Done",
+      "retryOfRunId": null,
+      "resumeOfRunId": "prior-completed-run",
       "canCancel": false,
-      "canResume": false
+      "canRetry": false,
+      "canResume": true
     },
     {
       "id": "cancelled-run",
@@ -76,7 +94,10 @@
       "category": "recent",
       "elapsedMs": 45000,
       "latestActivity": "Cancelled by owner",
+      "retryOfRunId": null,
+      "resumeOfRunId": null,
       "canCancel": false,
+      "canRetry": false,
       "canResume": false
     }
   ]

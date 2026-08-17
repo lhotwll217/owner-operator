@@ -171,7 +171,11 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
     agentRun: (id: string) => json<AgentRun>(`/agent-runs/${encodeURIComponent(id)}`),
     delegateAgent: (input: AgentRunCreateInput) => post<AgentRun>("/agent-runs", input),
     cancelAgentRun: (id: string) => post<AgentRun>(`/agent-runs/${encodeURIComponent(id)}/cancel`, {}),
-    resumeAgentRun: (id: string) => post<AgentRun>(`/agent-runs/${encodeURIComponent(id)}/resume`, {}),
+    retryAgentRun: (id: string) => post<AgentRun>(`/agent-runs/${encodeURIComponent(id)}/retry`, {}),
+    resumeAgentRun: (id: string, task: string) => post<AgentRun>(
+      `/agent-runs/${encodeURIComponent(id)}/resume`,
+      { task },
+    ),
     waitAgentRun: (id: string, timeoutSeconds: number) => post<AgentRun>(
       `/agent-runs/${encodeURIComponent(id)}/wait`,
       { timeoutSeconds },

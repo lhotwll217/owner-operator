@@ -1,6 +1,6 @@
 ---
 title: "Sub-agents and delegated runs"
-summary: "Owner Operator-issued sub-agents: tracking boundaries, lifecycle, harness seam (ACP), and lineage"
+summary: "Owner Operator-issued sub-agents: tracking boundaries, lifecycle, harness seam (ACP), retry, and resume"
 read_when:
   - Understanding sub-agents, child agents, or delegated work
   - Determining whether child work is tracked in the run ledger, session state, or widget
@@ -23,7 +23,7 @@ schedules or triggers launch sub-agents.
 
 Owner Operator launches child coding agents (Claude Code, Codex, Cursor) as durable, daemon-owned
 **delegated runs** ([#69](https://github.com/lhotwll217/owner-operator/issues/69)). A run is
-tracked with explicit lineage, durable status, controls, and presentation — never inferred from
+tracked with explicit retry/resume relationships, durable status, controls, and presentation — never inferred from
 transcript activity. The domain terms live in [CONTEXT.md](../CONTEXT.md).
 
 The daemon owns execution; the executor extends the scheduler's durable-run substrate rather
@@ -60,12 +60,21 @@ owns transcript identity and discovery.
 
 `pending → running → { completed | failed | cancelled | interrupted | lost }`.
 
-- **Terminal states are monotonic.** A finished row never changes status. Resume does not
-  downgrade a row — it creates a *new* run under the same child identity.
+- **Terminal states are monotonic.** Retry and resume each create a new row; reopening a terminal
+  row would erase one paid turn's history. Retry links the new row to the unsuccessful run whose
+  task it reruns; resume links the new row to the completed run after which it sends a new task.
+  The exact ledger-column contract lives in
+  [schema docs](../src/state/schema-docs.ts). The
+  [domain contract](../packages/core/src/agent-runs.ts) derives runtime turn intent from those
+  relationships and fails closed when either is inconsistent.
+- **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
+  `interrupted`, or `lost`; resume requires a new task after `completed`. The
+  [tool schema](../src/agent/tools/manage-agent-run.ts) owns their inputs, while the
+  [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
-- **`interrupted`** is resumable: a graceful daemon shutdown mid-run, or a restart reconciling a
-  row left `running` by a crash, lands here. The child identity is preserved for resume.
+- **`interrupted`** is retryable: a graceful daemon shutdown mid-run, or a restart reconciling a
+  row left `running` by a crash, lands here. The child identity is preserved for retry.
 - **`lost`** is assigned only by the reconciliation sweep: a `running` row with no live
   in-process turn and no activity inside the grace window. Liveness is the executor's active-turn
   set plus durable rows — persisted metadata alone never keeps a run alive, and a live turn is
@@ -115,6 +124,13 @@ and terminal styling are adapters over that contract.
   poll after delegation; `/agent-state` owns liveness. Status reads remain only for explicit
   owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
   `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
+- **Retry and resume re-enter the ordinary lifecycle.** The
+  [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
+  [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available record/session identity
+  before sending the turn. For resume, the
+  [environmental projection](../src/agent-runs/agent-state-projection.ts) also prevents clients from
+  offering a control for an unavailable workspace. Both controls fail closed rather than
+  substituting a fresh context.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.
@@ -272,7 +288,9 @@ message persists the other inline lifecycle moment. The parent-scoped live view 
 footer shows queued, running, and attention
 counts only while one exists and clears whenever the Gateway connection is unavailable;
 `/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
-harness, model and known effort, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
+harness, model and known effort, glyph-plus-text status, elapsed time, activity, exact retry/resume
+relationships, and only currently valid controls. Retry is available only for unsuccessful runs;
+resume is available only for completed runs and collects the required new task before mutation.
 Cancellation confirms before mutation.
 
 Terminal completion behavior is defined at four linked seams: the browser-safe
@@ -291,5 +309,5 @@ receives it.
 The `agent_runs` table is the durable ledger; its columns are documented once in
 [`src/state/schema-docs.ts`](../src/state/schema-docs.ts) and inspectable through `query_database`.
 `acpx` session records and process leases live under `~/.owner-operator/agent-runs/` (relocated
-out of the system tmpdir so restart reconciliation, safe orphan reaping, and resume retain their
+out of the system tmpdir so restart reconciliation, safe orphan reaping, retry, and resume retain their
 identities across daemon restarts).

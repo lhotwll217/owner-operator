@@ -2,22 +2,24 @@ import {
   AgentRunStatus,
   GatewayEventKind,
   isTerminalAgentRunStatus,
+  validateAgentRunResumeTask,
   type AgentRun,
   type GatewayApi,
 } from "@owner-operator/core";
 import {
   createAgentRunCompletionEnvelope,
-  deriveParentAgentState,
   type AgentRunCompletionEnvelope,
   type ParentAgentStateView,
 } from "@owner-operator/core/agent-state";
+import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
 
 /** Parent-scoped transport seam. The production Gateway and tests use the same contract. */
 export interface ParentRunAdapter {
   list(parentThreadId: string): Promise<AgentRun[]>;
   subscribe(listener: () => void, onDisconnected?: () => void): () => void;
   cancel(runId: string): Promise<AgentRun>;
-  resume(runId: string): Promise<AgentRun>;
+  retry(runId: string): Promise<AgentRun>;
+  resume(runId: string, task: string): Promise<AgentRun>;
 }
 
 export interface ParentCompletionDeliveryResult {
@@ -95,7 +97,7 @@ export class ParentRunSession {
   }
 
   get view(): ParentAgentStateView {
-    return deriveParentAgentState([...this.runs.values()], {
+    return deriveParentAgentStateWithEnvironment([...this.runs.values()], {
       now: this.now(),
       ...(this.recentLimit === undefined ? {} : { recentLimit: this.recentLimit }),
     });
@@ -137,10 +139,18 @@ export class ParentRunSession {
     await this.refresh();
   }
 
-  async resume(runId: string): Promise<void> {
+  async retry(runId: string): Promise<void> {
+    const selected = this.view.runs.find(({ id }) => id === runId);
+    if (!selected?.canRetry) throw new Error(`agent run ${runId} cannot be retried`);
+    this.reconcileOne(await this.adapter.retry(runId));
+    await this.refresh();
+  }
+
+  async resume(runId: string, task: string): Promise<void> {
     const selected = this.view.runs.find(({ id }) => id === runId);
     if (!selected?.canResume) throw new Error(`agent run ${runId} cannot be resumed`);
-    this.reconcileOne(await this.adapter.resume(runId));
+    const followUpTask = validateAgentRunResumeTask(task);
+    this.reconcileOne(await this.adapter.resume(runId, followUpTask));
     await this.refresh();
   }
 
@@ -310,7 +320,10 @@ function acceptsTransition(previous: AgentRun, incoming: AgentRun): boolean {
 
 /** Production adapter: one Gateway subscription is shared by every run in the parent session. */
 export function gatewayParentRunAdapter(
-  gateway: Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "subscribe">,
+  gateway: Pick<
+    GatewayApi,
+    "listAgentRuns" | "cancelAgentRun" | "retryAgentRun" | "resumeAgentRun" | "subscribe"
+  >,
 ): ParentRunAdapter {
   return {
     list: (parentThreadId) => gateway.listAgentRuns(parentThreadId),
@@ -320,6 +333,7 @@ export function gatewayParentRunAdapter(
       onDisconnected,
     ),
     cancel: (runId) => gateway.cancelAgentRun(runId),
-    resume: (runId) => gateway.resumeAgentRun(runId),
+    retry: (runId) => gateway.retryAgentRun(runId),
+    resume: (runId, task) => gateway.resumeAgentRun(runId, task),
   };
 }

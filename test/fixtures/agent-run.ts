@@ -33,6 +33,7 @@ export function agentRunFixture(
     acpxRecordId: null,
     resultTail: null,
     error: null,
+    retryOfRunId: null,
     resumeOfRunId: null,
     timeoutSeconds: 3_600,
     ...overrides,

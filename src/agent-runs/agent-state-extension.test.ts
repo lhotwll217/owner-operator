@@ -17,7 +17,13 @@ import {
 } from "./agent-state-extension";
 
 const rows = [
-  run("completed", AgentRunStatus.Completed, { task: "Task completed", resultTail: "Report ready" }),
+  run("completed", AgentRunStatus.Completed, {
+    task: "Task completed",
+    resultTail: "Report ready",
+    childSessionId: "completed-child",
+    acpxRecordId: "completed-acpx",
+    resumeOfRunId: "prior-completed",
+  }),
   run("running", AgentRunStatus.Running, {
     task: "Task running",
     harness: AgentRunHarness.Codex,
@@ -34,7 +40,10 @@ const rows = [
     childSessionId: "failed-child",
   }),
 ];
-const view = deriveParentAgentState(rows, { now: "2026-07-21T12:10:00.000Z" });
+const view = deriveParentAgentState(rows, {
+  now: "2026-07-21T12:10:00.000Z",
+  isResumeEnvironmentEligible: (run) => run.id === "completed",
+});
 const theme = buildOoTheme("256color");
 const actions: AgentStatePickerAction[] = [];
 const picker = new AgentStatePicker(view, theme, (action) => actions.push(action), () => undefined);
@@ -78,7 +87,16 @@ assert.deepEqual(actions, [{ kind: "cancel", runId: "running" }]);
 actions.length = 0;
 picker.handleInput("\u001b[A");
 picker.handleInput("r");
-assert.deepEqual(actions, [{ kind: "resume", runId: "failed" }]);
+assert.deepEqual(actions, [{ kind: "retry", runId: "failed" }]);
+actions.length = 0;
+picker.handleInput("\u001b[B");
+picker.handleInput("\u001b[B");
+assert.match(picker.render(100).join("\n"), /u resume/);
+picker.handleInput("\r");
+assert.match(picker.render(100).join("\n"), /Resume of:.*prior-completed/);
+picker.handleInput("\u001b");
+picker.handleInput("u");
+assert.deepEqual(actions, [{ kind: "resume", runId: "completed" }]);
 
 // Extension integration: parent id scopes the first list, one subscription feeds the literal
 // footer and picker, cancellation is confirmed, and shutdown clears both subscription/footer.
@@ -95,7 +113,16 @@ const gateway = {
     gatewayRows = [cancelled];
     return cancelled;
   },
-  resumeAgentRun: async (id: string) => { calls.push(`resume:${id}`); return run(`${id}-resumed`, AgentRunStatus.Pending); },
+  retryAgentRun: async (id: string) => {
+    calls.push(`retry:${id}`);
+    return run(`${id}-retried`, AgentRunStatus.Pending, { retryOfRunId: id });
+  },
+  resumeAgentRun: async (id: string, task: string) => {
+    calls.push(`resume:${id}:${task}`);
+    const resumed = run(`${id}-resumed`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
+    gatewayRows = [resumed];
+    return resumed;
+  },
   subscribe: (listener: typeof gatewayListener, onConnected?: () => void, onDisconnected?: () => void) => {
     calls.push("subscribe");
     gatewayListener = listener;
@@ -103,7 +130,7 @@ const gateway = {
     gatewayDisconnected = onDisconnected;
     return () => calls.push("unsubscribe");
   },
-} as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "subscribe">;
+} as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "retryAgentRun" | "resumeAgentRun" | "subscribe">;
 
 const handlers = new Map<string, Function>();
 let command: { handler(args: string, ctx: any): Promise<void> } | undefined;
@@ -119,6 +146,8 @@ extension({
 
 const statuses: Array<string | undefined> = [];
 let confirmed = false;
+let pickerInput = "c";
+let followUpTask = "";
 const confirmationDetails: string[] = [];
 const notices: string[] = [];
 const ctx = {
@@ -129,9 +158,10 @@ const ctx = {
     setStatus(_key: string, text: string | undefined) { statuses.push(text); },
     notify(message: string) { notices.push(message); },
     confirm: async (_title: string, details: string) => { confirmationDetails.push(details); return confirmed; },
+    input: async () => followUpTask,
     custom: async (factory: Function) => await new Promise((resolve) => {
       const component = factory({ requestRender() {} }, theme, {}, resolve);
-      component.handleInput("c");
+      component.handleInput(pickerInput);
     }),
   },
 };
@@ -154,6 +184,22 @@ assert.ok(calls.includes("cancel:running"), "confirmed picker action cancels thr
 assert.equal(statuses.at(-1), undefined, "routine terminal completion hides the footer");
 assert.ok(completionRenderer, "the extension registers the typed completion renderer");
 assert.deepEqual(completionMessages[0]?.options, { triggerTurn: true, deliverAs: "followUp" });
+
+gatewayRows = [run("completed-follow-up", AgentRunStatus.Completed, {
+  cwd: process.cwd(),
+  childSessionId: "completed-child",
+  acpxRecordId: "completed-acpx",
+  finishedAt: "2026-07-21T12:10:00.000Z",
+})];
+gatewayListener?.({ kind: GatewayEventKind.AgentRunChanged });
+await new Promise<void>((resolve) => setImmediate(resolve));
+pickerInput = "u";
+followUpTask = "explain what changed";
+await command!.handler("", ctx);
+assert.ok(
+  calls.includes("resume:completed-follow-up:explain what changed"),
+  "the picker collects a new task before resuming a completed session",
+);
 
 gatewayListener?.({ kind: GatewayEventKind.AgentRunChanged });
 await new Promise<void>((resolve) => setImmediate(resolve));

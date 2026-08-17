@@ -7,6 +7,7 @@ import {
   DomainEventKind,
   GatewayEventKind,
   MAX_AGENT_RUN_WAIT_SECONDS,
+  validateAgentRunResumeTask,
   type AgentRun,
   type AgentRunCreateInput,
   type DaemonHealth,
@@ -17,7 +18,7 @@ import {
   type ScheduleDefinition,
   type ScheduleRun,
 } from "@owner-operator/core";
-import { deriveParentAgentState } from "@owner-operator/core/agent-state";
+import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
 import type { State } from "../state/state";
 
 export interface GatewayMonitor {
@@ -40,10 +41,12 @@ export interface GatewayQueryService {
 
 export interface GatewayAgentRuns {
   list(parentThreadId?: string): AgentRun[];
+  view(parentThreadId?: string): ParentAgentStateView;
   get(id: string): AgentRun | undefined;
   launch(input: AgentRunCreateInput): AgentRun;
   cancel(id: string): Promise<AgentRun>;
-  resume(id: string): AgentRun;
+  retry(id: string): AgentRun;
+  resume(id: string, task: string): AgentRun;
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
 }
 
@@ -172,7 +175,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       if (route === "GET /agent-state") {
         const parent = url.searchParams.get("parentThreadId");
-        return respond(200, deriveParentAgentState(options.agentRuns.list(parent ?? undefined)));
+        return respond(200, options.agentRuns.view(parent ?? undefined));
       }
       if (route === "POST /agent-runs") {
         const run = options.agentRuns.launch(await readBody(request) as AgentRunCreateInput);
@@ -185,8 +188,15 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/cancel`) {
         return respond(200, await options.agentRuns.cancel(agentRunId));
       }
+      if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/retry`) {
+        return respond(201, options.agentRuns.retry(agentRunId));
+      }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/resume`) {
-        return respond(201, options.agentRuns.resume(agentRunId));
+        const body = await readBody(request) as { task?: unknown };
+        return respond(201, options.agentRuns.resume(
+          agentRunId,
+          validateAgentRunResumeTask(body.task),
+        ));
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/wait`) {
         const body = await readBody(request) as { timeoutSeconds?: unknown };

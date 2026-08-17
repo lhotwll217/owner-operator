@@ -49,9 +49,8 @@ export function harnessIdentityObservation(input: {
   return { observed: false };
 }
 
-/** Terminal states are monotonic: once reached, a run row never changes status again,
- * except that `interrupted` and `lost` may be resumed — which creates a NEW run under
- * the same child identity, never a status downgrade on the old row. */
+/** Terminal states are monotonic: retry and resume always create a
+ * new run under the same child identity, never a status downgrade on the old row. */
 export const AGENT_RUN_TERMINAL_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Completed,
   AgentRunStatus.Failed,
@@ -64,12 +63,22 @@ export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
   return AGENT_RUN_TERMINAL_STATUSES.includes(status);
 }
 
-/** Statuses a resume may start from. Resumption requires a persisted child session id. */
-export const AGENT_RUN_RESUMABLE_STATUSES: readonly AgentRunStatus[] = [
+/** Statuses a retry may start from. Retrying requires a persisted child session id. */
+export const AGENT_RUN_RETRYABLE_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Interrupted,
   AgentRunStatus.Lost,
   AgentRunStatus.Failed,
 ];
+
+export const AGENT_RUN_RESUME_TASK_ERROR = "resume follow-up task is required";
+
+/** Preserve the owner's task bytes while applying one validation rule at every public boundary. */
+export function validateAgentRunResumeTask(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(AGENT_RUN_RESUME_TASK_ERROR);
+  }
+  return value;
+}
 
 /** What Owner Operator can do with a child of a given harness. The floor is never zero:
  * every harness gets a durable run row, an activity source, and inspect/cancel/result. */
@@ -81,7 +90,7 @@ export interface AgentRunCapabilityRecord {
   activitySource: "acp-events";
   steerMidRun: boolean;
   asksToParent: boolean;
-  resume: boolean;
+  loadSession: boolean;
 }
 
 export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCapabilityRecord>> = {
@@ -91,7 +100,7 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
     activitySource: "acp-events",
     steerMidRun: false,
     asksToParent: false,
-    resume: true,
+    loadSession: true,
   },
   [AgentRunHarness.Codex]: {
     harness: AgentRunHarness.Codex,
@@ -99,17 +108,17 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
     activitySource: "acp-events",
     steerMidRun: false,
     asksToParent: false,
-    resume: true,
+    loadSession: true,
   },
   // Pinned from a live `cursor-agent acp` initialize response (CLI 2026.07.08): the server
-  // advertises loadSession, so resume is confirmed; it advertises no steer or parent-ask surface.
+  // advertises loadSession; it advertises no steer or parent-ask surface.
   [AgentRunHarness.Cursor]: {
     harness: AgentRunHarness.Cursor,
     acpAgent: "cursor",
     activitySource: "acp-events",
     steerMidRun: false,
     asksToParent: false,
-    resume: true,
+    loadSession: true,
   },
 };
 
@@ -162,7 +171,7 @@ export interface AgentRun {
   /** Latest explicit activity line published by the child's runtime. */
   activity: string | null;
   lastActivityAt: string | null;
-  /** The child harness's own session id — the resume identity and the monitor join key. */
+  /** The child harness's own session id — the persistent-session identity and monitor join key. */
   childSessionId: string | null;
   /** acpx session-record id, the second identity level persisted for reconciliation. */
   acpxRecordId: string | null;
@@ -170,13 +179,129 @@ export interface AgentRun {
   resultTail: string | null;
   /** Terminal failure/interruption/loss explanation. */
   error: string | null;
-  /** Set when this run resumes an earlier run's child identity. */
+  /** Exact unsuccessful run whose task this row retries. */
+  retryOfRunId: string | null;
+  /** Exact completed run after which this row sends a required new task. */
   resumeOfRunId: string | null;
   timeoutSeconds: number;
 }
 
+export interface AgentRunResumeContext {
+  existingResumeRunId: string | null;
+  activeRunId: string | null;
+}
+
+export interface AgentRunRetryContext {
+  existingRetryRunId: string | null;
+  activeRunId: string | null;
+}
+
+/** Pure retry eligibility shared by executor enforcement and presentation derivation. */
+export function agentRunRetryError(
+  run: AgentRun,
+  context: AgentRunRetryContext,
+): string | null {
+  if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
+    return `agent run ${run.id} is not retryable from status ${run.status}`;
+  }
+  if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
+    return `harness ${run.harness} does not support loading an existing session`;
+  }
+  if (!run.childSessionId) return `agent run ${run.id} has no child session identity to retry`;
+  if (context.existingRetryRunId) {
+    return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
+  }
+  if (context.activeRunId) {
+    return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
+  }
+  return null;
+}
+
+/** Pure resume eligibility shared by executor enforcement and presentation derivation.
+ * Runtime-only facts such as cwd availability remain outside core. */
+export function agentRunResumeError(
+  run: AgentRun,
+  context: AgentRunResumeContext,
+): string | null {
+  if (run.status !== AgentRunStatus.Completed) {
+    return `agent run ${run.id} can only be resumed from completed status, not ${run.status}`;
+  }
+  if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
+    return `harness ${run.harness} does not support loading an existing session`;
+  }
+  if (!run.childSessionId) return `completed agent run ${run.id} has no child session identity to resume`;
+  if (!run.acpxRecordId) return `completed agent run ${run.id} has no acpx session-record identity to resume`;
+  if (context.existingResumeRunId) {
+    return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
+  }
+  if (context.activeRunId) {
+    return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
+  }
+  return null;
+}
+
+/** Explicit runtime intent derived from the two semantic run relationships. Referenced rows are
+ * immutable; a missing or inconsistent relationship must fail rather than launch fresh. */
+export type AgentRunTurnIntent =
+  | { kind: "fresh" }
+  | { kind: "retry"; childSessionId: string; acpxRecordId?: string }
+  | { kind: "resume"; childSessionId: string; acpxRecordId: string };
+
+export function agentRunTurnIntent(
+  run: AgentRun,
+  retriedRun: AgentRun | undefined,
+  resumedRun: AgentRun | undefined,
+): AgentRunTurnIntent {
+  if (run.retryOfRunId && run.resumeOfRunId) {
+    throw new Error(`agent run ${run.id} cannot set both retryOfRunId and resumeOfRunId`);
+  }
+  if (!run.retryOfRunId && !run.resumeOfRunId) return { kind: "fresh" };
+  if (run.retryOfRunId) {
+    if (!retriedRun) {
+      throw new Error(`agent run ${run.id} references missing retry run ${run.retryOfRunId}`);
+    }
+    if (retriedRun.id !== run.retryOfRunId) {
+      throw new Error(`agent run ${run.id} retry identity mismatch: expected ${run.retryOfRunId}, found ${retriedRun.id}`);
+    }
+    if (!run.childSessionId || run.childSessionId !== retriedRun.childSessionId) {
+      throw new Error(`agent run ${run.id} child identity mismatch with retried run ${retriedRun.id}`);
+    }
+    if (run.acpxRecordId !== retriedRun.acpxRecordId) {
+      throw new Error(`agent run ${run.id} acpx record identity mismatch with retried run ${retriedRun.id}`);
+    }
+    if (!AGENT_RUN_RETRYABLE_STATUSES.includes(retriedRun.status)) {
+      throw new Error(`agent run ${run.id} cannot retry run ${retriedRun.id} from status ${retriedRun.status}`);
+    }
+    return {
+      kind: "retry",
+      childSessionId: run.childSessionId,
+      ...(run.acpxRecordId ? { acpxRecordId: run.acpxRecordId } : {}),
+    };
+  }
+  if (!resumedRun) {
+    throw new Error(`agent run ${run.id} references missing resume run ${run.resumeOfRunId}`);
+  }
+  if (resumedRun.id !== run.resumeOfRunId) {
+    throw new Error(`agent run ${run.id} resume identity mismatch: expected ${run.resumeOfRunId}, found ${resumedRun.id}`);
+  }
+  if (resumedRun.status !== AgentRunStatus.Completed) {
+    throw new Error(`agent run ${run.id} cannot resume run ${resumedRun.id} from status ${resumedRun.status}`);
+  }
+  if (!run.childSessionId || run.childSessionId !== resumedRun.childSessionId) {
+    throw new Error(`agent run ${run.id} child identity mismatch with resumed run ${resumedRun.id}`);
+  }
+  if (!run.acpxRecordId || run.acpxRecordId !== resumedRun.acpxRecordId) {
+    throw new Error(`agent run ${run.id} acpx record identity mismatch with resumed run ${resumedRun.id}`);
+  }
+  return {
+    kind: "resume",
+    childSessionId: run.childSessionId,
+    acpxRecordId: run.acpxRecordId,
+  };
+}
+
 /** The two ids a delegated child carries — captured together from the acpx handle and flowed
- * together everywhere: the harness's own session id (resume + monitor-join key) and the acpx
+ * together everywhere: the harness's own persistent-session id and the acpx
  * record id (reconciliation). Fields are omitted, not nulled, until known. */
 export interface ChildIdentity {
   childSessionId?: string;
@@ -194,8 +319,8 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
 /** Runtime request passed from the executor to the injected launcher seam. */
 export interface AgentRunLaunchRequest {
   run: AgentRun;
-  /** Child session to resume, when this run continues an earlier one. */
-  resumeSessionId: string | null;
+  /** Fresh launch, same-task retry, or exact completed-session resume. */
+  turnIntent: AgentRunTurnIntent;
   signal: AbortSignal;
   /** Explicit-activity channel: the launcher reports progress and identity as soon as known. */
   onActivity(update: AgentRunActivityUpdate): void;
