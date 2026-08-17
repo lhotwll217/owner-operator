@@ -154,11 +154,18 @@ struct AgentRunRow: View {
                     if run.canResume {
                         Text("· resumable").foregroundStyle(.yellow)
                     }
+                    if run.canContinue == true {
+                        Text("· follow-up available").foregroundStyle(.green)
+                    }
                 }
                 .foregroundStyle(.secondary).font(.system(size: 10))
                 if !run.latestActivity.isEmpty {
                     Text(run.latestActivity)
                         .foregroundStyle(.secondary).font(.system(size: 10)).lineLimit(2)
+                }
+                if let previous = run.resumeOfRunId {
+                    Text("↳ \(previous)")
+                        .foregroundStyle(.secondary).font(.system(size: 10)).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)

@@ -44,6 +44,7 @@ export interface GatewayAgentRuns {
   launch(input: AgentRunCreateInput): AgentRun;
   cancel(id: string): Promise<AgentRun>;
   resume(id: string): AgentRun;
+  continue(id: string, task: string): AgentRun;
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
 }
 
@@ -187,6 +188,13 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/resume`) {
         return respond(201, options.agentRuns.resume(agentRunId));
+      }
+      if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/continue`) {
+        const body = await readBody(request) as { task?: unknown };
+        if (typeof body.task !== "string" || !body.task.trim()) {
+          return respond(400, { error: "continuation task must be a non-empty string" });
+        }
+        return respond(201, options.agentRuns.continue(agentRunId, body.task));
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/wait`) {
         const body = await readBody(request) as { timeoutSeconds?: unknown };

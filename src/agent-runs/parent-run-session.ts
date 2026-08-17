@@ -18,6 +18,7 @@ export interface ParentRunAdapter {
   subscribe(listener: () => void, onDisconnected?: () => void): () => void;
   cancel(runId: string): Promise<AgentRun>;
   resume(runId: string): Promise<AgentRun>;
+  continueRun(runId: string, task: string): Promise<AgentRun>;
 }
 
 export interface ParentCompletionDeliveryResult {
@@ -141,6 +142,14 @@ export class ParentRunSession {
     const selected = this.view.runs.find(({ id }) => id === runId);
     if (!selected?.canResume) throw new Error(`agent run ${runId} cannot be resumed`);
     this.reconcileOne(await this.adapter.resume(runId));
+    await this.refresh();
+  }
+
+  async continueRun(runId: string, task: string): Promise<void> {
+    const selected = this.view.runs.find(({ id }) => id === runId);
+    if (!selected?.canContinue) throw new Error(`agent run ${runId} cannot be continued`);
+    if (!task.trim()) throw new Error("continuation follow-up task is required");
+    this.reconcileOne(await this.adapter.continueRun(runId, task));
     await this.refresh();
   }
 
@@ -310,7 +319,10 @@ function acceptsTransition(previous: AgentRun, incoming: AgentRun): boolean {
 
 /** Production adapter: one Gateway subscription is shared by every run in the parent session. */
 export function gatewayParentRunAdapter(
-  gateway: Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "subscribe">,
+  gateway: Pick<
+    GatewayApi,
+    "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun" | "subscribe"
+  >,
 ): ParentRunAdapter {
   return {
     list: (parentThreadId) => gateway.listAgentRuns(parentThreadId),
@@ -321,5 +333,6 @@ export function gatewayParentRunAdapter(
     ),
     cancel: (runId) => gateway.cancelAgentRun(runId),
     resume: (runId) => gateway.resumeAgentRun(runId),
+    continueRun: (runId, task) => gateway.continueAgentRun(runId, task),
   };
 }

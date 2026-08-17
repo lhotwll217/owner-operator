@@ -51,8 +51,8 @@ try {
     new Promise((resolve, reject) => {
       request.onActivity({
         activity: "child started",
-        childSessionId: `child-${request.run.id}`,
-        acpxRecordId: `acpx-${request.run.id}`,
+        childSessionId: request.resumeSessionId ?? `child-${request.run.id}`,
+        acpxRecordId: request.run.acpxRecordId ?? `acpx-${request.run.id}`,
       });
       const abort = (): void => reject(request.signal.reason ?? new Error("aborted"));
       if (request.signal.aborted) return abort();
@@ -187,6 +187,66 @@ try {
   );
   launches[6].finish({ status: AgentRunStatus.Completed, resultText: "resumed fine", error: null });
   await waitFor(() => state.agentRunById(resumedRun.id)?.status === AgentRunStatus.Completed, "resumed run completion");
+
+  // --- continue: a completed turn gets a new task in a new row under the exact identities ---
+  const completedSource = state.agentRunById(resumedRun.id)!;
+  const continuedRun = restarted.continue(resumedRun.id, "answer the follow-up question");
+  assert.equal(continuedRun.task, "answer the follow-up question", "continue requires and records a new task");
+  assert.equal(continuedRun.resumeOfRunId, resumedRun.id, "continue records immediate lineage");
+  assert.equal(continuedRun.childSessionId, completedSource.childSessionId, "continue reuses the child identity");
+  assert.equal(continuedRun.acpxRecordId, completedSource.acpxRecordId, "continue reuses the acpx record identity");
+  assert.equal(continuedRun.cwd, completedSource.cwd);
+  assert.equal(continuedRun.model, completedSource.model);
+  assert.equal(continuedRun.effort, completedSource.effort);
+  assert.equal(continuedRun.depth, completedSource.depth);
+  assert.equal(continuedRun.timeoutSeconds, completedSource.timeoutSeconds);
+  await waitFor(() => launches.length === 8, "continued run to start");
+  assert.equal(launches[7].request.resumeSessionId, completedSource.childSessionId);
+  assert.equal(launches[7].request.resumeRecordId, completedSource.acpxRecordId);
+  assert.equal(launches[7].request.run.acpxRecordId, completedSource.acpxRecordId);
+  launches[7].finish({ status: AgentRunStatus.Completed, resultText: "follow-up answered", error: null });
+  await waitFor(() => state.agentRunById(continuedRun.id)?.status === AgentRunStatus.Completed, "continued run completion");
+  assert.equal(state.agentRunById(resumedRun.id)?.resultTail, "resumed fine", "the completed source stays immutable");
+
+  assert.throws(() => restarted.continue(sixth.id, "not completed"), /completed/);
+  assert.throws(() => restarted.continue(continuedRun.id, "  "), /follow-up task/);
+  assert.throws(() => restarted.continue(resumedRun.id, "branch old context"), /already been continued/);
+  const invalidCompletedSource = state.createAgentRun({
+    harness: AgentRunHarness.ClaudeCode,
+    task: "legacy completed row",
+    cwd: dir,
+    depth: 1,
+    timeoutSeconds: 60,
+  });
+  state.finishAgentRun(invalidCompletedSource.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "done without identity",
+    error: null,
+  });
+  assert.throws(
+    () => restarted.continue(invalidCompletedSource.id, "follow up"),
+    /no child session identity/,
+    "an invalid completed source fails before creating a row",
+  );
+  const beforeMissingCwd = state.listAgentRuns().length;
+  const missingCwdSource = state.createAgentRun({
+    harness: AgentRunHarness.ClaudeCode,
+    task: "source whose workspace was removed",
+    cwd: join(dir, "missing-cwd"),
+    model: completedSource.model,
+    effort: completedSource.effort,
+    depth: completedSource.depth,
+    timeoutSeconds: completedSource.timeoutSeconds,
+    childSessionId: "missing-cwd-child",
+    acpxRecordId: "missing-cwd-acpx",
+  });
+  state.finishAgentRun(missingCwdSource.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "done",
+    error: null,
+  });
+  assert.throws(() => restarted.continue(missingCwdSource.id, "follow up"), /working directory no longer exists/);
+  assert.equal(state.listAgentRuns().length, beforeMissingCwd + 1, "missing cwd fails before a continuation row is created");
   await restarted.stop();
 
   // --- lost sweeper: stale running row with no live turn ------------------------------------
@@ -234,6 +294,32 @@ try {
   assert.equal(failedStartup.activity, null, "startup failure does not preserve invented pending activity");
   assert.ok(failedStartup.finishedAt, "startup failure has an actionable terminal timestamp");
   assert.equal(failedStartup.error, "ACP handshake incompatible");
+
+  const staleSource = startupState.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "completed before its ACP record became stale",
+    cwd: dir,
+    model: "test-codex",
+    effort: "high",
+    depth: 1,
+    timeoutSeconds: 60,
+    childSessionId: "stale-child",
+    acpxRecordId: "stale-acpx",
+  });
+  startupState.finishAgentRun(staleSource.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "source result",
+    error: null,
+  });
+  const staleContinuation = startupExecutor.continue(staleSource.id, "new paid follow-up");
+  await waitFor(
+    () => startupState.agentRunById(staleContinuation.id)?.status === AgentRunStatus.Failed,
+    "stale continuation failure to become terminal",
+  );
+  assert.equal(startupState.agentRunById(staleContinuation.id)?.resumeOfRunId, staleSource.id);
+  assert.equal(startupState.agentRunById(staleContinuation.id)?.error, "ACP handshake incompatible");
+  assert.equal(startupState.agentRunById(staleSource.id)?.status, AgentRunStatus.Completed);
+  assert.equal(startupState.agentRunById(staleSource.id)?.resultTail, "source result");
   await startupExecutor.stop();
   startupState.close();
 

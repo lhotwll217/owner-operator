@@ -49,9 +49,8 @@ export function harnessIdentityObservation(input: {
   return { observed: false };
 }
 
-/** Terminal states are monotonic: once reached, a run row never changes status again,
- * except that `interrupted` and `lost` may be resumed — which creates a NEW run under
- * the same child identity, never a status downgrade on the old row. */
+/** Terminal states are monotonic: recovery and completed-session follow-ups always create a
+ * new run under the same child identity, never a status downgrade on the old row. */
 export const AGENT_RUN_TERMINAL_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Completed,
   AgentRunStatus.Failed,
@@ -170,7 +169,7 @@ export interface AgentRun {
   resultTail: string | null;
   /** Terminal failure/interruption/loss explanation. */
   error: string | null;
-  /** Set when this run resumes an earlier run's child identity. */
+  /** Immediate source when this run recovers or continues an earlier run's child identity. */
   resumeOfRunId: string | null;
   timeoutSeconds: number;
 }
@@ -194,8 +193,11 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
 /** Runtime request passed from the executor to the injected launcher seam. */
 export interface AgentRunLaunchRequest {
   run: AgentRun;
-  /** Child session to resume, when this run continues an earlier one. */
+  /** Child session to load, when this run recovers or continues an earlier one. */
   resumeSessionId: string | null;
+  /** Exact acpx record reused only for a completed-session follow-up. Recovery resume keeps its
+   * existing behavior and therefore omits this field. */
+  resumeRecordId?: string;
   signal: AbortSignal;
   /** Explicit-activity channel: the launcher reports progress and identity as soon as known. */
   onActivity(update: AgentRunActivityUpdate): void;

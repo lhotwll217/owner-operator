@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
   AGENT_RUN_CAPABILITIES,
@@ -233,6 +234,51 @@ export class AgentRunExecutor {
     return resumed;
   }
 
+  /** Continue = one new task on a completed child session, recorded as a new immutable run.
+   * Unlike recovery resume, continuation never replays the source task. */
+  continue(id: string, task: string): AgentRun {
+    if (this.stopping) throw new Error("agent-run executor has been stopped");
+    const run = this.state.agentRunById(id);
+    if (!run) throw new Error(`no such agent run: ${id}`);
+    if (run.status !== AgentRunStatus.Completed) {
+      throw new Error(`agent run can only be continued from completed status, not ${run.status}`);
+    }
+    if (!task.trim()) throw new Error("continuation follow-up task is required");
+    if (!AGENT_RUN_CAPABILITIES[run.harness]?.resume) {
+      throw new Error(`harness ${run.harness} does not support session continuation`);
+    }
+    if (!run.childSessionId) {
+      throw new Error("completed agent run has no child session identity to continue");
+    }
+    if (!run.acpxRecordId) {
+      throw new Error("completed agent run has no acpx session-record identity to continue");
+    }
+    const cwd = statSync(run.cwd, { throwIfNoEntry: false });
+    if (!cwd) throw new Error(`continuation working directory no longer exists: ${run.cwd}`);
+    if (!cwd.isDirectory()) throw new Error(`continuation working directory is not a directory: ${run.cwd}`);
+    const successor = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
+    if (successor) throw new Error(`agent run ${run.id} has already been continued by ${successor.id}`);
+    const inflight = this.state.nonterminalAgentRunByChildSession(run.childSessionId);
+    if (inflight) {
+      throw new Error(`child session ${run.childSessionId} already has active run ${inflight.id}`);
+    }
+    const continued = this.state.createAgentRun({
+      harness: run.harness,
+      task,
+      cwd: run.cwd,
+      parentThreadId: run.parentThreadId,
+      model: run.model,
+      effort: run.effort,
+      depth: run.depth,
+      timeoutSeconds: run.timeoutSeconds,
+      resumeOfRunId: run.id,
+      childSessionId: run.childSessionId,
+      acpxRecordId: run.acpxRecordId,
+    });
+    this.pump();
+    return continued;
+  }
+
   /** Bounded block until the run is terminal; returns the current row either way. */
   async wait(id: string, timeoutMs: number): Promise<AgentRun> {
     const deadline = this.now() + timeoutMs;
@@ -284,9 +330,14 @@ export class AgentRunExecutor {
     }, run.timeoutSeconds * 1_000);
     timeout.unref?.();
     try {
+      const source = run.resumeOfRunId ? this.state.agentRunById(run.resumeOfRunId) : undefined;
+      const resumeRecordId = source?.status === AgentRunStatus.Completed
+        ? run.acpxRecordId ?? undefined
+        : undefined;
       const result = await this.launcher({
         run,
         resumeSessionId: run.childSessionId,
+        ...(resumeRecordId ? { resumeRecordId } : {}),
         signal: controller.signal,
         onActivity: (update) => {
           this.state.recordAgentRunActivity(run.id, update);

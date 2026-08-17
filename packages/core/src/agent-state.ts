@@ -30,8 +30,11 @@ export interface AgentRunView {
   category: AgentRunViewCategory;
   elapsedMs: number;
   latestActivity: string;
+  /** Immediate predecessor when this row reuses an earlier run's child identity. */
+  resumeOfRunId: string | null;
   canCancel: boolean;
   canResume: boolean;
+  canContinue: boolean;
 }
 
 export interface ParentAgentStateView {
@@ -140,9 +143,15 @@ function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<st
     category,
     elapsedMs: elapsedMs(run, now),
     latestActivity: activityFor(run),
+    resumeOfRunId: run.resumeOfRunId,
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
     canResume: AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)
       && run.childSessionId !== null
+      && !resumedRunIds.has(run.id)
+      && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
+    canContinue: run.status === AgentRunStatus.Completed
+      && run.childSessionId !== null
+      && run.acpxRecordId !== null
       && !resumedRunIds.has(run.id)
       && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
   };

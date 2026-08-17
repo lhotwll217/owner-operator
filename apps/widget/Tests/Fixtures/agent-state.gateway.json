@@ -65,8 +65,10 @@
       "category": "recent",
       "elapsedMs": 90000,
       "latestActivity": "Done",
+      "resumeOfRunId": "completed-source",
       "canCancel": false,
-      "canResume": false
+      "canResume": false,
+      "canContinue": true
     },
     {
       "id": "cancelled-run",

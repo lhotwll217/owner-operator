@@ -16,7 +16,8 @@ import { formatAgentElapsed } from "./format-agent-elapsed";
 export type AgentStatePickerAction =
   | { kind: "close" }
   | { kind: "cancel"; runId: string }
-  | { kind: "resume"; runId: string };
+  | { kind: "resume"; runId: string }
+  | { kind: "continue"; runId: string };
 
 function statusColor(theme: Theme, run: AgentRunView): string {
   const value = `${run.status.glyph} ${run.status.text}`;
@@ -75,6 +76,8 @@ export class AgentStatePicker {
       this.onAction({ kind: "cancel", runId: selected.id });
     } else if (data === "r" && selected?.canResume) {
       this.onAction({ kind: "resume", runId: selected.id });
+    } else if (data === "f" && selected?.canContinue) {
+      this.onAction({ kind: "continue", runId: selected.id });
     }
   }
 
@@ -100,7 +103,15 @@ export class AgentStatePicker {
       lines.push(line(`${this.theme.fg("dim", "Status:")} ${statusColor(this.theme, selected)}`));
       lines.push(line(`${this.theme.fg("dim", "Elapsed:")} ${formatAgentElapsed(selected.elapsedMs)}`));
       lines.push(line(`${this.theme.fg("dim", "Activity:")} ${selected.latestActivity || "No activity yet"}`));
-      const controls = [selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc back"]
+      if (selected.resumeOfRunId) {
+        lines.push(line(`${this.theme.fg("dim", "Previous run:")} ${selected.resumeOfRunId}`));
+      }
+      const controls = [
+        selected.canCancel ? "c cancel" : "",
+        selected.canResume ? "r resume" : "",
+        selected.canContinue ? "f follow-up" : "",
+        "esc back",
+      ]
         .filter(Boolean)
         .join(" · ");
       lines.push("", line(this.theme.fg("dim", controls)));
@@ -124,7 +135,13 @@ export class AgentStatePicker {
     }
 
     const selected = this.selected!;
-    const controls = ["↑/↓ select", selected.canCancel ? "c cancel" : "", selected.canResume ? "r resume" : "", "esc close"]
+    const controls = [
+      "↑/↓ select",
+      selected.canCancel ? "c cancel" : "",
+      selected.canResume ? "r resume" : "",
+      selected.canContinue ? "f follow-up" : "",
+      "esc close",
+    ]
       .filter(Boolean)
       .join(" · ");
     lines.push("", line(this.theme.fg("dim", `enter inspect · ${controls}`)));
@@ -204,8 +221,15 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
             );
             if (!confirmed) return;
             await session.cancel(selected.runId);
-          } else {
+          } else if (selected.kind === "resume") {
             await session.resume(selected.runId);
+          } else {
+            const task = await ctx.ui.input(
+              "Continue completed delegated session",
+              "New follow-up task",
+            );
+            if (!task?.trim()) return;
+            await session.continueRun(selected.runId, task);
           }
         } catch (error) {
           ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");

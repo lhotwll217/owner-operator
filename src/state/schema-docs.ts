@@ -121,7 +121,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "acpx_record_id", description: "acpx session-record id; the second identity level for reconciliation." },
       { name: "result_tail", description: "Bounded tail of the child's final report." },
       { name: "error", description: "Terminal failure/interruption/loss explanation." },
-      { name: "resume_of_run_id", description: "Set when this run resumes an earlier run's child identity." },
+      { name: "resume_of_run_id", description: "Immediate source run when this row recovers or continues an earlier run's child identity." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
     ],
   },

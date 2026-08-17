@@ -108,6 +108,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       launch: (input) => agentRuns.launch(input),
       cancel: (id) => agentRuns.cancel(id),
       resume: (id) => agentRuns.resume(id),
+      continue: (id, task) => agentRuns.continue(id, task),
       wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
     },
     port: options.port,

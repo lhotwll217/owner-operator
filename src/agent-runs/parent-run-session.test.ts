@@ -44,6 +44,7 @@ class MemoryAdapter implements ParentRunAdapter {
   unsubscriptions = 0;
   cancelled: string[] = [];
   resumed: string[] = [];
+  continued: Array<{ id: string; task: string }> = [];
 
   async list(parentThreadId: string): Promise<AgentRun[]> {
     this.operations.push(`list:${parentThreadId}`);
@@ -71,6 +72,11 @@ class MemoryAdapter implements ParentRunAdapter {
   async resume(id: string): Promise<AgentRun> {
     this.resumed.push(id);
     return run(`${id}-resumed`, AgentRunStatus.Pending, { resumeOfRunId: id });
+  }
+
+  async continueRun(id: string, task: string): Promise<AgentRun> {
+    this.continued.push({ id, task });
+    return run(`${id}-continued`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
   }
 }
 
@@ -190,6 +196,15 @@ await session.settled();
 await session.resume("lost");
 assert.deepEqual(adapter.resumed, ["lost"]);
 await assert.rejects(() => session.resume("running"), /cannot be resumed/);
+adapter.rows.push(run("completed-follow-up", AgentRunStatus.Completed, {
+  childSessionId: "completed-child",
+  acpxRecordId: "completed-acpx",
+}));
+adapter.invalidate();
+await session.settled();
+await session.continueRun("completed-follow-up", "explain the next implication");
+assert.deepEqual(adapter.continued, [{ id: "completed-follow-up", task: "explain the next implication" }]);
+await assert.rejects(() => session.continueRun("running", "invalid"), /cannot be continued/);
 
 session.stop();
 assert.equal(adapter.unsubscriptions, 1);
@@ -421,12 +436,16 @@ const gateway = {
   listAgentRuns: async (parent?: string) => { gatewayCalls.push(`list:${parent}`); return []; },
   cancelAgentRun: async (id: string) => { gatewayCalls.push(`cancel:${id}`); return run(id, AgentRunStatus.Cancelled); },
   resumeAgentRun: async (id: string) => { gatewayCalls.push(`resume:${id}`); return run(`${id}-new`, AgentRunStatus.Pending); },
+  continueAgentRun: async (id: string, task: string) => {
+    gatewayCalls.push(`continue:${id}:${task}`);
+    return run(`${id}-continued`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
+  },
   subscribe: (listener: (event: GatewayEvent) => void, onConnected?: () => void) => {
     gatewayListener = listener;
     gatewayConnected = onConnected;
     return () => gatewayCalls.push("stop");
   },
-} as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "subscribe">;
+} as Pick<GatewayApi, "listAgentRuns" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun" | "subscribe">;
 const gatewayAdapter = gatewayParentRunAdapter(gateway);
 let invalidations = 0;
 const stopGateway = gatewayAdapter.subscribe(() => { invalidations += 1; });
@@ -436,8 +455,9 @@ gatewayListener?.({ kind: GatewayEventKind.StateChanged });
 gatewayListener?.({ kind: GatewayEventKind.AgentRunChanged });
 await gatewayAdapter.cancel("a");
 await gatewayAdapter.resume("b");
+await gatewayAdapter.continueRun("c", "follow up");
 stopGateway();
 assert.equal(invalidations, 2, "connection and agent-run events both invalidate durable truth");
-assert.deepEqual(gatewayCalls, ["list:parent-gateway", "cancel:a", "resume:b", "stop"]);
+assert.deepEqual(gatewayCalls, ["list:parent-gateway", "cancel:a", "resume:b", "continue:c:follow up", "stop"]);
 
 process.stdout.write("ok — parent run session reconciles one durable parent fleet\n");

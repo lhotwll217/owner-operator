@@ -196,4 +196,84 @@ assert.equal(terminationChecks, 1, "normal runtime close independently verifies 
 assert.deepEqual(verifiedPids, [701, 702], "normal close verifies the PID set captured before wrapper exit");
 assert.equal(releases, 0, "failed close verification retains the process lease");
 
+// A continuation addresses both durable identities. Invalid acpx records fail before
+// ensureSession can recreate the record and accidentally turn the follow-up into a fresh session.
+const continuationRun = {
+  ...run,
+  id: "continued-run",
+  task: "answer a follow-up",
+  childSessionId: "continued-child",
+  acpxRecordId: "source-acpx-record",
+  resumeOfRunId: "completed-source",
+};
+const continuationRecord = {
+  acpxRecordId: "source-acpx-record",
+  acpSessionId: "backend-child",
+  agentSessionId: "continued-child",
+  cwd: continuationRun.cwd,
+  acpx: {},
+};
+let continuationEnsureInput: Record<string, unknown> | undefined;
+const continuationRuntime = {
+  ensureSession: async (input: Record<string, unknown>) => {
+    continuationEnsureInput = input;
+    return { agentSessionId: "continued-child", acpxRecordId: "source-acpx-record" };
+  },
+  startTurn: () => ({
+    events: (async function* () {})(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+  close: async () => undefined,
+} as unknown as AcpRuntime;
+await createAcpLauncher({
+  leasedRuntimeFactory: () => ({
+    runtime: continuationRuntime,
+    sessionStore: { load: async () => continuationRecord } as never,
+    leaseId: "continuation-lease",
+    release: () => undefined,
+    processTreePids: async () => [],
+    terminate: async () => true,
+  }),
+})({
+  run: continuationRun,
+  resumeSessionId: "continued-child",
+  resumeRecordId: "source-acpx-record",
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(continuationEnsureInput?.sessionKey, "source-acpx-record", "continuation reuses the exact acpx record id");
+assert.equal(continuationEnsureInput?.resumeSessionId, "continued-child", "continuation reuses the exact child id");
+
+for (const [label, record, expected] of [
+  ["missing", undefined, /session record not found.*refusing to create a fresh session/i],
+  ["mismatched", { ...continuationRecord, agentSessionId: "some-other-child" }, /identity mismatch/i],
+  ["closed", { ...continuationRecord, acpx: { reset_on_next_ensure: true } }, /was closed/i],
+] as const) {
+  let ensureCalls = 0;
+  const invalidRuntime = {
+    ...continuationRuntime,
+    ensureSession: async () => { ensureCalls += 1; return {}; },
+  } as unknown as AcpRuntime;
+  await assert.rejects(
+    () => createAcpLauncher({
+      leasedRuntimeFactory: () => ({
+        runtime: invalidRuntime,
+        sessionStore: { load: async () => record } as never,
+        leaseId: `continuation-${label}`,
+        release: () => undefined,
+        processTreePids: async () => [],
+        terminate: async () => true,
+      }),
+    })({
+      run: continuationRun,
+      resumeSessionId: "continued-child",
+      resumeRecordId: "source-acpx-record",
+      signal: new AbortController().signal,
+      onActivity: () => undefined,
+    }),
+    expected,
+  );
+  assert.equal(ensureCalls, 0, `${label} continuation cannot fall through to fresh-session creation`);
+}
+
 process.stdout.write("ok — ACP launcher maps native/backend identity, outcome, and bounded output\n");

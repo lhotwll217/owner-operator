@@ -164,8 +164,13 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
     try {
+      if (request.resumeRecordId) {
+        await validateContinuationRecord(leased.sessionStore, request);
+      }
       handle = await ensureAcpSession(leased.runtime, request);
-      const record = await leased.sessionStore.load(handle.acpxRecordId ?? request.run.id);
+      const record = await leased.sessionStore.load(
+        handle.acpxRecordId ?? request.resumeRecordId ?? request.run.id,
+      );
       if (record?.pid) {
         updateAgentRunProcessLease(leased.leaseId, {
           rootPid: record.pid,
@@ -173,6 +178,10 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
         });
       }
       return await runAcpTurn(leased.runtime, request, handle);
+    } catch (error) {
+      if (!request.resumeRecordId) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`ACP continuation failed for ${request.resumeRecordId}: ${message}`, { cause: error });
     } finally {
       if (handle) {
         try {
@@ -194,6 +203,34 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
     await reapStaleAgentRunProcesses({ wrapperPath: agentRunWrapperPath() });
   };
   return launcher;
+}
+
+async function validateContinuationRecord(
+  sessionStore: AcpSessionStore,
+  request: AgentRunLaunchRequest,
+): Promise<void> {
+  const recordId = request.resumeRecordId!;
+  const record = await sessionStore.load(recordId);
+  if (!record) {
+    throw new Error(`ACP continuation session record not found: ${recordId}; refusing to create a fresh session`);
+  }
+  if (record.acpxRecordId !== recordId) {
+    throw new Error(`ACP continuation record identity mismatch: expected ${recordId}, found ${record.acpxRecordId}`);
+  }
+  if (!request.resumeSessionId) {
+    throw new Error(`ACP continuation ${recordId} has no child session identity`);
+  }
+  if (record.agentSessionId !== request.resumeSessionId && record.acpSessionId !== request.resumeSessionId) {
+    throw new Error(
+      `ACP continuation child identity mismatch for ${recordId}: expected ${request.resumeSessionId}`,
+    );
+  }
+  if (resolve(record.cwd) !== resolve(request.run.cwd)) {
+    throw new Error(`ACP continuation working-directory mismatch for ${recordId}`);
+  }
+  if (record.acpx?.reset_on_next_ensure === true) {
+    throw new Error(`ACP continuation session ${recordId} was closed and cannot be continued`);
+  }
 }
 
 async function runAcpTurn(
@@ -310,7 +347,7 @@ function ensureAcpSession(
   const capability = AGENT_RUN_CAPABILITIES[request.run.harness];
   if (!capability) throw new Error(`unknown delegation harness: ${request.run.harness}`);
   return runtime.ensureSession({
-    sessionKey: request.run.id,
+    sessionKey: request.resumeRecordId ?? request.run.id,
     agent: capability.acpAgent,
     mode: "persistent",
     cwd: request.run.cwd,

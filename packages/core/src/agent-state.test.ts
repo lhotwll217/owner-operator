@@ -23,6 +23,8 @@ const fleet = [
   run("completed-new", AgentRunStatus.Completed, {
     task: "x".repeat(AGENT_STATE_TASK_MAX_LENGTH + 20),
     resultTail: "done",
+    childSessionId: "completed-child",
+    acpxRecordId: "completed-acpx",
     finishedAt: "2026-07-21T12:09:00.000Z",
   }),
   run("running", AgentRunStatus.Running, {
@@ -66,6 +68,7 @@ assert.deepEqual(
     category: running.category,
     canCancel: running.canCancel,
     canResume: running.canResume,
+    canContinue: running.canContinue,
     elapsedMs: running.elapsedMs,
     model: running.model,
     effort: running.effort,
@@ -77,6 +80,7 @@ assert.deepEqual(
     category: "active",
     canCancel: true,
     canResume: false,
+    canContinue: false,
     elapsedMs: 540_000,
     model: "gpt-5.6-sol",
     effort: "high",
@@ -96,6 +100,7 @@ assert.deepEqual(
   "attention status is always exposed as an accessible glyph/text pair",
 );
 assert.equal(view.runs.find(({ id }) => id === "lost-no-child")?.canResume, false, "missing child identity blocks resume");
+assert.equal(view.runs.find(({ id }) => id === "completed-new")?.canContinue, true, "the latest completed session can take a follow-up");
 assert.ok(view.runs.find(({ id }) => id === "completed-new")!.task.length <= AGENT_STATE_TASK_MAX_LENGTH);
 assert.equal(
   view.runs.find(({ id }) => id === "completed-new")!.latestActivity,
@@ -127,6 +132,35 @@ assert.equal(
   "a resumed interrupted run cannot be resumed again",
 );
 assert.equal(resumedInterrupted.counts.attention, 0);
+
+const continuedCompleted = deriveParentAgentState([
+  run("completed-predecessor", AgentRunStatus.Completed, {
+    childSessionId: "continued-child",
+    acpxRecordId: "continued-acpx",
+  }),
+  run("continued-turn", AgentRunStatus.Completed, {
+    childSessionId: "continued-child",
+    acpxRecordId: "continued-acpx",
+    resumeOfRunId: "completed-predecessor",
+  }),
+], { now });
+assert.equal(
+  continuedCompleted.runs.find(({ id }) => id === "completed-predecessor")?.canContinue,
+  false,
+  "a completed source with a successor cannot branch the child session",
+);
+const latestContinuation = continuedCompleted.runs.find(({ id }) => id === "continued-turn")!;
+assert.equal(latestContinuation.canContinue, true, "the latest completed turn can take the next follow-up");
+assert.equal(latestContinuation.resumeOfRunId, "completed-predecessor", "agent state exposes immediate run lineage");
+
+const incompleteContinuationIdentity = deriveParentAgentState([
+  run("completed-without-acpx", AgentRunStatus.Completed, { childSessionId: "child-only" }),
+], { now });
+assert.equal(
+  incompleteContinuationIdentity.runs[0]?.canContinue,
+  false,
+  "continuation control requires both child and acpx identities",
+);
 
 const resumedOnlyFailure = deriveParentAgentState([
   run("only-failure", AgentRunStatus.Failed, { childSessionId: "resumed-child" }),

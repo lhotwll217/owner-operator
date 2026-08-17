@@ -60,8 +60,14 @@ owns transcript identity and discovery.
 
 `pending → running → { completed | failed | cancelled | interrupted | lost }`.
 
-- **Terminal states are monotonic.** A finished row never changes status. Resume does not
-  downgrade a row — it creates a *new* run under the same child identity.
+- **Terminal states are monotonic.** A finished row never changes status. Both recovery and a
+  completed-session follow-up create a *new* row under the same child identity and link its
+  immediate source through `resume_of_run_id`.
+- **Recovery and continuation are distinct controls.** `resume` applies only to
+  `failed | interrupted | lost` and replays the source task. `continue` applies only to the latest
+  completed turn in a child-session lineage and requires a new follow-up task. It reuses both the
+  exact child session and acpx record identities; reopening the completed source row would erase
+  paid-turn history and violate monotonic terminal state.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
 - **`interrupted`** is resumable: a graceful daemon shutdown mid-run, or a restart reconciling a
@@ -115,6 +121,13 @@ and terminal styling are adapters over that contract.
   poll after delegation; `/agent-state` owns liveness. Status reads remain only for explicit
   owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
   `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
+- **A completed follow-up re-enters the same lifecycle.** The new row inherits harness, cwd,
+  model, effort, depth, timeout, parent lineage, and both session identities before entering the
+  ordinary pending queue. Concurrency, process leases, permissions, deadline, cancellation, ACP
+  outcome mapping, and completion delivery therefore remain unchanged. A missing/non-directory cwd
+  fails before row creation. Once the row exists, a missing, closed, stale, or identity-mismatched
+  acpx record fails that row with a clear error; the launcher refuses to replace it with a fresh
+  session.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.
@@ -272,7 +285,9 @@ message persists the other inline lifecycle moment. The parent-scoped live view 
 footer shows queued, running, and attention
 counts only while one exists and clears whenever the Gateway connection is unavailable;
 `/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
-harness, model and known effort, glyph-plus-text status, elapsed time, activity, and only currently valid controls.
+harness, model and known effort, glyph-plus-text status, elapsed time, activity, immediate run
+lineage, and only currently valid controls. Recovery resume and completed-session follow-up are
+separate controls; follow-up collects the required new task before mutation.
 Cancellation confirms before mutation.
 
 Terminal completion behavior is defined at four linked seams: the browser-safe

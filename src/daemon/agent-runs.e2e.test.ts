@@ -5,6 +5,8 @@
 // the opt-in acp-launcher.live.test.ts drives the same path through real Claude/acpx. The
 // crash-vs-graceful reconciliation on start() is also covered in executor.integration.test.ts.
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type AgentRun,
   AgentRunHarness,
@@ -34,7 +36,8 @@ const launcher: AgentRunLauncher = (request: AgentRunLaunchRequest): Promise<Age
   new Promise((resolve, reject) => {
     request.onActivity({
       activity: "child started",
-      childSessionId: `child-${request.run.task.replace(/\W+/g, "-")}`,
+      childSessionId: request.resumeSessionId ?? `child-${request.run.task.replace(/\W+/g, "-")}`,
+      acpxRecordId: request.run.acpxRecordId ?? `acpx-${request.run.task.replace(/\W+/g, "-")}`,
     });
     const abort = (): void => reject(request.signal.reason ?? new Error("aborted"));
     if (request.signal.aborted) return abort();
@@ -133,6 +136,36 @@ try {
   assert.equal(done.status, AgentRunStatus.Completed);
   assert.equal(done.resultTail, "found the race", "the durable result is delivered through the ledger");
 
+  // --- continue a completed turn over HTTP with strict task validation -------------------
+  const daemonInfo = JSON.parse(readFileSync(join(ooHome, "daemon.json"), "utf8")) as {
+    port: number;
+    authToken: string;
+  };
+  const missingTask = await fetch(`http://127.0.0.1:${daemonInfo.port}/agent-runs/${done.id}/continue`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${daemonInfo.authToken}`, "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missingTask.status, 400, "Gateway rejects continuation without a new task");
+  assert.match(String((await missingTask.json() as { error?: unknown }).error), /task/i);
+
+  parked.length = 0;
+  const continued = await gateway2.continueAgentRun(done.id, "explain the owner impact");
+  assert.equal(continued.task, "explain the owner impact");
+  assert.equal(continued.resumeOfRunId, done.id);
+  assert.equal(continued.childSessionId, done.childSessionId);
+  assert.equal(continued.acpxRecordId, done.acpxRecordId);
+  assert.equal(continued.model, done.model);
+  assert.equal(continued.effort, done.effort);
+  assert.equal(continued.timeoutSeconds, done.timeoutSeconds);
+  await waitFor(() => parked.length === 1, 3_000, "continued child to start");
+  assert.equal(parked[0].request.resumeSessionId, done.childSessionId);
+  assert.equal(parked[0].request.resumeRecordId, done.acpxRecordId);
+  parked[0].finish({ status: AgentRunStatus.Completed, resultText: "owner impact explained", error: null });
+  const continuedDone = await gateway2.waitAgentRun(continued.id, 5);
+  assert.equal(continuedDone.status, AgentRunStatus.Completed);
+  assert.equal((await gateway2.agentRun(done.id)).resultTail, "found the race", "continuation never mutates its source row");
+
   // --- cancel a fresh run over HTTP -------------------------------------------------------
   parked.length = 0;
   const toCancel = await gateway2.delegateAgent({
@@ -151,7 +184,7 @@ try {
     "the daemon pushed agent-run invalidations over SSE",
   );
 
-  process.stdout.write("ok — delegated run drives launch → interrupt → resume → result → cancel over the daemon HTTP surface\n");
+  process.stdout.write("ok — delegated run drives launch → recovery → follow-up → result → cancel over daemon HTTP\n");
 } finally {
   gateway?.close();
   gateway2?.close();

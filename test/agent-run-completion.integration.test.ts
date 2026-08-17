@@ -94,7 +94,11 @@ try {
     },
     async cancelAgentRun() { throw new Error("not used"); },
     async resumeAgentRun() { throw new Error("not used"); },
-  } as Pick<GatewayApi, "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun">;
+    async continueAgentRun() { throw new Error("not used"); },
+  } as Pick<
+    GatewayApi,
+    "listAgentRuns" | "subscribe" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun"
+  >;
   const createTestResourceLoader = () => new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -190,6 +194,7 @@ try {
     },
     async cancel() { throw new Error("not used"); },
     async resume() { throw new Error("not used"); },
+    async continueRun() { throw new Error("not used"); },
   };
   const abortParentSession = new ParentRunSession(sessionManager.getSessionId(), abortRunAdapter, {
     completionAdapter: adapter,

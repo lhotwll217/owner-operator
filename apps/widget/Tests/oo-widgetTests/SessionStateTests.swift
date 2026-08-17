@@ -129,6 +129,8 @@ struct SessionStateTests {
             .attention, .attention, .attention, .active, .active, .recent, .recent,
         ])
         #expect(decoded.runs.map(\.canResume) == [true, true, true, false, false, false, false])
+        #expect(decoded.runs.map { $0.canContinue ?? false } == [false, false, false, false, false, true, false])
+        #expect(decoded.runs[5].resumeOfRunId == "completed-source")
         #expect(decoded.runs[3].status.glyph == "●")
     }
 
@@ -138,6 +140,8 @@ struct SessionStateTests {
         #expect(rendered.contains("! failed  Investigate startup"))
         #expect(rendered.contains("! interrupted  Continue migration"))
         #expect(rendered.contains("· resumable"))
+        #expect(rendered.contains("· follow-up available"))
+        #expect(rendered.contains("↳ completed-source"))
         #expect(rendered.contains("■ cancelled  Superseded audit"))
         let failed = try #require(rendered.range(of: "Investigate startup"))
         let running = try #require(rendered.range(of: "Research widget behavior"))

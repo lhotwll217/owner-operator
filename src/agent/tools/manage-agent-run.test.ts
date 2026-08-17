@@ -4,6 +4,7 @@ import { manageAgentRun, manageAgentRunTool } from "./manage-agent-run";
 
 assert.match(manageAgentRunTool.description, /not for monitoring/i, "the tool reserves status for explicit owner requests");
 assert.ok(!manageAgentRunTool.description.includes("wait"), "no blocking wait affordance: completions arrive as events");
+assert.match(manageAgentRunTool.description, /continue.*new follow-up task/i);
 
 const run: AgentRun = {
   id: "run-1",
@@ -38,14 +39,34 @@ const backend = {
     calls.push(`resume:${id}`);
     return { ...run, id: "run-2", resumeOfRunId: id, status: AgentRunStatus.Pending };
   },
-} as Pick<GatewayApi, "agentRun" | "cancelAgentRun" | "resumeAgentRun">;
+  async continueAgentRun(id: string, task: string) {
+    calls.push(`continue:${id}:${task}`);
+    return { ...run, id: "run-3", task, resumeOfRunId: id, status: AgentRunStatus.Pending };
+  },
+} as Pick<GatewayApi, "agentRun" | "cancelAgentRun" | "resumeAgentRun" | "continueAgentRun">;
 
 assert.equal((await manageAgentRun(backend, { action: "status", id: "run-1" })).status, AgentRunStatus.Running);
 assert.equal((await manageAgentRun(backend, { action: "cancel", id: "run-1" })).status, AgentRunStatus.Cancelled);
 const resumed = await manageAgentRun(backend, { action: "resume", id: "run-1" });
 assert.equal(resumed.id, "run-2");
 assert.equal(resumed.resumeOfRunId, "run-1", "resume returns a new run continuing the same identity");
+const continued = await manageAgentRun(backend, {
+  action: "continue",
+  id: "run-1",
+  task: "explain the audit finding",
+});
+assert.equal(continued.id, "run-3");
+assert.equal(continued.task, "explain the audit finding");
+await assert.rejects(
+  () => manageAgentRun(backend, { action: "continue", id: "run-1", task: "  " }),
+  /follow-up task/,
+);
 
-assert.deepEqual(calls, ["status:run-1", "cancel:run-1", "resume:run-1"]);
+assert.deepEqual(calls, [
+  "status:run-1",
+  "cancel:run-1",
+  "resume:run-1",
+  "continue:run-1:explain the audit finding",
+]);
 
-process.stdout.write("ok — manage_agent_run routes status/cancel/resume to the backend\n");
+process.stdout.write("ok — manage_agent_run distinguishes recovery resume from completed-session follow-up\n");
