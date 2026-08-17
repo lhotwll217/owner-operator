@@ -130,7 +130,7 @@ struct SessionStateTests {
         ])
         #expect(decoded.runs.map(\.canRetry) == [true, true, true, false, false, false, false])
         #expect(decoded.runs.map(\.canResume) == [false, false, false, false, false, true, false])
-        #expect(decoded.runs[5].resumeOfRunId == "completed-run")
+        #expect(decoded.runs[5].resumeOfRunId == "prior-completed-run")
         #expect(decoded.runs[3].status.glyph == "●")
     }
 
@@ -141,7 +141,7 @@ struct SessionStateTests {
         #expect(rendered.contains("! interrupted  Continue migration"))
         #expect(rendered.contains("· retry available"))
         #expect(rendered.contains("· resume available"))
-        #expect(rendered.contains("Resume of: completed-run"))
+        #expect(rendered.contains("Resume of: prior-completed-run"))
         #expect(rendered.contains("■ cancelled  Superseded audit"))
         let failed = try #require(rendered.range(of: "Investigate startup"))
         let running = try #require(rendered.range(of: "Research widget behavior"))

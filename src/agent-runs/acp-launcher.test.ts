@@ -445,7 +445,7 @@ for (const identityCase of identityCases) {
       onActivity: () => undefined,
     }),
     /ACP retry failed.*(?:identity mismatch|fresh session)/i,
-    `${identityCase.harness} Retry refuses a fresh fallback after a failed Resume`,
+    `${identityCase.harness} Retry refuses a fresh fallback after a failed turn`,
   );
   assert.equal(retryTurnCalls, 1, "a rejected Retry fallback never receives a turn");
 }

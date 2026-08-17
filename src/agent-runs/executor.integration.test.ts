@@ -177,7 +177,7 @@ try {
   restarted.start();
   assert.equal(orphanState.agentRunById(orphan.id)?.status, AgentRunStatus.Interrupted, "restart reconciles running rows");
 
-  // --- resume: same child identity, new run row --------------------------------------------
+  // --- retry: same child identity, new run row ---------------------------------------------
   assert.throws(() => restarted.retry(orphan.id), /child session/, "retry without identity is rejected");
   const retryable = state.agentRunById(sixth.id)!;
   assert.ok(retryable.childSessionId, "interrupted run kept its child identity");
@@ -192,7 +192,7 @@ try {
     retryable.childSessionId,
     "the launcher is asked to retry the same child session",
   );
-  launches[6].finish({ status: AgentRunStatus.Completed, resultText: "resumed fine", error: null });
+  launches[6].finish({ status: AgentRunStatus.Completed, resultText: "retried fine", error: null });
   await waitFor(() => state.agentRunById(retriedRun.id)?.status === AgentRunStatus.Completed, "retried run completion");
   assert.throws(() => restarted.retry(sixth.id), /already been retried/);
 
@@ -217,7 +217,7 @@ try {
   assert.equal(launches[7].request.run.acpxRecordId, completedRun.acpxRecordId);
   launches[7].finish({ status: AgentRunStatus.Completed, resultText: "follow-up answered", error: null });
   await waitFor(() => state.agentRunById(resumedRun.id)?.status === AgentRunStatus.Completed, "resumed run completion");
-  assert.equal(state.agentRunById(retriedRun.id)?.resultTail, "resumed fine", "the completed run stays immutable");
+  assert.equal(state.agentRunById(retriedRun.id)?.resultTail, "retried fine", "the completed run stays immutable");
 
   assert.throws(() => restarted.resume(sixth.id, "not completed"), /completed/);
   assert.throws(

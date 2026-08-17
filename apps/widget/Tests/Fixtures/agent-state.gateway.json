@@ -81,7 +81,7 @@
       "elapsedMs": 90000,
       "latestActivity": "Done",
       "retryOfRunId": null,
-      "resumeOfRunId": "completed-run",
+      "resumeOfRunId": "prior-completed-run",
       "canCancel": false,
       "canRetry": false,
       "canResume": true
