@@ -47,7 +47,7 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
   try {
     const result = await createAcpLauncher()({
       run,
-      resumeSessionId: null,
+      sessionIntent: { kind: "fresh" },
       signal: controller.signal,
       onActivity: () => undefined,
     });

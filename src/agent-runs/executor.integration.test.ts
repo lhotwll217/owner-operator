@@ -5,7 +5,9 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
+  AGENT_RUN_CONTINUATION_TASK_ERROR,
   AgentRunHarness,
   AgentRunStatus,
   DomainEventKind,
@@ -49,9 +51,12 @@ try {
   }> = [];
   const launcher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> =>
     new Promise((resolve, reject) => {
+      const intendedChild = request.sessionIntent.kind === "fresh"
+        ? `child-${request.run.id}`
+        : request.sessionIntent.childSessionId;
       request.onActivity({
         activity: "child started",
-        childSessionId: request.resumeSessionId ?? `child-${request.run.id}`,
+        childSessionId: intendedChild,
         acpxRecordId: request.run.acpxRecordId ?? `acpx-${request.run.id}`,
       });
       const abort = (): void => reject(request.signal.reason ?? new Error("aborted"));
@@ -181,7 +186,9 @@ try {
   assert.equal(resumedRun.childSessionId, resumable.childSessionId, "resume reuses the child session identity");
   await waitFor(() => launches.length === 7, "resumed run to start");
   assert.equal(
-    launches[6].request.resumeSessionId,
+    launches[6].request.sessionIntent.kind === "resume"
+      ? launches[6].request.sessionIntent.childSessionId
+      : null,
     resumable.childSessionId,
     "the launcher is asked to resume the same child session",
   );
@@ -201,15 +208,21 @@ try {
   assert.equal(continuedRun.depth, completedSource.depth);
   assert.equal(continuedRun.timeoutSeconds, completedSource.timeoutSeconds);
   await waitFor(() => launches.length === 8, "continued run to start");
-  assert.equal(launches[7].request.resumeSessionId, completedSource.childSessionId);
-  assert.equal(launches[7].request.resumeRecordId, completedSource.acpxRecordId);
+  assert.deepEqual(launches[7].request.sessionIntent, {
+    kind: "continue",
+    childSessionId: completedSource.childSessionId,
+    acpxRecordId: completedSource.acpxRecordId,
+  });
   assert.equal(launches[7].request.run.acpxRecordId, completedSource.acpxRecordId);
   launches[7].finish({ status: AgentRunStatus.Completed, resultText: "follow-up answered", error: null });
   await waitFor(() => state.agentRunById(continuedRun.id)?.status === AgentRunStatus.Completed, "continued run completion");
   assert.equal(state.agentRunById(resumedRun.id)?.resultTail, "resumed fine", "the completed source stays immutable");
 
   assert.throws(() => restarted.continue(sixth.id, "not completed"), /completed/);
-  assert.throws(() => restarted.continue(continuedRun.id, "  "), /follow-up task/);
+  assert.throws(
+    () => restarted.continue(continuedRun.id, "  "),
+    (error: unknown) => error instanceof Error && error.message === AGENT_RUN_CONTINUATION_TASK_ERROR,
+  );
   assert.throws(() => restarted.continue(resumedRun.id, "branch old context"), /already been continued/);
   const invalidCompletedSource = state.createAgentRun({
     harness: AgentRunHarness.ClaudeCode,
@@ -322,6 +335,53 @@ try {
   assert.equal(startupState.agentRunById(staleSource.id)?.resultTail, "source result");
   await startupExecutor.stop();
   startupState.close();
+
+  // --- corrupt lineage: a missing immutable source fails closed before launcher dispatch ---
+  const corruptPath = join(dir, "missing-source.db");
+  const corruptState = new State(corruptPath, { bus: new InMemoryEventBus() });
+  const corruptSource = corruptState.createAgentRun({
+    harness: AgentRunHarness.ClaudeCode,
+    task: "completed source",
+    cwd: dir,
+    depth: 1,
+    timeoutSeconds: 60,
+    childSessionId: "corrupt-child",
+    acpxRecordId: "corrupt-acpx",
+  });
+  corruptState.finishAgentRun(corruptSource.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "source result",
+    error: null,
+  });
+  const dormantExecutor = new AgentRunExecutor(corruptState, {
+    launcher,
+    maxConcurrent: 0,
+    logger: () => undefined,
+  });
+  const corruptContinuation = dormantExecutor.continue(corruptSource.id, "follow up");
+  const corruptDb = new DatabaseSync(corruptPath);
+  corruptDb.exec("PRAGMA foreign_keys = OFF");
+  corruptDb.prepare("DELETE FROM agent_runs WHERE id = ?").run(corruptSource.id);
+  corruptDb.close();
+  let corruptLaunchCalls = 0;
+  const corruptExecutor = new AgentRunExecutor(corruptState, {
+    launcher: async () => {
+      corruptLaunchCalls += 1;
+      throw new Error("must not launch");
+    },
+    tickMs: 20,
+    logger: () => undefined,
+  });
+  corruptExecutor.start();
+  await waitFor(
+    () => corruptState.agentRunById(corruptContinuation.id)?.status === AgentRunStatus.Failed,
+    "missing continuation source to fail",
+  );
+  assert.match(corruptState.agentRunById(corruptContinuation.id)?.error ?? "", /references missing source/);
+  assert.equal(corruptLaunchCalls, 0, "missing continuation lineage cannot downgrade into a launcher call");
+  await corruptExecutor.stop();
+  await dormantExecutor.stop();
+  corruptState.close();
 
   // --- depth cap: delegating from a thread that is itself a delegated child is rejected -----
   // Isolated so the never-started executor's pump can't disturb the positional launches above.

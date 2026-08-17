@@ -1,13 +1,17 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import { type AgentRun, type GatewayApi } from "@owner-operator/core";
+import {
+  validateAgentRunContinuationTask,
+  type AgentRun,
+  type GatewayApi,
+} from "@owner-operator/core";
 import { resolveBackend } from "../../gateway/client";
 import { agentRunToolResult } from "./agent-run-result";
 
 /** The manage_agent_run actions, declared once so the runtime schema and the request type can't
  * drift. The compile-time `action` type and the model-facing Type.Union both derive from this. */
-const MANAGE_AGENT_RUN_RECOVERY_ACTIONS = ["status", "cancel", "resume"] as const;
-const MANAGE_AGENT_RUN_ACTIONS = [...MANAGE_AGENT_RUN_RECOVERY_ACTIONS, "continue"] as const;
+const MANAGE_AGENT_RUN_TASKLESS_ACTIONS = ["status", "cancel", "resume"] as const;
+const MANAGE_AGENT_RUN_ACTIONS = [...MANAGE_AGENT_RUN_TASKLESS_ACTIONS, "continue"] as const;
 type ManageAgentRunAction = (typeof MANAGE_AGENT_RUN_ACTIONS)[number];
 
 type ManageAgentRunBackend = Pick<
@@ -31,8 +35,7 @@ export async function manageAgentRun(
     case "resume":
       return backend.resumeAgentRun(request.id);
     case "continue":
-      if (!request.task.trim()) throw new Error("continuation follow-up task is required");
-      return backend.continueAgentRun(request.id, request.task);
+      return backend.continueAgentRun(request.id, validateAgentRunContinuationTask(request.task));
   }
 }
 
@@ -49,7 +52,7 @@ export const manageAgentRunTool = defineTool({
   parameters: Type.Union([
     Type.Object({
       action: Type.Union(
-        MANAGE_AGENT_RUN_RECOVERY_ACTIONS.map((action) => Type.Literal(action)),
+        MANAGE_AGENT_RUN_TASKLESS_ACTIONS.map((action) => Type.Literal(action)),
         { description: "status | cancel | resume." },
       ),
       id: Type.String({ minLength: 1, description: "Exact stable run id from the agent_runs table." }),

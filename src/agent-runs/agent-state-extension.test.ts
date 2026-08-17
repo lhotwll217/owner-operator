@@ -40,7 +40,10 @@ const rows = [
     childSessionId: "failed-child",
   }),
 ];
-const view = deriveParentAgentState(rows, { now: "2026-07-21T12:10:00.000Z" });
+const view = deriveParentAgentState(rows, {
+  now: "2026-07-21T12:10:00.000Z",
+  isContinuationEnvironmentEligible: (run) => run.id === "completed",
+});
 const theme = buildOoTheme("256color");
 const actions: AgentStatePickerAction[] = [];
 const picker = new AgentStatePicker(view, theme, (action) => actions.push(action), () => undefined);
@@ -180,6 +183,7 @@ assert.ok(completionRenderer, "the extension registers the typed completion rend
 assert.deepEqual(completionMessages[0]?.options, { triggerTurn: true, deliverAs: "followUp" });
 
 gatewayRows = [run("completed-follow-up", AgentRunStatus.Completed, {
+  cwd: process.cwd(),
   childSessionId: "completed-child",
   acpxRecordId: "completed-acpx",
   finishedAt: "2026-07-21T12:10:00.000Z",

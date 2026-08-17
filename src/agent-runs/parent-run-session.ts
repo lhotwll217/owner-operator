@@ -2,15 +2,16 @@ import {
   AgentRunStatus,
   GatewayEventKind,
   isTerminalAgentRunStatus,
+  validateAgentRunContinuationTask,
   type AgentRun,
   type GatewayApi,
 } from "@owner-operator/core";
 import {
   createAgentRunCompletionEnvelope,
-  deriveParentAgentState,
   type AgentRunCompletionEnvelope,
   type ParentAgentStateView,
 } from "@owner-operator/core/agent-state";
+import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
 
 /** Parent-scoped transport seam. The production Gateway and tests use the same contract. */
 export interface ParentRunAdapter {
@@ -18,7 +19,7 @@ export interface ParentRunAdapter {
   subscribe(listener: () => void, onDisconnected?: () => void): () => void;
   cancel(runId: string): Promise<AgentRun>;
   resume(runId: string): Promise<AgentRun>;
-  continueRun(runId: string, task: string): Promise<AgentRun>;
+  continue(runId: string, task: string): Promise<AgentRun>;
 }
 
 export interface ParentCompletionDeliveryResult {
@@ -96,7 +97,7 @@ export class ParentRunSession {
   }
 
   get view(): ParentAgentStateView {
-    return deriveParentAgentState([...this.runs.values()], {
+    return deriveParentAgentStateWithEnvironment([...this.runs.values()], {
       now: this.now(),
       ...(this.recentLimit === undefined ? {} : { recentLimit: this.recentLimit }),
     });
@@ -145,11 +146,11 @@ export class ParentRunSession {
     await this.refresh();
   }
 
-  async continueRun(runId: string, task: string): Promise<void> {
+  async continue(runId: string, task: string): Promise<void> {
     const selected = this.view.runs.find(({ id }) => id === runId);
     if (!selected?.canContinue) throw new Error(`agent run ${runId} cannot be continued`);
-    if (!task.trim()) throw new Error("continuation follow-up task is required");
-    this.reconcileOne(await this.adapter.continueRun(runId, task));
+    const followUpTask = validateAgentRunContinuationTask(task);
+    this.reconcileOne(await this.adapter.continue(runId, followUpTask));
     await this.refresh();
   }
 
@@ -333,6 +334,6 @@ export function gatewayParentRunAdapter(
     ),
     cancel: (runId) => gateway.cancelAgentRun(runId),
     resume: (runId) => gateway.resumeAgentRun(runId),
-    continueRun: (runId, task) => gateway.continueAgentRun(runId, task),
+    continue: (runId, task) => gateway.continueAgentRun(runId, task),
   };
 }

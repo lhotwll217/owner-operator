@@ -1,5 +1,11 @@
 import assert from "node:assert";
-import { AgentRunHarness, AgentRunStatus, type AgentRun, type GatewayApi } from "@owner-operator/core";
+import {
+  AGENT_RUN_CONTINUATION_TASK_ERROR,
+  AgentRunHarness,
+  AgentRunStatus,
+  type AgentRun,
+  type GatewayApi,
+} from "@owner-operator/core";
 import { manageAgentRun, manageAgentRunTool } from "./manage-agent-run";
 
 assert.match(manageAgentRunTool.description, /not for monitoring/i, "the tool reserves status for explicit owner requests");
@@ -59,7 +65,7 @@ assert.equal(continued.id, "run-3");
 assert.equal(continued.task, "explain the audit finding");
 await assert.rejects(
   () => manageAgentRun(backend, { action: "continue", id: "run-1", task: "  " }),
-  /follow-up task/,
+  (error: unknown) => error instanceof Error && error.message === AGENT_RUN_CONTINUATION_TASK_ERROR,
 );
 
 assert.deepEqual(calls, [

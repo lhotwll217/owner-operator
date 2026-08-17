@@ -7,6 +7,7 @@ import {
   DomainEventKind,
   GatewayEventKind,
   MAX_AGENT_RUN_WAIT_SECONDS,
+  validateAgentRunContinuationTask,
   type AgentRun,
   type AgentRunCreateInput,
   type DaemonHealth,
@@ -17,7 +18,7 @@ import {
   type ScheduleDefinition,
   type ScheduleRun,
 } from "@owner-operator/core";
-import { deriveParentAgentState } from "@owner-operator/core/agent-state";
+import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
 import type { State } from "../state/state";
 
 export interface GatewayMonitor {
@@ -40,6 +41,7 @@ export interface GatewayQueryService {
 
 export interface GatewayAgentRuns {
   list(parentThreadId?: string): AgentRun[];
+  view(parentThreadId?: string): ParentAgentStateView;
   get(id: string): AgentRun | undefined;
   launch(input: AgentRunCreateInput): AgentRun;
   cancel(id: string): Promise<AgentRun>;
@@ -173,7 +175,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       if (route === "GET /agent-state") {
         const parent = url.searchParams.get("parentThreadId");
-        return respond(200, deriveParentAgentState(options.agentRuns.list(parent ?? undefined)));
+        return respond(200, options.agentRuns.view(parent ?? undefined));
       }
       if (route === "POST /agent-runs") {
         const run = options.agentRuns.launch(await readBody(request) as AgentRunCreateInput);
@@ -191,10 +193,10 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/continue`) {
         const body = await readBody(request) as { task?: unknown };
-        if (typeof body.task !== "string" || !body.task.trim()) {
-          return respond(400, { error: "continuation task must be a non-empty string" });
-        }
-        return respond(201, options.agentRuns.continue(agentRunId, body.task));
+        return respond(201, options.agentRuns.continue(
+          agentRunId,
+          validateAgentRunContinuationTask(body.task),
+        ));
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/wait`) {
         const body = await readBody(request) as { timeoutSeconds?: unknown };

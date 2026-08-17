@@ -1,4 +1,3 @@
-import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
   AGENT_RUN_CAPABILITIES,
@@ -7,8 +6,11 @@ import {
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
+  agentRunContinuationError,
+  agentRunSessionIntent,
   isAgentRunEffort,
   isTerminalAgentRunStatus,
+  validateAgentRunContinuationTask,
   type AgentRun,
   type AgentRunCreateInput,
   type AgentRunFinalStatus,
@@ -17,6 +19,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
+import { continuationCwdError } from "./agent-state-projection";
 import { resolveAgentRunLaunch } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
@@ -240,31 +243,21 @@ export class AgentRunExecutor {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
-    if (run.status !== AgentRunStatus.Completed) {
-      throw new Error(`agent run can only be continued from completed status, not ${run.status}`);
-    }
-    if (!task.trim()) throw new Error("continuation follow-up task is required");
-    if (!AGENT_RUN_CAPABILITIES[run.harness]?.resume) {
-      throw new Error(`harness ${run.harness} does not support session continuation`);
-    }
-    if (!run.childSessionId) {
-      throw new Error("completed agent run has no child session identity to continue");
-    }
-    if (!run.acpxRecordId) {
-      throw new Error("completed agent run has no acpx session-record identity to continue");
-    }
-    const cwd = statSync(run.cwd, { throwIfNoEntry: false });
-    if (!cwd) throw new Error(`continuation working directory no longer exists: ${run.cwd}`);
-    if (!cwd.isDirectory()) throw new Error(`continuation working directory is not a directory: ${run.cwd}`);
+    const followUpTask = validateAgentRunContinuationTask(task);
     const successor = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
-    if (successor) throw new Error(`agent run ${run.id} has already been continued by ${successor.id}`);
-    const inflight = this.state.nonterminalAgentRunByChildSession(run.childSessionId);
-    if (inflight) {
-      throw new Error(`child session ${run.childSessionId} already has active run ${inflight.id}`);
-    }
+    const inflight = run.childSessionId
+      ? this.state.nonterminalAgentRunByChildSession(run.childSessionId)
+      : undefined;
+    const domainError = agentRunContinuationError(run, {
+      successorRunId: successor?.id ?? null,
+      activeRunId: inflight?.id ?? null,
+    });
+    if (domainError) throw new Error(domainError);
+    const cwdError = continuationCwdError(run.cwd);
+    if (cwdError) throw new Error(cwdError);
     const continued = this.state.createAgentRun({
       harness: run.harness,
-      task,
+      task: followUpTask,
       cwd: run.cwd,
       parentThreadId: run.parentThreadId,
       model: run.model,
@@ -331,13 +324,10 @@ export class AgentRunExecutor {
     timeout.unref?.();
     try {
       const source = run.resumeOfRunId ? this.state.agentRunById(run.resumeOfRunId) : undefined;
-      const resumeRecordId = source?.status === AgentRunStatus.Completed
-        ? run.acpxRecordId ?? undefined
-        : undefined;
+      const sessionIntent = agentRunSessionIntent(run, source);
       const result = await this.launcher({
         run,
-        resumeSessionId: run.childSessionId,
-        ...(resumeRecordId ? { resumeRecordId } : {}),
+        sessionIntent,
         signal: controller.signal,
         onActivity: (update) => {
           this.state.recordAgentRunActivity(run.id, update);

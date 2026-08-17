@@ -8,6 +8,7 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  AGENT_RUN_CONTINUATION_TASK_ERROR,
   type AgentRun,
   AgentRunHarness,
   AgentRunStatus,
@@ -34,9 +35,12 @@ const parked: Array<{ request: AgentRunLaunchRequest; finish: (r: AgentRunLaunch
 let startupReaps = 0;
 const launcher: AgentRunLauncher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> =>
   new Promise((resolve, reject) => {
+    const intendedChild = request.sessionIntent.kind === "fresh"
+      ? `child-${request.run.task.replace(/\W+/g, "-")}`
+      : request.sessionIntent.childSessionId;
     request.onActivity({
       activity: "child started",
-      childSessionId: request.resumeSessionId ?? `child-${request.run.task.replace(/\W+/g, "-")}`,
+      childSessionId: intendedChild,
       acpxRecordId: request.run.acpxRecordId ?? `acpx-${request.run.task.replace(/\W+/g, "-")}`,
     });
     const abort = (): void => reject(request.signal.reason ?? new Error("aborted"));
@@ -128,7 +132,10 @@ try {
   assert.equal(resumed.resumeOfRunId, launched.id, "resume records lineage");
   assert.equal(resumed.childSessionId, afterRestart.childSessionId, "resume reuses the child identity");
   await waitFor(() => parked.length === 1, 3_000, "resumed child to start");
-  assert.equal(parked[0].request.resumeSessionId, afterRestart.childSessionId, "the launcher is asked to resume it");
+  assert.deepEqual(parked[0].request.sessionIntent, {
+    kind: "resume",
+    childSessionId: afterRestart.childSessionId,
+  }, "the launcher is asked to resume it");
 
   // --- receive the durable result ---------------------------------------------------------
   parked[0].finish({ status: AgentRunStatus.Completed, resultText: "found the race", error: null });
@@ -147,7 +154,10 @@ try {
     body: JSON.stringify({}),
   });
   assert.equal(missingTask.status, 400, "Gateway rejects continuation without a new task");
-  assert.match(String((await missingTask.json() as { error?: unknown }).error), /task/i);
+  assert.equal(
+    (await missingTask.json() as { error?: unknown }).error,
+    AGENT_RUN_CONTINUATION_TASK_ERROR,
+  );
 
   parked.length = 0;
   const continued = await gateway2.continueAgentRun(done.id, "explain the owner impact");
@@ -159,8 +169,11 @@ try {
   assert.equal(continued.effort, done.effort);
   assert.equal(continued.timeoutSeconds, done.timeoutSeconds);
   await waitFor(() => parked.length === 1, 3_000, "continued child to start");
-  assert.equal(parked[0].request.resumeSessionId, done.childSessionId);
-  assert.equal(parked[0].request.resumeRecordId, done.acpxRecordId);
+  assert.deepEqual(parked[0].request.sessionIntent, {
+    kind: "continue",
+    childSessionId: done.childSessionId,
+    acpxRecordId: done.acpxRecordId,
+  });
   parked[0].finish({ status: AgentRunStatus.Completed, resultText: "owner impact explained", error: null });
   const continuedDone = await gateway2.waitAgentRun(continued.id, 5);
   assert.equal(continuedDone.status, AgentRunStatus.Completed);

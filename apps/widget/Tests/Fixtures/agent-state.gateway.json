@@ -10,8 +10,10 @@
       "category": "attention",
       "elapsedMs": 3000,
       "latestActivity": "ACP handshake failed",
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": true
+      "canResume": true,
+      "canContinue": false
     },
     {
       "id": "interrupted-run",
@@ -21,8 +23,10 @@
       "category": "attention",
       "elapsedMs": 62000,
       "latestActivity": "Daemon stopped",
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": true
+      "canResume": true,
+      "canContinue": false
     },
     {
       "id": "lost-run",
@@ -32,8 +36,10 @@
       "category": "attention",
       "elapsedMs": 120000,
       "latestActivity": "No live turn",
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": true
+      "canResume": true,
+      "canContinue": false
     },
     {
       "id": "running-run",
@@ -43,8 +49,10 @@
       "category": "active",
       "elapsedMs": 250000,
       "latestActivity": "Reading UI.swift",
+      "resumeOfRunId": null,
       "canCancel": true,
-      "canResume": false
+      "canResume": false,
+      "canContinue": false
     },
     {
       "id": "queued-run",
@@ -54,8 +62,10 @@
       "category": "active",
       "elapsedMs": 12000,
       "latestActivity": "",
+      "resumeOfRunId": null,
       "canCancel": true,
-      "canResume": false
+      "canResume": false,
+      "canContinue": false
     },
     {
       "id": "completed-run",
@@ -78,8 +88,10 @@
       "category": "recent",
       "elapsedMs": 45000,
       "latestActivity": "Cancelled by owner",
+      "resumeOfRunId": null,
       "canCancel": false,
-      "canResume": false
+      "canResume": false,
+      "canContinue": false
     }
   ]
 }

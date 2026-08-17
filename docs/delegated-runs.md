@@ -60,14 +60,15 @@ owns transcript identity and discovery.
 
 `pending → running → { completed | failed | cancelled | interrupted | lost }`.
 
-- **Terminal states are monotonic.** A finished row never changes status. Both recovery and a
-  completed-session follow-up create a *new* row under the same child identity and link its
-  immediate source through `resume_of_run_id`.
-- **Recovery and continuation are distinct controls.** `resume` applies only to
-  `failed | interrupted | lost` and replays the source task. `continue` applies only to the latest
-  completed turn in a child-session lineage and requires a new follow-up task. It reuses both the
-  exact child session and acpx record identities; reopening the completed source row would erase
-  paid-turn history and violate monotonic terminal state.
+- **Terminal states are monotonic.** Recovery and completed-session follow-up each create a new
+  row linked to their immutable immediate source. A row represents one paid turn and its lifecycle,
+  so reopening a completed row would erase history. The source link is also the durable launch
+  discriminator: the [domain contract](../packages/core/src/agent-runs.ts) derives an explicit
+  runtime intent and fails closed if that lineage is absent or inconsistent.
+- **Recovery and continuation are distinct controls.** Recovery replays an unsuccessful source
+  task; continuation supplies a new task to the latest completed turn. The
+  [tool schema](../src/agent/tools/manage-agent-run.ts) owns their inputs, while the
+  [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
 - **`interrupted`** is resumable: a graceful daemon shutdown mid-run, or a restart reconciling a
@@ -121,13 +122,12 @@ and terminal styling are adapters over that contract.
   poll after delegation; `/agent-state` owns liveness. Status reads remain only for explicit
   owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
   `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
-- **A completed follow-up re-enters the same lifecycle.** The new row inherits harness, cwd,
-  model, effort, depth, timeout, parent lineage, and both session identities before entering the
-  ordinary pending queue. Concurrency, process leases, permissions, deadline, cancellation, ACP
-  outcome mapping, and completion delivery therefore remain unchanged. A missing/non-directory cwd
-  fails before row creation. Once the row exists, a missing, closed, stale, or identity-mismatched
-  acpx record fails that row with a clear error; the launcher refuses to replace it with a fresh
-  session.
+- **A completed follow-up re-enters the ordinary lifecycle.** The
+  [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
+  the [environmental projection](../src/agent-runs/agent-state-projection.ts) prevents clients from
+  offering a control for an unavailable workspace; and the
+  [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact record/session reuse before sending
+  the turn. Continuation fails closed rather than substituting a fresh context.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.

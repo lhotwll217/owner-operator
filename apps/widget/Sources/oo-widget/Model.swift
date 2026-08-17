@@ -82,7 +82,7 @@ struct AgentRunView: Decodable, Identifiable {
     let resumeOfRunId: String?
     let canCancel: Bool
     let canResume: Bool
-    let canContinue: Bool?
+    let canContinue: Bool
 
     var tone: AgentRunTone {
         if category == .attention { return .attention }

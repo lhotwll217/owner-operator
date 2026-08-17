@@ -154,7 +154,7 @@ struct AgentRunRow: View {
                     if run.canResume {
                         Text("· resumable").foregroundStyle(.yellow)
                     }
-                    if run.canContinue == true {
+                    if run.canContinue {
                         Text("· follow-up available").foregroundStyle(.green)
                     }
                 }

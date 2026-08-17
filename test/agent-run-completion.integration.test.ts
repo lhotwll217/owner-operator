@@ -194,7 +194,7 @@ try {
     },
     async cancel() { throw new Error("not used"); },
     async resume() { throw new Error("not used"); },
-    async continueRun() { throw new Error("not used"); },
+    async continue() { throw new Error("not used"); },
   };
   const abortParentSession = new ParentRunSession(sessionManager.getSessionId(), abortRunAdapter, {
     completionAdapter: adapter,

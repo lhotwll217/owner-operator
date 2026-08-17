@@ -129,7 +129,7 @@ struct SessionStateTests {
             .attention, .attention, .attention, .active, .active, .recent, .recent,
         ])
         #expect(decoded.runs.map(\.canResume) == [true, true, true, false, false, false, false])
-        #expect(decoded.runs.map { $0.canContinue ?? false } == [false, false, false, false, false, true, false])
+        #expect(decoded.runs.map(\.canContinue) == [false, false, false, false, false, true, false])
         #expect(decoded.runs[5].resumeOfRunId == "completed-source")
         #expect(decoded.runs[3].status.glyph == "●")
     }
@@ -151,7 +151,7 @@ struct SessionStateTests {
 
     @Test func unknownAgentStatusAndCategoryStillRender() throws {
         let payload = Data("""
-        {"counts":{"queued":0,"running":1,"attention":0},"footer":"Agent state: 1 running","runs":[{"id":"run-1","harness":"codex","task":"Future lifecycle","status":{"glyph":"◆","text":"paused"},"category":"future","elapsedMs":1000,"latestActivity":"waiting","canCancel":false,"canResume":false}]}
+        {"counts":{"queued":0,"running":1,"attention":0},"footer":"Agent state: 1 running","runs":[{"id":"run-1","harness":"codex","task":"Future lifecycle","status":{"glyph":"◆","text":"paused"},"category":"future","elapsedMs":1000,"latestActivity":"waiting","canCancel":false,"canResume":false,"canContinue":false}]}
         """.utf8)
 
         let decoded = try JSONDecoder().decode(AgentStateView.self, from: payload)
@@ -184,7 +184,7 @@ struct SessionStateTests {
             {
               "counts":{"queued":0,"running":\(status == "running" ? 1 : 0),"attention":\(category == "attention" ? 1 : 0)},
               "footer":\(footerJSON),
-              "runs":[{"id":"run-1","harness":"codex","task":"Audit state","status":{"glyph":"\(glyph)","text":"\(status)"},"category":"\(category)","elapsedMs":1000,"latestActivity":"bounded","canCancel":\(status == "running"),"canResume":\(status == "interrupted")}]
+              "runs":[{"id":"run-1","harness":"codex","task":"Audit state","status":{"glyph":"\(glyph)","text":"\(status)"},"category":"\(category)","elapsedMs":1000,"latestActivity":"bounded","canCancel":\(status == "running"),"canResume":\(status == "interrupted"),"canContinue":false}]
             }
             """.utf8)
         }
@@ -224,7 +224,7 @@ struct SessionStateTests {
     @Test @MainActor func invalidationDuringRefetchRequiresAnotherDurableRead() async throws {
         func view(_ status: String, _ glyph: String, _ category: String) -> Data {
             Data("""
-            {"counts":{"queued":0,"running":0,"attention":0},"footer":null,"runs":[{"id":"run-1","harness":"codex","task":"Audit state","status":{"glyph":"\(glyph)","text":"\(status)"},"category":"\(category)","elapsedMs":1000,"latestActivity":"","canCancel":false,"canResume":false}]}
+            {"counts":{"queued":0,"running":0,"attention":0},"footer":null,"runs":[{"id":"run-1","harness":"codex","task":"Audit state","status":{"glyph":"\(glyph)","text":"\(status)"},"category":"\(category)","elapsedMs":1000,"latestActivity":"","canCancel":false,"canResume":false,"canContinue":false}]}
             """.utf8)
         }
 

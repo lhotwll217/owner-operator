@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import {
+  AGENT_RUN_CONTINUATION_TASK_ERROR,
   AgentRunStatus,
   GatewayEventKind,
   type AgentRun,
@@ -74,7 +75,7 @@ class MemoryAdapter implements ParentRunAdapter {
     return run(`${id}-resumed`, AgentRunStatus.Pending, { resumeOfRunId: id });
   }
 
-  async continueRun(id: string, task: string): Promise<AgentRun> {
+  async continue(id: string, task: string): Promise<AgentRun> {
     this.continued.push({ id, task });
     return run(`${id}-continued`, AgentRunStatus.Pending, { task, resumeOfRunId: id });
   }
@@ -197,14 +198,35 @@ await session.resume("lost");
 assert.deepEqual(adapter.resumed, ["lost"]);
 await assert.rejects(() => session.resume("running"), /cannot be resumed/);
 adapter.rows.push(run("completed-follow-up", AgentRunStatus.Completed, {
+  cwd: process.cwd(),
   childSessionId: "completed-child",
   acpxRecordId: "completed-acpx",
 }));
 adapter.invalidate();
 await session.settled();
-await session.continueRun("completed-follow-up", "explain the next implication");
+await assert.rejects(
+  () => session.continue("completed-follow-up", "  "),
+  (error: unknown) => error instanceof Error && error.message === AGENT_RUN_CONTINUATION_TASK_ERROR,
+);
+await session.continue("completed-follow-up", "explain the next implication");
 assert.deepEqual(adapter.continued, [{ id: "completed-follow-up", task: "explain the next implication" }]);
-await assert.rejects(() => session.continueRun("running", "invalid"), /cannot be continued/);
+await assert.rejects(() => session.continue("running", "invalid"), /cannot be continued/);
+adapter.rows.push(run("completed-missing-cwd", AgentRunStatus.Completed, {
+  cwd: "/missing/owner-operator-continuation-workspace",
+  childSessionId: "missing-cwd-child",
+  acpxRecordId: "missing-cwd-acpx",
+}));
+adapter.invalidate();
+await session.settled();
+assert.equal(
+  session.view.runs.find(({ id }) => id === "completed-missing-cwd")?.canContinue,
+  false,
+  "the parent TUI cannot offer follow-up for a deleted workspace",
+);
+await assert.rejects(
+  () => session.continue("completed-missing-cwd", "invalid workspace"),
+  /cannot be continued/,
+);
 
 session.stop();
 assert.equal(adapter.unsubscriptions, 1);
@@ -455,7 +477,7 @@ gatewayListener?.({ kind: GatewayEventKind.StateChanged });
 gatewayListener?.({ kind: GatewayEventKind.AgentRunChanged });
 await gatewayAdapter.cancel("a");
 await gatewayAdapter.resume("b");
-await gatewayAdapter.continueRun("c", "follow up");
+await gatewayAdapter.continue("c", "follow up");
 stopGateway();
 assert.equal(invalidations, 2, "connection and agent-run events both invalidate durable truth");
 assert.deepEqual(gatewayCalls, ["list:parent-gateway", "cancel:a", "resume:b", "continue:c:follow up", "stop"]);

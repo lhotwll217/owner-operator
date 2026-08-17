@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "node --import tsx src/resolve.test.ts && node --import tsx src/status.test.ts && node --import tsx src/session-state.test.ts && node --import tsx src/session-text.test.ts && node --import tsx src/blacklist.test.ts && node --import tsx src/session-sources.test.ts && node --import tsx src/session-hosts.test.ts && node --import tsx src/gui-hosts.test.ts && node --import tsx src/settings.test.ts && node --import tsx src/agent-state.test.ts",
+    "test:unit": "node --import tsx src/resolve.test.ts && node --import tsx src/status.test.ts && node --import tsx src/session-state.test.ts && node --import tsx src/session-text.test.ts && node --import tsx src/blacklist.test.ts && node --import tsx src/session-sources.test.ts && node --import tsx src/session-hosts.test.ts && node --import tsx src/gui-hosts.test.ts && node --import tsx src/settings.test.ts && node --import tsx src/agent-runs.test.ts && node --import tsx src/agent-state.test.ts",
     "test:integration": "node --import tsx src/onboarding.integration.test.ts && node --import tsx src/harness.integration.test.ts && node --import tsx src/delegated-baselines.integration.test.ts && node --import tsx src/permissions.integration.test.ts"
   }
 }

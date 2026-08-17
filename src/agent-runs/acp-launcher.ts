@@ -17,6 +17,7 @@ import {
   type AgentRunHarness,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
+  type AgentRunSessionIntent,
   type ChildIdentity,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
@@ -164,12 +165,13 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
     try {
-      if (request.resumeRecordId) {
-        await validateContinuationRecord(leased.sessionStore, request);
-      }
-      handle = await ensureAcpSession(leased.runtime, request);
+      const continuationRecord = request.sessionIntent.kind === "continue"
+        ? await validateContinuationRecord(leased.sessionStore, request, request.sessionIntent)
+        : undefined;
+      handle = await ensureAcpSession(leased.runtime, request, continuationRecord);
+      if (continuationRecord) validateContinuationHandle(handle, continuationRecord, request);
       const record = await leased.sessionStore.load(
-        handle.acpxRecordId ?? request.resumeRecordId ?? request.run.id,
+        handle.acpxRecordId ?? continuationRecord?.acpxRecordId ?? request.run.id,
       );
       if (record?.pid) {
         updateAgentRunProcessLease(leased.leaseId, {
@@ -179,9 +181,9 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
       }
       return await runAcpTurn(leased.runtime, request, handle);
     } catch (error) {
-      if (!request.resumeRecordId) throw error;
+      if (request.sessionIntent.kind !== "continue") throw error;
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`ACP continuation failed for ${request.resumeRecordId}: ${message}`, { cause: error });
+      throw new Error(`ACP continuation failed for ${request.sessionIntent.acpxRecordId}: ${message}`, { cause: error });
     } finally {
       if (handle) {
         try {
@@ -208,8 +210,9 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
 async function validateContinuationRecord(
   sessionStore: AcpSessionStore,
   request: AgentRunLaunchRequest,
-): Promise<void> {
-  const recordId = request.resumeRecordId!;
+  intent: Extract<AgentRunSessionIntent, { kind: "continue" }>,
+): Promise<NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>> {
+  const recordId = intent.acpxRecordId;
   const record = await sessionStore.load(recordId);
   if (!record) {
     throw new Error(`ACP continuation session record not found: ${recordId}; refusing to create a fresh session`);
@@ -217,19 +220,50 @@ async function validateContinuationRecord(
   if (record.acpxRecordId !== recordId) {
     throw new Error(`ACP continuation record identity mismatch: expected ${recordId}, found ${record.acpxRecordId}`);
   }
-  if (!request.resumeSessionId) {
-    throw new Error(`ACP continuation ${recordId} has no child session identity`);
+  if (!record.acpSessionId) {
+    throw new Error(`ACP continuation record ${recordId} has no ACP session identity`);
   }
-  if (record.agentSessionId !== request.resumeSessionId && record.acpSessionId !== request.resumeSessionId) {
+  const childSessionId = record.agentSessionId ?? record.acpSessionId;
+  if (childSessionId !== intent.childSessionId) {
     throw new Error(
-      `ACP continuation child identity mismatch for ${recordId}: expected ${request.resumeSessionId}`,
+      `ACP continuation child identity mismatch for ${recordId}: expected ${intent.childSessionId}, found ${childSessionId}`,
     );
   }
   if (resolve(record.cwd) !== resolve(request.run.cwd)) {
     throw new Error(`ACP continuation working-directory mismatch for ${recordId}`);
   }
-  if (record.acpx?.reset_on_next_ensure === true) {
+  if (record.closed === true || record.acpx?.reset_on_next_ensure === true) {
     throw new Error(`ACP continuation session ${recordId} was closed and cannot be continued`);
+  }
+  return record;
+}
+
+function validateContinuationHandle(
+  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
+  record: NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>,
+  request: AgentRunLaunchRequest,
+): void {
+  if (request.sessionIntent.kind !== "continue") {
+    throw new Error("ACP continuation handle validation requires continuation intent");
+  }
+  const recordId = request.sessionIntent.acpxRecordId;
+  if (handle.sessionKey !== recordId || handle.acpxRecordId !== recordId) {
+    throw new Error(
+      `ACP continuation record identity mismatch after session ensure: expected ${recordId}, `
+      + `found session key ${handle.sessionKey} and record ${handle.acpxRecordId ?? "none"}`,
+    );
+  }
+  if (handle.backendSessionId !== record.acpSessionId) {
+    throw new Error(
+      `ACP continuation ACP session identity mismatch after session ensure for ${recordId}: `
+      + `expected ${record.acpSessionId}, found ${handle.backendSessionId ?? "none"}; refusing a fresh session`,
+    );
+  }
+  if (handle.agentSessionId !== record.agentSessionId) {
+    throw new Error(
+      `ACP continuation native session identity mismatch after session ensure for ${recordId}: `
+      + `expected ${record.agentSessionId ?? "none"}, found ${handle.agentSessionId ?? "none"}; refusing a fresh session`,
+    );
   }
 }
 
@@ -343,15 +377,24 @@ async function observeHarnessIdentity(
 function ensureAcpSession(
   runtime: AcpRuntime,
   request: AgentRunLaunchRequest,
+  continuationRecord?: NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>,
 ): ReturnType<AcpRuntime["ensureSession"]> {
   const capability = AGENT_RUN_CAPABILITIES[request.run.harness];
   if (!capability) throw new Error(`unknown delegation harness: ${request.run.harness}`);
+  if (request.sessionIntent.kind === "continue" && !continuationRecord) {
+    throw new Error("ACP continuation requires a validated session record");
+  }
+  const sessionKey = request.sessionIntent.kind === "continue"
+    ? request.sessionIntent.acpxRecordId
+    : request.run.id;
+  const resumeSessionId = continuationRecord?.acpSessionId
+    ?? (request.sessionIntent.kind === "resume" ? request.sessionIntent.childSessionId : undefined);
   return runtime.ensureSession({
-    sessionKey: request.resumeRecordId ?? request.run.id,
+    sessionKey,
     agent: capability.acpAgent,
     mode: "persistent",
     cwd: request.run.cwd,
-    ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
+    ...(resumeSessionId !== undefined ? { resumeSessionId } : {}),
     ...(request.run.model ? { sessionOptions: { model: request.run.model } } : {}),
   });
 }

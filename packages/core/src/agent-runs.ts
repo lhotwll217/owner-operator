@@ -70,6 +70,16 @@ export const AGENT_RUN_RESUMABLE_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Failed,
 ];
 
+export const AGENT_RUN_CONTINUATION_TASK_ERROR = "continuation follow-up task is required";
+
+/** Preserve the owner's task bytes while applying one validation rule at every public boundary. */
+export function validateAgentRunContinuationTask(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(AGENT_RUN_CONTINUATION_TASK_ERROR);
+  }
+  return value;
+}
+
 /** What Owner Operator can do with a child of a given harness. The floor is never zero:
  * every harness gets a durable run row, an activity source, and inspect/cancel/result. */
 export interface AgentRunCapabilityRecord {
@@ -174,6 +184,72 @@ export interface AgentRun {
   timeoutSeconds: number;
 }
 
+export interface AgentRunContinuationContext {
+  successorRunId: string | null;
+  activeRunId: string | null;
+}
+
+/** Pure continuation eligibility shared by executor enforcement and presentation derivation.
+ * Runtime-only facts such as cwd availability remain outside core. */
+export function agentRunContinuationError(
+  run: AgentRun,
+  context: AgentRunContinuationContext,
+): string | null {
+  if (run.status !== AgentRunStatus.Completed) {
+    return `agent run ${run.id} can only be continued from completed status, not ${run.status}`;
+  }
+  if (!AGENT_RUN_CAPABILITIES[run.harness]?.resume) {
+    return `harness ${run.harness} does not support session continuation`;
+  }
+  if (!run.childSessionId) return `completed agent run ${run.id} has no child session identity to continue`;
+  if (!run.acpxRecordId) return `completed agent run ${run.id} has no acpx session-record identity to continue`;
+  if (context.successorRunId) {
+    return `agent run ${run.id} has already been continued by ${context.successorRunId}`;
+  }
+  if (context.activeRunId) {
+    return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
+  }
+  return null;
+}
+
+/** Explicit runtime intent derived from the durable immediate-source relationship. The source
+ * row is immutable; a missing source is invalid and must fail, never become a fresh or recovery
+ * launch. */
+export type AgentRunSessionIntent =
+  | { kind: "fresh" }
+  | { kind: "resume"; childSessionId: string }
+  | { kind: "continue"; childSessionId: string; acpxRecordId: string };
+
+export function agentRunSessionIntent(
+  run: AgentRun,
+  source: AgentRun | undefined,
+): AgentRunSessionIntent {
+  if (!run.resumeOfRunId) return { kind: "fresh" };
+  if (!source) {
+    throw new Error(`agent run ${run.id} references missing source ${run.resumeOfRunId}`);
+  }
+  if (source.id !== run.resumeOfRunId) {
+    throw new Error(`agent run ${run.id} source identity mismatch: expected ${run.resumeOfRunId}, found ${source.id}`);
+  }
+  if (!run.childSessionId || run.childSessionId !== source.childSessionId) {
+    throw new Error(`agent run ${run.id} child identity mismatch with source ${source.id}`);
+  }
+  if (source.status === AgentRunStatus.Completed) {
+    if (!run.acpxRecordId || run.acpxRecordId !== source.acpxRecordId) {
+      throw new Error(`agent run ${run.id} acpx record identity mismatch with completed source ${source.id}`);
+    }
+    return {
+      kind: "continue",
+      childSessionId: run.childSessionId,
+      acpxRecordId: run.acpxRecordId,
+    };
+  }
+  if (!AGENT_RUN_RESUMABLE_STATUSES.includes(source.status)) {
+    throw new Error(`agent run ${run.id} cannot resume source ${source.id} from status ${source.status}`);
+  }
+  return { kind: "resume", childSessionId: run.childSessionId };
+}
+
 /** The two ids a delegated child carries — captured together from the acpx handle and flowed
  * together everywhere: the harness's own session id (resume + monitor-join key) and the acpx
  * record id (reconciliation). Fields are omitted, not nulled, until known. */
@@ -193,11 +269,8 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
 /** Runtime request passed from the executor to the injected launcher seam. */
 export interface AgentRunLaunchRequest {
   run: AgentRun;
-  /** Child session to load, when this run recovers or continues an earlier one. */
-  resumeSessionId: string | null;
-  /** Exact acpx record reused only for a completed-session follow-up. Recovery resume keeps its
-   * existing behavior and therefore omits this field. */
-  resumeRecordId?: string;
+  /** Fresh launch, recovery resume, or exact completed-session continuation. */
+  sessionIntent: AgentRunSessionIntent;
   signal: AbortSignal;
   /** Explicit-activity channel: the launcher reports progress and identity as soon as known. */
   onActivity(update: AgentRunActivityUpdate): void;

@@ -27,6 +27,14 @@ function statusColor(theme: Theme, run: AgentRunView): string {
   return theme.fg("muted", value);
 }
 
+function runControlLabels(run: AgentRunView): string[] {
+  return [
+    run.canCancel ? "c cancel" : "",
+    run.canResume ? "r resume" : "",
+    run.canContinue ? "f follow-up" : "",
+  ].filter(Boolean);
+}
+
 /** Focused, surface-only component. All lifecycle meaning arrives in ParentAgentStateView. */
 export class AgentStatePicker {
   private selectedIndex = 0;
@@ -106,14 +114,7 @@ export class AgentStatePicker {
       if (selected.resumeOfRunId) {
         lines.push(line(`${this.theme.fg("dim", "Previous run:")} ${selected.resumeOfRunId}`));
       }
-      const controls = [
-        selected.canCancel ? "c cancel" : "",
-        selected.canResume ? "r resume" : "",
-        selected.canContinue ? "f follow-up" : "",
-        "esc back",
-      ]
-        .filter(Boolean)
-        .join(" · ");
+      const controls = [...runControlLabels(selected), "esc back"].join(" · ");
       lines.push("", line(this.theme.fg("dim", controls)));
       return lines;
     }
@@ -137,13 +138,9 @@ export class AgentStatePicker {
     const selected = this.selected!;
     const controls = [
       "↑/↓ select",
-      selected.canCancel ? "c cancel" : "",
-      selected.canResume ? "r resume" : "",
-      selected.canContinue ? "f follow-up" : "",
+      ...runControlLabels(selected),
       "esc close",
-    ]
-      .filter(Boolean)
-      .join(" · ");
+    ].join(" · ");
     lines.push("", line(this.theme.fg("dim", `enter inspect · ${controls}`)));
     return lines;
   }
@@ -228,8 +225,8 @@ export function createAgentStateExtension(options: AgentStateExtensionOptions = 
               "Continue completed delegated session",
               "New follow-up task",
             );
-            if (!task?.trim()) return;
-            await session.continueRun(selected.runId, task);
+            if (task === undefined) return;
+            await session.continue(selected.runId, task);
           }
         } catch (error) {
           ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");

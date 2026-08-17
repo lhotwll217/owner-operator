@@ -2,6 +2,7 @@ import {
   AGENT_RUN_CAPABILITIES,
   AGENT_RUN_RESUMABLE_STATUSES,
   AgentRunStatus,
+  agentRunContinuationError,
   isTerminalAgentRunStatus,
   type AgentRun,
 } from "./agent-runs";
@@ -52,6 +53,9 @@ export interface ParentAgentStateView {
 export interface DeriveParentAgentStateOptions {
   now?: string;
   recentLimit?: number;
+  /** Runtime adapter proof for environmental eligibility (currently: cwd exists and is a
+   * directory). Omission fails closed because browser-safe core cannot inspect a filesystem. */
+  isContinuationEnvironmentEligible?: (run: AgentRun) => boolean;
 }
 
 const ATTENTION_STATUSES = new Set<AgentRunStatus>([
@@ -130,8 +134,19 @@ function sortTime(run: AgentRun): number {
   return Date.parse(run.finishedAt ?? run.lastActivityAt ?? run.startedAt ?? run.createdAt) || 0;
 }
 
-function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<string>): AgentRunView {
+function deriveRunView(
+  run: AgentRun,
+  now: string,
+  resumedRunIds: ReadonlySet<string>,
+  successorRunIds: ReadonlyMap<string, string>,
+  activeRunIdsByChild: ReadonlyMap<string, string>,
+  isContinuationEnvironmentEligible: (run: AgentRun) => boolean,
+): AgentRunView {
   const category = categoryFor(run, resumedRunIds);
+  const successorRunId = successorRunIds.get(run.id) ?? null;
+  const activeRunId = run.childSessionId
+    ? activeRunIdsByChild.get(run.childSessionId) ?? null
+    : null;
   return {
     id: run.id,
     harness: run.harness,
@@ -149,11 +164,8 @@ function deriveRunView(run: AgentRun, now: string, resumedRunIds: ReadonlySet<st
       && run.childSessionId !== null
       && !resumedRunIds.has(run.id)
       && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
-    canContinue: run.status === AgentRunStatus.Completed
-      && run.childSessionId !== null
-      && run.acpxRecordId !== null
-      && !resumedRunIds.has(run.id)
-      && (AGENT_RUN_CAPABILITIES[run.harness]?.resume ?? false),
+    canContinue: agentRunContinuationError(run, { successorRunId, activeRunId }) === null
+      && isContinuationEnvironmentEligible(run),
   };
 }
 
@@ -163,8 +175,16 @@ export function deriveParentAgentState(
 ): ParentAgentStateView {
   const now = options.now ?? new Date().toISOString();
   const recentLimit = Math.max(0, options.recentLimit ?? AGENT_STATE_RECENT_LIMIT);
-  const resumedRunIds = new Set(
-    runs.flatMap(({ resumeOfRunId }) => resumeOfRunId === null ? [] : [resumeOfRunId]),
+  const isContinuationEnvironmentEligible = options.isContinuationEnvironmentEligible ?? (() => false);
+  const successorRunIds = new Map(
+    runs.flatMap((run) => run.resumeOfRunId === null ? [] : [[run.resumeOfRunId, run.id] as const]),
+  );
+  const resumedRunIds = new Set(successorRunIds.keys());
+  const activeRunIdsByChild = new Map(
+    runs.flatMap((run) => run.childSessionId !== null
+      && (run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running)
+      ? [[run.childSessionId, run.id] as const]
+      : []),
   );
   const ordered = [...runs].sort((left, right) => {
     const categoryDifference = ["attention", "active", "recent"].indexOf(categoryFor(left, resumedRunIds))
@@ -183,7 +203,14 @@ export function deriveParentAgentState(
   return {
     counts: { queued, running, attention },
     footer: footerParts.length ? `${footerParts.join(" · ")}    /agent-state` : null,
-    runs: visible.map((run) => deriveRunView(run, now, resumedRunIds)),
+    runs: visible.map((run) => deriveRunView(
+      run,
+      now,
+      resumedRunIds,
+      successorRunIds,
+      activeRunIdsByChild,
+      isContinuationEnvironmentEligible,
+    )),
   };
 }
 

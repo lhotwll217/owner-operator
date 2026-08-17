@@ -51,7 +51,11 @@ const fleet = [
   }),
 ];
 
-const view = deriveParentAgentState(fleet, { now, recentLimit: AGENT_STATE_RECENT_LIMIT });
+const view = deriveParentAgentState(fleet, {
+  now,
+  recentLimit: AGENT_STATE_RECENT_LIMIT,
+  isContinuationEnvironmentEligible: (run) => run.id === "completed-new",
+});
 assert.deepEqual(view.counts, { queued: 1, running: 1, attention: 2 });
 assert.equal(view.footer, "◦ 1 queued · ● 1 running · ! 2 attention    /agent-state");
 assert.deepEqual(
@@ -143,7 +147,7 @@ const continuedCompleted = deriveParentAgentState([
     acpxRecordId: "continued-acpx",
     resumeOfRunId: "completed-predecessor",
   }),
-], { now });
+], { now, isContinuationEnvironmentEligible: (run) => run.id === "continued-turn" });
 assert.equal(
   continuedCompleted.runs.find(({ id }) => id === "completed-predecessor")?.canContinue,
   false,
@@ -155,11 +159,23 @@ assert.equal(latestContinuation.resumeOfRunId, "completed-predecessor", "agent s
 
 const incompleteContinuationIdentity = deriveParentAgentState([
   run("completed-without-acpx", AgentRunStatus.Completed, { childSessionId: "child-only" }),
-], { now });
+], { now, isContinuationEnvironmentEligible: (run) => run.id === "completed-without-acpx" });
 assert.equal(
   incompleteContinuationIdentity.runs[0]?.canContinue,
   false,
   "continuation control requires both child and acpx identities",
+);
+
+const environmentNotProven = deriveParentAgentState([
+  run("completed-without-environment", AgentRunStatus.Completed, {
+    childSessionId: "environment-child",
+    acpxRecordId: "environment-acpx",
+  }),
+], { now });
+assert.equal(
+  environmentNotProven.runs[0]?.canContinue,
+  false,
+  "the browser-safe projection fails closed until an adapter proves environmental eligibility",
 );
 
 const resumedOnlyFailure = deriveParentAgentState([

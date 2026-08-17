@@ -49,7 +49,7 @@ class MemoryParentAdapter implements ParentRunAdapter {
   invalidate(): void { this.listener?.(); }
   async cancel(): Promise<AgentRun> { throw new Error("not used"); }
   async resume(): Promise<AgentRun> { throw new Error("not used"); }
-  async continueRun(): Promise<AgentRun> { throw new Error("not used"); }
+  async continue(): Promise<AgentRun> { throw new Error("not used"); }
 }
 
 if (process.env.OO_COMPLETION_PTY_CHILD === "1") {
