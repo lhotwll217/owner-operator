@@ -168,3 +168,70 @@ try {
 }
 
 process.stdout.write("ok — overloaded relationships migrate losslessly to retry/resume semantics\n");
+
+const failedRebuildDir = mkdtempSync(join(tmpdir(), "oo-agent-run-failed-rebuild-"));
+try {
+  const dbPath = join(failedRebuildDir, "state.db");
+  const prior = new DatabaseSync(dbPath);
+  prior.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE agent_runs (
+      id TEXT PRIMARY KEY, harness TEXT NOT NULL, task TEXT NOT NULL, cwd TEXT NOT NULL,
+      parent_thread_id TEXT, model TEXT,
+      effort TEXT CHECK (effort IS NULL OR effort IN ('minimal','low','medium','high','xhigh')),
+      effort_applied INTEGER NOT NULL DEFAULT 0 CHECK (effort_applied IN (0,1)),
+      harness_model TEXT,
+      harness_effort TEXT CHECK (harness_effort IS NULL OR harness_effort IN ('minimal','low','medium','high','xhigh','max','ultra')),
+      harness_identity_observed INTEGER NOT NULL DEFAULT 0 CHECK (harness_identity_observed IN (0,1)),
+      depth INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT,
+      finished_at TEXT, activity TEXT, last_activity_at TEXT, child_session_id TEXT,
+      acpx_record_id TEXT, result_tail TEXT, error TEXT,
+      retry_of_run_id TEXT REFERENCES agent_runs(id),
+      resume_of_run_id TEXT REFERENCES agent_runs(id), timeout_seconds INTEGER NOT NULL,
+      CHECK (retry_of_run_id IS NULL OR resume_of_run_id IS NULL)
+    );
+    CREATE INDEX idx_agent_runs_status_created ON agent_runs(status, created_at);
+    CREATE INDEX idx_agent_runs_child_session ON agent_runs(child_session_id) WHERE child_session_id IS NOT NULL;
+    CREATE INDEX idx_agent_runs_parent_created ON agent_runs(parent_thread_id, created_at DESC) WHERE parent_thread_id IS NOT NULL;
+    INSERT INTO agent_runs (
+      id,harness,task,cwd,effort,depth,status,created_at,retry_of_run_id,timeout_seconds
+    ) VALUES (
+      'broken-retry','codex','must roll back','/tmp/repo','xhigh',1,'failed',
+      '2026-07-01T00:00:00.000Z','missing-run',3600
+    );
+  `);
+  prior.close();
+
+  assert.throws(
+    () => new ThreadDb(dbPath),
+    /foreign key/i,
+    "every agent_runs rebuild validates copied relationships before commit",
+  );
+
+  const inspect = new DatabaseSync(dbPath);
+  const tableSql = (inspect.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_runs'",
+  ).get() as { sql: string }).sql;
+  assert.ok(
+    tableSql.includes("effort TEXT CHECK (effort IS NULL OR effort IN ('minimal','low','medium','high','xhigh'))"),
+    "failed rebuild rolls back the original effort constraint",
+  );
+  assert.equal(
+    (inspect.prepare("SELECT task FROM agent_runs WHERE id='broken-retry'").get() as { task: string }).task,
+    "must roll back",
+    "failed rebuild preserves original data",
+  );
+  const indexNames = (inspect.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_agent_runs_%' ORDER BY name",
+  ).all() as Array<{ name: string }>).map(({ name }) => name);
+  assert.deepEqual(indexNames, [
+    "idx_agent_runs_child_session",
+    "idx_agent_runs_parent_created",
+    "idx_agent_runs_status_created",
+  ], "failed rebuild restores the original indexes");
+  inspect.close();
+} finally {
+  rmSync(failedRebuildDir, { recursive: true, force: true });
+}
+
+process.stdout.write("ok — failed agent_runs rebuild rolls back schema, data, and indexes\n");

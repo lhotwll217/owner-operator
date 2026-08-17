@@ -61,10 +61,12 @@ owns transcript identity and discovery.
 `pending → running → { completed | failed | cancelled | interrupted | lost }`.
 
 - **Terminal states are monotonic.** Retry and resume each create a new row; reopening a terminal
-  row would erase one paid turn's history. `retry_of_run_id` records the failed, interrupted, or
-  lost run being retried. `resume_of_run_id` records the completed run being resumed. Exactly one
-  may be set. The [domain contract](../packages/core/src/agent-runs.ts) derives the runtime turn
-  intent directly from those fields and fails closed if either relationship is inconsistent.
+  row would erase one paid turn's history. Retry links the new row to the unsuccessful run whose
+  task it reruns; resume links the new row to the completed run after which it sends a new task.
+  The exact ledger-column contract lives in
+  [schema docs](../src/state/schema-docs.ts). The
+  [domain contract](../packages/core/src/agent-runs.ts) derives runtime turn intent from those
+  relationships and fails closed when either is inconsistent.
 - **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
   `interrupted`, or `lost`; resume requires a new task after `completed`. The
   [tool schema](../src/agent/tools/manage-agent-run.ts) owns their inputs, while the
@@ -122,12 +124,13 @@ and terminal styling are adapters over that contract.
   poll after delegation; `/agent-state` owns liveness. Status reads remain only for explicit
   owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
   `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
-- **Resume re-enters the ordinary lifecycle.** The
+- **Retry and resume re-enter the ordinary lifecycle.** The
   [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
-  the [environmental projection](../src/agent-runs/agent-state-projection.ts) prevents clients from
-  offering a control for an unavailable workspace; and the
-  [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact record/session reuse before sending
-  the turn. Resume fails closed rather than substituting a fresh context.
+  [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available record/session identity
+  before sending the turn. For resume, the
+  [environmental projection](../src/agent-runs/agent-state-projection.ts) also prevents clients from
+  offering a control for an unavailable workspace. Both controls fail closed rather than
+  substituting a fresh context.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.

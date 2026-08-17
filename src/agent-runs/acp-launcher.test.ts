@@ -254,7 +254,7 @@ await createAcpLauncher({
 assert.equal(resumeEnsureInput?.sessionKey, "completed-acpx-record", "resume reuses the exact acpx record id");
 assert.equal(resumeEnsureInput?.resumeSessionId, "backend-child", "resume loads the record's exact ACP session id");
 
-for (const identityCase of [
+const identityCases = [
   {
     harness: AgentRunHarness.ClaudeCode,
     recordId: "claude-record",
@@ -276,7 +276,8 @@ for (const identityCase of [
     agentSessionId: "cursor-native-session",
     childSessionId: "cursor-native-session",
   },
-] as const) {
+] as const;
+for (const identityCase of identityCases) {
   const record = {
     ...resumeRecord,
     acpxRecordId: identityCase.recordId,
@@ -328,6 +329,160 @@ for (const identityCase of [
   );
 }
 
+for (const identityCase of identityCases) {
+  const record = {
+    ...resumeRecord,
+    acpxRecordId: identityCase.recordId,
+    acpSessionId: identityCase.acpSessionId,
+    ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : { agentSessionId: undefined }),
+  };
+  const failedResumeRun = {
+    ...resumeRun,
+    id: `${identityCase.harness}-failed-resume`,
+    harness: identityCase.harness,
+    status: AgentRunStatus.Failed,
+    childSessionId: identityCase.childSessionId,
+    acpxRecordId: identityCase.recordId,
+    error: "resume load failed after its row was created",
+  };
+  const retryRun = {
+    ...failedResumeRun,
+    id: `${identityCase.harness}-retry-failed-resume`,
+    status: AgentRunStatus.Running,
+    error: null,
+    retryOfRunId: failedResumeRun.id,
+    resumeOfRunId: null,
+  };
+  let retryEnsureInput: Record<string, unknown> | undefined;
+  let retryTurnCalls = 0;
+  const retryRuntime = {
+    ...resumeRuntime,
+    ensureSession: async (input: Record<string, unknown>) => {
+      retryEnsureInput = input;
+      return {
+        sessionKey: retryRun.id,
+        acpxRecordId: retryRun.id,
+        backendSessionId: identityCase.acpSessionId,
+        ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : {}),
+      };
+    },
+    startTurn: () => {
+      retryTurnCalls += 1;
+      return {
+        events: (async function* () {})(),
+        result: Promise.resolve({ status: "completed" }),
+      };
+    },
+  } as unknown as AcpRuntime;
+  await createAcpLauncher({
+    leasedRuntimeFactory: () => ({
+      runtime: retryRuntime,
+      sessionStore: { load: async (id: string) => id === identityCase.recordId ? record : undefined } as never,
+      leaseId: `${identityCase.harness}-retry-identity-lease`,
+      release: () => undefined,
+      processTreePids: async () => [],
+      terminate: async () => true,
+    }),
+  })({
+    run: retryRun,
+    turnIntent: {
+      kind: "retry",
+      childSessionId: identityCase.childSessionId,
+      acpxRecordId: identityCase.recordId,
+    },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  });
+  assert.equal(retryEnsureInput?.sessionKey, retryRun.id, "retry creates its own acpx record");
+  assert.equal(
+    retryEnsureInput?.resumeSessionId,
+    identityCase.acpSessionId,
+    `${identityCase.harness} retry loads the ACP identity proven by the failed Resume's record`,
+  );
+  assert.equal(retryTurnCalls, 1);
+
+  const freshRetryRuntime = {
+    ...retryRuntime,
+    ensureSession: async () => ({
+      sessionKey: retryRun.id,
+      acpxRecordId: retryRun.id,
+      backendSessionId: "fresh-backend-session",
+      ...(identityCase.agentSessionId ? { agentSessionId: "fresh-native-session" } : {}),
+    }),
+    startTurn: () => {
+      retryTurnCalls += 1;
+      return {
+        events: (async function* () {})(),
+        result: Promise.resolve({ status: "completed" }),
+      };
+    },
+  } as unknown as AcpRuntime;
+  await assert.rejects(
+    () => createAcpLauncher({
+      leasedRuntimeFactory: () => ({
+        runtime: freshRetryRuntime,
+        sessionStore: { load: async (id: string) => id === identityCase.recordId ? record : undefined } as never,
+        leaseId: `${identityCase.harness}-retry-fallback-lease`,
+        release: () => undefined,
+        processTreePids: async () => [],
+        terminate: async () => true,
+      }),
+    })({
+      run: retryRun,
+      turnIntent: {
+        kind: "retry",
+        childSessionId: identityCase.childSessionId,
+        acpxRecordId: identityCase.recordId,
+      },
+      signal: new AbortController().signal,
+      onActivity: () => undefined,
+    }),
+    /ACP retry failed.*(?:identity mismatch|fresh session)/i,
+    `${identityCase.harness} Retry refuses a fresh fallback after a failed Resume`,
+  );
+  assert.equal(retryTurnCalls, 1, "a rejected Retry fallback never receives a turn");
+}
+
+let legacyRetryTurnCalls = 0;
+await createAcpLauncher({
+  leasedRuntimeFactory: () => ({
+    runtime: {
+      ...resumeRuntime,
+      ensureSession: async () => ({
+        sessionKey: "legacy-child-only-retry",
+        acpxRecordId: "legacy-child-only-retry",
+        backendSessionId: "legacy-child-identity",
+      }),
+      startTurn: () => {
+        legacyRetryTurnCalls += 1;
+        return {
+          events: (async function* () {})(),
+          result: Promise.resolve({ status: "completed" }),
+        };
+      },
+    } as unknown as AcpRuntime,
+    sessionStore: { load: async () => undefined } as never,
+    leaseId: "legacy-child-only-retry-lease",
+    release: () => undefined,
+    processTreePids: async () => [],
+    terminate: async () => true,
+  }),
+})({
+  run: {
+    ...resumeRun,
+    id: "legacy-child-only-retry",
+    status: AgentRunStatus.Running,
+    childSessionId: "legacy-child-identity",
+    acpxRecordId: null,
+    retryOfRunId: "legacy-failure",
+    resumeOfRunId: null,
+  },
+  turnIntent: { kind: "retry", childSessionId: "legacy-child-identity" },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(legacyRetryTurnCalls, 1, "legacy retry remains available from its sole durable child identity");
+
 let fallbackTurnCalls = 0;
 const freshFallbackRuntime = {
   ...resumeRuntime,
@@ -365,10 +520,40 @@ await assert.rejects(
     signal: new AbortController().signal,
     onActivity: () => undefined,
   }),
-  /identity mismatch|fresh session/i,
+  /ACP resume failed.*(?:identity mismatch|fresh session)/i,
   "a valid pre-check cannot authorize a fresh handle returned by ensureSession",
 );
 assert.equal(fallbackTurnCalls, 0, "a fresh fallback never receives the follow-up turn");
+
+await assert.rejects(
+  () => createAcpLauncher({
+    leasedRuntimeFactory: () => ({
+      runtime: {
+        ...resumeRuntime,
+        startTurn: () => { throw new Error("ordinary failure after validated resume identity"); },
+      } as unknown as AcpRuntime,
+      sessionStore: { load: async () => resumeRecord } as never,
+      leaseId: "resume-turn-failure",
+      release: () => undefined,
+      processTreePids: async () => [],
+      terminate: async () => true,
+    }),
+  })({
+    run: resumeRun,
+    turnIntent: {
+      kind: "resume",
+      childSessionId: "resumed-child",
+      acpxRecordId: "completed-acpx-record",
+    },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  }),
+  (error: unknown) => error instanceof Error
+    && error.message.includes("ACP turn failed for resumed-run")
+    && error.message.includes("ordinary failure after validated resume identity")
+    && !error.message.includes("ACP resume failed"),
+  "a post-identity turn failure is not misclassified as a Resume load failure",
+);
 
 for (const [label, record, expected] of [
   ["missing", undefined, /session record not found.*refusing to create a fresh session/i],

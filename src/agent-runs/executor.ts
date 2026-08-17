@@ -2,10 +2,10 @@ import { isAbsolute } from "node:path";
 import {
   AGENT_RUN_CAPABILITIES,
   AGENT_RUN_MAX_DEPTH,
-  AGENT_RUN_RETRYABLE_STATUSES,
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
+  agentRunRetryError,
   agentRunResumeError,
   agentRunTurnIntent,
   isAgentRunEffort,
@@ -204,21 +204,18 @@ export class AgentRunExecutor {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
-    if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
-      throw new Error(`agent run is not retryable from status ${run.status}`);
-    }
-    if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
-      throw new Error(`harness ${run.harness} does not support loading an existing session`);
-    }
-    if (!run.childSessionId) {
-      throw new Error("agent run has no child session identity to retry");
-    }
-    // Guard concurrent retries of one child. retry()/createAgentRun() are synchronous over
-    // DatabaseSync, so the single-process daemon makes this check-then-create atomic.
-    const inflight = this.state.nonterminalAgentRunByChildSession(run.childSessionId);
-    if (inflight) return inflight;
     const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
-    if (existingRetry) throw new Error(`agent run ${run.id} has already been retried by ${existingRetry.id}`);
+    if (existingRetry && !isTerminalAgentRunStatus(existingRetry.status)) return existingRetry;
+    const inflight = run.childSessionId
+      ? this.state.nonterminalAgentRunByChildSession(run.childSessionId)
+      : undefined;
+    const domainError = agentRunRetryError(run, {
+      existingRetryRunId: existingRetry?.id ?? null,
+      activeRunId: inflight?.id ?? null,
+    });
+    if (domainError) throw new Error(domainError);
+    // retry()/createAgentRun() are synchronous over DatabaseSync, so this pure validation and
+    // row creation are atomic in the single-process daemon.
     const retried = this.state.createAgentRun({
       harness: run.harness,
       task: run.task,

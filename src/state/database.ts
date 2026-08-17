@@ -346,21 +346,9 @@ export class ThreadDb {
       );
     }
 
-    const createTable = SCHEMA.match(/CREATE TABLE IF NOT EXISTS agent_runs \([\s\S]*?\n\);/)?.[0];
-    const indexes = [...SCHEMA.matchAll(/CREATE INDEX IF NOT EXISTS idx_agent_runs_[\s\S]*?;/g)]
-      .map(([sql]) => sql);
-    if (!createTable || indexes.length !== 3) throw new Error("agent_runs schema definition is incomplete");
-    this.db.exec("PRAGMA foreign_keys = OFF");
-    try {
-      this.db.exec("BEGIN IMMEDIATE");
-      for (const index of indexes) {
-        const name = /idx_agent_runs_[a-z_]+/.exec(index)?.[0];
-        if (name) this.db.exec(`DROP INDEX IF EXISTS ${name}`);
-      }
-      this.db.exec("ALTER TABLE agent_runs RENAME TO agent_runs_overloaded_relationship");
-      this.db.exec(createTable.replace("agent_runs (", "agent_runs_current ("));
+    this.rebuildAgentRunsTable("agent_runs_overloaded_relationship", (priorTable, currentTable) => {
       this.db.exec(`
-        INSERT INTO agent_runs_current (
+        INSERT INTO ${currentTable} (
           id, harness, task, cwd, parent_thread_id, model, effort, effort_applied,
           harness_model, harness_effort, harness_identity_observed, depth, status,
           created_at, started_at, finished_at, activity, last_activity_at, child_session_id,
@@ -374,49 +362,54 @@ export class ThreadDb {
           CASE WHEN referenced.status IN ('failed','interrupted','lost') THEN run.resume_of_run_id END,
           CASE WHEN referenced.status = 'completed' THEN run.resume_of_run_id END,
           run.timeout_seconds
-        FROM agent_runs_overloaded_relationship AS run
-        LEFT JOIN agent_runs_overloaded_relationship AS referenced ON referenced.id = run.resume_of_run_id
+        FROM ${priorTable} AS run
+        LEFT JOIN ${priorTable} AS referenced ON referenced.id = run.resume_of_run_id
       `);
-      this.db.exec("DROP TABLE agent_runs_overloaded_relationship");
-      this.db.exec("ALTER TABLE agent_runs_current RENAME TO agent_runs");
-      for (const index of indexes) this.db.exec(index);
-      const violations = this.db.prepare("PRAGMA foreign_key_check(agent_runs)").all();
-      if (violations.length) throw new Error("agent_runs relationship migration violated a foreign key");
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    } finally {
-      this.db.exec("PRAGMA foreign_keys = ON");
-    }
+    });
   }
 
   /** SQLite cannot alter a CHECK constraint. Rebuild only this table, copying every column and
    * recreating its documented indexes; rows and self-referential retry/resume relationships are preserved. */
   private rebuildAgentRunsForCurrentEfforts(): void {
+    const columns = (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
+      .map(({ name }) => name);
+    this.rebuildAgentRunsTable("agent_runs_prior_effort_constraint", (priorTable, currentTable) => {
+      const names = columns.map((name) => `"${name}"`).join(", ");
+      this.db.exec(`INSERT INTO ${currentTable} (${names}) SELECT ${names} FROM ${priorTable}`);
+    });
+  }
+
+  /** Both agent_runs migrations need SQLite's same fail-closed table-rebuild transaction. */
+  private rebuildAgentRunsTable(
+    priorTable: "agent_runs_overloaded_relationship" | "agent_runs_prior_effort_constraint",
+    copyRows: (priorTable: string, currentTable: string) => void,
+  ): void {
+    const currentTable = "agent_runs_current";
     const createTable = SCHEMA.match(/CREATE TABLE IF NOT EXISTS agent_runs \([\s\S]*?\n\);/)?.[0];
     const indexes = [...SCHEMA.matchAll(/CREATE INDEX IF NOT EXISTS idx_agent_runs_[\s\S]*?;/g)]
       .map(([sql]) => sql);
     if (!createTable || indexes.length !== 3) throw new Error("agent_runs schema definition is incomplete");
-    const columns = (this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>)
-      .map(({ name }) => name);
     this.db.exec("PRAGMA foreign_keys = OFF");
+    let transactionStarted = false;
     try {
       this.db.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
       for (const index of indexes) {
         const name = /idx_agent_runs_[a-z_]+/.exec(index)?.[0];
         if (name) this.db.exec(`DROP INDEX IF EXISTS ${name}`);
       }
-      this.db.exec("ALTER TABLE agent_runs RENAME TO agent_runs_prior_effort_constraint");
-      this.db.exec(createTable.replace("agent_runs (", "agent_runs_current ("));
-      const names = columns.map((name) => `"${name}"`).join(", ");
-      this.db.exec(`INSERT INTO agent_runs_current (${names}) SELECT ${names} FROM agent_runs_prior_effort_constraint`);
-      this.db.exec("DROP TABLE agent_runs_prior_effort_constraint");
-      this.db.exec("ALTER TABLE agent_runs_current RENAME TO agent_runs");
+      this.db.exec(`ALTER TABLE agent_runs RENAME TO ${priorTable}`);
+      this.db.exec(createTable.replace("agent_runs (", `${currentTable} (`));
+      copyRows(priorTable, currentTable);
+      this.db.exec(`DROP TABLE ${priorTable}`);
+      this.db.exec(`ALTER TABLE ${currentTable} RENAME TO agent_runs`);
       for (const index of indexes) this.db.exec(index);
+      const violations = this.db.prepare("PRAGMA foreign_key_check(agent_runs)").all();
+      if (violations.length) throw new Error("agent_runs rebuild violated a foreign key");
       this.db.exec("COMMIT");
+      transactionStarted = false;
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      if (transactionStarted) this.db.exec("ROLLBACK");
       throw error;
     } finally {
       this.db.exec("PRAGMA foreign_keys = ON");

@@ -135,6 +135,7 @@ try {
   assert.deepEqual(parked[0].request.turnIntent, {
     kind: "retry",
     childSessionId: afterRestart.childSessionId,
+    acpxRecordId: afterRestart.acpxRecordId,
   }, "the launcher is asked to retry it");
 
   // --- receive the durable result ---------------------------------------------------------

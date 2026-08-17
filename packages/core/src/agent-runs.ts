@@ -191,6 +191,32 @@ export interface AgentRunResumeContext {
   activeRunId: string | null;
 }
 
+export interface AgentRunRetryContext {
+  existingRetryRunId: string | null;
+  activeRunId: string | null;
+}
+
+/** Pure retry eligibility shared by executor enforcement and presentation derivation. */
+export function agentRunRetryError(
+  run: AgentRun,
+  context: AgentRunRetryContext,
+): string | null {
+  if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
+    return `agent run ${run.id} is not retryable from status ${run.status}`;
+  }
+  if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
+    return `harness ${run.harness} does not support loading an existing session`;
+  }
+  if (!run.childSessionId) return `agent run ${run.id} has no child session identity to retry`;
+  if (context.existingRetryRunId) {
+    return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
+  }
+  if (context.activeRunId) {
+    return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
+  }
+  return null;
+}
+
 /** Pure resume eligibility shared by executor enforcement and presentation derivation.
  * Runtime-only facts such as cwd availability remain outside core. */
 export function agentRunResumeError(
@@ -218,7 +244,7 @@ export function agentRunResumeError(
  * immutable; a missing or inconsistent relationship must fail rather than launch fresh. */
 export type AgentRunTurnIntent =
   | { kind: "fresh" }
-  | { kind: "retry"; childSessionId: string }
+  | { kind: "retry"; childSessionId: string; acpxRecordId?: string }
   | { kind: "resume"; childSessionId: string; acpxRecordId: string };
 
 export function agentRunTurnIntent(
@@ -240,10 +266,17 @@ export function agentRunTurnIntent(
     if (!run.childSessionId || run.childSessionId !== retriedRun.childSessionId) {
       throw new Error(`agent run ${run.id} child identity mismatch with retried run ${retriedRun.id}`);
     }
+    if (run.acpxRecordId !== retriedRun.acpxRecordId) {
+      throw new Error(`agent run ${run.id} acpx record identity mismatch with retried run ${retriedRun.id}`);
+    }
     if (!AGENT_RUN_RETRYABLE_STATUSES.includes(retriedRun.status)) {
       throw new Error(`agent run ${run.id} cannot retry run ${retriedRun.id} from status ${retriedRun.status}`);
     }
-    return { kind: "retry", childSessionId: run.childSessionId };
+    return {
+      kind: "retry",
+      childSessionId: run.childSessionId,
+      ...(run.acpxRecordId ? { acpxRecordId: run.acpxRecordId } : {}),
+    };
   }
   if (!resumedRun) {
     throw new Error(`agent run ${run.id} references missing resume run ${run.resumeOfRunId}`);

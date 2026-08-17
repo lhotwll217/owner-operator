@@ -165,25 +165,36 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
 
     let handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>> | undefined;
     try {
-      const resumeRecord = request.turnIntent.kind === "resume"
-        ? await validateResumeRecord(leased.sessionStore, request, request.turnIntent)
-        : undefined;
-      handle = await ensureAcpSession(leased.runtime, request, resumeRecord);
-      if (resumeRecord) validateResumeHandle(handle, resumeRecord, request);
-      const record = await leased.sessionStore.load(
-        handle.acpxRecordId ?? resumeRecord?.acpxRecordId ?? request.run.id,
-      );
-      if (record?.pid) {
-        updateAgentRunProcessLease(leased.leaseId, {
-          rootPid: record.pid,
-          rootCommand: record.agentCommand,
-        });
+      try {
+        const existingRecord = request.turnIntent.kind === "fresh"
+          ? undefined
+          : await validateTurnRecord(leased.sessionStore, request, request.turnIntent);
+        handle = await ensureAcpSession(leased.runtime, request, existingRecord);
+        if (request.turnIntent.kind !== "fresh") {
+          validateLoadedHandle(handle, existingRecord, request);
+        }
+        const record = await leased.sessionStore.load(
+          handle.acpxRecordId ?? existingRecord?.acpxRecordId ?? request.run.id,
+        );
+        if (record?.pid) {
+          updateAgentRunProcessLease(leased.leaseId, {
+            rootPid: record.pid,
+            rootCommand: record.agentCommand,
+          });
+        }
+      } catch (error) {
+        if (request.turnIntent.kind === "fresh") throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const identity = request.turnIntent.acpxRecordId ?? request.turnIntent.childSessionId;
+        throw new Error(`ACP ${request.turnIntent.kind} failed for ${identity}: ${message}`, { cause: error });
       }
-      return await runAcpTurn(leased.runtime, request, handle);
-    } catch (error) {
-      if (request.turnIntent.kind !== "resume") throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`ACP resume failed for ${request.turnIntent.acpxRecordId}: ${message}`, { cause: error });
+      try {
+        return await runAcpTurn(leased.runtime, request, handle);
+      } catch (error) {
+        if (request.turnIntent.kind === "fresh") throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`ACP turn failed for ${request.run.id}: ${message}`, { cause: error });
+      }
     } finally {
       if (handle) {
         try {
@@ -207,61 +218,79 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
   return launcher;
 }
 
-async function validateResumeRecord(
+type ExistingTurnIntent = Extract<AgentRunTurnIntent, { kind: "retry" | "resume" }>;
+type AcpRecord = NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>;
+
+async function validateTurnRecord(
   sessionStore: AcpSessionStore,
   request: AgentRunLaunchRequest,
-  intent: Extract<AgentRunTurnIntent, { kind: "resume" }>,
-): Promise<NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>> {
+  intent: ExistingTurnIntent,
+): Promise<AcpRecord | undefined> {
   const recordId = intent.acpxRecordId;
+  if (!recordId) return undefined;
+  const action = intent.kind;
   const record = await sessionStore.load(recordId);
   if (!record) {
-    throw new Error(`ACP resume session record not found: ${recordId}; refusing to create a fresh session`);
+    throw new Error(`ACP ${action} session record not found: ${recordId}; refusing to create a fresh session`);
   }
   if (record.acpxRecordId !== recordId) {
-    throw new Error(`ACP resume record identity mismatch: expected ${recordId}, found ${record.acpxRecordId}`);
+    throw new Error(`ACP ${action} record identity mismatch: expected ${recordId}, found ${record.acpxRecordId}`);
   }
   if (!record.acpSessionId) {
-    throw new Error(`ACP resume record ${recordId} has no ACP session identity`);
+    throw new Error(`ACP ${action} record ${recordId} has no ACP session identity`);
   }
   const childSessionId = record.agentSessionId ?? record.acpSessionId;
   if (childSessionId !== intent.childSessionId) {
     throw new Error(
-      `ACP resume child identity mismatch for ${recordId}: expected ${intent.childSessionId}, found ${childSessionId}`,
+      `ACP ${action} child identity mismatch for ${recordId}: expected ${intent.childSessionId}, found ${childSessionId}`,
     );
   }
   if (resolve(record.cwd) !== resolve(request.run.cwd)) {
-    throw new Error(`ACP resume working-directory mismatch for ${recordId}`);
+    throw new Error(`ACP ${action} working-directory mismatch for ${recordId}`);
   }
   if (record.closed === true || record.acpx?.reset_on_next_ensure === true) {
-    throw new Error(`ACP resume session ${recordId} was closed and cannot be resumed`);
+    throw new Error(`ACP ${action} session ${recordId} was closed and cannot be loaded`);
   }
   return record;
 }
 
-function validateResumeHandle(
+function validateLoadedHandle(
   handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
-  record: NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>,
+  record: AcpRecord | undefined,
   request: AgentRunLaunchRequest,
 ): void {
-  if (request.turnIntent.kind !== "resume") {
-    throw new Error("ACP resume handle validation requires resume intent");
+  if (request.turnIntent.kind === "fresh") {
+    throw new Error("ACP loaded-session handle validation requires Retry or Resume intent");
   }
-  const recordId = request.turnIntent.acpxRecordId;
-  if (handle.sessionKey !== recordId || handle.acpxRecordId !== recordId) {
+  const action = request.turnIntent.kind;
+  const expectedRecordId = action === "resume"
+    ? request.turnIntent.acpxRecordId
+    : request.run.id;
+  if (handle.sessionKey !== expectedRecordId || handle.acpxRecordId !== expectedRecordId) {
     throw new Error(
-      `ACP resume record identity mismatch after session ensure: expected ${recordId}, `
+      `ACP ${action} record identity mismatch after session ensure: expected ${expectedRecordId}, `
       + `found session key ${handle.sessionKey} and record ${handle.acpxRecordId ?? "none"}`,
     );
   }
+  if (!record) {
+    const childSessionId = handle.agentSessionId ?? handle.backendSessionId;
+    if (childSessionId !== request.turnIntent.childSessionId) {
+      throw new Error(
+        `ACP retry child identity mismatch after session ensure: expected ${request.turnIntent.childSessionId}, `
+        + `found ${childSessionId ?? "none"}; refusing a fresh session`,
+      );
+    }
+    return;
+  }
   if (handle.backendSessionId !== record.acpSessionId) {
     throw new Error(
-      `ACP resume ACP session identity mismatch after session ensure for ${recordId}: `
+      `ACP ${action} ACP session identity mismatch after session ensure for ${record.acpxRecordId}: `
       + `expected ${record.acpSessionId}, found ${handle.backendSessionId ?? "none"}; refusing a fresh session`,
     );
   }
   if (handle.agentSessionId !== record.agentSessionId) {
     throw new Error(
-      `ACP resume native session identity mismatch after session ensure for ${recordId}: `
+      `ACP ${action} native session identity mismatch after session ensure for ${record.acpxRecordId}: `
       + `expected ${record.agentSessionId ?? "none"}, found ${handle.agentSessionId ?? "none"}; refusing a fresh session`,
     );
   }
@@ -377,17 +406,20 @@ async function observeHarnessIdentity(
 function ensureAcpSession(
   runtime: AcpRuntime,
   request: AgentRunLaunchRequest,
-  resumeRecord?: NonNullable<Awaited<ReturnType<AcpSessionStore["load"]>>>,
+  existingRecord?: AcpRecord,
 ): ReturnType<AcpRuntime["ensureSession"]> {
   const capability = AGENT_RUN_CAPABILITIES[request.run.harness];
   if (!capability) throw new Error(`unknown delegation harness: ${request.run.harness}`);
-  if (request.turnIntent.kind === "resume" && !resumeRecord) {
+  if (request.turnIntent.kind === "resume" && !existingRecord) {
     throw new Error("ACP resume requires a validated session record");
+  }
+  if (request.turnIntent.kind === "retry" && request.turnIntent.acpxRecordId && !existingRecord) {
+    throw new Error("ACP retry requires its available validated session record");
   }
   const sessionKey = request.turnIntent.kind === "resume"
     ? request.turnIntent.acpxRecordId
     : request.run.id;
-  const resumeSessionId = resumeRecord?.acpSessionId
+  const resumeSessionId = existingRecord?.acpSessionId
     ?? (request.turnIntent.kind === "retry" ? request.turnIntent.childSessionId : undefined);
   return runtime.ensureSession({
     sessionKey,

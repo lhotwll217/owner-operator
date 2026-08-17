@@ -287,8 +287,12 @@ try {
 
   // --- immediate startup failure: pending presentation is replaced by terminal truth -------
   const startupState = new State(join(dir, "startup-failure.db"), { bus: new InMemoryEventBus() });
+  const startupRequests: AgentRunLaunchRequest[] = [];
   const startupExecutor = new AgentRunExecutor(startupState, {
-    launcher: async () => { throw new Error("ACP handshake incompatible"); },
+    launcher: async (request) => {
+      startupRequests.push(request);
+      throw new Error("ACP handshake incompatible");
+    },
     tickMs: 20,
     logger: () => undefined,
   });
@@ -334,6 +338,21 @@ try {
   assert.equal(startupState.agentRunById(staleResume.id)?.error, "ACP handshake incompatible");
   assert.equal(startupState.agentRunById(staleCompletedRun.id)?.status, AgentRunStatus.Completed);
   assert.equal(startupState.agentRunById(staleCompletedRun.id)?.resultTail, "completed result");
+  const retryFailedResume = startupExecutor.retry(staleResume.id);
+  await waitFor(
+    () => startupState.agentRunById(retryFailedResume.id)?.status === AgentRunStatus.Failed,
+    "retry of failed resume to become terminal",
+  );
+  assert.equal(retryFailedResume.retryOfRunId, staleResume.id);
+  assert.deepEqual(
+    startupRequests.find(({ run }) => run.id === retryFailedResume.id)?.turnIntent,
+    {
+      kind: "retry",
+      childSessionId: "stale-child",
+      acpxRecordId: "stale-acpx",
+    },
+    "Retry after failed Resume retains both exact-session identities",
+  );
   await startupExecutor.stop();
   startupState.close();
 
@@ -383,6 +402,90 @@ try {
   await corruptExecutor.stop();
   await dormantExecutor.stop();
   corruptState.close();
+
+  // --- retry idempotency is exact to the requested relationship --------------------------
+  const retryIdentityState = new State(join(dir, "retry-identity.db"), { bus: new InMemoryEventBus() });
+  const failedA = retryIdentityState.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "A fails",
+    cwd: dir,
+    depth: 1,
+    timeoutSeconds: 60,
+    childSessionId: "shared-retry-child",
+    acpxRecordId: "shared-retry-acpx",
+  });
+  retryIdentityState.claimNextPendingAgentRun(1);
+  retryIdentityState.finishAgentRun(failedA.id, {
+    status: AgentRunStatus.Failed,
+    resultTail: null,
+    error: "A failed",
+  });
+  const retryB = retryIdentityState.createAgentRun({
+    harness: failedA.harness,
+    task: failedA.task,
+    cwd: failedA.cwd,
+    depth: failedA.depth,
+    timeoutSeconds: failedA.timeoutSeconds,
+    retryOfRunId: failedA.id,
+    childSessionId: failedA.childSessionId,
+    acpxRecordId: failedA.acpxRecordId,
+  });
+  retryIdentityState.claimNextPendingAgentRun(1);
+  retryIdentityState.finishAgentRun(retryB.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "B completed",
+    error: null,
+  });
+  const activeC = retryIdentityState.createAgentRun({
+    harness: retryB.harness,
+    task: "C resumes B",
+    cwd: retryB.cwd,
+    depth: retryB.depth,
+    timeoutSeconds: retryB.timeoutSeconds,
+    resumeOfRunId: retryB.id,
+    childSessionId: retryB.childSessionId,
+    acpxRecordId: retryB.acpxRecordId,
+  });
+  const retryIdentityExecutor = new AgentRunExecutor(retryIdentityState, {
+    launcher,
+    maxConcurrent: 0,
+    logger: () => undefined,
+  });
+  assert.throws(
+    () => retryIdentityExecutor.retry(failedA.id),
+    new RegExp(`already been retried by ${retryB.id}`),
+    "retry(A) cannot return C merely because C is active on the same child",
+  );
+  const failedD = retryIdentityState.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "D fails",
+    cwd: dir,
+    depth: 1,
+    timeoutSeconds: 60,
+    childSessionId: "exact-inflight-child",
+  });
+  const exactRetry = retryIdentityState.createAgentRun({
+    harness: failedD.harness,
+    task: failedD.task,
+    cwd: failedD.cwd,
+    depth: failedD.depth,
+    timeoutSeconds: failedD.timeoutSeconds,
+    retryOfRunId: failedD.id,
+    childSessionId: failedD.childSessionId,
+  });
+  retryIdentityState.finishAgentRun(failedD.id, {
+    status: AgentRunStatus.Failed,
+    resultTail: null,
+    error: "D failed",
+  });
+  assert.equal(
+    retryIdentityExecutor.retry(failedD.id).id,
+    exactRetry.id,
+    "retry returns an inflight run only when it is the exact retry of the requested run",
+  );
+  assert.equal(retryIdentityState.agentRunById(activeC.id)?.status, AgentRunStatus.Pending);
+  await retryIdentityExecutor.stop();
+  retryIdentityState.close();
 
   // --- depth cap: delegating from a thread that is itself a delegated child is rejected -----
   // Isolated so the never-started executor's pump can't disturb the positional launches above.

@@ -187,6 +187,19 @@ const retriedOnlyFailure = deriveParentAgentState([
 ], { now });
 assert.equal(retriedOnlyFailure.footer, null, "footer hides when the only failure has been retried");
 
+const activeChildAfterFailure = deriveParentAgentState([
+  run("failed-before-other-turn", AgentRunStatus.Failed, { childSessionId: "busy-child" }),
+  run("other-active-turn", AgentRunStatus.Running, {
+    childSessionId: "busy-child",
+    resumeOfRunId: "some-completed-run",
+  }),
+], { now });
+assert.equal(
+  activeChildAfterFailure.runs.find(({ id }) => id === "failed-before-other-turn")?.canRetry,
+  false,
+  "retry is unavailable while any other run is active on the child",
+);
+
 const unresumedFailure = deriveParentAgentState([
   run("unresumed-failure", AgentRunStatus.Failed, { childSessionId: "failed-child" }),
 ], { now });
