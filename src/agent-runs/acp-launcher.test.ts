@@ -197,8 +197,9 @@ assert.equal(terminationChecks, 1, "normal runtime close independently verifies 
 assert.deepEqual(verifiedPids, [701, 702], "normal close verifies the PID set captured before wrapper exit");
 assert.equal(releases, 0, "failed close verification retains the process lease");
 
-// A resume addresses both durable identities. Invalid acpx records fail before
-// ensureSession can recreate the record and accidentally turn the follow-up into a fresh session.
+// A handled completed turn ends with acpx.close(), which persists an ordinary closed record.
+// Resume must pass that exact record to ensureSession so acpx can reopen it, while invalid records
+// still fail before ensureSession can accidentally turn the follow-up into a fresh session.
 const resumeRun = {
   ...run,
   id: "resumed-run",
@@ -213,6 +214,8 @@ const resumeRecord = {
   acpSessionId: "backend-child",
   agentSessionId: "resumed-child",
   cwd: resumeRun.cwd,
+  closed: true,
+  closedAt: "2026-07-20T00:01:00.000Z",
   acpx: {},
 };
 let resumeEnsureInput: Record<string, unknown> | undefined;
@@ -253,6 +256,7 @@ await createAcpLauncher({
 });
 assert.equal(resumeEnsureInput?.sessionKey, "completed-acpx-record", "resume reuses the exact acpx record id");
 assert.equal(resumeEnsureInput?.resumeSessionId, "backend-child", "resume loads the record's exact ACP session id");
+assert.equal(resumeRecord.closed, true, "Resume accepts the ordinary record state persisted by acpx.close()");
 
 const identityCases = [
   {
@@ -329,6 +333,8 @@ for (const identityCase of identityCases) {
   );
 }
 
+// A handled failed turn reaches the same acpx.close() cleanup. Retry must load that normally closed
+// source record under its new run id without weakening either level of identity proof.
 for (const identityCase of identityCases) {
   const record = {
     ...resumeRecord,
@@ -336,21 +342,21 @@ for (const identityCase of identityCases) {
     acpSessionId: identityCase.acpSessionId,
     ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : { agentSessionId: undefined }),
   };
-  const failedResumeRun = {
+  const failedRun = {
     ...resumeRun,
-    id: `${identityCase.harness}-failed-resume`,
+    id: `${identityCase.harness}-failed-turn`,
     harness: identityCase.harness,
     status: AgentRunStatus.Failed,
     childSessionId: identityCase.childSessionId,
     acpxRecordId: identityCase.recordId,
-    error: "resume load failed after its row was created",
+    error: "handled turn failed after loading the exact session",
   };
   const retryRun = {
-    ...failedResumeRun,
-    id: `${identityCase.harness}-retry-failed-resume`,
+    ...failedRun,
+    id: `${identityCase.harness}-retry-failed-turn`,
     status: AgentRunStatus.Running,
     error: null,
-    retryOfRunId: failedResumeRun.id,
+    retryOfRunId: failedRun.id,
     resumeOfRunId: null,
   };
   let retryEnsureInput: Record<string, unknown> | undefined;
@@ -397,9 +403,10 @@ for (const identityCase of identityCases) {
   assert.equal(
     retryEnsureInput?.resumeSessionId,
     identityCase.acpSessionId,
-    `${identityCase.harness} retry loads the ACP identity proven by the failed Resume's record`,
+    `${identityCase.harness} retry loads the ACP identity proven by the failed turn's record`,
   );
-  assert.equal(retryTurnCalls, 1);
+  assert.equal(record.closed, true, `${identityCase.harness} fixture matches acpx.close() persistence`);
+  assert.equal(retryTurnCalls, 1, `${identityCase.harness} Retry runs after an ordinarily closed failed turn`);
 
   const freshRetryRuntime = {
     ...retryRuntime,
@@ -559,7 +566,7 @@ for (const [label, record, expected] of [
   ["missing", undefined, /session record not found.*refusing to create a fresh session/i],
   ["mismatched", { ...resumeRecord, agentSessionId: "some-other-child" }, /identity mismatch/i],
   ["missing-acp-identity", { ...resumeRecord, acpSessionId: "" }, /no ACP session identity/i],
-  ["closed", { ...resumeRecord, acpx: { reset_on_next_ensure: true } }, /was closed/i],
+  ["reset-marked", { ...resumeRecord, acpx: { reset_on_next_ensure: true } }, /reset-marked/i],
 ] as const) {
   let ensureCalls = 0;
   const invalidRuntime = {

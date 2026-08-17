@@ -880,7 +880,7 @@ export class ThreadDb {
     return toAgentRun(row);
   }
 
-  /** A pending-or-running run for this child session, if any — the resume-duplication guard. */
+  /** A pending-or-running run for this child session, if any — the Retry/Resume active-child guard. */
   nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
     const row = this.db.prepare(
       `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs

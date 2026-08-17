@@ -248,8 +248,8 @@ async function validateTurnRecord(
   if (resolve(record.cwd) !== resolve(request.run.cwd)) {
     throw new Error(`ACP ${action} working-directory mismatch for ${recordId}`);
   }
-  if (record.closed === true || record.acpx?.reset_on_next_ensure === true) {
-    throw new Error(`ACP ${action} session ${recordId} was closed and cannot be loaded`);
+  if (record.acpx?.reset_on_next_ensure === true) {
+    throw new Error(`ACP ${action} session ${recordId} is reset-marked and cannot be loaded`);
   }
   return record;
 }
