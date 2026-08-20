@@ -1,20 +1,16 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { AgentRunStatus } from "@owner-operator/core";
 import {
   configuredOwnerOperatorTools,
-  createOoSession,
-  createOwnerOperatorSession,
   lastAssistantError,
   lastAssistantText,
-  ooProvenance,
-  shutdownSessionExtensions,
 } from "../../src/agent/agent";
-import { startDaemon, type RunningDaemon } from "../../src/daemon/runtime";
+import { type RunningDaemon } from "../../src/daemon/runtime";
 import { stateDatabasePath } from "../../src/shared/paths";
 import { buildMarkDoneBehaviorFixture } from "./mark-done-fixture.mjs";
-import { createEvalSandboxUserEnvironment } from "../sandbox-user";
+import { createSandboxUser } from "../sandbox-user";
 
 interface TrialInput {
   caseId: string;
@@ -45,43 +41,26 @@ assertInside(root, taskCwd, "task cwd");
 if (process.env.OO_EVAL_READ_ONLY || process.env.OO_EVAL_BASELINE_PROMPT) {
   throw new Error("behavioral trial must use the production prompt and full configured roster");
 }
-const sandboxEnvironment = createEvalSandboxUserEnvironment({
+const sandboxEnvironment = await createSandboxUser({
+  profile: "deterministic-harness",
   root,
   sourcePiAgentDir: input.sourcePiAgentDir,
   protectedOwnerPaths: input.protectedOwnerPaths,
   modelSettings: input.modelSettings,
 });
 
-let daemon: RunningDaemon | undefined;
-let created: Awaited<ReturnType<typeof createOwnerOperatorSession>> | undefined;
-let daemonStopped = false;
+const daemon = sandboxEnvironment.daemon;
+let created: Awaited<ReturnType<typeof sandboxEnvironment.createProductionSession>> | undefined;
 let trialResult: Record<string, unknown> | undefined;
 let trialError: unknown;
 const traceEvents: Array<Record<string, unknown>> = [];
 
 try {
-  daemon = await startDaemon({
-    port: 0,
-    watch: false,
-    enableEnrichment: false,
-    monitor: { scan: async () => [], intervalMs: 60 * 60 * 1_000 },
-    scheduler: { tickMs: 60 * 60 * 1_000 },
-    agentRuns: {
-      maxConcurrent: 0,
-      tickMs: 60 * 60 * 1_000,
-      launcher: Object.assign(
-        async () => { throw new Error("behavioral eval executor must never launch a child"); },
-        { reapOrphans: async () => undefined },
-      ),
-    },
-  });
-
-  const sessionManager = createOoSession(ooProvenance("chat"));
-  sessionManager.appendMessage({ role: "user", content: input.parentContext, timestamp: Date.now() });
+  created = await sandboxEnvironment.createProductionSession({ parentContext: input.parentContext });
   const fixture = buildMarkDoneBehaviorFixture({
     root,
     taskCwd,
-    parentThreadId: sessionManager.getSessionId(),
+    parentThreadId: created.sessionId,
     childSessionId: input.childSessionId,
     sentinelSessionId: input.sentinelSessionId,
     parentContext: input.parentContext,
@@ -91,7 +70,6 @@ try {
   for (const row of fixture.rows) daemon.state.recordObservation(row);
   const stateBefore = captureState(daemon, fixture.expected, fixture.rows);
 
-  created = await createOwnerOperatorSession("chat", { cwd: taskCwd, sessionManager });
   const endOfCompletionTurn = completionTurnPromise(created.session, traceEvents, input.timeoutMs ?? 10 * 60 * 1_000);
   const run = daemon.state.createAgentRun(fixture.run.create);
   const completed = daemon.state.finishAgentRun(run.id, fixture.run.outcome);
@@ -109,7 +87,7 @@ try {
     caseId: input.caseId,
     assistantText: lastAssistantText(created.session),
     modelLabel: created.modelLabel,
-    sessionId: sessionManager.getSessionId(),
+    sessionId: created.sessionId,
     toolRoster: [...created.toolNames],
     configuredToolRoster: [...configuredOwnerOperatorTools(ooHome)],
     traceEvents,
@@ -118,57 +96,35 @@ try {
     stateAfter,
     sandbox: {
       isolated: true,
+      credentialFileRemoved: sandboxEnvironment.credentialFileRemoved(),
       daemonStopped: false,
-      leasesRemaining: leaseCount(ooHome),
+      leasesRemaining: sandboxEnvironment.leasesRemaining(),
       diagnosticsRetained: false,
     },
+    sessionTrace: sandboxEnvironment.readSessionTrace(created.sessionId),
   };
 } catch (error) {
   trialError = error;
-} finally {
-  if (created) {
-    await shutdownSessionExtensions(created.session);
-    created.session.dispose();
-  }
-  if (daemon) {
-    const port = daemon.port;
-    await daemon.close();
-    daemonStopped = !existsSync(join(ooHome, "daemon.json")) && !await portResponds(port);
-  }
 }
 
 if (!trialResult) {
-  sandboxEnvironment.finalize({
-    teardownVerified: false,
-    diagnostic: {
-      kind: "behavioral-trial-failed",
-      error: trialError instanceof Error ? trialError.message : String(trialError ?? "unknown error"),
-      daemonStopped,
-      leasesRemaining: leaseCount(ooHome),
-    },
+  await sandboxEnvironment.close({
+    kind: "behavioral-trial-failed",
+    error: trialError instanceof Error ? trialError.message : String(trialError ?? "unknown error"),
   });
   throw trialError ?? new Error("behavioral trial produced no result");
 }
-(trialResult.sandbox as Record<string, unknown>).daemonStopped = daemonStopped;
-(trialResult.sandbox as Record<string, unknown>).leasesRemaining = leaseCount(ooHome);
-(trialResult as Record<string, unknown>).sessionTrace = readSessionTrace(
-  ooHome,
-  String(trialResult.sessionId),
-);
-const preservedDiagnostics = sandboxEnvironment.finalize({
-  teardownVerified: daemonStopped && leaseCount(ooHome) === 0,
-  diagnostic: {
-    kind: "behavioral-trial-teardown-unverified",
-    caseId: input.caseId,
-    daemonStopped,
-    leasesRemaining: leaseCount(ooHome),
-  },
+const closeResult = await sandboxEnvironment.close({
+  kind: "behavioral-trial-teardown",
+  caseId: input.caseId,
 });
-(trialResult.sandbox as Record<string, unknown>).preservedDiagnostics = preservedDiagnostics;
+(trialResult.sandbox as Record<string, unknown>).daemonStopped = closeResult.daemonStopped;
+(trialResult.sandbox as Record<string, unknown>).leasesRemaining = closeResult.leasesRemaining;
+(trialResult.sandbox as Record<string, unknown>).preservedDiagnostics = closeResult.preservedDiagnostics;
 process.stdout.write(`OO_BEHAVIOR_RESULT=${Buffer.from(JSON.stringify(trialResult)).toString("base64url")}\n`);
 
 function completionTurnPromise(
-  session: Awaited<ReturnType<typeof createOwnerOperatorSession>>["session"],
+  session: Awaited<ReturnType<typeof sandboxEnvironment.createProductionSession>>["session"],
   events: Array<Record<string, unknown>>,
   timeoutMs: number,
 ): Promise<void> {
@@ -224,29 +180,6 @@ function captureState(
     };
   } finally {
     database.close();
-  }
-}
-
-function leaseCount(home: string): number {
-  const dir = join(home, "agent-runs", "process-leases");
-  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".json")).length : 0;
-}
-
-function readSessionTrace(home: string, sessionId: string): string | null {
-  const sessions = join(home, "sessions");
-  if (!existsSync(sessions)) return null;
-  const relative = readdirSync(sessions, { recursive: true })
-    .map(String)
-    .find((file) => file.endsWith(".jsonl") && file.includes(sessionId));
-  return relative ? readFileSync(join(sessions, relative), "utf8") : null;
-}
-
-async function portResponds(port: number): Promise<boolean> {
-  try {
-    await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(250) });
-    return true;
-  } catch {
-    return false;
   }
 }
 

@@ -1,9 +1,10 @@
 // Integration: Owner Operator session configuration over isolated harness files.
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   createOwnerOperatorSession,
   evalSettingsOverrides,
@@ -36,6 +37,14 @@ try {
   assert.equal(services.settingsManager.getDefaultProvider(), "owned");
   assert.equal(services.settingsManager.getDefaultModel(), "owned-model");
   assert.equal(services.settingsManager.isProjectTrusted(), false, "project Pi settings cannot alter harness policy");
+  const injectedCredentials = new InMemoryCredentialStore();
+  await injectedCredentials.modify("owned", async () => ({ type: "api_key", key: "memory-only" }));
+  const injectedServices = await ownerOperatorPiServices(ooHome, injectedCredentials);
+  assert.deepEqual(
+    (await injectedServices.modelRuntime.listCredentials()).map((credential) => credential.providerId),
+    ["owned"],
+    "callers can isolate production composition from a readable credential file",
+  );
   process.env.OO_HOME = ooHome;
   const headless = await createOwnerOperatorSession("chat", { ephemeral: true });
   assert.ok(
@@ -51,6 +60,15 @@ try {
     "an empty toolsAllow does not register excluded custom capabilities through tool display",
   );
   restricted.session.dispose();
+  rmSync(join(ooHome, "pi", "auth.json"));
+  const memoryBacked = await createOwnerOperatorSession("chat", {
+    ephemeral: true,
+    toolsAllow: [],
+    credentials: injectedCredentials,
+  });
+  assert.equal(existsSync(join(ooHome, "pi", "auth.json")), false,
+    "in-memory production credentials do not recreate an agent-readable auth file");
+  memoryBacked.session.dispose();
 } finally {
   if (priorOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorOoHome;

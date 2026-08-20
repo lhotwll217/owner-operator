@@ -19,6 +19,8 @@ import {
   evalSandboxUserPaths,
   sanitizeEvalDiagnosticText,
   sanitizeEvalDiagnosticValue,
+  sanitizeEvalSessionTrace,
+  sanitizeEvalWorkerOutput,
 } from '../sandbox.mjs';
 import { normalizeBehavioralTrialResult } from './behavioral-result.mjs';
 import { DEFAULT_GRADER_MODEL, DEFAULT_GRADER_REASONING } from './codex-grader.mjs';
@@ -32,6 +34,7 @@ const tsxLoaderPath = fileURLToPath(import.meta.resolve('tsx'));
 const runStamp = process.env.OO_EVAL_RUN_ID ?? new Date().toISOString().replace(/[:.]/g, '-');
 const SANDBOX = evalSandboxPath(runStamp);
 const OO_HOME = path.join(SANDBOX, 'home');
+const RETRIEVAL_USER = evalSandboxUserPaths(SANDBOX);
 const DISCOVERY = path.join(OO_HOME, 'daemon.json');
 const SUBJECT_TRANSPORT = 'sse';
 const logDir = path.join(repoRoot, 'eval', 'results', 'logs', runStamp);
@@ -42,6 +45,8 @@ let evalDaemon = null;
 let retrievalSetup = null;
 
 fs.mkdirSync(logDir, { recursive: true });
+fs.mkdirSync(RETRIEVAL_USER.userHome, { recursive: true });
+fs.mkdirSync(RETRIEVAL_USER.tempDir, { recursive: true });
 process.once('exit', () => {
   if (evalDaemon?.exitCode === null) evalDaemon.kill('SIGTERM');
   fs.rmSync(SANDBOX, { recursive: true, force: true });
@@ -274,12 +279,15 @@ async function runMarkDoneBehavioralTrial({
     spawnError = error instanceof Error ? error.message : String(error);
   }
 
-  const safeStdout = sanitizeEvalDiagnosticText(stdout, [trialRoot, sourcePiAgentDir, ownerOoHome]);
-  const safeStderr = sanitizeEvalDiagnosticText(stderr, [trialRoot, sourcePiAgentDir, ownerOoHome]);
+  const diagnosticRedactions = [trialRoot, sourcePiAgentDir, ownerOoHome];
+  const safeStdout = sanitizeEvalWorkerOutput(stdout, diagnosticRedactions);
+  const safeStderr = sanitizeEvalDiagnosticText(stderr, diagnosticRedactions);
   fs.writeFileSync(path.join(logDir, `${baseName}.stdout.txt`), safeStdout);
   fs.writeFileSync(path.join(logDir, `${baseName}.stderr.txt`), safeStderr);
   if (payload?.traceEvents) {
-    fs.writeFileSync(traceFile, payload.traceEvents.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    fs.writeFileSync(traceFile, payload.traceEvents
+      .map((event) => JSON.stringify(sanitizeEvalDiagnosticValue(event, diagnosticRedactions)))
+      .join('\n') + '\n');
   } else {
     fs.writeFileSync(traceFile, JSON.stringify({
       event: 'provider_error',
@@ -288,15 +296,21 @@ async function runMarkDoneBehavioralTrial({
   }
   if (payload) {
     payload.sandbox = { ...payload.sandbox, diagnosticsRetained: true };
+    const diagnosticPayload = {
+      ...payload,
+      sessionTrace: payload.sessionTrace ? '<stored separately after structural sanitization>' : null,
+    };
     fs.writeFileSync(
       path.join(logDir, `${baseName}.diagnostic.json`),
-      JSON.stringify(sanitizeEvalDiagnosticValue(payload, [trialRoot, sourcePiAgentDir, ownerOoHome]), null, 2) + '\n',
+      JSON.stringify(sanitizeEvalDiagnosticValue(diagnosticPayload, diagnosticRedactions), null, 2) + '\n',
     );
   }
   const sessionTraceFile = payload?.sessionTrace
     ? path.join(logDir, `${baseName}.session.jsonl`)
     : null;
-  if (sessionTraceFile) fs.writeFileSync(sessionTraceFile, payload.sessionTrace);
+  if (sessionTraceFile) {
+    fs.writeFileSync(sessionTraceFile, sanitizeEvalSessionTrace(payload.sessionTrace, diagnosticRedactions));
+  }
   const teardownVerified = Boolean(
     sandbox && !timedOut && !spawnError && payload?.sandbox?.daemonStopped === true
       && Number(payload?.sandbox?.leasesRemaining) === 0,
@@ -396,6 +410,7 @@ function parseBehavioralPayload(stdout) {
 
 function emptyBehavioralMetadata() {
   return {
+    trialVersion: null,
     modelLabel: null,
     sessionId: null,
     toolRoster: [],
@@ -410,6 +425,7 @@ function emptyBehavioralMetadata() {
     tokensOutput: 0,
     costUsd: 0,
     numTurns: 0,
+    traceProblems: ["behavioral trial did not produce metadata"],
     completion: null,
     stateBefore: null,
     stateAfter: null,
@@ -435,10 +451,17 @@ async function ensureRetrievalHarness() {
 
 function runOo(prompt, traceFile, timeoutMs, extraEnv) {
   return new Promise((resolve) => {
-    const child = spawn(path.join(repoRoot, 'oo'), [prompt], {
+    // The shell launcher resolves to this same entry. Invoke it through Node's repository-owned
+    // loader so tsx does not create an overlong IPC socket beneath the disposable TMPDIR.
+    const child = spawn(process.execPath, [
+      '--import',
+      tsxLoaderPath,
+      path.join(repoRoot, 'src', 'cli', 'oo.ts'),
+      prompt,
+    ], {
       cwd: repoRoot,
       env: {
-        ...process.env,
+        ...RETRIEVAL_USER.env,
         ...extraEnv,
         OO_HOME,
         OO_TRACE: traceFile,
@@ -485,7 +508,10 @@ function copySessionTrace(sessionId, destination, ooHome = OO_HOME) {
   }
   const relative = files.find((file) => file.endsWith('.jsonl') && path.basename(file).includes(sessionId));
   if (!relative) return null;
-  fs.copyFileSync(path.join(root, relative), destination);
+  fs.writeFileSync(
+    destination,
+    sanitizeEvalSessionTrace(fs.readFileSync(path.join(root, relative), 'utf8'), [SANDBOX, ooHome]),
+  );
   return destination;
 }
 
@@ -509,10 +535,12 @@ function buildRunManifest() {
     'eval/fixtures/naive-baseline-prompt.md',
     'eval/asserts/tool-use.mjs',
     'eval/asserts/efficiency.mjs',
+    'eval/behavioral/contract.mjs',
     'eval/behavioral/mark-done-fixture.mjs',
     'eval/behavioral/run-mark-done-trial.ts',
     'eval/compare.mjs',
     'eval/loop.mjs',
+    'eval/run-validity.mjs',
     'eval/sandbox.mjs',
     'eval/sandbox-user.ts',
     'eval/seed/build-fixture-home.mjs',
@@ -585,7 +613,7 @@ async function startManagedEvalDaemon() {
   const log = fs.openSync(logPath, 'a');
   const child = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'eval-daemon.mjs')], {
     cwd: repoRoot,
-    env: { ...process.env, OO_HOME },
+    env: { ...RETRIEVAL_USER.env, OO_HOME },
     stdio: ['ignore', log, log],
   });
   fs.closeSync(log);

@@ -13,6 +13,7 @@ import {
   SettingsManager,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import type { CredentialStore } from "@earendil-works/pi-ai";
 import {
   AgentToolId,
   ensureOwnerOperatorWorkspace,
@@ -57,6 +58,7 @@ export interface OwnerOperatorSessionOptions {
   cwd?: string;
   callerSessionId?: string;
   toolsAllow?: readonly AgentToolId[];
+  credentials?: CredentialStore;
 }
 
 export async function bindOwnerOperatorSessionExtensions(
@@ -97,7 +99,7 @@ export function evalSettingsOverrides(
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "src", "prompts", "owner-operator.md"), "utf8");
 
-export async function ownerOperatorPiServices(ooHome?: string): Promise<{
+export async function ownerOperatorPiServices(ooHome?: string, credentials?: CredentialStore): Promise<{
   paths: ReturnType<typeof ownerOperatorPaths>;
   modelRuntime: ModelRuntime;
   settingsManager: SettingsManager;
@@ -105,7 +107,10 @@ export async function ownerOperatorPiServices(ooHome?: string): Promise<{
   const paths = ensureOwnerOperatorWorkspace(ooHome);
   return {
     paths,
-    modelRuntime: await ModelRuntime.create({ authPath: paths.piAuth, modelsPath: paths.piModels }),
+    modelRuntime: await ModelRuntime.create({
+      ...(credentials ? { credentials } : { authPath: paths.piAuth }),
+      modelsPath: paths.piModels,
+    }),
     settingsManager: SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false }),
   };
 }
@@ -122,7 +127,7 @@ export async function createOwnerOperatorSession(
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
-  const { modelRuntime, paths, settingsManager } = await ownerOperatorPiServices();
+  const { modelRuntime, paths, settingsManager } = await ownerOperatorPiServices(undefined, opts.credentials);
   configurePermissionSystemEnvironment(paths);
   const configuredTools = configuredOwnerOperatorTools(paths.home);
   const readOnlyCustomToolNames = new Set<string>([

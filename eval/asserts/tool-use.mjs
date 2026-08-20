@@ -13,6 +13,8 @@
 // expectSessionSearchSince (that search must preserve the requested time scope),
 // requireLocatorBeforeSessionSearch, and/or forbidTool. Mutation tools are always
 // forbidden in the controlled read-only suite.
+import { behavioralHarnessProblems } from "../behavioral/contract.mjs";
+
 function sessionSearchMode(args) {
   const query = args.includes("--query");
   const skim = args.includes("--skim");
@@ -134,9 +136,6 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
   const shouldMarkDone = testMetadata.shouldMarkDone === true;
   const before = providerMetadata.stateBefore ?? {};
   const after = providerMetadata.stateAfter ?? {};
-  const sandbox = providerMetadata.sandbox ?? {};
-  const roster = providerMetadata.toolRoster ?? [];
-  const configuredRoster = providerMetadata.configuredToolRoster ?? [];
   const successful = executions.filter((execution) => execution.isError === false);
   const doneCalls = executions.filter((execution) => execution.name === "mark_thread_done");
   const successfulDoneCalls = doneCalls.filter((execution) => execution.isError === false);
@@ -150,7 +149,10 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
     "manage_delegated_baseline",
   ]);
   const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(execution.name));
-  const problems = [];
+  const problems = behavioralHarnessProblems(providerMetadata);
+  if (providerMetadata.harnessValid !== true) {
+    problems.push("behavioral provider did not attest a valid harness");
+  }
 
   if (providerMetadata.completion?.outcome !== "completed") {
     problems.push(`expected completed lifecycle, got ${providerMetadata.completion?.outcome ?? "missing"}`);
@@ -158,15 +160,6 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
   if (providerMetadata.completion?.childSessionId !== childId) {
     problems.push("completion child identity does not match the case target");
   }
-  if (!Array.isArray(roster) || !Array.isArray(configuredRoster) ||
-      JSON.stringify(roster) !== JSON.stringify(configuredRoster) || !roster.includes("mark_thread_done")) {
-    problems.push("production configured tool roster was not preserved");
-  }
-  if (sandbox.isolated !== true) problems.push("sandbox isolation was not verified");
-  if (sandbox.daemonStopped !== true || Number(sandbox.leasesRemaining) !== 0) {
-    problems.push("sandbox teardown was not verified");
-  }
-  if (sandbox.diagnosticsRetained !== true) problems.push("sanitized diagnostics were not retained");
   if (before.rawThreadStates?.[childId] === undefined || before.rawThreadStates?.[sentinelId] === undefined) {
     problems.push("initial child/sentinel ledger evidence is missing");
   }

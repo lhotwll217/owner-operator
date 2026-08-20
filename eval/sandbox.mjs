@@ -29,18 +29,7 @@ export function evalSandboxUserPaths(root, sourceEnv = process.env) {
   const ooHome = join(userHome, ".owner-operator");
   const taskCwd = join(sandboxRoot, "task");
   const tempDir = join(sandboxRoot, "tmp");
-  const env = { ...sourceEnv };
-  for (const key of Object.keys(env)) {
-    if (isAmbientCredentialKey(key)) delete env[key];
-  }
-  for (const key of [
-    "OO_EVAL_READ_ONLY",
-    "OO_EVAL_BASELINE_PROMPT",
-    "OO_EVAL_DEFAULT_PROVIDER",
-    "OO_EVAL_DEFAULT_MODEL",
-    "OO_EVAL_DEFAULT_THINKING",
-    "OO_EVAL_TRANSPORT",
-  ]) delete env[key];
+  const env = evalRuntimeEnvironment(sourceEnv);
   Object.assign(env, {
     HOME: userHome,
     OO_HOME: ooHome,
@@ -53,6 +42,12 @@ export function evalSandboxUserPaths(root, sourceEnv = process.env) {
     CURSOR_CONFIG_DIR: join(userHome, ".cursor"),
   });
   return { root: sandboxRoot, userHome, ooHome, taskCwd, tempDir, env };
+}
+
+export function evalRuntimeEnvironment(sourceEnv = process.env) {
+  return Object.fromEntries(Object.entries(sourceEnv).filter(([key, value]) =>
+    value !== undefined && isAllowedRuntimeEnvKey(key)
+  ));
 }
 
 export function sanitizeEvalDiagnosticValue(value, redactions = [], key = "") {
@@ -75,23 +70,52 @@ export function sanitizeEvalDiagnosticText(value, redactions = []) {
     text = text.split(String(redaction)).join("<redacted-path>");
   }
   return text
-    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, "Bearer <redacted>")
-    .replace(/("(?:auth(?:orization)?|credential|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token)"\s*:\s*")[^"]+/gi, "$1<redacted>");
+    .replace(/Bearer\s+\S+/gi, "Bearer <redacted>")
+    .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)=\S+/g, "$1=<redacted>")
+    .replace(/("(?:auth(?:orization)?|credential|secret|password|key|access|api[_-]?key|access[_-]?token|refresh[_-]?token|codex[_-]?thread[_-]?id)"\s*:\s*")[^"]+/gi, "$1<redacted>");
 }
 
-function isAmbientCredentialKey(key) {
-  return /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS|ACCESS_KEY_ID|SESSION_TOKEN)$/i.test(key)
-    || [
-      "SSH_AUTH_SOCK",
-      "GPG_AGENT_INFO",
-      "AWS_PROFILE",
-      "AWS_SHARED_CREDENTIALS_FILE",
-      "GOOGLE_APPLICATION_CREDENTIALS",
-      "AZURE_CONFIG_DIR",
-    ].includes(key);
+export function sanitizeEvalSessionTrace(trace, redactions = []) {
+  return String(trace ?? "").split("\n").map((line) => {
+    if (!line) return "";
+    try {
+      return JSON.stringify(sanitizeEvalDiagnosticValue(JSON.parse(line), redactions));
+    } catch {
+      return sanitizeEvalDiagnosticText(line, redactions);
+    }
+  }).join("\n");
+}
+
+export function sanitizeEvalWorkerOutput(output, redactions = []) {
+  return sanitizeEvalDiagnosticText(output, redactions)
+    .replace(/^OO_BEHAVIOR_RESULT=[A-Za-z0-9_-]+$/gm, "OO_BEHAVIOR_RESULT=<captured-and-sanitized>");
+}
+
+function isAllowedRuntimeEnvKey(key) {
+  return [
+    "PATH",
+    "SHELL",
+    "LANG",
+    "TZ",
+    "TERM",
+    "COLORTERM",
+    "NO_COLOR",
+    "FORCE_COLOR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+  ].includes(key) || key.startsWith("LC_");
 }
 
 function isSensitiveDiagnosticKey(key) {
   const normalized = String(key).replace(/([a-z0-9])([A-Z])/g, "$1_$2");
-  return /(?:^|[_-])(?:auth(?:orization)?|credential(?:s)?|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token)(?:$|[_-])/i.test(normalized);
+  return /(?:^|[_-])(?:auth(?:orization)?|credential(?:s)?|secret|password|key|access|refresh|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?access[_-]?key|private[_-]?key|client[_-]?secret|session[_-]?token|codex[_-]?thread[_-]?id)(?:$|[_-])/i.test(normalized);
 }

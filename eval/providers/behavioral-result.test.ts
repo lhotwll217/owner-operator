@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { normalizeBehavioralTrialResult } from "../eval/providers/behavioral-result.mjs";
+import { normalizeBehavioralTrialResult } from "./behavioral-result.mjs";
 
 const payload = {
   version: 1,
@@ -25,6 +25,7 @@ const payload = {
   },
   sandbox: {
     isolated: true,
+    credentialFileRemoved: true,
     daemonStopped: true,
     leasesRemaining: 0,
     diagnosticsRetained: true,
@@ -65,7 +66,7 @@ const brokenTrace = normalizeBehavioralTrialResult({
   traceEvents: [{ event: "tool_call", id: "call-1", tool: "mark_thread_done", args: { ids: ["child-129"] } }],
 });
 assert.equal(brokenTrace.metadata.harnessValid, false);
-assert.match(brokenTrace.providerError!, /incomplete tool execution/);
+assert.match(brokenTrace.providerError!, /incomplete or malformed tool execution/);
 
 const brokenTeardown = normalizeBehavioralTrialResult({
   ...payload,
@@ -73,5 +74,22 @@ const brokenTeardown = normalizeBehavioralTrialResult({
 });
 assert.equal(brokenTeardown.metadata.harnessValid, false);
 assert.match(brokenTeardown.providerError!, /teardown/);
+
+const missingStateComponent = normalizeBehavioralTrialResult({
+  ...payload,
+  stateAfter: { ...payload.stateAfter, activeIds: undefined },
+});
+assert.equal(missingStateComponent.metadata.harnessValid, false);
+assert.match(missingStateComponent.providerError!, /state evidence/);
+
+const unmatchedResult = normalizeBehavioralTrialResult({
+  ...payload,
+  traceEvents: [
+    { event: "tool_result", id: "missing-call", tool: "mark_thread_done", isError: false, result: {} },
+    ...payload.traceEvents,
+  ],
+});
+assert.equal(unmatchedResult.metadata.harnessValid, false);
+assert.match(unmatchedResult.providerError!, /no matching call/);
 
 process.stdout.write("ok — behavioral result: real tool events normalize while target failures remain valid baseline data\n");

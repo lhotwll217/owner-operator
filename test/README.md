@@ -2,16 +2,16 @@
 
 Cross-cutting tests live here; module-bound tests stay colocated under `src`. See
 [docs/testing.md](../docs/testing.md) for the tier taxonomy and hermetic rule.
+Agent-eval sandbox and artifact behavior is owned by [docs/evals.md](../docs/evals.md).
 
 - **`run.mjs`** discovers the selected `*.test.ts`, `*.integration.test.ts`, or
-  `*.e2e.test.ts` tier anywhere under `src/` and `test/`, then runs each file through tsx,
+  `*.e2e.test.ts` tier anywhere under `src/`, `eval/`, and `test/`, then runs each file through tsx,
   fail-fast.
 - **`eval-daemon.integration.test.ts`** covers the managed eval daemon lifecycle.
-- **`eval-sandbox-user.integration.test.ts`** covers the behavioral eval's isolated user/config and
-  secret-safe cleanup contract.
-- **`eval-mark-done-fixture.integration.test.ts`** and
-  **`eval-behavioral-result.integration.test.ts`** cover controlled completion fixtures and Pi
-  trajectory normalization at deterministic seams.
+- **`eval-sandbox-user.integration.test.ts`** covers the canonical disposable user across daemon
+  and CLI profiles.
+- **`eval-mark-done-fixture.integration.test.ts`** covers controlled completion fixtures;
+  `eval/providers/behavioral-result.test.ts` covers Pi trajectory normalization beside its module.
 - **`scan.integration.test.ts`** covers the real transcript scanner across session files and git.
 - **`sessions-grep.integration.test.ts`** covers the vendored session-search primitive and privacy
   boundaries.

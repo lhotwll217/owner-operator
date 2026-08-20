@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evalSandboxPath } from "./sandbox.mjs";
+import { shouldWriteGlobalResults, validateEvalRun } from "./run-validity.mjs";
 import { backfillGitIdentity, buildGlobalResults, buildStatsEntry, upsertStatsLog } from "./stats-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -163,10 +164,11 @@ const cases = collectCases(records);
 const metrics = summarize(cases);
 
 const manifest = readManifest(records);
-const runValidity = validateStatsRun(records, cases, {
+const runValidity = validateEvalRun(records, cases, {
   expectedIds: new Set(ids),
   manifest,
   repeat,
+  scope,
 });
 const detail = path.join(iterationsDir, `${runId}.json`);
 const record = {
@@ -192,14 +194,18 @@ const record = {
 fs.writeFileSync(detail, JSON.stringify({ ...record, cases }, null, 2) + "\n");
 fs.appendFileSync(historyFile, JSON.stringify(record) + "\n");
 let statsStatus = "not-applicable:targeted-run";
-if (scope === "full" && runValidity.valid) {
+if (shouldWriteGlobalResults(scope) && runValidity.valid) {
   const globalResults = buildGlobalResults({ record, cases, observations: records, manifest });
   const globalResultsFile = path.join(repoRoot, record.logs, "global_results.json");
   fs.writeFileSync(globalResultsFile, `${JSON.stringify(globalResults, null, 2)}\n`);
-  upsertStatsLog(statsLogFile, buildStatsEntry(globalResults));
-  statsStatus = `${path.relative(repoRoot, statsLogFile)} (${path.relative(repoRoot, globalResultsFile)})`;
-} else if (scope === "full") {
-  // A full run that cannot publish is a broken measurement, not a quiet skip.
+  if (scope === "full") {
+    upsertStatsLog(statsLogFile, buildStatsEntry(globalResults));
+    statsStatus = `${path.relative(repoRoot, statsLogFile)} (${path.relative(repoRoot, globalResultsFile)})`;
+  } else {
+    statsStatus = `comparison=${path.relative(repoRoot, globalResultsFile)}; compact-stats=not-applicable`;
+  }
+} else if (shouldWriteGlobalResults(scope)) {
+  // A canonical comparison run that cannot publish is a broken measurement, not a quiet skip.
   statsStatus = `INVALID-NOT-PUBLISHED:${runValidity.reasons.join(",")}`;
 }
 
@@ -256,10 +262,19 @@ function toRecord(result) {
     caseId: result.vars?.id ?? result.description ?? `test-${result.testIdx}`,
     subject: subjectName,
     qtype: result.testCase?.metadata?.qtype ?? "unknown",
-    correct: behavioralCase ? Number(trajectory?.pass === true) : rubric && !graderError ? Number(rubric.pass === true) : null,
+    correct: behavioralCase
+      ? typeof trajectory?.pass === "boolean" ? Number(trajectory.pass) : null
+      : rubric && !graderError ? Number(rubric.pass === true) : null,
     graderError: behavioralCase ? false : graderError,
     // The tool-selection gate judges OO's composition; the control passes vacuously.
-    trajectoryPass: subjectName === "owner-operator" ? trajectory?.pass === true : true,
+    trajectoryPresent: Boolean(trajectory),
+    trajectoryWellFormed: typeof trajectory?.pass === "boolean",
+    behavioralStatePresent: behavioralCase
+      ? stateEvidencePresent(metadata.stateBefore) && stateEvidencePresent(metadata.stateAfter)
+      : null,
+    trajectoryPass: ["owner-operator", "owner-operator-behavioral"].includes(subjectName)
+      ? typeof trajectory?.pass === "boolean" ? trajectory.pass : null
+      : true,
     rubricReason: rubric?.reason ?? null,
     tokens: metric(metadata.tokensTotal ?? result.tokenUsage?.total),
     toolCalls: metric(metadata.toolCallCount),
@@ -280,6 +295,13 @@ function toRecord(result) {
 function metric(value) {
   const n = Number(value);
   return value != null && Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function stateEvidencePresent(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    && value.rawThreadStates && typeof value.rawThreadStates === "object" && !Array.isArray(value.rawThreadStates)
+    && Array.isArray(value.activeIds)
+    && value.transcriptExists && typeof value.transcriptExists === "object" && !Array.isArray(value.transcriptExists);
 }
 
 function collectCases(records) {
@@ -317,34 +339,6 @@ function summarize(cases) {
     latencyMs: sum(cases.map((item) => item.stats.latencyMs)),
     trajectoryPass: cases.every((item) => item.stats.trajectoryPass),
   };
-}
-
-function validateStatsRun(records, cases, { expectedIds, manifest, repeat }) {
-  const reasons = [];
-  if (!manifest) reasons.push("missing-manifest");
-  if (!manifest?.gitHead) reasons.push("missing-git-commit");
-  if (!manifest?.gitBranch || manifest.gitBranch === "HEAD") reasons.push("missing-git-branch");
-  // Exact membership, not cardinality: a swapped case must not publish as a full run.
-  const observedIds = new Set(cases.map((item) => item.caseId));
-  const missing = [...expectedIds].filter((id) => !observedIds.has(id));
-  const extra = [...observedIds].filter((id) => !expectedIds.has(id));
-  if (missing.length) reasons.push(`missing-cases:${missing.join("+")}`);
-  if (extra.length) reasons.push(`unexpected-cases:${extra.join("+")}`);
-  if (records.length !== expectedIds.size * repeat) reasons.push(`records-${records.length}-of-${expectedIds.size * repeat}`);
-  if (records.some((item) => item.subject === "unknown")) reasons.push("unknown-subject");
-  if (records.some((item) => item.graderError)) reasons.push("grader-error");
-  if (records.some((item) => item.correct === null)) reasons.push("missing-grade");
-  if (records.some((item) => item.providerError)) reasons.push("provider-error");
-  // Every observation carries the same run identity, or the results are not one run.
-  if (records.some((item) => !item.runId)) reasons.push("missing-run-id");
-  if (records.some((item) => !item.traceFile)) reasons.push("missing-trace");
-  if (records.some((item) => item.manifestHash !== manifest?.manifestHash)) reasons.push("manifest-mismatch");
-  if (unique(records.map((item) => item.modelLabel)).length !== 1) reasons.push("model-mismatch");
-  if (records.some((item) =>
-    item.tokens === null || item.toolCalls === null || item.cost === null || item.latencyMs === null
-  )) reasons.push("missing-telemetry");
-  if (cases.some((item) => item.stats.n !== repeat)) reasons.push("repeat-mismatch");
-  return { valid: reasons.length === 0, reasons };
 }
 
 function readManifest(items) {

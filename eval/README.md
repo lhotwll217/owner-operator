@@ -5,6 +5,8 @@ lifecycle decisions. Retrieval cases use a seeded read-only sandbox and the `ses
 skill for evidence. Behavioral cases run the production session composition and grade its
 actual tool trajectory plus resulting state. Pattern adapted from the
 [session-grep eval harness](https://github.com/lhotwll217/session-grep).
+The sandbox, credential, teardown, diagnostic, validity, and publication contracts live only in
+[Agent evaluations](../docs/evals.md).
 
 A run measures **one subject**: `owner-operator` (default), `naive-session-grep`, or
 `owner-operator-behavioral`. The first two are the
@@ -49,25 +51,18 @@ also pins the subject's `defaultThinkingLevel`, recorded as `reasoning_level`). 
 is a cheap pinned model at minimal reasoning (`openai-codex/gpt-5.4`; override with
 `EVAL_GRADER_MODEL=provider/model` — it is not a subject). No API keys.
 
-Each behavioral case/repeat gets a pristine disposable user home, `OO_HOME`, SQLite database,
-transcripts, temporary directory, Pi home, and in-process daemon. Authentication and explicit Pi
-model configuration are copied into that user only for the trial; ambient provider keys and other
-agent homes are discarded or redirected. The daemon uses an ephemeral loopback port, has delegated
-launch capacity fixed at zero, and receives a controlled terminal run outcome, so no real child is
-launched. The subject keeps ordinary Ask permission posture and the real `mark_thread_done` tool.
-Teardown deletes copied credentials/configuration first and retains only sanitized diagnostics when
-daemon/lease shutdown cannot be proved.
-
 ## PR comparison contract
 
 The base branch carries earlier full-suite entries in `eval_stat_log.json` — one compact
 single-subject summary per run (shape: `buildStatsEntry` in [`stats-log.mjs`](stats-log.mjs));
 the raw `global_results.json` under the run's ignored result folder holds run-time git state
-and per-case detail. Spend distributions cover calls, tokens, cost, and latency (the `oo`
+and per-case detail. Valid behavioral runs write the same raw comparison artifact but do not enter
+the compact full-suite stats log. Spend distributions cover calls, tokens, cost, and latency (the `oo`
 subprocess wall-clock, `result.latencyMs` fallback). A full run that cannot publish exits
 nonzero with the reasons. When posting a PR, backfill each run's entry to the commit that
 carries its work (`--backfill-git`). Targeted runs stay in `history.jsonl` and cannot
-publish; `compare.mjs` reports shared and unpaired cases separately when suites differ.
+publish unless their scope is `behavioral`; `compare.mjs` reports shared and unpaired cases
+separately when suites differ.
 
 ## Layout
 
@@ -76,11 +71,11 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
 | `fixtures/sessions.mjs` | synthetic sessions (claude + codex formats) — THE ground truth; cases key off facts planted here |
 | `seed/build-fixture-home.mjs` | materializes a run-scoped `$TMPDIR/oo-eval-sandbox/<run-id>`: transcripts + seeded OO_HOME (sources config, state.db with versioned details history); timestamps relative to now; answer-key paths blacklisted |
 | `providers/pi-agent-core.mjs` | shared runner: seeds once, spawns `oo`, records a hashed run manifest plus full session/tool trajectories and usage |
-| `sandbox.mjs`, `sandbox-user.ts` | shared disposable-root validation plus core-backed sandbox-user materialization and secret-first teardown |
+| `sandbox.mjs`, `sandbox-user.ts` | diagnostic sanitizers plus the canonical disposable user/daemon/session/CLI primitive ([contract](../docs/evals.md)) |
 | `providers/oo-agent.mjs` | the owner-operator subject: OO's shipped read-only composition |
 | `providers/naive-agent.mjs` | the naive-session-grep control: same runner/model/search capability without OO's state/index composition |
 | `providers/behavioral-agent.mjs` | real mutable subject: fresh trial per case/repeat over production chat composition and full roster |
-| `behavioral/run-mark-done-trial.ts` | isolated daemon/session lifecycle, controlled completed-run injection, Pi trajectory capture, and independent SQLite/transcript state capture |
+| `behavioral/run-mark-done-trial.ts` | mark-done case adapter: controlled completed-run injection, Pi trajectory capture, and independent SQLite/transcript state capture |
 | `behavioral/mark-done-fixture.mjs` | sanitized completed-work and same-lifecycle unresolved-work fixtures; no delegated process launch |
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
 | `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not a subject) |
@@ -90,7 +85,7 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
 | `compare.mjs` | downstream: pairs two published runs per case; optional A≥B correctness gate; qtype breakdown |
 | `loop.mjs` | attested one-case/probe/core/holdout runner; writes every run to history and per-run detail |
 | `history.jsonl` | local append-only experiment ledger for targeted, probe, core, and full runs |
-| `results/logs/<run>/global_results.json` | ignored full-run detail: metadata, pass rates, distributions, and per-case results |
+| `results/logs/<run>/global_results.json` | ignored valid full/behavioral comparison detail: metadata, pass rates, distributions, and per-case results |
 | `eval_stat_log.json` | committed newest-first compact single-subject summaries of valid full runs; commit/branch resolve to the PR state via --backfill-git |
 | `hypotheses/` | campaign-specific claims and expected trajectory changes |
 
@@ -103,11 +98,8 @@ publish; `compare.mjs` reports shared and unpaired cases separately when suites 
   metadata ([docs](https://www.promptfoo.dev/docs/providers/custom-api/)): require a
   `session-search`, require a DB/state locator before it, reject direct transcript reads.
   Mutation tools are absent from every subject; the denylist is defense in depth.
-- **Mutable behavior** — the same assertion module checks the exact production roster, controlled
-  completion identity/status, ordered Pi tool arguments/results, raw and active state before/after,
-  transcript preservation, an unrelated sentinel, and verified teardown. A missing intended
-  proactive call is a behavioral failure; missing or inconsistent instrumentation is a provider
-  error and invalid measurement.
+- **Mutable behavior** — the shared behavioral contract and case assertion grade production
+  trajectory plus observed state; [Agent evaluations](../docs/evals.md) owns the validity boundary.
 - **Cross-run comparison** — `compare.mjs` post-processes two runs' `outputPath` JSON: per-case pairing, spend deltas, and the A≥B correctness gate (promptfoo's viewer compares evals visually, without a gate).
 
 Providers reseed the sandbox at load, so every run gets fresh activity windows. Manifests,
@@ -115,11 +107,8 @@ daemon logs, Pi sessions, and tool traces land in `results/logs/<run>/`. The pub
 fails closed on missing grades, provider errors, count mismatches, or missing provenance; a
 fatal model turn trips a run-wide circuit breaker so later cases fail cheaply.
 
-Behavioral runs are targeted ledger entries and do not publish retrieval-suite stats. Their
-`measurementValid` field is independent of `promptfooPass`: a valid pre-change target-case failure
-is baseline evidence, while a provider error, teardown failure, or assertion-instrumentation problem
-invalidates the measurement. Inspect sanitized per-case `.trace.ndjson`, `.diagnostic.json`,
-`.session.jsonl`, stdout, and stderr under the run's ignored log directory.
+Behavioral runs publish canonical comparison artifacts but not retrieval-suite compact stats. See
+[Agent evaluations](../docs/evals.md) for the baseline-validity and diagnostic contract.
 
 ## Reading results
 

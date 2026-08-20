@@ -194,10 +194,16 @@ const behavioralContext = ({
   },
   providerResponse: {
     metadata: {
+      trialVersion: 1,
+      modelLabel: "test-provider/test-model",
+      sessionId: "parent-129",
+      numTurns: 1,
+      traceProblems: [],
+      harnessValid: true,
       completion: { outcome: "completed", childSessionId: "child-129" },
       toolRoster: ["read", "bash", "mark_thread_done"],
       configuredToolRoster: ["read", "bash", "mark_thread_done"],
-      toolExecutions: executions,
+      toolExecutions: executions.map((execution, index) => ({ id: `call-${index}`, ...execution })),
       stateBefore: {
         rawThreadStates: { "child-129": "working", "sentinel-129": "needs-you" },
         activeIds: ["child-129", "sentinel-129"],
@@ -210,6 +216,7 @@ const behavioralContext = ({
       },
       sandbox: {
         isolated: true,
+        credentialFileRemoved: true,
         daemonStopped: true,
         leasesRemaining: 0,
         diagnosticsRetained: true,
@@ -279,5 +286,16 @@ brokenSandbox.providerResponse.metadata.sandbox.daemonStopped = false;
 const brokenHarness = toolUseAssertion("", brokenSandbox);
 assert.equal(brokenHarness.pass, false);
 assert.match(brokenHarness.reason, /sandbox teardown was not verified/);
+
+const unattestedHarness = behavioralContext({
+  shouldMarkDone: false,
+  executions: [],
+  childState: "working",
+  activeIds: ["child-129", "sentinel-129"],
+});
+unattestedHarness.providerResponse.metadata.harnessValid = false;
+const unattested = toolUseAssertion("", unattestedHarness);
+assert.equal(unattested.pass, false);
+assert.match(unattested.reason, /did not attest a valid harness/);
 
 process.stdout.write("ok — eval tool gate: retrieval policy plus behavioral trajectory/state profiles hold\n");

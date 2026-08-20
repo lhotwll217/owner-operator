@@ -1,3 +1,5 @@
+import { behavioralHarnessProblems } from "../behavioral/contract.mjs";
+
 /** Normalize the real in-process Pi trial into the provider metadata shape used by Promptfoo. */
 export function normalizeBehavioralTrialResult(payload) {
   const events = Array.isArray(payload?.traceEvents) ? payload.traceEvents : [];
@@ -5,9 +7,14 @@ export function normalizeBehavioralTrialResult(payload) {
   const byId = new Map();
   const usage = { input: 0, output: 0, cacheRead: 0, total: 0, cost: 0 };
   let turns = 0;
+  const traceProblems = [];
 
   for (const event of events) {
     if (event.event === "tool_call") {
+      if (!event.id || !event.tool || byId.has(event.id)) {
+        traceProblems.push("tool call is missing identity/name or duplicates an identity");
+        continue;
+      }
       const execution = {
         id: event.id,
         name: event.tool,
@@ -20,7 +27,10 @@ export function normalizeBehavioralTrialResult(payload) {
       byId.set(event.id, execution);
     } else if (event.event === "tool_result") {
       const execution = byId.get(event.id);
-      if (!execution) continue;
+      if (!execution) {
+        traceProblems.push("tool result has no matching call");
+        continue;
+      }
       execution.isError = Boolean(event.isError);
       execution.result = event.result ?? null;
       execution.resultChars = JSON.stringify(event.result ?? "").length;
@@ -34,34 +44,8 @@ export function normalizeBehavioralTrialResult(payload) {
     }
   }
 
-  const harnessProblems = [];
-  if (payload?.version !== 1) harnessProblems.push("unsupported or missing behavioral trial version");
-  if (!payload?.sessionId) harnessProblems.push("missing parent session identity");
-  if (!payload?.modelLabel) harnessProblems.push("missing subject model identity");
-  if (!Array.isArray(payload?.toolRoster) || !Array.isArray(payload?.configuredToolRoster) ||
-      JSON.stringify(payload.toolRoster) !== JSON.stringify(payload.configuredToolRoster) ||
-      !payload.toolRoster.includes("mark_thread_done")) {
-    harnessProblems.push("production configured tool roster was not preserved");
-  }
-  if (toolExecutions.some(({ isError }) => isError === null)) {
-    harnessProblems.push("incomplete tool execution in Pi trajectory");
-  }
-  if (turns < 1) harnessProblems.push("no completed assistant turn in Pi trajectory");
-  if (payload?.completion?.outcome !== "completed" || !payload?.completion?.childSessionId) {
-    harnessProblems.push("missing completed lifecycle evidence");
-  }
-  if (!payload?.stateBefore?.rawThreadStates || !payload?.stateAfter?.rawThreadStates) {
-    harnessProblems.push("missing independently captured state evidence");
-  }
-  if (payload?.sandbox?.isolated !== true) harnessProblems.push("sandbox isolation was not verified");
-  if (payload?.sandbox?.daemonStopped !== true || Number(payload?.sandbox?.leasesRemaining) !== 0) {
-    harnessProblems.push("sandbox teardown was not verified");
-  }
-  if (payload?.sandbox?.diagnosticsRetained !== true) {
-    harnessProblems.push("sanitized diagnostics were not retained");
-  }
-
   const metadata = {
+    trialVersion: payload?.version ?? null,
     caseId: payload?.caseId ?? null,
     modelLabel: payload?.modelLabel ?? null,
     sessionId: payload?.sessionId ?? null,
@@ -77,13 +61,15 @@ export function normalizeBehavioralTrialResult(payload) {
     tokensOutput: usage.output,
     costUsd: usage.cost,
     numTurns: turns,
+    traceProblems,
     completion: payload?.completion ?? null,
     stateBefore: payload?.stateBefore ?? null,
     stateAfter: payload?.stateAfter ?? null,
     sandbox: payload?.sandbox ?? null,
-    harnessValid: harnessProblems.length === 0,
-    harnessProblems,
   };
+  const harnessProblems = behavioralHarnessProblems(metadata);
+  metadata.harnessValid = harnessProblems.length === 0;
+  metadata.harnessProblems = harnessProblems;
   return {
     output: String(payload?.assistantText ?? "").trim(),
     metadata,
