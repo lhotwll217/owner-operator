@@ -7,6 +7,11 @@ Cross-cutting tests live here; module-bound tests stay colocated under `src`. Se
   `*.e2e.test.ts` tier anywhere under `src/` and `test/`, then runs each file through tsx,
   fail-fast.
 - **`eval-daemon.integration.test.ts`** covers the managed eval daemon lifecycle.
+- **`eval-sandbox-user.integration.test.ts`** covers the behavioral eval's isolated user/config and
+  secret-safe cleanup contract.
+- **`eval-mark-done-fixture.integration.test.ts`** and
+  **`eval-behavioral-result.integration.test.ts`** cover controlled completion fixtures and Pi
+  trajectory normalization at deterministic seams.
 - **`scan.integration.test.ts`** covers the real transcript scanner across session files and git.
 - **`sessions-grep.integration.test.ts`** covers the vendored session-search primitive and privacy
   boundaries.

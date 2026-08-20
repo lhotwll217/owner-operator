@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evalSandboxPath } from "./sandbox.mjs";
 import { backfillGitIdentity, buildGlobalResults, buildStatsEntry, upsertStatsLog } from "./stats-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +21,11 @@ const statsLogFile = path.join(here, "eval_stat_log.json");
 const iterationsDir = path.join(here, "results", "iterations");
 fs.mkdirSync(iterationsDir, { recursive: true });
 
-const SUBJECTS = ["owner-operator", "naive-session-grep"];
+const SUBJECTS = ["owner-operator", "naive-session-grep", "owner-operator-behavioral"];
+const BEHAVIORAL_IDS = [
+  "delegated-child-confidently-finished",
+  "delegated-child-completed-unresolved",
+];
 
 const PROBE_IDS = [
   "evidence-flaky-error",             // rare literal / query-led
@@ -41,8 +46,8 @@ const CORE_IDS = [
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
-    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full]\n" +
-    "         [--subject owner-operator|naive-session-grep] [--repeat N (default 3; 1 = smoke)] [--dry]\n" +
+    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full | --behavioral]\n" +
+    "         [--subject owner-operator|naive-session-grep|owner-operator-behavioral] [--repeat N (default 3; 1 = smoke)] [--dry]\n" +
     "       node eval/loop.mjs --backfill-git EVAL_FOLDER [--commit SHA] [--branch NAME]\n" +
     "A run measures one subject. Compare two runs downstream:\n" +
     "  node eval/compare.mjs <global_results_A.json> <global_results_B.json> [--gate]\n" +
@@ -73,46 +78,71 @@ if (has("backfill-git")) {
 const label = option("label");
 const notes = option("notes");
 const custom = option("cases");
-let subject = option("subject", "owner-operator");
+const behavioral = has("behavioral");
+let subject = option("subject", behavioral ? "owner-operator-behavioral" : "owner-operator");
 const repeat = Number(option("repeat", "3"));
 const dry = has("dry");
 if (!label) fail("--label is required: name the mechanism being tested");
 if (!notes) fail("--notes is required: state the hypothesis and expected trajectory effect");
 if (!SUBJECTS.includes(subject)) fail(`unknown subject: ${subject}; expected ${SUBJECTS.join(" | ")}`);
 if (!Number.isInteger(repeat) || repeat < 1) fail("--repeat must be a positive integer");
-if ([has("probe"), has("full"), Boolean(custom)].filter(Boolean).length > 1) {
-  fail("choose only one of --probe, --full, or --cases id1,id2");
+if ([has("probe"), has("full"), behavioral, Boolean(custom)].filter(Boolean).length > 1) {
+  fail("choose only one of --probe, --full, --behavioral, or --cases id1,id2");
+}
+if (behavioral && subject !== "owner-operator-behavioral") {
+  fail("--behavioral requires the owner-operator-behavioral subject");
 }
 
 const knownIds = new Set(
   [...fs.readFileSync(path.join(here, "cases.yaml"), "utf8").matchAll(/^- description:\s*(\S+)\s*$/gm)]
     .map((match) => match[1]),
 );
-const ids = custom ? custom.split(",").filter(Boolean) : has("probe") ? PROBE_IDS : has("full") ? [] : CORE_IDS;
+const retrievalIds = [...knownIds].filter((id) => !BEHAVIORAL_IDS.includes(id));
+const ids = behavioral
+  ? BEHAVIORAL_IDS
+  : custom
+    ? custom.split(",").filter(Boolean)
+    : has("probe")
+      ? PROBE_IDS
+      : has("full")
+        ? retrievalIds
+        : CORE_IDS;
 for (const id of ids) if (!knownIds.has(id)) fail(`unknown case id: ${id}`);
-const scope = custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
-const pattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
+const scope = behavioral ? "behavioral" : custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
+const filterPattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
+const pattern = scope === "full" ? null : filterPattern;
 const createdAt = new Date().toISOString();
 const requestedRunId = createdAt.replace(/[:.]/g, "-");
 
 let evalStatus = 0;
 if (!dry) {
+  const promptfooHome = evalSandboxPath(`${requestedRunId}-promptfoo`);
+  fs.mkdirSync(promptfooHome, { recursive: true });
   const command = [
     "--no-install", "promptfoo", "eval",
     "-c", "eval/promptfooconfig.yaml",
     "--no-cache",
     "--max-concurrency", "1",
     "--filter-providers", `^${escapeRegex(subject)}$`,
-    ...(pattern ? ["--filter-pattern", pattern] : []),
+    ...(filterPattern ? ["--filter-pattern", filterPattern] : []),
     ...(repeat > 1 ? ["--repeat", String(repeat)] : []),
   ];
   console.log(`[loop] ${label} subject=${subject} scope=${scope}${ids.length ? ` cases=${ids.join(",")}` : ""} repeat=${repeat}`);
-  const run = spawnSync("npx", command, {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: { ...process.env, OO_EVAL_RUN_ID: requestedRunId },
-  });
-  evalStatus = run.status ?? 1;
+  try {
+    const run = spawnSync("npx", command, {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        OO_EVAL_RUN_ID: requestedRunId,
+        PROMPTFOO_CONFIG_DIR: promptfooHome,
+        PROMPTFOO_LOG_DIR: path.join(promptfooHome, "logs"),
+      },
+    });
+    evalStatus = run.status ?? 1;
+  } finally {
+    fs.rmSync(promptfooHome, { recursive: true, force: true });
+  }
   if (!fs.existsSync(resultsFile)) fail("promptfoo produced no eval/results/latest.json");
 }
 
@@ -134,7 +164,7 @@ const metrics = summarize(cases);
 
 const manifest = readManifest(records);
 const runValidity = validateStatsRun(records, cases, {
-  expectedIds: scope === "full" ? knownIds : new Set(ids),
+  expectedIds: new Set(ids),
   manifest,
   repeat,
 });
@@ -156,6 +186,7 @@ const record = {
   logs: records[0]?.traceFile ? path.dirname(records[0].traceFile) : null,
   detail: path.relative(repoRoot, detail),
   promptfooPass: evalStatus === 0,
+  measurementValid: runValidity.valid,
   metrics,
 };
 fs.writeFileSync(detail, JSON.stringify({ ...record, cases }, null, 2) + "\n");
@@ -214,6 +245,7 @@ function toRecord(result) {
   const rubric = components.find((component) => component.assertion?.type === "llm-rubric");
   const trajectory = components.find((component) => component.assertion?.metric === "tool_selection");
   const metadata = result.response?.metadata ?? {};
+  const behavioralCase = result.testCase?.metadata?.profile === "mark-done" || metadata.profile === "mark-done";
   // A broken judge must not read as a failed answer: the grader emits a sentinel-prefixed
   // error reason, and promptfoo tags its own grading failures.
   const graderError =
@@ -224,8 +256,8 @@ function toRecord(result) {
     caseId: result.vars?.id ?? result.description ?? `test-${result.testIdx}`,
     subject: subjectName,
     qtype: result.testCase?.metadata?.qtype ?? "unknown",
-    correct: rubric && !graderError ? Number(rubric.pass === true) : null,
-    graderError,
+    correct: behavioralCase ? Number(trajectory?.pass === true) : rubric && !graderError ? Number(rubric.pass === true) : null,
+    graderError: behavioralCase ? false : graderError,
     // The tool-selection gate judges OO's composition; the control passes vacuously.
     trajectoryPass: subjectName === "owner-operator" ? trajectory?.pass === true : true,
     rubricReason: rubric?.reason ?? null,
@@ -240,6 +272,7 @@ function toRecord(result) {
     modelLabel: metadata.modelLabel ?? null,
     traceFile: metadata.traceFile ?? null,
     providerError: result.response?.error ?? null,
+    harnessValid: metadata.harnessValid ?? null,
   };
 }
 

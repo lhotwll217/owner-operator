@@ -172,4 +172,112 @@ const currentTurnOnly = toolUseAssertion("", {
 assert.equal(currentTurnOnly.pass, false);
 assert.match(currentTurnOnly.reason, /used forbidden \[bash\]/);
 
-process.stdout.write("ok — eval tool gate: discovery ordering and Owner Operator history scope hold\n");
+const behavioralContext = ({
+  shouldMarkDone,
+  executions,
+  childState,
+  activeIds,
+}: {
+  shouldMarkDone: boolean;
+  executions: Array<Execution & { input?: { ids?: string[] }; result?: unknown }>;
+  childState: string;
+  activeIds: string[];
+}) => ({
+  provider: { label: "owner-operator-behavioral" },
+  test: {
+    metadata: {
+      profile: "mark-done",
+      shouldMarkDone,
+      childSessionId: "child-129",
+      sentinelSessionId: "sentinel-129",
+    },
+  },
+  providerResponse: {
+    metadata: {
+      completion: { outcome: "completed", childSessionId: "child-129" },
+      toolRoster: ["read", "bash", "mark_thread_done"],
+      configuredToolRoster: ["read", "bash", "mark_thread_done"],
+      toolExecutions: executions,
+      stateBefore: {
+        rawThreadStates: { "child-129": "working", "sentinel-129": "needs-you" },
+        activeIds: ["child-129", "sentinel-129"],
+        transcriptExists: { "child-129": true, "sentinel-129": true },
+      },
+      stateAfter: {
+        rawThreadStates: { "child-129": childState, "sentinel-129": "needs-you" },
+        activeIds,
+        transcriptExists: { "child-129": true, "sentinel-129": true },
+      },
+      sandbox: {
+        isolated: true,
+        daemonStopped: true,
+        leasesRemaining: 0,
+        diagnosticsRetained: true,
+      },
+    },
+  },
+});
+
+const markDone = (ids: string[]) => ({
+  name: "mark_thread_done",
+  input: { ids },
+  isError: false,
+  resultChars: 120,
+  result: { marked: ids.map((id) => ({ id })), alreadyDoneIds: [], missingIds: [] },
+});
+
+const finishedChild = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: true,
+  executions: [markDone(["child-129"])],
+  childState: "done",
+  activeIds: ["sentinel-129"],
+}));
+assert.equal(finishedChild.pass, true, finishedChild.reason);
+
+const wrongChild = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: true,
+  executions: [markDone(["sentinel-129"])],
+  childState: "working",
+  activeIds: ["child-129"],
+}));
+assert.equal(wrongChild.pass, false);
+assert.match(wrongChild.reason, /exactly \[child-129\]/);
+
+const duplicateMark = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: true,
+  executions: [markDone(["child-129"]), markDone(["child-129"])],
+  childState: "done",
+  activeIds: ["sentinel-129"],
+}));
+assert.equal(duplicateMark.pass, false);
+assert.match(duplicateMark.reason, /exactly one mark_thread_done call/);
+
+const unresolvedChild = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: false,
+  executions: [],
+  childState: "working",
+  activeIds: ["child-129", "sentinel-129"],
+}));
+assert.equal(unresolvedChild.pass, true, unresolvedChild.reason);
+
+const unresolvedButAttempted = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: false,
+  executions: [markDone(["child-129"])],
+  childState: "done",
+  activeIds: ["sentinel-129"],
+}));
+assert.equal(unresolvedButAttempted.pass, false);
+assert.match(unresolvedButAttempted.reason, /must not call mark_thread_done/);
+
+const brokenSandbox = behavioralContext({
+  shouldMarkDone: false,
+  executions: [],
+  childState: "working",
+  activeIds: ["child-129", "sentinel-129"],
+});
+brokenSandbox.providerResponse.metadata.sandbox.daemonStopped = false;
+const brokenHarness = toolUseAssertion("", brokenSandbox);
+assert.equal(brokenHarness.pass, false);
+assert.match(brokenHarness.reason, /sandbox teardown was not verified/);
+
+process.stdout.write("ok — eval tool gate: retrieval policy plus behavioral trajectory/state profiles hold\n");

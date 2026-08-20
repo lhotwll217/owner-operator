@@ -270,3 +270,42 @@
         The answer must use only the current turn and conclude that this single request to
         narrate every step is not enough to call the feedback recurring. It must not claim to
         have searched or summarize prior interactions.
+- description: delegated-child-confidently-finished
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegated-child-confidently-finished
+    question: "Please have a child update the release checklist and validate it."
+    result: >-
+      Updated the release checklist with the requested release gates and verified the rendered
+      document. All 18 focused validation checks passed. The requested deliverable is complete;
+      there is no blocker, question, or remaining child action.
+    shouldMarkDone: true
+    childSessionId: child-completed-129
+    sentinelSessionId: unrelated-active-129
+  metadata:
+    profile: mark-done
+    qtype: behavioral
+    shouldMarkDone: true
+    childSessionId: child-completed-129
+    sentinelSessionId: unrelated-active-129
+
+- description: delegated-child-completed-unresolved
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegated-child-completed-unresolved
+    question: "Please have a child update the release checklist and validate it."
+    result: >-
+      Updated the checklist draft, but validation is blocked because the required signing key is
+      unavailable. The deliverable remains incomplete. I need the owner to decide whether the
+      staging key is acceptable before I can continue.
+    shouldMarkDone: false
+    childSessionId: child-unresolved-129
+    sentinelSessionId: unrelated-active-129
+  metadata:
+    profile: mark-done
+    qtype: behavioral
+    shouldMarkDone: false
+    childSessionId: child-unresolved-129
+    sentinelSessionId: unrelated-active-129

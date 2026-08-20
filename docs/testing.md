@@ -61,6 +61,8 @@ npm run lint                                          # oxlint
 npm run test:integration                              # one tier
 npm run poll:smoke                                    # smoke — reads your live sessions
 npm run test:agent                                     # live — needs model auth, paid
+npm run eval:behavioral -- --label "<campaign>" \
+  --notes "<claim>"                                    # real OO session + mutable state, paid
 OO_RUN_DELEGATION_SELECTION_EVAL=1 \
 OO_DELEGATION_SELECTION_AUTH_PATH=/explicit/eval/auth.json \
   npm run test:delegation-selection                    # real model chooses controlled trajectories
@@ -83,6 +85,11 @@ discards ambient provider keys, ACP overrides, `CODEX_HOME`, and `CLAUDE_CONFIG_
 a neutral disposable directory. It preserves that directory when teardown cannot prove the daemon,
 leased process tree, and process lease are all gone, but deletes the copied harness credential and
 configuration first. Never put secret values in these variables.
+
+The Promptfoo behavioral eval likewise copies only the configured Pi auth/model files into a fresh
+case/repeat-scoped user, redirects all state and transcript roots, runs a disposable loopback daemon,
+and removes credential/config copies before retaining any teardown diagnostic. Its controlled
+delegated-run outcome never launches a child process. See [`eval/README.md`](../eval/README.md).
 
 CI runs on every PR and every landing on `main`: [`ci.yml`](../.github/workflows/ci.yml);
 the widget suite: [`widget.yml`](../.github/workflows/widget.yml) (macOS, path-filtered).

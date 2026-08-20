@@ -76,6 +76,16 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     and its private `vendor/` receives the
     [pinned upstream primitive](https://github.com/lhotwll217/session-grep/blob/f786ca24440e72f93c63e7aded30a67170f9d41c/skills/session-grep/session-grep.mjs#L1-L5)
     untouched.
+- **[Promptfoo](https://github.com/promptfoo/promptfoo/tree/7d26d8f3cccb35dc6df53b18af32f0082cef2197)** —
+  first-party real-agent evaluation examples.
+  - Borrowed (behavioral harness, [#129](https://github.com/lhotwll217/owner-operator/issues/129)):
+    serialize mutable cases and capture/reset observable effects around each case
+    ([advanced agent example](https://github.com/promptfoo/promptfoo/tree/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced),
+    [hooks](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced/hooks.js));
+    configure real provider sandbox/permission behavior
+    ([advanced options](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced-options/promptfooconfig.yaml));
+    and grade real agent trajectories plus workspace outcomes against shared fixtures
+    ([agent SDK comparison](https://github.com/promptfoo/promptfoo/tree/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/compare-agentic-sdks)).
 - **Agent Deck**
   - Borrowed: one canonical, ordered tool registry and exact-set regression tests
     ([registry contract](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry.go#L15-L33),

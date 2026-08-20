@@ -28,6 +28,7 @@
     "test:agent-runs:codex-live": "tsx src/agent-runs/acp-launcher.codex.live.test.ts",
     "test:delegated-identity:live": "node --import tsx src/agent-runs/delegated-identity.live.test.ts",
     "eval": "node eval/loop.mjs --full",
+    "eval:behavioral": "node eval/loop.mjs --behavioral",
     "eval:loop": "node eval/loop.mjs",
     "eval:compare": "node eval/compare.mjs",
     "poll:smoke": "tsx src/session-monitor/monitor.smoke.ts",

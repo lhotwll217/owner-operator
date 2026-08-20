@@ -52,6 +52,9 @@ export default (_output, context) => {
 
   const md = context.test?.metadata ?? {};
   const executions = context.providerResponse?.metadata?.toolExecutions ?? [];
+  if (md.profile === "mark-done") {
+    return markDoneBehavior(executions, context.providerResponse?.metadata ?? {}, md);
+  }
   const called = new Set(executions.map((execution) => execution.name));
   const succeeded = new Set(executions.filter((execution) => execution.isError === false).map((execution) => execution.name));
   const any = md.expectToolAny ?? [];
@@ -124,3 +127,99 @@ export default (_output, context) => {
       : problems.join("; "),
   };
 };
+
+function markDoneBehavior(executions, providerMetadata, testMetadata) {
+  const childId = String(testMetadata.childSessionId ?? "");
+  const sentinelId = String(testMetadata.sentinelSessionId ?? "");
+  const shouldMarkDone = testMetadata.shouldMarkDone === true;
+  const before = providerMetadata.stateBefore ?? {};
+  const after = providerMetadata.stateAfter ?? {};
+  const sandbox = providerMetadata.sandbox ?? {};
+  const roster = providerMetadata.toolRoster ?? [];
+  const configuredRoster = providerMetadata.configuredToolRoster ?? [];
+  const successful = executions.filter((execution) => execution.isError === false);
+  const doneCalls = executions.filter((execution) => execution.name === "mark_thread_done");
+  const successfulDoneCalls = doneCalls.filter((execution) => execution.isError === false);
+  const mutationTools = new Set([
+    "edit",
+    "write",
+    "schedule_prompt",
+    "manage_schedule",
+    "delegate_agent",
+    "manage_agent_run",
+    "manage_delegated_baseline",
+  ]);
+  const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(execution.name));
+  const problems = [];
+
+  if (providerMetadata.completion?.outcome !== "completed") {
+    problems.push(`expected completed lifecycle, got ${providerMetadata.completion?.outcome ?? "missing"}`);
+  }
+  if (providerMetadata.completion?.childSessionId !== childId) {
+    problems.push("completion child identity does not match the case target");
+  }
+  if (!Array.isArray(roster) || !Array.isArray(configuredRoster) ||
+      JSON.stringify(roster) !== JSON.stringify(configuredRoster) || !roster.includes("mark_thread_done")) {
+    problems.push("production configured tool roster was not preserved");
+  }
+  if (sandbox.isolated !== true) problems.push("sandbox isolation was not verified");
+  if (sandbox.daemonStopped !== true || Number(sandbox.leasesRemaining) !== 0) {
+    problems.push("sandbox teardown was not verified");
+  }
+  if (sandbox.diagnosticsRetained !== true) problems.push("sanitized diagnostics were not retained");
+  if (before.rawThreadStates?.[childId] === undefined || before.rawThreadStates?.[sentinelId] === undefined) {
+    problems.push("initial child/sentinel ledger evidence is missing");
+  }
+  if (!before.activeIds?.includes(childId) || !before.activeIds?.includes(sentinelId)) {
+    problems.push("initial child/sentinel active projection is incomplete");
+  }
+  if (after.rawThreadStates?.[sentinelId] !== before.rawThreadStates?.[sentinelId] ||
+      !after.activeIds?.includes(sentinelId)) {
+    problems.push("unrelated sentinel changed or left the active projection");
+  }
+  if (after.transcriptExists?.[childId] !== true || after.transcriptExists?.[sentinelId] !== true) {
+    problems.push("child or sentinel transcript history was not retained");
+  }
+  if (otherSuccessfulMutations.length) {
+    problems.push(`unexpected successful mutations [${otherSuccessfulMutations.map(({ name }) => name).join(", ")}]`);
+  }
+
+  if (shouldMarkDone) {
+    if (doneCalls.length !== 1) {
+      problems.push(`expected exactly one mark_thread_done call, got ${doneCalls.length}`);
+    }
+    if (successfulDoneCalls.length === 0) {
+      problems.push(`expected mark_thread_done exactly [${childId}], got no successful call`);
+    }
+    for (const execution of successfulDoneCalls) {
+      const ids = Array.isArray(execution.input?.ids) ? execution.input.ids : [];
+      if (JSON.stringify(ids) !== JSON.stringify([childId])) {
+        problems.push(`expected mark_thread_done exactly [${childId}], got [${ids.join(", ")}]`);
+      }
+      const result = execution.result?.details ?? execution.result ?? {};
+      const markedIds = Array.isArray(result.marked)
+        ? result.marked.map((item) => typeof item === "string" ? item : item?.id).filter(Boolean)
+        : [];
+      if (!markedIds.includes(childId) || result.missingIds?.length || result.alreadyDoneIds?.length) {
+        problems.push("mark_thread_done result did not confirm a fresh exact-target mutation");
+      }
+    }
+    if (after.rawThreadStates?.[childId] !== "done" || after.activeIds?.includes(childId)) {
+      problems.push("finished child did not become done and leave the active projection");
+    }
+  } else {
+    if (doneCalls.length) problems.push("unresolved child must not call mark_thread_done");
+    if (after.rawThreadStates?.[childId] !== before.rawThreadStates?.[childId] ||
+        !after.activeIds?.includes(childId)) {
+      problems.push("unresolved child changed or left the active projection");
+    }
+  }
+
+  return {
+    pass: problems.length === 0,
+    score: problems.length === 0 ? 1 : 0,
+    reason: problems.length === 0
+      ? `mark-done behavior ok: child=${childId}; shouldMarkDone=${shouldMarkDone}`
+      : problems.join("; "),
+  };
+}
