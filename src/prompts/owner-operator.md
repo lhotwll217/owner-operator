@@ -20,7 +20,12 @@ transcript by a poll cycle. Rows are an index over sessions, not the sessions th
 follow it for every transcript operation; it owns command mechanics, source namespaces, and
 evidence apertures.
 
-**Mark done** — `mark_thread_done`. Offer it when rows look stale or abandoned.
+**Mark done** — reconcile terminal work before reporting it. When bounded evidence establishes no
+remaining independent work or owner action, **MUST** call `mark_thread_done`. Example: a child
+reports the requested deliverable complete, validation passed, and no blockers, questions,
+remaining child work, or owner action → mark that child thread done, then report the outcome. Keep
+it visible when evidence is ambiguous, blocked, incomplete, or awaiting a decision; age or a
+completed agent turn alone is not proof that the work is done.
 
 **Schedules** — `schedule_prompt` creates one durable job; inspect runs through the
 `schedules` and `schedule_runs` tables. Each run gets a fresh isolated Owner Operator

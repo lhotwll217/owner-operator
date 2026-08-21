@@ -309,3 +309,163 @@
     shouldMarkDone: false
     childSessionId: child-unresolved-129
     sentinelSessionId: unrelated-active-129
+
+- description: delegation-natural-first
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-natural-first
+    behaviorProfile: delegation-selection
+    behaviorClaim: natural-first-delegation
+    question: >-
+      Please delegate a quick inventory of this repository with Codex. Choose the model and
+      reasoning effort for me.
+    harnessRoster: |-
+      # Harness roster
+
+      ### Quick mechanical work
+
+      _No preference configured._
+    harnessDetails:
+      - harness: codex
+        observedAt: "2026-08-20T12:00:00.000Z"
+        source: controlled-current-observation
+        account: { plan: team }
+        models:
+          - id: controlled-default
+            displayName: Controlled Default
+            reasoningLevels: [high]
+            unsupportedReasoningLevels: []
+            defaultReasoningLevel: high
+            isDefault: true
+        allowanceWindows:
+          - id: weekly
+            label: Weekly
+            usedPercent: 12
+            resetsAt: 1787335200
+            windowMinutes: 10080
+        baselineCandidate: null
+        notes: []
+        errors: []
+    baselineCandidate:
+      harness: codex
+      model: controlled-default
+      effort: high
+      availableEfforts: [high]
+    behaviorExpected:
+      candidate: { harness: codex, model: controlled-default, effort: high }
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: natural-first-delegation
+
+- description: delegation-usage-explanation
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-usage-explanation
+    behaviorProfile: delegation-selection
+    behaviorClaim: usage-explanation
+    question: >-
+      For a careful implementation review, what is our current harness usage, and does it change
+      what you would recommend? Please explain what is known and unknown.
+    harnessRoster: |-
+      # Harness roster
+
+      ### Implementation review
+
+      Prefer codex / codex-review / high. When Codex weekly usage is above 60%, prefer
+      claude-code / claude-review / high instead.
+    harnessDetails:
+      - harness: codex
+        observedAt: "2026-08-20T12:00:00.000Z"
+        source: controlled-current-observation
+        account: { plan: team }
+        models:
+          - id: codex-review
+            displayName: Codex Review
+            reasoningLevels: [high]
+            unsupportedReasoningLevels: []
+            defaultReasoningLevel: high
+            isDefault: true
+        allowanceWindows:
+          - id: weekly
+            label: Weekly
+            usedPercent: 63
+            resetsAt: 1787335200
+            windowMinutes: 10080
+        baselineCandidate: null
+        notes: []
+        errors: []
+      - harness: claude-code
+        observedAt: "2026-08-20T12:00:00.000Z"
+        source: controlled-current-observation
+        account: null
+        models:
+          - id: claude-review
+            displayName: Claude Review
+            reasoningLevels: [high]
+            unsupportedReasoningLevels: []
+            defaultReasoningLevel: high
+            isDefault: true
+        allowanceWindows: null
+        baselineCandidate: null
+        notes: ["Allowance usage is not exposed by this harness."]
+        errors: []
+    behaviorExpected:
+      usedPercent: 63
+      unknownHarness: claude-code
+      recommendedHarness: claude-code
+      usageAffectedRecommendation: true
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: usage-explanation
+
+- description: delegation-approved-default-reuse
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-approved-default-reuse
+    behaviorProfile: delegation-selection
+    behaviorClaim: approved-default-reuse
+    question: >-
+      Please delegate a repository inventory with Codex, using my approved default for its model
+      and reasoning effort.
+    harnessRoster: |-
+      # Harness roster
+
+      ### Quick mechanical work
+
+      _No preference configured._
+    harnessDetails:
+      - harness: codex
+        observedAt: "2026-08-20T12:00:00.000Z"
+        source: controlled-current-observation
+        account: { plan: team }
+        models:
+          - id: controlled-approved-model
+            displayName: Controlled Approved Model
+            reasoningLevels: [high]
+            unsupportedReasoningLevels: []
+            defaultReasoningLevel: high
+            isDefault: true
+        allowanceWindows:
+          - id: weekly
+            label: Weekly
+            usedPercent: 18
+            resetsAt: 1787335200
+            windowMinutes: 10080
+        baselineCandidate: null
+        notes: []
+        errors: []
+    approvedBaseline:
+      harness: codex
+      model: controlled-approved-model
+      effort: high
+    behaviorExpected:
+      identity: { harness: codex, model: controlled-approved-model, effort: high }
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: approved-default-reuse

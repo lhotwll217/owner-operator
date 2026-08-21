@@ -4,5 +4,5 @@ import { makePiAgentProvider } from "./pi-agent-core.mjs";
 
 export default makePiAgentProvider({
   arm: "owner-operator-behavioral",
-  profile: "mark-done",
+  profile: "behavioral",
 });

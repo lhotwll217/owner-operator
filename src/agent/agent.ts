@@ -31,7 +31,12 @@ import {
   permissionSystemExtensionPath,
 } from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
+import {
+  configuredOwnerOperatorTools,
+  createOwnerOperatorCustomTools,
+  ownerOperatorCustomTools,
+  type OwnerOperatorHarnessAdapters,
+} from "./tools";
 import { createOwnerOperatorToolDisplayExtension } from "./tool-display";
 
 export { repoRoot };
@@ -59,6 +64,14 @@ export interface OwnerOperatorSessionOptions {
   callerSessionId?: string;
   toolsAllow?: readonly AgentToolId[];
   credentials?: CredentialStore;
+  piServices?: OwnerOperatorPiServices;
+  harnessAdapters?: OwnerOperatorHarnessAdapters;
+}
+
+export interface OwnerOperatorPiServices {
+  paths: ReturnType<typeof ownerOperatorPaths>;
+  modelRuntime: ModelRuntime;
+  settingsManager: SettingsManager;
 }
 
 export async function bindOwnerOperatorSessionExtensions(
@@ -99,11 +112,10 @@ export function evalSettingsOverrides(
 export const ownerOperatorPrompt = (): string =>
   readFileSync(join(repoRoot, "src", "prompts", "owner-operator.md"), "utf8");
 
-export async function ownerOperatorPiServices(ooHome?: string, credentials?: CredentialStore): Promise<{
-  paths: ReturnType<typeof ownerOperatorPaths>;
-  modelRuntime: ModelRuntime;
-  settingsManager: SettingsManager;
-}> {
+export async function ownerOperatorPiServices(
+  ooHome?: string,
+  credentials?: CredentialStore,
+): Promise<OwnerOperatorPiServices> {
   const paths = ensureOwnerOperatorWorkspace(ooHome);
   return {
     paths,
@@ -127,18 +139,22 @@ export async function createOwnerOperatorSession(
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
-  const { modelRuntime, paths, settingsManager } = await ownerOperatorPiServices(undefined, opts.credentials);
+  const { modelRuntime, paths, settingsManager } = opts.piServices
+    ?? await ownerOperatorPiServices(undefined, opts.credentials);
   configurePermissionSystemEnvironment(paths);
   const configuredTools = configuredOwnerOperatorTools(paths.home);
   const readOnlyCustomToolNames = new Set<string>([
     AgentToolId.GetCurrentSessionState,
     AgentToolId.QueryDatabase,
   ]);
+  const productionCustomTools = opts.harnessAdapters
+    ? createOwnerOperatorCustomTools(opts.harnessAdapters)
+    : ownerOperatorCustomTools;
   const customTools = baselinePrompt
     ? []
     : evalReadOnly
-      ? ownerOperatorCustomTools.filter((tool) => readOnlyCustomToolNames.has(tool.name))
-      : ownerOperatorCustomTools;
+      ? productionCustomTools.filter((tool) => readOnlyCustomToolNames.has(tool.name))
+      : productionCustomTools;
   const tools = baselinePrompt
     ? ["read", "bash"]
     : opts.toolsAllow

@@ -6,7 +6,7 @@ import {
   SANDBOX_USER_PROFILES,
   createSandboxUser,
 } from "../eval/sandbox-user";
-import { isOnboarded } from "@owner-operator/core";
+import { isOnboarded, loadHarnessSettings } from "@owner-operator/core";
 import {
   EVAL_SANDBOX_ROOT,
   evalSandboxPath,
@@ -23,15 +23,33 @@ const requestedRoot = evalSandboxPath(`sandbox-user-test-${process.pid}-${Date.n
 const freshRoot = evalSandboxPath(`sandbox-user-fresh-test-${process.pid}-${Date.now()}`);
 const cliRoot = evalSandboxPath(`sandbox-user-cli-test-${process.pid}-${Date.now()}`);
 const rejectedLiveRoot = evalSandboxPath(`sandbox-user-live-test-${process.pid}-${Date.now()}`);
+const optedInLiveRoot = evalSandboxPath(`sandbox-user-opted-live-test-${process.pid}-${Date.now()}`);
+const liveCredential = join(fixtureRoot, "live-auth.json");
+const liveConfig = join(fixtureRoot, "live-config.toml");
 mkdirSync(sourcePi, { recursive: true });
 mkdirSync(ownerState, { recursive: true });
-writeFileSync(join(sourcePi, "auth.json"), JSON.stringify({ "test-provider": { token: "test-secret" } }));
+writeFileSync(join(sourcePi, "auth.json"), JSON.stringify({
+  "test-provider": { token: "test-secret" },
+  "unselected-provider": { token: "must-not-enter-sandbox-runtime" },
+}));
 writeFileSync(join(sourcePi, "settings.json"), JSON.stringify({
   defaultProvider: "old-provider",
   defaultModel: "old-model",
   transport: "websocket",
 }));
-writeFileSync(join(sourcePi, "models.json"), JSON.stringify({ providers: {} }));
+writeFileSync(join(sourcePi, "models.json"), JSON.stringify({
+  providers: {
+    "test-provider": {
+      baseUrl: "http://127.0.0.1:1/v1",
+      api: "openai-completions",
+      apiKey: "literal-models-secret",
+      models: [{ id: "test-model" }],
+    },
+  },
+}));
+writeFileSync(join(sourcePi, "models-store.json"), "{}\n");
+writeFileSync(liveCredential, "live-credential-secret\n");
+writeFileSync(liveConfig, "credential_process = 'live-config-secret'\n");
 writeFileSync(join(ownerState, "state.db"), "owner sentinel\n");
 writeFileSync(join(ownerState, "daemon.json"), "owner daemon sentinel\n");
 
@@ -138,14 +156,39 @@ try {
     },
   );
   assert.equal(statSync(join(sandbox.ooHome, "pi", "auth.json")).mode & 0o777, 0o600);
+  assert.deepEqual(
+    Object.keys(JSON.parse(readFileSync(join(sandbox.ooHome, "pi", "auth.json"), "utf8"))),
+    ["test-provider"],
+    "the eval imports only its pinned provider credential and cannot fall back across providers",
+  );
   const blacklist = JSON.parse(readFileSync(join(sandbox.ooHome, "blacklist.json"), "utf8"));
   assert.ok(blacklist.paths.includes(ownerState), "the owner's state root is denied inside the sandbox");
   assert.ok(
     blacklist.paths.includes(join(sandbox.ooHome, "pi", "auth.json")),
     "the production full-roster agent cannot read its copied credential file",
   );
-  const harnessSettings = JSON.parse(readFileSync(join(sandbox.ooHome, "settings.json"), "utf8"));
-  assert.equal(harnessSettings.permissionMode, "ask", "the full-roster trial uses ordinary Ask posture");
+  assert.ok(blacklist.paths.includes(join(sandbox.ooHome, "pi", "settings.json")));
+  assert.ok(blacklist.paths.includes(join(sandbox.ooHome, "pi", "models.json")));
+  assert.ok(blacklist.paths.includes(join(sandbox.ooHome, "pi", "models-store.json")));
+  assert.equal(existsSync(join(sandbox.ooHome, "settings.json")), false, "the sandbox needs no permission override");
+  assert.equal(
+    loadHarnessSettings(sandbox.ooHome).permissionMode,
+    "allow",
+    "the sandbox inherits the production Allow default",
+  );
+
+  const production = await sandbox.createProductionSession();
+  assert.ok(production.sessionId, "the real production session initializes from the in-memory Pi services");
+  assert.equal(production.modelLabel, "test-provider/test-model");
+  for (const file of [
+    sandbox.paths.piAuth,
+    sandbox.paths.piSettings,
+    sandbox.paths.piModels,
+    join(sandbox.paths.piAgentDir, "models-store.json"),
+  ]) {
+    assert.equal(existsSync(file), false, `${file}: copied Pi credential-bearing config is gone before model action`);
+  }
+  assert.equal(sandbox.credentialFilesUnavailable(), true);
 
   const leaseDir = join(sandbox.ooHome, "agent-runs", "process-leases");
   mkdirSync(leaseDir, { recursive: true });
@@ -172,6 +215,33 @@ try {
     /explicit opt-in/i,
     "real delegated harness execution cannot be enabled accidentally",
   );
+
+  const live = await createSandboxUser({
+    profile: "live-harness",
+    root: optedInLiveRoot,
+    allowLiveHarness: true,
+    liveHarness: {
+      harness: "codex",
+      credentialSource: liveCredential,
+      configSource: liveConfig,
+    },
+  });
+  const liveBlacklist = JSON.parse(readFileSync(live.paths.blacklist, "utf8"));
+  const copiedLiveFiles = [
+    join(live.userHome, ".codex", "auth.json"),
+    join(live.userHome, ".codex", "config.toml"),
+  ];
+  for (const file of copiedLiveFiles) {
+    assert.ok(liveBlacklist.paths.includes(file), `${file}: copied live harness secret is blacklisted`);
+  }
+  await assert.rejects(
+    live.createProductionSession(),
+    /live-harness.*production session.*credential/i,
+    "a full-roster parent model can never coexist with readable external-harness credential files",
+  );
+  const liveClose = await live.close();
+  assert.equal(liveClose.teardownVerified, true);
+  for (const file of copiedLiveFiles) assert.equal(existsSync(file), false);
 
   const fresh = await createSandboxUser({
     profile: "fresh-onboarding",
@@ -210,7 +280,8 @@ try {
   rmSync(freshRoot, { recursive: true, force: true });
   rmSync(cliRoot, { recursive: true, force: true });
   rmSync(rejectedLiveRoot, { recursive: true, force: true });
+  rmSync(optedInLiveRoot, { recursive: true, force: true });
   rmSync(fixtureRoot, { recursive: true, force: true });
 }
 
-process.stdout.write("ok — eval sandbox user: isolated roots, pinned Pi config, Ask posture, and secret-safe cleanup\n");
+process.stdout.write("ok — eval sandbox user: isolated roots, pinned Pi config, Allow posture, and secret-safe cleanup\n");

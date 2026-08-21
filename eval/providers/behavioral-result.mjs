@@ -47,6 +47,9 @@ export function normalizeBehavioralTrialResult(payload) {
   const metadata = {
     trialVersion: payload?.version ?? null,
     caseId: payload?.caseId ?? null,
+    behaviorProfile: payload?.behaviorProfile ?? (payload?.completion ? "mark-done" : null),
+    behaviorClaim: payload?.behaviorClaim ?? null,
+    behaviorExpected: payload?.behaviorExpected ?? null,
     modelLabel: payload?.modelLabel ?? null,
     sessionId: payload?.sessionId ?? null,
     toolRoster: payload?.toolRoster ?? [],

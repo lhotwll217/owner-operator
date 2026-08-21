@@ -2,17 +2,25 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 
-/** Build the deterministic state/run half of one paid behavioral trial. */
-export function buildMarkDoneBehaviorFixture({
+/** OO-specific environment operation reused by every mark-done sample. */
+export function materializeMarkDoneScenario({
   root,
   taskCwd,
   parentThreadId,
   childSessionId,
   sentinelSessionId,
-  parentContext,
   result,
   shouldMarkDone,
   now = new Date().toISOString(),
+}: {
+  root: string;
+  taskCwd: string;
+  parentThreadId: string;
+  childSessionId: string;
+  sentinelSessionId: string;
+  result: string;
+  shouldMarkDone: boolean;
+  now?: string;
 }) {
   for (const [name, value] of Object.entries({
     root,
@@ -20,13 +28,11 @@ export function buildMarkDoneBehaviorFixture({
     parentThreadId,
     childSessionId,
     sentinelSessionId,
-    parentContext,
     result,
   })) {
-    if (typeof value !== "string" || !value.trim()) throw new Error(`${name} is required`);
+    if (!value.trim()) throw new Error(`${name} is required`);
   }
   if (childSessionId === sentinelSessionId) throw new Error("child and sentinel ids must differ");
-  if (typeof shouldMarkDone !== "boolean") throw new Error("shouldMarkDone must be boolean");
 
   const transcripts = join(root, "transcripts");
   mkdirSync(transcripts, { recursive: true });
@@ -73,7 +79,6 @@ export function buildMarkDoneBehaviorFixture({
   ];
 
   return {
-    parentContext,
     rows,
     run: {
       create: {
@@ -98,10 +103,14 @@ export function buildMarkDoneBehaviorFixture({
   };
 }
 
-function writeTranscript(file, id, cwd, text, timestamp) {
+function writeTranscript(file: string, id: string, cwd: string, text: string, timestamp: string): string {
   const lines = [
     { timestamp, type: "session_meta", payload: { id, cwd, originator: "codex_cli" } },
-    { timestamp, type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } },
+    {
+      timestamp,
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+    },
     { timestamp, type: "event_msg", payload: { type: "task_complete" } },
   ];
   writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);

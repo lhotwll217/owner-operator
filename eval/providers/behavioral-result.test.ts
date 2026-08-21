@@ -92,4 +92,30 @@ const unmatchedResult = normalizeBehavioralTrialResult({
 assert.equal(unmatchedResult.metadata.harnessValid, false);
 assert.match(unmatchedResult.providerError!, /no matching call/);
 
+const delegationTrial = normalizeBehavioralTrialResult({
+  ...payload,
+  caseId: "delegation-usage-explanation",
+  behaviorProfile: "delegation-selection",
+  behaviorClaim: "usage-explanation",
+  behaviorExpected: { usedPercent: 63, remainingPercent: 37, usageAffectedRecommendation: true },
+  completion: null,
+  stateBefore: { harnessRoster: "# neutral\n", delegatedBaselines: {}, agentRuns: [] },
+  stateAfter: { harnessRoster: "# neutral\n", delegatedBaselines: {}, agentRuns: [] },
+  traceEvents: [
+    {
+      event: "tool_call", id: "details", tool: "get_harness_details",
+      args: { harnesses: ["codex", "claude-code"] },
+    },
+    { event: "tool_result", id: "details", tool: "get_harness_details", isError: false, result: { details: [] } },
+    ...payload.traceEvents,
+  ],
+});
+assert.equal(delegationTrial.providerError, null, delegationTrial.providerError ?? "");
+assert.equal(delegationTrial.metadata.behaviorProfile, "delegation-selection");
+assert.deepEqual(delegationTrial.metadata.behaviorExpected, {
+  usedPercent: 63,
+  remainingPercent: 37,
+  usageAffectedRecommendation: true,
+});
+
 process.stdout.write("ok — behavioral result: real tool events normalize while target failures remain valid baseline data\n");

@@ -15,16 +15,18 @@ import {
   importPiConfiguration,
   markOnboarded,
   ownerOperatorPaths,
-  savePermissionMode,
 } from "@owner-operator/core";
 import { InMemoryCredentialStore, type Credential } from "@earendil-works/pi-ai";
 import {
   createOoSession,
   createOwnerOperatorSession,
   ooProvenance,
+  ownerOperatorPiServices,
   shutdownSessionExtensions,
+  type OwnerOperatorPiServices,
   type OwnerOperatorSession,
 } from "../src/agent/agent";
+import type { OwnerOperatorHarnessAdapters } from "../src/agent/tools";
 import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
 import { repoRoot } from "../src/shared/repo-root";
 import { absoluteTsxLoaderPath } from "../src/shared/tsx-loader";
@@ -97,7 +99,7 @@ export async function createSandboxUser(options: SandboxUserOptions) {
   replaceProcessEnvironment(materialized.env);
   let daemon: RunningDaemon | undefined;
   const sessions: ManagedSession[] = [];
-  let productionCredentials: InMemoryCredentialStore | undefined;
+  let productionServices: OwnerOperatorPiServices | undefined;
   let closed = false;
   try {
     daemon = await startDaemon(daemonOptions(options.profile));
@@ -127,13 +129,23 @@ export async function createSandboxUser(options: SandboxUserOptions) {
       surface?: "chat" | "interactive" | "schedule";
       parentContext?: string;
       callerSessionId?: string;
+      harnessAdapters?: OwnerOperatorHarnessAdapters;
     } = {}): Promise<ManagedSession> {
       if (options.profile === "fresh-onboarding") {
         throw new Error("fresh-onboarding profile cannot create a production session before consent");
       }
-      if (!productionCredentials) {
-        productionCredentials = await loadCredentialsIntoMemory(materialized.paths.piAuth);
-        rmSync(materialized.paths.piAuth, { force: true });
+      if (options.profile === "live-harness") {
+        throw new Error(
+          "live-harness cannot create a production session while external-harness credential files exist",
+        );
+      }
+      if (!productionServices) {
+        const credentials = await loadCredentialsIntoMemory(materialized.paths.piAuth);
+        productionServices = await ownerOperatorPiServices(materialized.ooHome, credentials);
+        // ModelRuntime has loaded auth/model data, but SettingsManager is reloaded while the
+        // production resource loader initializes. Remove credential-bearing model sources now;
+        // retain the blacklisted settings file only until that reload completes.
+        materialized.removeCredentialFiles({ keepSettings: true });
       }
       const surface = input.surface ?? "chat";
       const sessionManager = createOoSession(ooProvenance(surface, input.callerSessionId));
@@ -144,14 +156,17 @@ export async function createSandboxUser(options: SandboxUserOptions) {
         cwd: materialized.taskCwd,
         sessionManager,
         callerSessionId: input.callerSessionId,
-        credentials: productionCredentials,
+        piServices: productionServices,
+        harnessAdapters: input.harnessAdapters,
       });
+      materialized.removeCredentialFiles();
       const managed = { ...created, sessionId: sessionManager.getSessionId() };
       sessions.push(managed);
       return managed;
     },
     readSessionTrace: readTrace,
-    credentialFileRemoved: () => !existsSync(materialized.paths.piAuth),
+    credentialFileRemoved: () => materialized.credentialFilesUnavailable(),
+    credentialFilesUnavailable: materialized.credentialFilesUnavailable,
     leasesRemaining: () => leaseCount(materialized.ooHome),
     async runCli(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
       if (!isModelFreeCliInvocation(args)) {
@@ -209,7 +224,22 @@ function materializeSandboxUser(options: SandboxUserOptions) {
   const paths = options.sourcePiAgentDir
     ? (importPiConfiguration(sandbox.ooHome, options.sourcePiAgentDir), ownerOperatorPaths(sandbox.ooHome))
     : ensureOwnerOperatorWorkspace(sandbox.ooHome);
+  const piModelsStore = join(paths.piAgentDir, "models-store.json");
+  const sourceModelsStore = options.sourcePiAgentDir
+    ? join(resolve(options.sourcePiAgentDir), "models-store.json")
+    : null;
+  if (sourceModelsStore && existsSync(sourceModelsStore)) {
+    copyFileSync(sourceModelsStore, piModelsStore);
+  }
   if (options.modelSettings) {
+    const importedAuth = readJson(paths.piAuth);
+    const selectedCredential = importedAuth[options.modelSettings.defaultProvider];
+    if (!selectedCredential) {
+      throw new Error(`eval credential is missing for ${options.modelSettings.defaultProvider}`);
+    }
+    writeFileSync(paths.piAuth, `${JSON.stringify({
+      [options.modelSettings.defaultProvider]: selectedCredential,
+    }, null, 2)}\n`);
     const importedSettings = readJson(paths.piSettings);
     writeFileSync(paths.piSettings, `${JSON.stringify({
       ...importedSettings,
@@ -222,26 +252,25 @@ function materializeSandboxUser(options: SandboxUserOptions) {
     }, null, 2)}\n`);
   }
   if (existsSync(paths.piAuth)) chmodSync(paths.piAuth, 0o600);
+  if (existsSync(piModelsStore)) chmodSync(piModelsStore, 0o600);
   writeFileSync(paths.sessionSources, `${JSON.stringify({
     disable: ["claude", "codex", "cursor", "posthog-code", "pi", "opencode", "antigravity", "grok-build"],
     add: [],
   }, null, 2)}\n`);
+  const copiedHarnessFiles = options.liveHarness
+    ? copyLiveHarnessConfiguration(sandbox.userHome, options.liveHarness, sandbox.env)
+    : [];
+  const secretFiles = [paths.piAuth, paths.piSettings, paths.piModels, piModelsStore, ...copiedHarnessFiles];
   writeFileSync(paths.blacklist, `${JSON.stringify({
     paths: [...new Set([
-      paths.piAuth,
+      ...secretFiles,
       ...protectedOwnerPaths.map((value) => resolve(value)),
     ])],
     repos: [],
   }, null, 2)}\n`);
   if (options.profile !== "fresh-onboarding") {
     markOnboarded(sandbox.ooHome, { via: `eval-${options.profile}` });
-    savePermissionMode(sandbox.ooHome, "ask");
   }
-
-  const copiedHarnessFiles = options.liveHarness
-    ? copyLiveHarnessConfiguration(sandbox.userHome, options.liveHarness, sandbox.env)
-    : [];
-  const secretFiles = [paths.piAuth, paths.piSettings, paths.piModels, ...copiedHarnessFiles];
   const diagnosticRedactions = [
     ...(options.sourcePiAgentDir ? [options.sourcePiAgentDir] : []),
     ...protectedOwnerPaths,
@@ -255,6 +284,13 @@ function materializeSandboxUser(options: SandboxUserOptions) {
     ...sandbox,
     paths,
     diagnosticRedactions,
+    removeCredentialFiles({ keepSettings = false }: { keepSettings?: boolean } = {}): void {
+      for (const file of [paths.piAuth, paths.piModels, piModelsStore]) rmSync(file, { force: true });
+      if (!keepSettings) rmSync(paths.piSettings, { force: true });
+    },
+    credentialFilesUnavailable(): boolean {
+      return secretFiles.every((file) => !existsSync(file));
+    },
     finalize({ teardownVerified, diagnostic = {} }: {
       teardownVerified: boolean;
       diagnostic?: Record<string, unknown>;

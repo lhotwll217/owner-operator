@@ -34,10 +34,12 @@ Profiles select only lifecycle/configuration policy:
 The live profile requires an explicit opt-in plus named credential/config source files. Every
 profile uses an allowlisted child environment: ambient provider keys, agent homes, shell agents,
 cloud profiles, and caller provenance (including `CODEX_THREAD_ID`) do not cross the boundary.
-Network transport variables remain available. Pi model files, and explicit live-harness files when
-applicable, are copied into sandbox-only homes. Before creating a production model session, Pi auth
-is loaded into Pi's in-memory credential store and the copied file is deleted; the full-roster agent
-therefore has no credential file to reach through file or shell tools.
+Network transport variables remain available. Pi auth, settings, and model files are copied into a
+sandbox-only Pi home, consumed into Pi's credential/model/settings runtime, then deleted before a
+production model session is returned. All copied paths remain blacklisted as defense in depth.
+Explicit live-harness credential/config files remain blacklisted for the delegated subprocess and
+are deleted at teardown; that profile refuses to create a full-roster parent model while those files
+exist.
 
 Teardown shuts down tracked production sessions and the daemon, then verifies daemon discovery,
 loopback reachability, and process leases. Copied credentials/configuration are deleted first. A
@@ -49,14 +51,64 @@ The CLI driver accepts only model-free commands such as `--session-state`, `--do
 `status`, and `doctor`. Model-bearing cases use `createProductionSession`; this keeps the full
 production roster while ensuring credentials exist only in memory before the model can act.
 
+### Runnable examples
+
+Run programmatic checks from the repository root. The `finally` block is mandatory because it
+stops the sandbox daemon and verifies teardown before deleting the disposable user.
+
+```ts
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createSandboxUser } from "./eval/sandbox-user.ts";
+
+const sandbox = await createSandboxUser({
+  profile: "already-onboarded",
+  root: mkdtempSync(join(tmpdir(), "oo-programmatic-")),
+});
+try {
+  console.log(sandbox.daemon.state.listCurrentSessionState());
+} finally {
+  const closed = await sandbox.close();
+  if (!closed.teardownVerified) throw new Error("sandbox teardown was not verified");
+}
+```
+
+For a production CLI call, let the primitive supply the explicit temporary `HOME`, `OO_HOME`, and
+already-running ephemeral daemon. This command is directly runnable from the repository root:
+
+```sh
+node --import tsx --input-type=module <<'EOF'
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createSandboxUser } from "./eval/sandbox-user.ts";
+
+const sandbox = await createSandboxUser({
+  profile: "cli-driving",
+  root: mkdtempSync(join(tmpdir(), "oo-cli-")),
+});
+try {
+  const result = await sandbox.runCli(["--session-state"]);
+  process.stdout.write(result.stdout);
+  if (result.exitCode !== 0) throw new Error(result.stderr);
+} finally {
+  const closed = await sandbox.close();
+  if (!closed.teardownVerified) throw new Error("sandbox teardown was not verified");
+}
+EOF
+```
+
 ## Mutable behavioral path
 
 Each Promptfoo case/repeat creates its own `deterministic-harness` sandbox and calls the production
 `createOwnerOperatorSession("chat", ...)` composition without `toolsAllow`, a baseline prompt, or a
-reduced custom-tool list. The daemon's delegated executor is disabled; case adapters may insert
-controlled run/state evidence but may not launch a child. The parent model loop, completion
-delivery, configured tool roster, extensions, Ask permission posture, and real mutation tools stay
-production-real.
+reduced custom-tool list. The daemon's delegated executor is disabled; case adapters may supply
+controlled harness observations, baseline candidates, requested-tool permission outcomes, and
+run/state evidence, but may not launch a child. The parent model loop, completion delivery,
+configured tool roster, extensions, production default-Allow posture, and real mutation tools stay
+production-real. Explicit project and user deny rules still refine that permissive baseline, and
+Owner Operator's blacklist enforcement remains authoritative.
 
 Pi tool start/end events retain ordered arguments and results. Case assertions combine those
 events with independently captured raw ledger state, active projection, transcripts, exact

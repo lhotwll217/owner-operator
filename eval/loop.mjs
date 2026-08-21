@@ -26,6 +26,9 @@ const SUBJECTS = ["owner-operator", "naive-session-grep", "owner-operator-behavi
 const BEHAVIORAL_IDS = [
   "delegated-child-confidently-finished",
   "delegated-child-completed-unresolved",
+  "delegation-natural-first",
+  "delegation-usage-explanation",
+  "delegation-approved-default-reuse",
 ];
 
 const PROBE_IDS = [
@@ -251,7 +254,8 @@ function toRecord(result) {
   const rubric = components.find((component) => component.assertion?.type === "llm-rubric");
   const trajectory = components.find((component) => component.assertion?.metric === "tool_selection");
   const metadata = result.response?.metadata ?? {};
-  const behavioralCase = result.testCase?.metadata?.profile === "mark-done" || metadata.profile === "mark-done";
+  const behaviorProfile = result.testCase?.metadata?.profile ?? metadata.profile ?? null;
+  const behavioralCase = ["mark-done", "delegation-selection"].includes(behaviorProfile);
   // A broken judge must not read as a failed answer: the grader emits a sentinel-prefixed
   // error reason, and promptfoo tags its own grading failures.
   const graderError =
@@ -270,7 +274,8 @@ function toRecord(result) {
     trajectoryPresent: Boolean(trajectory),
     trajectoryWellFormed: typeof trajectory?.pass === "boolean",
     behavioralStatePresent: behavioralCase
-      ? stateEvidencePresent(metadata.stateBefore) && stateEvidencePresent(metadata.stateAfter)
+      ? stateEvidencePresent(behaviorProfile, metadata.stateBefore)
+        && stateEvidencePresent(behaviorProfile, metadata.stateAfter)
       : null,
     trajectoryPass: ["owner-operator", "owner-operator-behavioral"].includes(subjectName)
       ? typeof trajectory?.pass === "boolean" ? trajectory.pass : null
@@ -297,9 +302,15 @@ function metric(value) {
   return value != null && Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-function stateEvidencePresent(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    && value.rawThreadStates && typeof value.rawThreadStates === "object" && !Array.isArray(value.rawThreadStates)
+function stateEvidencePresent(profile, value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (profile === "delegation-selection") {
+    return typeof value.harnessRoster === "string"
+      && value.delegatedBaselines && typeof value.delegatedBaselines === "object"
+      && !Array.isArray(value.delegatedBaselines)
+      && Array.isArray(value.agentRuns);
+  }
+  return value.rawThreadStates && typeof value.rawThreadStates === "object" && !Array.isArray(value.rawThreadStates)
     && Array.isArray(value.activeIds)
     && value.transcriptExists && typeof value.transcriptExists === "object" && !Array.isArray(value.transcriptExists);
 }

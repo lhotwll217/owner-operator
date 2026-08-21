@@ -1,6 +1,7 @@
 /** The behavioral provider and trajectory grader share one fail-closed harness contract. */
 export function behavioralHarnessProblems(metadata) {
   const problems = [];
+  const profile = metadata?.behaviorProfile ?? (metadata?.completion ? "mark-done" : null);
   if (metadata?.trialVersion !== 1) problems.push("unsupported or missing behavioral trial version");
   if (!nonEmpty(metadata?.sessionId)) problems.push("missing parent session identity");
   if (!nonEmpty(metadata?.modelLabel)) problems.push("missing subject model identity");
@@ -20,14 +21,26 @@ export function behavioralHarnessProblems(metadata) {
   if (!Number.isInteger(metadata?.numTurns) || metadata.numTurns < 1) {
     problems.push("no completed assistant turn in Pi trajectory");
   }
-  if (metadata?.completion?.outcome !== "completed" || !nonEmpty(metadata?.completion?.childSessionId)) {
-    problems.push("missing completed lifecycle evidence");
-  }
-  if (!stateEvidence(metadata?.stateBefore) || !stateEvidence(metadata?.stateAfter)) {
-    problems.push("missing or malformed independently captured state evidence");
+  if (profile === "mark-done") {
+    if (metadata?.completion?.outcome !== "completed" || !nonEmpty(metadata?.completion?.childSessionId)) {
+      problems.push("missing completed lifecycle evidence");
+    }
+    if (!markDoneStateEvidence(metadata?.stateBefore) || !markDoneStateEvidence(metadata?.stateAfter)) {
+      problems.push("missing or malformed independently captured state evidence");
+    }
+  } else if (profile === "delegation-selection") {
+    if (!nonEmpty(metadata?.behaviorClaim) || !plainObject(metadata?.behaviorExpected)) {
+      problems.push("missing delegation behavior claim or controlled expectation");
+    }
+    if (!delegationStateEvidence(metadata?.stateBefore) || !delegationStateEvidence(metadata?.stateAfter)) {
+      problems.push("missing or malformed independently captured delegation state evidence");
+    }
+  } else {
+    problems.push("unsupported or missing behavioral profile");
   }
   if (metadata?.sandbox?.isolated !== true) problems.push("sandbox isolation was not verified");
-  if (metadata?.sandbox?.credentialFileRemoved !== true) {
+  if (metadata?.sandbox?.credentialFilesUnavailable !== true
+      && metadata?.sandbox?.credentialFileRemoved !== true) {
     problems.push("copied model credentials remained readable to the full-roster agent");
   }
   if (metadata?.sandbox?.daemonStopped !== true || Number(metadata?.sandbox?.leasesRemaining) !== 0) {
@@ -45,11 +58,19 @@ function sameRoster(actual, configured) {
     && actual.includes("mark_thread_done");
 }
 
-function stateEvidence(value) {
+function markDoneStateEvidence(value) {
   return plainObject(value)
     && plainObject(value.rawThreadStates)
     && Array.isArray(value.activeIds)
     && plainObject(value.transcriptExists);
+}
+
+function delegationStateEvidence(value) {
+  return plainObject(value)
+    && typeof value.harnessRoster === "string"
+    && plainObject(value.delegatedBaselines)
+    && Array.isArray(value.agentRuns)
+    && value.agentRuns.every(plainObject);
 }
 
 function plainObject(value) {

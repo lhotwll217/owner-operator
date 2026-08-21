@@ -5,7 +5,7 @@ import { DEFAULT_ACTIVE_WINDOW, isWindowSpec } from "./settings.mjs";
 
 export const DEFAULT_SKILL_POLICY = Object.freeze({ mode: "owner-operator", allowlist: [] });
 export const DEFAULT_TOOL_POSTURE = Object.freeze(["read", "grep", "find", "ls", "bash", "edit", "write"]);
-export const DEFAULT_PERMISSION_MODE = "read-only";
+export const DEFAULT_PERMISSION_MODE = "allow";
 
 const SKILL_MODES = new Set(["owner-operator", "all-personal", "allowlist"]);
 const TOOL_NAMES = new Set(DEFAULT_TOOL_POSTURE);
@@ -118,6 +118,19 @@ function readJson(path) {
   }
 }
 
+function readHarnessSettings(path) {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? { valid: true, value }
+      : { valid: false, value: {} };
+  } catch (error) {
+    return error?.code === "ENOENT"
+      ? { valid: true, value: {} }
+      : { valid: false, value: {} };
+  }
+}
+
 const cleanStrings = (values) => [...new Set(
   (Array.isArray(values) ? values : []).map((value) => String(value ?? "").trim()).filter(Boolean),
 )];
@@ -128,7 +141,11 @@ function skillPolicy(value) {
 }
 
 export function loadHarnessSettings(ooHome = defaultHome()) {
-  const raw = readJson(ownerOperatorPaths(ooHome).settings);
+  const document = readHarnessSettings(ownerOperatorPaths(ooHome).settings);
+  const raw = document.value;
+  const permissionMode = !document.valid || (Object.hasOwn(raw, "permissionMode") && !isPermissionMode(raw.permissionMode))
+    ? "read-only"
+    : isPermissionMode(raw.permissionMode) ? raw.permissionMode : DEFAULT_PERMISSION_MODE;
   return {
     activeWindow: typeof raw.activeWindow === "string" && isWindowSpec(raw.activeWindow)
       ? raw.activeWindow.trim()
@@ -137,7 +154,7 @@ export function loadHarnessSettings(ooHome = defaultHome()) {
     toolPosture: cleanStrings(raw.toolPosture).filter((name) => TOOL_NAMES.has(name)).length
       ? cleanStrings(raw.toolPosture).filter((name) => TOOL_NAMES.has(name))
       : [...DEFAULT_TOOL_POSTURE],
-    permissionMode: isPermissionMode(raw.permissionMode) ? raw.permissionMode : DEFAULT_PERMISSION_MODE,
+    permissionMode,
     alwaysOn: raw.alwaysOn === "installed" || raw.alwaysOn === "declined" ? raw.alwaysOn : undefined,
   };
 }

@@ -63,9 +63,6 @@ npm run poll:smoke                                    # smoke — reads your liv
 npm run test:agent                                     # live — needs model auth, paid
 npm run eval:behavioral -- --label "<campaign>" \
   --notes "<claim>"                                    # see agent-eval contract below
-OO_RUN_DELEGATION_SELECTION_EVAL=1 \
-OO_DELEGATION_SELECTION_AUTH_PATH=/explicit/eval/auth.json \
-  npm run test:delegation-selection                    # real model chooses controlled trajectories
 OO_RUN_LIVE_ACP_TEST=1 npm run test:agent-runs:live    # real Claude/acpx kill + resume
 OO_RUN_LIVE_CODEX_ACP_TEST=1 \
   npm run test:agent-runs:codex-live                    # real Codex ACP startup + turn

@@ -5,7 +5,7 @@ import toolUseAssertion from "../eval/asserts/tool-use.mjs";
 
 type Execution = {
   name: string;
-  input?: { command?: string; args?: string[] };
+  input?: Record<string, unknown> & { command?: string; args?: string[] };
   isError: boolean;
   resultChars: number;
 };
@@ -297,5 +297,121 @@ unattestedHarness.providerResponse.metadata.harnessValid = false;
 const unattested = toolUseAssertion("", unattestedHarness);
 assert.equal(unattested.pass, false);
 assert.match(unattested.reason, /did not attest a valid harness/);
+
+const delegationContext = (
+  claim: string,
+  executions: Array<Execution & { result?: unknown }>,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+) => ({
+  provider: { label: "owner-operator-behavioral" },
+  test: { metadata: { profile: "delegation-selection", behaviorClaim: claim } },
+  providerResponse: {
+    metadata: {
+      trialVersion: 1,
+      behaviorProfile: "delegation-selection",
+      behaviorClaim: claim,
+      behaviorExpected: claim === "natural-first-delegation"
+        ? { candidate: { harness: "codex", model: "controlled-default", effort: "high" } }
+        : claim === "usage-explanation"
+          ? {
+              usedPercent: 63,
+              remainingPercent: 37,
+              resetHourUtc: 18,
+              unknownHarness: "claude-code",
+              recommendedHarness: "claude-code",
+              usageAffectedRecommendation: true,
+            }
+          : { identity: { harness: "codex", model: "controlled-approved-model", effort: "high" } },
+      modelLabel: "test-provider/test-model",
+      sessionId: "parent-135",
+      numTurns: 1,
+      traceProblems: [],
+      harnessValid: true,
+      toolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent", "mark_thread_done"],
+      configuredToolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent", "mark_thread_done"],
+      toolExecutions: executions.map((execution, index) => ({ id: `delegation-call-${index}`, ...execution })),
+      stateBefore: before,
+      stateAfter: after,
+      sandbox: {
+        isolated: true,
+        credentialFileRemoved: true,
+        daemonStopped: true,
+        leasesRemaining: 0,
+        diagnosticsRetained: true,
+      },
+    },
+  },
+});
+const emptyDelegationState = {
+  harnessRoster: "# Harness roster\n\nNo preferences configured.\n",
+  delegatedBaselines: {},
+  agentRuns: [],
+};
+const successful = (name: string, input: Record<string, unknown>, result: unknown = {}) => ({
+  name, input, result, isError: false, resultChars: 100,
+});
+
+const naturalFirst = toolUseAssertion(
+  "Codex proposed controlled-default / high. Please approve that exact choice before I save or launch it.",
+  delegationContext("natural-first-delegation", [
+    successful("bash", { command: "cat \"$OO_HOME/workspace/harness-roster.md\"" }),
+    successful("get_harness_details", { harnesses: ["codex"] }),
+    successful("manage_delegated_baseline", { action: "propose", harness: "codex" }, {
+      approved: null, candidate: { model: "controlled-default", effort: "high" },
+    }),
+  ], emptyDelegationState, emptyDelegationState),
+);
+assert.equal(naturalFirst.pass, true, naturalFirst.reason);
+
+const usageExplanation = toolUseAssertion(
+  "Codex has used 63% of the weekly window, so 37% remains; it resets at 18:00 UTC. claude-code usage is unknown. This changes my recommendation to claude-code.",
+  delegationContext("usage-explanation", [
+    successful("bash", { command: "cat \"$OO_HOME/workspace/harness-roster.md\"" }),
+    successful("get_harness_details", { harnesses: ["codex", "claude-code"] }),
+  ], emptyDelegationState, emptyDelegationState),
+);
+assert.equal(usageExplanation.pass, true, usageExplanation.reason);
+
+const approvedBaseline = {
+  codex: { model: "controlled-approved-model", effort: "high", approvedAt: "2026-08-20T00:00:00.000Z" },
+};
+const approvedReuse = toolUseAssertion(
+  "Delegated the inventory with codex / controlled-approved-model / high.",
+  delegationContext("approved-default-reuse", [
+    successful("get_harness_details", { harnesses: ["codex"] }),
+    successful("delegate_agent", {
+      harness: "codex", task: "Inventory the repository.",
+    }),
+  ], {
+    ...emptyDelegationState,
+    delegatedBaselines: approvedBaseline,
+  }, {
+    ...emptyDelegationState,
+    delegatedBaselines: approvedBaseline,
+    agentRuns: [{
+      id: "run-135", harness: "codex", model: "controlled-approved-model", effort: "high",
+      status: "pending", parentThreadId: "parent-135",
+    }],
+  }),
+);
+assert.equal(approvedReuse.pass, true, approvedReuse.reason);
+
+const reuseThatReonboards = toolUseAssertion(
+  "I replaced your approved default and delegated.",
+  delegationContext("approved-default-reuse", [
+    successful("manage_delegated_baseline", { action: "approve", harness: "codex", model: "replacement", effort: "low" }),
+    successful("delegate_agent", { harness: "codex", model: "replacement", effort: "low", task: "Inventory." }),
+  ], {
+    ...emptyDelegationState,
+    delegatedBaselines: approvedBaseline,
+  }, {
+    ...emptyDelegationState,
+    delegatedBaselines: { codex: { model: "replacement", effort: "low", approvedAt: "later" } },
+    agentRuns: [],
+  }),
+);
+assert.equal(reuseThatReonboards.pass, false);
+assert.match(reuseThatReonboards.reason, /approved baseline|onboarding|exact saved identity/i);
 
 process.stdout.write("ok — eval tool gate: retrieval policy plus behavioral trajectory/state profiles hold\n");

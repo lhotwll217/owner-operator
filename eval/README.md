@@ -75,8 +75,8 @@ separately when suites differ.
 | `providers/oo-agent.mjs` | the owner-operator subject: OO's shipped read-only composition |
 | `providers/naive-agent.mjs` | the naive-session-grep control: same runner/model/search capability without OO's state/index composition |
 | `providers/behavioral-agent.mjs` | real mutable subject: fresh trial per case/repeat over production chat composition and full roster |
-| `behavioral/run-mark-done-trial.ts` | mark-done case adapter: controlled completed-run injection, Pi trajectory capture, and independent SQLite/transcript state capture |
-| `behavioral/mark-done-fixture.mjs` | sanitized completed-work and same-lifecycle unresolved-work fixtures; no delegated process launch |
+| `behavioral/run-scenario-trial.ts` | one generic Harbor-style lifecycle for every mutable case: configure, create, setup, observe, execute, observe, and verified teardown |
+| `behavioral/scenario-operations.ts` | reusable OO-specific environment operations; these materialize state but do not own trial lifecycle or grading |
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
 | `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not a subject) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; every subject attempts all of them |
@@ -107,7 +107,9 @@ daemon logs, Pi sessions, and tool traces land in `results/logs/<run>/`. The pub
 fails closed on missing grades, provider errors, count mismatches, or missing provenance; a
 fatal model turn trips a run-wide circuit breaker so later cases fail cheaply.
 
-Behavioral runs publish canonical comparison artifacts but not retrieval-suite compact stats. See
+The behavioral catalog includes repeated natural-first-delegation consent, current-usage
+explanation, and approved-default reuse claims alongside completion cleanup. Behavioral runs
+publish canonical comparison artifacts but not retrieval-suite compact stats. See
 [Agent evaluations](../docs/evals.md) for the baseline-validity and diagnostic contract.
 
 ## Reading results

@@ -3,10 +3,11 @@ import assert from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
+import { AgentRunHarness, ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   createOwnerOperatorSession,
+  configuredOwnerOperatorTools,
   evalSettingsOverrides,
   lastAssistantError,
   ownerOperatorPrompt,
@@ -69,6 +70,41 @@ try {
   assert.equal(existsSync(join(ooHome, "pi", "auth.json")), false,
     "in-memory production credentials do not recreate an agent-readable auth file");
   memoryBacked.session.dispose();
+
+  let controlledReads = 0;
+  const controlled = await createOwnerOperatorSession("chat", {
+    ephemeral: true,
+    piServices: injectedServices,
+    harnessAdapters: {
+      readHarnessDetails: async () => {
+        controlledReads += 1;
+        return [{
+          harness: AgentRunHarness.Codex,
+          observedAt: "2026-08-20T00:00:00.000Z",
+          source: "controlled-production-adapter",
+          account: null,
+          models: [],
+          allowanceWindows: [],
+          baselineCandidate: null,
+          notes: [],
+          errors: [],
+        }];
+      },
+    },
+  });
+  assert.deepEqual(controlled.toolNames, configuredOwnerOperatorTools(ooHome),
+    "controlled external outcomes retain the exact production roster");
+  const controlledDetails = controlled.session.extensionRunner.getToolDefinition("get_harness_details");
+  assert.ok(controlledDetails, "the production details tool remains registered");
+  await controlledDetails.execute(
+    "controlled-details",
+    { harnesses: [AgentRunHarness.Codex] },
+    undefined,
+    undefined,
+    { sessionManager: { getSessionId: () => "controlled-parent" } } as never,
+  );
+  assert.equal(controlledReads, 1, "only the external observation adapter is controlled");
+  controlled.session.dispose();
 } finally {
   if (priorOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorOoHome;

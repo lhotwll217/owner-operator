@@ -113,8 +113,8 @@ export function makePiAgentProvider({ arm, env = {}, profile = 'retrieval' }) {
         };
       }
 
-      if (profile === 'mark-done') {
-        return runMarkDoneBehavioralTrial({
+      if (profile === 'behavioral') {
+        return runBehavioralTrial({
           arm,
           prompt,
           context,
@@ -228,7 +228,7 @@ export function makePiAgentProvider({ arm, env = {}, profile = 'retrieval' }) {
   };
 }
 
-async function runMarkDoneBehavioralTrial({
+async function runBehavioralTrial({
   arm,
   prompt,
   context,
@@ -240,6 +240,11 @@ async function runMarkDoneBehavioralTrial({
 }) {
   const started = Date.now();
   const vars = context?.vars ?? {};
+  const behaviorProfile = vars.behaviorProfile
+    ?? (vars.shouldMarkDone !== undefined ? 'mark-done' : null);
+  if (!['mark-done', 'delegation-selection'].includes(behaviorProfile)) {
+    throw new Error(`unsupported behavioral profile: ${behaviorProfile ?? 'missing'}`);
+  }
   const trialRoot = evalSandboxPath(`${runStamp}-${invocationId}`);
   const ownerOoHome = process.env.OO_HOME ?? path.join(homedir(), '.owner-operator');
   const sourcePiAgentDir = process.env.OO_BEHAVIOR_EVAL_PI_SOURCE?.trim()
@@ -258,12 +263,23 @@ async function runMarkDoneBehavioralTrial({
     fs.mkdirSync(sandbox.taskCwd, { recursive: true });
     fs.mkdirSync(sandbox.tempDir, { recursive: true });
     const trialInput = {
+      version: 1,
       caseId,
+      behaviorProfile,
       parentContext: prompt,
-      result: vars.result,
-      shouldMarkDone: vars.shouldMarkDone,
-      childSessionId: vars.childSessionId,
-      sentinelSessionId: vars.sentinelSessionId,
+      ...(behaviorProfile === 'mark-done' ? {
+        result: vars.result,
+        shouldMarkDone: vars.shouldMarkDone,
+        childSessionId: vars.childSessionId,
+        sentinelSessionId: vars.sentinelSessionId,
+      } : {
+        behaviorClaim: vars.behaviorClaim,
+        behaviorExpected: vars.behaviorExpected,
+        harnessRoster: vars.harnessRoster,
+        harnessDetails: vars.harnessDetails,
+        baselineCandidate: vars.baselineCandidate,
+        approvedBaseline: vars.approvedBaseline,
+      }),
       timeoutMs,
       sourcePiAgentDir,
       protectedOwnerPaths: [ownerOoHome, path.join(repoRoot, 'eval')],
@@ -341,7 +357,7 @@ async function runMarkDoneBehavioralTrial({
   const providerError = baseError ?? normalized?.providerError ?? modelDrift;
   const metadata = {
     arm,
-    profile: 'mark-done',
+    profile: behaviorProfile,
     caseId,
     invocationId,
     runId: runStamp,
@@ -377,7 +393,7 @@ function spawnBehavioralWorker(input, sandbox, timeoutMs) {
     const child = spawn(process.execPath, [
       '--import',
       tsxLoaderPath,
-      path.join(repoRoot, 'eval', 'behavioral', 'run-mark-done-trial.ts'),
+      path.join(repoRoot, 'eval', 'behavioral', 'run-scenario-trial.ts'),
       Buffer.from(JSON.stringify(input)).toString('base64url'),
     ], {
       cwd: sandbox.taskCwd,
@@ -536,8 +552,8 @@ function buildRunManifest() {
     'eval/asserts/tool-use.mjs',
     'eval/asserts/efficiency.mjs',
     'eval/behavioral/contract.mjs',
-    'eval/behavioral/mark-done-fixture.mjs',
-    'eval/behavioral/run-mark-done-trial.ts',
+    'eval/behavioral/scenario-operations.ts',
+    'eval/behavioral/run-scenario-trial.ts',
     'eval/compare.mjs',
     'eval/loop.mjs',
     'eval/run-validity.mjs',
