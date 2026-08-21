@@ -3,8 +3,9 @@
 // reasoning, so grading stays cheap. Single turn, no tools: it renders promptfoo's
 // grading prompt and returns the model's JSON.
 
-import { completeSimple } from '@earendil-works/pi-ai/compat';
-import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 
 // Single source of the judge identity: the run manifest logs these same values.
 export const DEFAULT_GRADER_MODEL = 'openai-codex/gpt-5.4';
@@ -33,17 +34,17 @@ export default class CodexGraderProvider {
     const provider = slash > 0 ? spec.slice(0, slash) : 'openai-codex';
     const modelId = slash > 0 ? spec.slice(slash + 1) : spec;
     try {
-      const registry = ModelRegistry.create(AuthStorage.create());
-      const model = registry.find(provider, modelId);
+      const ooHome = process.env.OO_HOME ?? join(homedir(), '.owner-operator');
+      const runtime = await ModelRuntime.create({
+        authPath: join(ooHome, 'pi', 'auth.json'),
+        modelsPath: join(ooHome, 'pi', 'models.json'),
+      });
+      const model = runtime.getModel(provider, modelId);
       if (!model) throw new Error(`grader model not found: ${spec}`);
-      const auth = await registry.getApiKeyAndHeaders(model);
-      if (!auth.ok) throw new Error(auth.error);
-      const response = await completeSimple(model, {
+      const response = await runtime.completeSimple(model, {
         systemPrompt: SYSTEM,
         messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
       }, {
-        apiKey: auth.apiKey,
-        headers: auth.headers,
         reasoning: this.config.reasoning ?? DEFAULT_GRADER_REASONING,
         maxTokens: 4096,
         signal: AbortSignal.timeout(120000),

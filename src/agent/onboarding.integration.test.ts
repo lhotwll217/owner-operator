@@ -30,7 +30,7 @@ writeFileSync(join(piAgentDir, "settings.json"), JSON.stringify({ defaultProvide
 
 const confirms = [true, true, false]; // intro, Pi import, always-on
 const inputs = [blocked, "calendar, mail"];
-const selects = ["Ask by default before shell commands and changes (recommended)", "36h", "Selected personal skills"];
+const selects = ["Allow shell commands and changes by default (recommended)", "36h", "Selected personal skills"];
 const asked: string[] = [];
 const ui = {
   async confirm(title: string): Promise<boolean> { asked.push(title); return confirms.shift() ?? false; },
@@ -93,7 +93,7 @@ try {
     { host: "superset", root: join(root, "superset-worktrees") },
   ]);
   const settings = loadHarnessSettings(ooHome);
-  assert.equal(settings.permissionMode, "ask");
+  assert.equal(settings.permissionMode, "allow");
   assert.equal(settings.activeWindow, "36h");
   assert.deepEqual(settings.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
   assert.equal(settings.alwaysOn, "declined");

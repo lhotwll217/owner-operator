@@ -11,9 +11,18 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evalSandboxPath } from '../sandbox.mjs';
+import {
+  evalSandboxPath,
+  evalSandboxUserPaths,
+  sanitizeEvalDiagnosticText,
+  sanitizeEvalDiagnosticValue,
+  sanitizeEvalSessionTrace,
+  sanitizeEvalWorkerOutput,
+} from '../sandbox.mjs';
+import { normalizeBehavioralTrialResult } from './behavioral-result.mjs';
 import { DEFAULT_GRADER_MODEL, DEFAULT_GRADER_REASONING } from './codex-grader.mjs';
 import { readGitProvenance } from './git-provenance.mjs';
 import { loadEvalModelSettings } from './model-settings.mjs';
@@ -21,27 +30,25 @@ import { readFatalModelError } from './trace-errors.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
+const tsxLoaderPath = fileURLToPath(import.meta.resolve('tsx'));
 const runStamp = process.env.OO_EVAL_RUN_ID ?? new Date().toISOString().replace(/[:.]/g, '-');
 const SANDBOX = evalSandboxPath(runStamp);
 const OO_HOME = path.join(SANDBOX, 'home');
+const RETRIEVAL_USER = evalSandboxUserPaths(SANDBOX);
 const DISCOVERY = path.join(OO_HOME, 'daemon.json');
 const SUBJECT_TRANSPORT = 'sse';
 const logDir = path.join(repoRoot, 'eval', 'results', 'logs', runStamp);
 const evalModelSettings = loadEvalModelSettings(repoRoot);
 let invocationSequence = 0;
 let fatalRunError = null;
+let evalDaemon = null;
+let retrievalSetup = null;
 
 fs.mkdirSync(logDir, { recursive: true });
-await stopRecordedEvalDaemon();
-const seed = spawnSync('npx', ['tsx', path.join(repoRoot, 'eval', 'seed', 'build-fixture-home.mjs')], {
-  cwd: repoRoot,
-  encoding: 'utf8',
-  env: { ...process.env, OO_EVAL_SANDBOX: SANDBOX },
-});
-if (seed.status !== 0) throw new Error(`fixture seed failed: ${seed.stderr}`);
-const evalDaemon = await startManagedEvalDaemon();
+fs.mkdirSync(RETRIEVAL_USER.userHome, { recursive: true });
+fs.mkdirSync(RETRIEVAL_USER.tempDir, { recursive: true });
 process.once('exit', () => {
-  if (evalDaemon.exitCode === null) evalDaemon.kill('SIGTERM');
+  if (evalDaemon?.exitCode === null) evalDaemon.kill('SIGTERM');
   fs.rmSync(SANDBOX, { recursive: true, force: true });
 });
 
@@ -54,7 +61,7 @@ fs.writeFileSync(manifestFile, JSON.stringify(runManifest, null, 2) + '\n');
 
 /** Build a promptfoo provider class for one arm. `arm` labels the metadata + logs; `env`
  *  is merged into the `oo` subprocess environment (the naive arm sets the baseline prompt). */
-export function makePiAgentProvider({ arm, env = {} }) {
+export function makePiAgentProvider({ arm, env = {}, profile = 'retrieval' }) {
   return class PiAgentProvider {
     constructor(options = {}) {
       this.config = options.config ?? {};
@@ -105,6 +112,21 @@ export function makePiAgentProvider({ arm, env = {} }) {
           },
         };
       }
+
+      if (profile === 'behavioral') {
+        return runBehavioralTrial({
+          arm,
+          prompt,
+          context,
+          caseId,
+          invocationId,
+          baseName,
+          traceFile,
+          timeoutMs,
+        });
+      }
+
+      await ensureRetrievalHarness();
 
       const started = Date.now();
       const { stdout, stderr, timedOut, spawnError } = await runOo(prompt, traceFile, timeoutMs, env);
@@ -206,12 +228,256 @@ export function makePiAgentProvider({ arm, env = {} }) {
   };
 }
 
+async function runBehavioralTrial({
+  arm,
+  prompt,
+  context,
+  caseId,
+  invocationId,
+  baseName,
+  traceFile,
+  timeoutMs,
+}) {
+  const started = Date.now();
+  const vars = context?.vars ?? {};
+  const behaviorProfile = vars.behaviorProfile
+    ?? (vars.shouldMarkDone !== undefined ? 'mark-done' : null);
+  if (!['mark-done', 'delegation-selection'].includes(behaviorProfile)) {
+    throw new Error(`unsupported behavioral profile: ${behaviorProfile ?? 'missing'}`);
+  }
+  const trialRoot = evalSandboxPath(`${runStamp}-${invocationId}`);
+  const ownerOoHome = process.env.OO_HOME ?? path.join(homedir(), '.owner-operator');
+  const sourcePiAgentDir = process.env.OO_BEHAVIOR_EVAL_PI_SOURCE?.trim()
+    || path.join(ownerOoHome, 'pi');
+  let sandbox;
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let spawnError = null;
+  let payload = null;
+  let preservedDiagnostics = null;
+
+  try {
+    sandbox = evalSandboxUserPaths(trialRoot);
+    fs.rmSync(sandbox.root, { recursive: true, force: true });
+    fs.mkdirSync(sandbox.taskCwd, { recursive: true });
+    fs.mkdirSync(sandbox.tempDir, { recursive: true });
+    const trialInput = {
+      version: 1,
+      caseId,
+      behaviorProfile,
+      parentContext: prompt,
+      ...(behaviorProfile === 'mark-done' ? {
+        result: vars.result,
+        shouldMarkDone: vars.shouldMarkDone,
+        childSessionId: vars.childSessionId,
+        sentinelSessionId: vars.sentinelSessionId,
+      } : {
+        behaviorClaim: vars.behaviorClaim,
+        behaviorExpected: vars.behaviorExpected,
+        harnessRoster: vars.harnessRoster,
+        harnessDetails: vars.harnessDetails,
+        baselineCandidate: vars.baselineCandidate,
+        approvedBaseline: vars.approvedBaseline,
+      }),
+      timeoutMs,
+      sourcePiAgentDir,
+      protectedOwnerPaths: [ownerOoHome, path.join(repoRoot, 'eval')],
+      modelSettings: { ...evalModelSettings.settings, transport: SUBJECT_TRANSPORT },
+    };
+    ({ stdout, stderr, timedOut, spawnError } = await spawnBehavioralWorker(
+      trialInput,
+      sandbox,
+      timeoutMs,
+    ));
+    payload = parseBehavioralPayload(stdout);
+  } catch (error) {
+    spawnError = error instanceof Error ? error.message : String(error);
+  }
+
+  const diagnosticRedactions = [trialRoot, sourcePiAgentDir, ownerOoHome];
+  const safeStdout = sanitizeEvalWorkerOutput(stdout, diagnosticRedactions);
+  const safeStderr = sanitizeEvalDiagnosticText(stderr, diagnosticRedactions);
+  fs.writeFileSync(path.join(logDir, `${baseName}.stdout.txt`), safeStdout);
+  fs.writeFileSync(path.join(logDir, `${baseName}.stderr.txt`), safeStderr);
+  if (payload?.traceEvents) {
+    fs.writeFileSync(traceFile, payload.traceEvents
+      .map((event) => JSON.stringify(sanitizeEvalDiagnosticValue(event, diagnosticRedactions)))
+      .join('\n') + '\n');
+  } else {
+    fs.writeFileSync(traceFile, JSON.stringify({
+      event: 'provider_error',
+      error: spawnError ?? (timedOut ? `behavioral trial timed out after ${timeoutMs}ms` : 'missing trial payload'),
+    }) + '\n');
+  }
+  if (payload) {
+    payload.sandbox = { ...payload.sandbox, diagnosticsRetained: true };
+    const diagnosticPayload = {
+      ...payload,
+      sessionTrace: payload.sessionTrace ? '<stored separately after structural sanitization>' : null,
+    };
+    fs.writeFileSync(
+      path.join(logDir, `${baseName}.diagnostic.json`),
+      JSON.stringify(sanitizeEvalDiagnosticValue(diagnosticPayload, diagnosticRedactions), null, 2) + '\n',
+    );
+  }
+  const sessionTraceFile = payload?.sessionTrace
+    ? path.join(logDir, `${baseName}.session.jsonl`)
+    : null;
+  if (sessionTraceFile) {
+    fs.writeFileSync(sessionTraceFile, sanitizeEvalSessionTrace(payload.sessionTrace, diagnosticRedactions));
+  }
+  const teardownVerified = Boolean(
+    sandbox && !timedOut && !spawnError && payload?.sandbox?.daemonStopped === true
+      && Number(payload?.sandbox?.leasesRemaining) === 0,
+  );
+  preservedDiagnostics = payload?.sandbox?.preservedDiagnostics ?? null;
+  if (sandbox && !teardownVerified && !preservedDiagnostics) {
+    // The worker could not report its fail-closed location (for example, SIGKILL). Remove
+    // credential/config copies before preserving only this parent-authored diagnostic.
+    for (const file of ['auth.json', 'settings.json', 'models.json']) {
+      fs.rmSync(path.join(sandbox.ooHome, 'pi', file), { force: true });
+    }
+    fs.rmSync(sandbox.root, { recursive: true, force: true });
+    preservedDiagnostics = path.join(sandbox.root, 'diagnostics');
+    fs.mkdirSync(preservedDiagnostics, { recursive: true });
+    fs.writeFileSync(path.join(preservedDiagnostics, 'diagnostic.json'), JSON.stringify({
+      kind: 'behavioral-eval-worker-unavailable', caseId, invocationId, timedOut, spawnError,
+    }, null, 2) + '\n');
+  }
+
+  const durationMs = Date.now() - started;
+  const normalized = payload ? normalizeBehavioralTrialResult(payload) : null;
+  const baseError = spawnError
+    ?? (timedOut ? `behavioral trial timed out after ${timeoutMs}ms` : null)
+    ?? (!payload ? 'behavioral trial produced no parseable result' : null);
+  const modelDrift = normalized?.metadata.modelLabel && normalized.metadata.modelLabel !== runManifest.modelLabel
+    ? `model drift: manifest=${runManifest.modelLabel}, invocation=${normalized.metadata.modelLabel}`
+    : null;
+  const providerError = baseError ?? normalized?.providerError ?? modelDrift;
+  const metadata = {
+    arm,
+    profile: behaviorProfile,
+    caseId,
+    invocationId,
+    runId: runStamp,
+    manifestHash: runManifest.manifestHash,
+    traceFile: path.relative(repoRoot, traceFile),
+    sessionTraceFile: sessionTraceFile ? path.relative(repoRoot, sessionTraceFile) : null,
+    durationMs,
+    ...(normalized?.metadata ?? emptyBehavioralMetadata()),
+    ...(preservedDiagnostics
+      ? { preservedDiagnostics: sanitizeEvalDiagnosticText(preservedDiagnostics, [trialRoot]) }
+      : {}),
+  };
+  fs.appendFileSync(path.join(logDir, 'summary.jsonl'), JSON.stringify(metadata) + '\n');
+
+  if (providerError) {
+    return { error: providerError, output: normalized?.output ?? '', metadata: { ...metadata, providerError } };
+  }
+  return {
+    output: normalized.output,
+    tokenUsage: {
+      total: metadata.tokensTotal,
+      prompt: metadata.tokensUncached - metadata.tokensOutput + metadata.tokensCacheRead,
+      completion: metadata.tokensOutput,
+      cached: metadata.tokensCacheRead,
+    },
+    cost: metadata.costUsd,
+    metadata,
+  };
+}
+
+function spawnBehavioralWorker(input, sandbox, timeoutMs) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, [
+      '--import',
+      tsxLoaderPath,
+      path.join(repoRoot, 'eval', 'behavioral', 'run-scenario-trial.ts'),
+      Buffer.from(JSON.stringify(input)).toString('base64url'),
+    ], {
+      cwd: sandbox.taskCwd,
+      env: { ...sandbox.env, OO_EVAL_SANDBOX: sandbox.root },
+    });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let spawnError = null;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs + 5_000);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', (error) => { spawnError = String(error); });
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      if (code !== 0 && !spawnError) spawnError = `behavioral trial exited ${code ?? signal ?? 'unknown'}`;
+      resolvePromise({ stdout, stderr, timedOut, spawnError });
+    });
+  });
+}
+
+function parseBehavioralPayload(stdout) {
+  const match = [...String(stdout).matchAll(/^OO_BEHAVIOR_RESULT=([A-Za-z0-9_-]+)$/gm)].at(-1);
+  if (!match) return null;
+  return JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8'));
+}
+
+function emptyBehavioralMetadata() {
+  return {
+    trialVersion: null,
+    modelLabel: null,
+    sessionId: null,
+    toolRoster: [],
+    configuredToolRoster: [],
+    toolExecutions: [],
+    toolCalls: [],
+    toolCallCount: 0,
+    toolResultChars: 0,
+    tokensTotal: 0,
+    tokensUncached: 0,
+    tokensCacheRead: 0,
+    tokensOutput: 0,
+    costUsd: 0,
+    numTurns: 0,
+    traceProblems: ["behavioral trial did not produce metadata"],
+    completion: null,
+    stateBefore: null,
+    stateAfter: null,
+    sandbox: null,
+    harnessValid: false,
+    harnessProblems: ['behavioral trial did not produce metadata'],
+  };
+}
+
+async function ensureRetrievalHarness() {
+  retrievalSetup ??= (async () => {
+    await stopRecordedEvalDaemon();
+    const seed = spawnSync('npx', ['tsx', path.join(repoRoot, 'eval', 'seed', 'build-fixture-home.mjs')], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, OO_EVAL_SANDBOX: SANDBOX },
+    });
+    if (seed.status !== 0) throw new Error(`fixture seed failed: ${seed.stderr}`);
+    evalDaemon = await startManagedEvalDaemon();
+  })();
+  await retrievalSetup;
+}
+
 function runOo(prompt, traceFile, timeoutMs, extraEnv) {
   return new Promise((resolve) => {
-    const child = spawn(path.join(repoRoot, 'oo'), [prompt], {
+    // The shell launcher resolves to this same entry. Invoke it through Node's repository-owned
+    // loader so tsx does not create an overlong IPC socket beneath the disposable TMPDIR.
+    const child = spawn(process.execPath, [
+      '--import',
+      tsxLoaderPath,
+      path.join(repoRoot, 'src', 'cli', 'oo.ts'),
+      prompt,
+    ], {
       cwd: repoRoot,
       env: {
-        ...process.env,
+        ...RETRIEVAL_USER.env,
         ...extraEnv,
         OO_HOME,
         OO_TRACE: traceFile,
@@ -247,9 +513,9 @@ function runOo(prompt, traceFile, timeoutMs, extraEnv) {
   });
 }
 
-function copySessionTrace(sessionId, destination) {
+function copySessionTrace(sessionId, destination, ooHome = OO_HOME) {
   if (!sessionId) return null;
-  const root = path.join(OO_HOME, 'sessions');
+  const root = path.join(ooHome, 'sessions');
   let files = [];
   try {
     files = fs.readdirSync(root, { recursive: true }).map(String);
@@ -258,7 +524,10 @@ function copySessionTrace(sessionId, destination) {
   }
   const relative = files.find((file) => file.endsWith('.jsonl') && path.basename(file).includes(sessionId));
   if (!relative) return null;
-  fs.copyFileSync(path.join(root, relative), destination);
+  fs.writeFileSync(
+    destination,
+    sanitizeEvalSessionTrace(fs.readFileSync(path.join(root, relative), 'utf8'), [SANDBOX, ooHome]),
+  );
   return destination;
 }
 
@@ -282,13 +551,21 @@ function buildRunManifest() {
     'eval/fixtures/naive-baseline-prompt.md',
     'eval/asserts/tool-use.mjs',
     'eval/asserts/efficiency.mjs',
+    'eval/behavioral/contract.mjs',
+    'eval/behavioral/scenario-operations.ts',
+    'eval/behavioral/run-scenario-trial.ts',
     'eval/compare.mjs',
     'eval/loop.mjs',
+    'eval/run-validity.mjs',
     'eval/sandbox.mjs',
+    'eval/sandbox-user.ts',
     'eval/seed/build-fixture-home.mjs',
     'eval/providers/codex-grader.mjs',
+    'eval/providers/behavioral-agent.mjs',
+    'eval/providers/behavioral-result.mjs',
     'eval/providers/git-provenance.mjs',
     'eval/providers/model-settings.mjs',
+    'eval/providers/noop-grader.mjs',
     'eval/providers/pi-agent-core.mjs',
     'eval/providers/trace-errors.mjs',
     'eval/promptfooconfig.yaml',
@@ -352,7 +629,7 @@ async function startManagedEvalDaemon() {
   const log = fs.openSync(logPath, 'a');
   const child = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'eval-daemon.mjs')], {
     cwd: repoRoot,
-    env: { ...process.env, OO_HOME },
+    env: { ...RETRIEVAL_USER.env, OO_HOME },
     stdio: ['ignore', log, log],
   });
   fs.closeSync(log);

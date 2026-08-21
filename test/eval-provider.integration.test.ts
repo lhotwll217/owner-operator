@@ -10,6 +10,8 @@ const dir = mkdtempSync(join(tmpdir(), "oo-eval-provider-"));
 const trace = join(dir, "trace.ndjson");
 const session = join(dir, "session.jsonl");
 
+await import("../eval/providers/codex-grader.mjs");
+
 try {
   writeFileSync(trace, '{"event":"turn","stopReason":"stop"}\n');
   assert.equal(readFatalModelError(trace, session), null);

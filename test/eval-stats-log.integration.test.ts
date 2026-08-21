@@ -10,6 +10,7 @@ import {
   buildStatsEntry,
   upsertStatsLog,
 } from "../eval/stats-log.mjs";
+import { shouldWriteGlobalResults } from "../eval/run-validity.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-eval-stats-"));
 const file = join(dir, "eval_stat_log.json");
@@ -31,6 +32,7 @@ const record = {
   logs: "eval/results/logs/run-repeat-3",
   detail: "eval/results/iterations/run-repeat-3.json",
   promptfooPass: true,
+  measurementValid: true,
   metrics: { trajectoryPass: true },
 };
 
@@ -66,19 +68,10 @@ try {
   const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
   assert.match(packageJson.scripts.eval, /eval\/loop\.mjs --full/, "the full command must use the ledgered runner");
 
-  const loopSource = readFileSync(join(process.cwd(), "eval", "loop.mjs"), "utf8");
-  assert.match(
-    loopSource,
-    /if \(scope === "full" && runValidity\.valid\)[\s\S]*buildGlobalResults[\s\S]*global_results\.json[\s\S]*upsertStatsLog/,
-    "valid full runs must write a raw global result before the compact stats entry",
-  );
-  assert.ok(
-    loopSource.indexOf("fs.appendFileSync(historyFile") < loopSource.indexOf('if (scope === "full"'),
-    "all runs enter durable history before the full-run stats boundary",
-  );
-  assert.match(loopSource, /INVALID-NOT-PUBLISHED/, "an unpublishable full run fails loudly");
-  assert.match(loopSource, /missing-git-commit/);
-  assert.match(loopSource, /missing-git-branch/);
+  assert.equal(shouldWriteGlobalResults("full"), true);
+  assert.equal(shouldWriteGlobalResults("behavioral"), true,
+    "behavioral before/after runs use the canonical comparison artifact");
+  assert.equal(shouldWriteGlobalResults("probe"), false);
 
   const provenanceSource = readFileSync(join(process.cwd(), "eval", "providers", "git-provenance.mjs"), "utf8");
   assert.match(provenanceSource, /gitBranch:/, "the run manifest must capture the PR branch");
@@ -91,6 +84,7 @@ try {
   assert.equal(globalResults.metadata.repeat, 3);
   assert.equal(globalResults.metadata.reasoning_level, "medium");
   assert.equal(globalResults.metadata.grader_reasoning, "minimal");
+  assert.equal(globalResults.metadata.measurement_valid, true);
   assert.deepEqual(globalResults.summary, {
     cases: 2,
     total_tests: 6,
@@ -162,6 +156,27 @@ try {
     () => buildStatsEntry({ ...globalResults, metadata: { ...globalResults.metadata, scope: "probe" } }),
     /full-suite/i,
   );
+
+  const behavioralResults = buildGlobalResults({
+    record: {
+      ...record,
+      runId: "behavioral-before",
+      subject: "owner-operator-behavioral",
+      scope: "behavioral",
+      repeat: 1,
+    },
+    cases: [{
+      caseId: "delegated-child-confidently-finished",
+      stats: { n: 1, qtype: "behavior", correct: 0, trajectoryPass: false, tokens: 50, toolCalls: 0, cost: 0.01, latencyMs: 100, providerErrors: 0 },
+    }],
+    observations: [{ toolCalls: 0, tokens: 50, cost: 0.01, latencyMs: 100 }],
+    manifest,
+  });
+  assert.equal(behavioralResults.metadata.scope, "behavioral");
+  assert.equal(behavioralResults.summary.trajectory_pass, false,
+    "a real target-case failure remains truthful comparison data");
+  assert.throws(() => buildStatsEntry(behavioralResults), /full-suite/i,
+    "behavioral comparison artifacts do not pollute the compact full-suite ledger");
 
   upsertStatsLog(file, entry);
   const controlEntry = { ...entry, subject: "naive-session-grep", timestamp: "2026-07-11T12:00:30.000Z" };

@@ -47,10 +47,16 @@ try {
   const defaults = loadHarnessSettings(ooHome);
   assert.deepEqual(defaults.skillPolicy, DEFAULT_SKILL_POLICY);
   assert.deepEqual(defaults.toolPosture, DEFAULT_TOOL_POSTURE);
-  assert.equal(defaults.permissionMode, "read-only", "missing settings use the least-permissive mode");
+  assert.equal(defaults.permissionMode, "allow", "missing settings use the production permissive default");
+
+  writeFileSync(paths.settings, JSON.stringify({ activeWindow: "24h" }));
+  assert.equal(loadHarnessSettings(ooHome).permissionMode, "allow", "valid settings without a mode use Allow");
 
   writeFileSync(paths.settings, "{ invalid settings");
   assert.equal(loadHarnessSettings(ooHome).permissionMode, "read-only", "invalid settings fail closed");
+
+  writeFileSync(paths.settings, JSON.stringify({ permissionMode: "unexpected" }));
+  assert.equal(loadHarnessSettings(ooHome).permissionMode, "read-only", "an invalid explicit mode fails closed");
 
   saveHarnessSettings(ooHome, {
     activeWindow: "36h",
@@ -60,7 +66,7 @@ try {
   assert.equal(configured.activeWindow, "36h");
   assert.deepEqual(configured.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
 
-  process.stdout.write("ok — harness: owned paths, missing-only workspace, least-permissive settings\n");
+  process.stdout.write("ok — harness: owned paths, missing-only workspace, permissive fresh settings\n");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });
 }

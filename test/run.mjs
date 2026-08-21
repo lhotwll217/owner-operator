@@ -3,7 +3,7 @@
 // Tier is the filename suffix (see docs/testing.md): unit = *.test.ts EXCLUDING the
 // integration/e2e tiers; the others match their own suffix. Each file is a tsx script that
 // throws (→ nonzero exit) on failure, so we stop at the first that fails. Drop a new
-// *.integration.test.ts anywhere under src/ or test/ and it joins the tier automatically —
+// *.integration.test.ts anywhere under src/, eval/, or test/ joins the tier automatically —
 // no script to edit. Live tests are explicitly excluded; smoke files do not use *.test.ts.
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
@@ -37,7 +37,7 @@ const matches = (f) =>
       && !f.endsWith(".live.test.ts")
     : f.endsWith(TIERS[tier]);
 
-const files = [join(root, "src"), join(root, "test")].flatMap(walk).filter(matches).sort();
+const files = [join(root, "src"), join(root, "eval"), join(root, "test")].flatMap(walk).filter(matches).sort();
 if (files.length === 0) { console.log(`no ${tier} tests`); process.exit(0); }
 
 for (const file of files) {

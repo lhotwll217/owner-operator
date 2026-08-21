@@ -10,6 +10,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evalSandboxPath } from "./sandbox.mjs";
+import { shouldWriteGlobalResults, validateEvalRun } from "./run-validity.mjs";
 import { backfillGitIdentity, buildGlobalResults, buildStatsEntry, upsertStatsLog } from "./stats-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +22,14 @@ const statsLogFile = path.join(here, "eval_stat_log.json");
 const iterationsDir = path.join(here, "results", "iterations");
 fs.mkdirSync(iterationsDir, { recursive: true });
 
-const SUBJECTS = ["owner-operator", "naive-session-grep"];
+const SUBJECTS = ["owner-operator", "naive-session-grep", "owner-operator-behavioral"];
+const BEHAVIORAL_IDS = [
+  "delegated-child-confidently-finished",
+  "delegated-child-completed-unresolved",
+  "delegation-natural-first",
+  "delegation-usage-explanation",
+  "delegation-approved-default-reuse",
+];
 
 const PROBE_IDS = [
   "evidence-flaky-error",             // rare literal / query-led
@@ -41,8 +50,8 @@ const CORE_IDS = [
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
-    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full]\n" +
-    "         [--subject owner-operator|naive-session-grep] [--repeat N (default 3; 1 = smoke)] [--dry]\n" +
+    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full | --behavioral]\n" +
+    "         [--subject owner-operator|naive-session-grep|owner-operator-behavioral] [--repeat N (default 3; 1 = smoke)] [--dry]\n" +
     "       node eval/loop.mjs --backfill-git EVAL_FOLDER [--commit SHA] [--branch NAME]\n" +
     "A run measures one subject. Compare two runs downstream:\n" +
     "  node eval/compare.mjs <global_results_A.json> <global_results_B.json> [--gate]\n" +
@@ -73,46 +82,71 @@ if (has("backfill-git")) {
 const label = option("label");
 const notes = option("notes");
 const custom = option("cases");
-let subject = option("subject", "owner-operator");
+const behavioral = has("behavioral");
+let subject = option("subject", behavioral ? "owner-operator-behavioral" : "owner-operator");
 const repeat = Number(option("repeat", "3"));
 const dry = has("dry");
 if (!label) fail("--label is required: name the mechanism being tested");
 if (!notes) fail("--notes is required: state the hypothesis and expected trajectory effect");
 if (!SUBJECTS.includes(subject)) fail(`unknown subject: ${subject}; expected ${SUBJECTS.join(" | ")}`);
 if (!Number.isInteger(repeat) || repeat < 1) fail("--repeat must be a positive integer");
-if ([has("probe"), has("full"), Boolean(custom)].filter(Boolean).length > 1) {
-  fail("choose only one of --probe, --full, or --cases id1,id2");
+if ([has("probe"), has("full"), behavioral, Boolean(custom)].filter(Boolean).length > 1) {
+  fail("choose only one of --probe, --full, --behavioral, or --cases id1,id2");
+}
+if (behavioral && subject !== "owner-operator-behavioral") {
+  fail("--behavioral requires the owner-operator-behavioral subject");
 }
 
 const knownIds = new Set(
   [...fs.readFileSync(path.join(here, "cases.yaml"), "utf8").matchAll(/^- description:\s*(\S+)\s*$/gm)]
     .map((match) => match[1]),
 );
-const ids = custom ? custom.split(",").filter(Boolean) : has("probe") ? PROBE_IDS : has("full") ? [] : CORE_IDS;
+const retrievalIds = [...knownIds].filter((id) => !BEHAVIORAL_IDS.includes(id));
+const ids = behavioral
+  ? BEHAVIORAL_IDS
+  : custom
+    ? custom.split(",").filter(Boolean)
+    : has("probe")
+      ? PROBE_IDS
+      : has("full")
+        ? retrievalIds
+        : CORE_IDS;
 for (const id of ids) if (!knownIds.has(id)) fail(`unknown case id: ${id}`);
-const scope = custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
-const pattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
+const scope = behavioral ? "behavioral" : custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
+const filterPattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
+const pattern = scope === "full" ? null : filterPattern;
 const createdAt = new Date().toISOString();
 const requestedRunId = createdAt.replace(/[:.]/g, "-");
 
 let evalStatus = 0;
 if (!dry) {
+  const promptfooHome = evalSandboxPath(`${requestedRunId}-promptfoo`);
+  fs.mkdirSync(promptfooHome, { recursive: true });
   const command = [
     "--no-install", "promptfoo", "eval",
     "-c", "eval/promptfooconfig.yaml",
     "--no-cache",
     "--max-concurrency", "1",
     "--filter-providers", `^${escapeRegex(subject)}$`,
-    ...(pattern ? ["--filter-pattern", pattern] : []),
+    ...(filterPattern ? ["--filter-pattern", filterPattern] : []),
     ...(repeat > 1 ? ["--repeat", String(repeat)] : []),
   ];
   console.log(`[loop] ${label} subject=${subject} scope=${scope}${ids.length ? ` cases=${ids.join(",")}` : ""} repeat=${repeat}`);
-  const run = spawnSync("npx", command, {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: { ...process.env, OO_EVAL_RUN_ID: requestedRunId },
-  });
-  evalStatus = run.status ?? 1;
+  try {
+    const run = spawnSync("npx", command, {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        OO_EVAL_RUN_ID: requestedRunId,
+        PROMPTFOO_CONFIG_DIR: promptfooHome,
+        PROMPTFOO_LOG_DIR: path.join(promptfooHome, "logs"),
+      },
+    });
+    evalStatus = run.status ?? 1;
+  } finally {
+    fs.rmSync(promptfooHome, { recursive: true, force: true });
+  }
   if (!fs.existsSync(resultsFile)) fail("promptfoo produced no eval/results/latest.json");
 }
 
@@ -133,10 +167,11 @@ const cases = collectCases(records);
 const metrics = summarize(cases);
 
 const manifest = readManifest(records);
-const runValidity = validateStatsRun(records, cases, {
-  expectedIds: scope === "full" ? knownIds : new Set(ids),
+const runValidity = validateEvalRun(records, cases, {
+  expectedIds: new Set(ids),
   manifest,
   repeat,
+  scope,
 });
 const detail = path.join(iterationsDir, `${runId}.json`);
 const record = {
@@ -156,19 +191,24 @@ const record = {
   logs: records[0]?.traceFile ? path.dirname(records[0].traceFile) : null,
   detail: path.relative(repoRoot, detail),
   promptfooPass: evalStatus === 0,
+  measurementValid: runValidity.valid,
   metrics,
 };
 fs.writeFileSync(detail, JSON.stringify({ ...record, cases }, null, 2) + "\n");
 fs.appendFileSync(historyFile, JSON.stringify(record) + "\n");
 let statsStatus = "not-applicable:targeted-run";
-if (scope === "full" && runValidity.valid) {
+if (shouldWriteGlobalResults(scope) && runValidity.valid) {
   const globalResults = buildGlobalResults({ record, cases, observations: records, manifest });
   const globalResultsFile = path.join(repoRoot, record.logs, "global_results.json");
   fs.writeFileSync(globalResultsFile, `${JSON.stringify(globalResults, null, 2)}\n`);
-  upsertStatsLog(statsLogFile, buildStatsEntry(globalResults));
-  statsStatus = `${path.relative(repoRoot, statsLogFile)} (${path.relative(repoRoot, globalResultsFile)})`;
-} else if (scope === "full") {
-  // A full run that cannot publish is a broken measurement, not a quiet skip.
+  if (scope === "full") {
+    upsertStatsLog(statsLogFile, buildStatsEntry(globalResults));
+    statsStatus = `${path.relative(repoRoot, statsLogFile)} (${path.relative(repoRoot, globalResultsFile)})`;
+  } else {
+    statsStatus = `comparison=${path.relative(repoRoot, globalResultsFile)}; compact-stats=not-applicable`;
+  }
+} else if (shouldWriteGlobalResults(scope)) {
+  // A canonical comparison run that cannot publish is a broken measurement, not a quiet skip.
   statsStatus = `INVALID-NOT-PUBLISHED:${runValidity.reasons.join(",")}`;
 }
 
@@ -214,6 +254,8 @@ function toRecord(result) {
   const rubric = components.find((component) => component.assertion?.type === "llm-rubric");
   const trajectory = components.find((component) => component.assertion?.metric === "tool_selection");
   const metadata = result.response?.metadata ?? {};
+  const behaviorProfile = result.testCase?.metadata?.profile ?? metadata.profile ?? null;
+  const behavioralCase = ["mark-done", "delegation-selection"].includes(behaviorProfile);
   // A broken judge must not read as a failed answer: the grader emits a sentinel-prefixed
   // error reason, and promptfoo tags its own grading failures.
   const graderError =
@@ -224,10 +266,20 @@ function toRecord(result) {
     caseId: result.vars?.id ?? result.description ?? `test-${result.testIdx}`,
     subject: subjectName,
     qtype: result.testCase?.metadata?.qtype ?? "unknown",
-    correct: rubric && !graderError ? Number(rubric.pass === true) : null,
-    graderError,
+    correct: behavioralCase
+      ? typeof trajectory?.pass === "boolean" ? Number(trajectory.pass) : null
+      : rubric && !graderError ? Number(rubric.pass === true) : null,
+    graderError: behavioralCase ? false : graderError,
     // The tool-selection gate judges OO's composition; the control passes vacuously.
-    trajectoryPass: subjectName === "owner-operator" ? trajectory?.pass === true : true,
+    trajectoryPresent: Boolean(trajectory),
+    trajectoryWellFormed: typeof trajectory?.pass === "boolean",
+    behavioralStatePresent: behavioralCase
+      ? stateEvidencePresent(behaviorProfile, metadata.stateBefore)
+        && stateEvidencePresent(behaviorProfile, metadata.stateAfter)
+      : null,
+    trajectoryPass: ["owner-operator", "owner-operator-behavioral"].includes(subjectName)
+      ? typeof trajectory?.pass === "boolean" ? trajectory.pass : null
+      : true,
     rubricReason: rubric?.reason ?? null,
     tokens: metric(metadata.tokensTotal ?? result.tokenUsage?.total),
     toolCalls: metric(metadata.toolCallCount),
@@ -240,6 +292,7 @@ function toRecord(result) {
     modelLabel: metadata.modelLabel ?? null,
     traceFile: metadata.traceFile ?? null,
     providerError: result.response?.error ?? null,
+    harnessValid: metadata.harnessValid ?? null,
   };
 }
 
@@ -247,6 +300,19 @@ function toRecord(result) {
 function metric(value) {
   const n = Number(value);
   return value != null && Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function stateEvidencePresent(profile, value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (profile === "delegation-selection") {
+    return typeof value.harnessRoster === "string"
+      && value.delegatedBaselines && typeof value.delegatedBaselines === "object"
+      && !Array.isArray(value.delegatedBaselines)
+      && Array.isArray(value.agentRuns);
+  }
+  return value.rawThreadStates && typeof value.rawThreadStates === "object" && !Array.isArray(value.rawThreadStates)
+    && Array.isArray(value.activeIds)
+    && value.transcriptExists && typeof value.transcriptExists === "object" && !Array.isArray(value.transcriptExists);
 }
 
 function collectCases(records) {
@@ -284,34 +350,6 @@ function summarize(cases) {
     latencyMs: sum(cases.map((item) => item.stats.latencyMs)),
     trajectoryPass: cases.every((item) => item.stats.trajectoryPass),
   };
-}
-
-function validateStatsRun(records, cases, { expectedIds, manifest, repeat }) {
-  const reasons = [];
-  if (!manifest) reasons.push("missing-manifest");
-  if (!manifest?.gitHead) reasons.push("missing-git-commit");
-  if (!manifest?.gitBranch || manifest.gitBranch === "HEAD") reasons.push("missing-git-branch");
-  // Exact membership, not cardinality: a swapped case must not publish as a full run.
-  const observedIds = new Set(cases.map((item) => item.caseId));
-  const missing = [...expectedIds].filter((id) => !observedIds.has(id));
-  const extra = [...observedIds].filter((id) => !expectedIds.has(id));
-  if (missing.length) reasons.push(`missing-cases:${missing.join("+")}`);
-  if (extra.length) reasons.push(`unexpected-cases:${extra.join("+")}`);
-  if (records.length !== expectedIds.size * repeat) reasons.push(`records-${records.length}-of-${expectedIds.size * repeat}`);
-  if (records.some((item) => item.subject === "unknown")) reasons.push("unknown-subject");
-  if (records.some((item) => item.graderError)) reasons.push("grader-error");
-  if (records.some((item) => item.correct === null)) reasons.push("missing-grade");
-  if (records.some((item) => item.providerError)) reasons.push("provider-error");
-  // Every observation carries the same run identity, or the results are not one run.
-  if (records.some((item) => !item.runId)) reasons.push("missing-run-id");
-  if (records.some((item) => !item.traceFile)) reasons.push("missing-trace");
-  if (records.some((item) => item.manifestHash !== manifest?.manifestHash)) reasons.push("manifest-mismatch");
-  if (unique(records.map((item) => item.modelLabel)).length !== 1) reasons.push("model-mismatch");
-  if (records.some((item) =>
-    item.tokens === null || item.toolCalls === null || item.cost === null || item.latencyMs === null
-  )) reasons.push("missing-telemetry");
-  if (cases.some((item) => item.stats.n !== repeat)) reasons.push("repeat-mismatch");
-  return { valid: reasons.length === 0, reasons };
 }
 
 function readManifest(items) {
