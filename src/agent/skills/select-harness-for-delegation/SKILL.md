@@ -64,7 +64,8 @@ exact identity.
 
 ## Missing delegated baseline
 
-When fallback is needed and `manage_delegated_baseline` reports no approved baseline:
+When omitted identity fields require a default and `manage_delegated_baseline` reports no approved
+baseline, **MUST NOT delegate yet**:
 
 1. Present the actual unpinned ACP candidate returned by `action: "propose"`, including its exact
    harness, model, and effort. Do not invent or substitute a default. If discovery returned no

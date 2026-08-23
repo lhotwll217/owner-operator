@@ -27,9 +27,11 @@ export function harnessDetailsResult(
   return { observedAt, ephemeral: true, details: [...details] };
 }
 
-export function createGetHarnessDetailsTool(
-  options: { read?: (input: ReadHarnessDetailsOptions) => Promise<HarnessDetails[]> } = {},
-) {
+export interface GetHarnessDetailsToolOptions {
+  read?: (input: ReadHarnessDetailsOptions) => Promise<HarnessDetails[]>;
+}
+
+export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOptions = {}) {
   const read = options.read ?? readHarnessDetails;
   return defineTool({
     name: "get_harness_details",

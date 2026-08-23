@@ -25,6 +25,9 @@ providers:
   - id: file://providers/naive-agent.mjs
     label: naive-session-grep
     config: { timeoutMs: 600000 }
+  - id: file://providers/behavioral-agent.mjs
+    label: owner-operator-behavioral
+    config: { timeoutMs: 600000 }
 
 defaultTest:
   options:

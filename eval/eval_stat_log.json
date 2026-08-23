@@ -1,5 +1,55 @@
 [
   {
+    "timestamp": "2026-08-21T11:17:22.023Z",
+    "label": "issue-129-all-evals-smoke-1x",
+    "commit": "4ca6ce9",
+    "branch": "fix/129-real-harness-evals",
+    "eval_folder": "2026-08-21T11-17-22-023Z",
+    "subject": "owner-operator",
+    "model": "openai-codex/gpt-5.6-sol",
+    "reasoning_level": "medium",
+    "grader_model": "openai-codex/gpt-5.4",
+    "grader_reasoning": "minimal",
+    "cases": 16,
+    "repeat": 1,
+    "total_tests": 16,
+    "summary": {
+      "total_pass": 16,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": true
+    },
+    "tool_calls": {
+      "mean": 3.75,
+      "median": 3.5,
+      "min": 0,
+      "max": 9,
+      "stdev": 2.18
+    },
+    "tokens": {
+      "mean": 16464.38,
+      "median": 17539,
+      "min": 2202,
+      "max": 31094,
+      "stdev": 7561.58
+    },
+    "cost_usd": {
+      "mean": 0.068044,
+      "median": 0.070789,
+      "min": 0.015435,
+      "max": 0.127535,
+      "stdev": 0.030141
+    },
+    "latency_ms": {
+      "mean": 22372,
+      "median": 21523,
+      "min": 10343,
+      "max": 38272,
+      "stdev": 8059
+    }
+  },
+  {
     "timestamp": "2026-07-14T21:31:39.074Z",
     "label": "prompt-shannon-pass",
     "commit": "a2f938b",

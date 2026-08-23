@@ -1,8 +1,11 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
 import { delegateAgentTool } from "./delegate-agent";
-import { getHarnessDetailsTool } from "./get-harness-details";
+import { createGetHarnessDetailsTool, type GetHarnessDetailsToolOptions } from "./get-harness-details";
 import { manageAgentRunTool } from "./manage-agent-run";
-import { manageDelegatedBaselineTool } from "./manage-delegated-baseline";
+import {
+  createManageDelegatedBaselineTool,
+  type ManageDelegatedBaselineOptions,
+} from "./manage-delegated-baseline";
 import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
@@ -17,17 +20,28 @@ export { manageAgentRunTool } from "./manage-agent-run";
 export { manageDelegatedBaselineTool } from "./manage-delegated-baseline";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 
-export const ownerOperatorCustomTools = [
-  getCurrentSessionStateTool,
-  markThreadDoneTool,
-  queryDatabaseTool,
-  schedulePromptTool,
-  manageScheduleTool,
-  delegateAgentTool,
-  manageAgentRunTool,
-  getHarnessDetailsTool,
-  manageDelegatedBaselineTool,
-];
+export interface OwnerOperatorHarnessAdapters {
+  readHarnessDetails?: GetHarnessDetailsToolOptions["read"];
+  proposeDelegatedBaseline?: ManageDelegatedBaselineOptions["propose"];
+}
+
+/** Production tools with only their external harness observations replaceable for deterministic
+ * evaluation. Durable approval, delegation, Gateway, and state behavior remain production-real. */
+export function createOwnerOperatorCustomTools(adapters: OwnerOperatorHarnessAdapters = {}) {
+  return [
+    getCurrentSessionStateTool,
+    markThreadDoneTool,
+    queryDatabaseTool,
+    schedulePromptTool,
+    manageScheduleTool,
+    delegateAgentTool,
+    manageAgentRunTool,
+    createGetHarnessDetailsTool({ read: adapters.readHarnessDetails }),
+    createManageDelegatedBaselineTool({ propose: adapters.proposeDelegatedBaseline }),
+  ];
+}
+
+export const ownerOperatorCustomTools = createOwnerOperatorCustomTools();
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.GetCurrentSessionState,

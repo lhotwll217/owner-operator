@@ -25,6 +25,8 @@ const backend = {
 } as Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
 const tool = createDelegateAgentTool({ resolveGateway: async () => backend });
 assert.match(tool.description, /do not poll/i, "the tool tells the Operator that completion is delivered automatically");
+assert.match(tool.description, /omits model or effort.*MUST follow.*select-harness-for-delegation/i,
+  "implicit delegation cannot use approved-baseline omission to bypass current harness details");
 const effortSchema = (tool.parameters as { properties: { effort: { anyOf: Array<{ type?: string }> } } }).properties.effort;
 assert.ok(effortSchema.anyOf.some((option) => option.type === "null"), "the public schema accepts explicit null effort");
 const effortLiterals = (effortSchema.anyOf as Array<{ const?: string }>).flatMap((option) => option.const ? [option.const] : []);

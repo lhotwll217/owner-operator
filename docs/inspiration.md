@@ -76,6 +76,20 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     and its private `vendor/` receives the
     [pinned upstream primitive](https://github.com/lhotwll217/session-grep/blob/f786ca24440e72f93c63e7aded30a67170f9d41c/skills/session-grep/session-grep.mjs#L1-L5)
     untouched.
+- **[Promptfoo](https://github.com/promptfoo/promptfoo/tree/7d26d8f3cccb35dc6df53b18af32f0082cef2197)** —
+  first-party real-agent evaluation examples.
+  - Borrowed (behavioral harness, [#129](https://github.com/lhotwll217/owner-operator/issues/129)):
+    serialize mutation-capable cases
+    ([advanced config](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced/promptfooconfig.yaml#L8-L23))
+    and capture/reset observable effects after each case
+    ([hooks](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced/hooks.js#L58-L98));
+    configure real-provider sandbox behavior
+    ([advanced options](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced-options/promptfooconfig.yaml#L7-L16));
+    capture real agent turns
+    ([tracing](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/basic/promptfooconfig.tracing.yaml#L15-L50));
+    and evaluate real agent providers in fixture workspaces with observable assertions
+    ([agent SDK comparison](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/compare-agentic-sdks/promptfooconfig.yaml#L9-L76),
+    [outcome assertion](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/compare-agentic-sdks/promptfooconfig.yaml#L89-L123)).
 - **Agent Deck**
   - Borrowed: one canonical, ordered tool registry and exact-set regression tests
     ([registry contract](https://github.com/asheshgoplani/agent-deck/blob/350a640649d9c4d6b52524030f63d426dcd309d0/internal/session/toolregistry.go#L15-L33),

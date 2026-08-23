@@ -24,13 +24,19 @@ const caseResult = (id: string, passRate: number, repeat = 3, qtype = "evidence"
   mean_latency_ms: 20000,
 });
 
-const run = (subject: string, label: string, cases: ReturnType<typeof caseResult>[], grader = "grader-x") => ({
+const run = (
+  subject: string,
+  label: string,
+  cases: ReturnType<typeof caseResult>[],
+  grader = "grader-x",
+  scope = "full",
+) => ({
   eval_folder: `${label}-folder`,
   metadata: {
     timestamp: "2026-07-13T00:00:00.000Z",
     label,
     subject,
-    scope: "full",
+    scope,
     model_under_test: "subject-model",
     reasoning_level: "medium",
     grader_model: grader,
@@ -112,6 +118,23 @@ try {
   assert.match(malformed.stderr, /invalid run/);
   assert.match(malformed.stderr, /invalid repeat/);
   assert.match(malformed.stderr, /non-finite mean_tokens/);
+
+  const behavioralBefore = run("owner-operator-behavioral", "before-prompt", [
+    { ...caseResult("delegated-child-confidently-finished", 0, 3, "behavior"), trajectory_pass: false },
+    caseResult("delegated-child-completed-unresolved", 100, 3, "behavior"),
+  ], "none", "behavioral");
+  behavioralBefore.summary.trajectory_pass = false;
+  const behavioralAfter = run("owner-operator-behavioral", "after-prompt", [
+    caseResult("delegated-child-confidently-finished", 100, 3, "behavior"),
+    caseResult("delegated-child-completed-unresolved", 100, 3, "behavior"),
+  ], "none", "behavioral");
+  const behavioral = compare(
+    write("behavioral-after.json", behavioralAfter),
+    write("behavioral-before.json", behavioralBefore),
+    "--gate",
+  );
+  assert.equal(behavioral.status, 0, `canonical behavioral artifacts must compare: ${behavioral.stderr}`);
+  assert.match(behavioral.stdout, /before-prompt/);
 
   process.stdout.write("ok — eval compare: downstream pairing, caveats, and a fail-closed correctness gate\n");
 } finally {

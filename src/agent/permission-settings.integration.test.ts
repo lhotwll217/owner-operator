@@ -18,6 +18,7 @@ import {
 import {
   configurePermissionSystemEnvironment,
   createPermissionSettingsExtension,
+  permissionModeForChoice,
   permissionSystemExtensionPath,
 } from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
@@ -49,8 +50,8 @@ try {
       async select(title: string, choices: string[]): Promise<string> {
         assert.equal(title, "Permission mode");
         assert.deepEqual(choices, [
-          "Ask by default before shell commands and changes (recommended)",
-          "Allow shell commands and changes by default",
+          "Allow shell commands and changes by default (recommended)",
+          "Ask by default before shell commands and changes",
           "Read-only by default (no shell)",
         ]);
         return "Read-only by default (no shell)";
@@ -61,6 +62,10 @@ try {
   });
 
   assert.equal(loadHarnessSettings(ooHome).permissionMode, "read-only");
+  assert.equal(permissionModeForChoice("Allow shell commands and changes by default (recommended)"), "allow");
+  assert.equal(permissionModeForChoice("Ask by default before shell commands and changes"), "ask");
+  assert.equal(permissionModeForChoice("Read-only by default (no shell)"), "read-only");
+  assert.throws(() => permissionModeForChoice("unexpected choice"), /unknown permission mode choice/);
   const paths = ownerOperatorPaths(ooHome);
   assert.equal(paths.piPermissionConfig.endsWith("pi-permission-system/config.json"), true);
   assert.equal(reloads, 1, "the active permission engine reloads after a mode change");

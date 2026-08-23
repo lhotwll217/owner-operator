@@ -10,15 +10,19 @@ import {
 } from "@owner-operator/core";
 
 export const PERMISSION_MODE_CHOICES = [
-  "Ask by default before shell commands and changes (recommended)",
-  "Allow shell commands and changes by default",
+  "Allow shell commands and changes by default (recommended)",
+  "Ask by default before shell commands and changes",
   "Read-only by default (no shell)",
 ] as const;
 
-export const permissionModeForChoice = (choice: string): PermissionMode =>
-  choice === "Allow shell commands and changes by default"
-    ? "allow"
-    : choice === "Read-only by default (no shell)" ? "read-only" : "ask";
+export const permissionModeForChoice = (choice: string): PermissionMode => {
+  switch (choice) {
+    case "Allow shell commands and changes by default (recommended)": return "allow";
+    case "Ask by default before shell commands and changes": return "ask";
+    case "Read-only by default (no shell)": return "read-only";
+    default: throw new Error(`unknown permission mode choice "${choice}"`);
+  }
+};
 
 const permissionPackage = "@gotgenes/pi-permission-system";
 

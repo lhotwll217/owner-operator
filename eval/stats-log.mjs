@@ -33,6 +33,7 @@ export function buildGlobalResults({ record, cases, observations = [], manifest 
       git_diff_hash: manifest?.gitDiffHash ?? null,
       manifest_hash: record.manifestHash,
       promptfoo_pass: record.promptfooPass ?? null,
+      measurement_valid: record.measurementValid ?? null,
       metric_source: observations.length ? "individual_evaluations" : "case_means",
       detail: record.detail,
     },

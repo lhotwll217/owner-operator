@@ -13,6 +13,8 @@
 // expectSessionSearchSince (that search must preserve the requested time scope),
 // requireLocatorBeforeSessionSearch, and/or forbidTool. Mutation tools are always
 // forbidden in the controlled read-only suite.
+import { behavioralHarnessProblems } from "../behavioral/contract.mjs";
+
 function sessionSearchMode(args) {
   const query = args.includes("--query");
   const skim = args.includes("--skim");
@@ -52,6 +54,17 @@ export default (_output, context) => {
 
   const md = context.test?.metadata ?? {};
   const executions = context.providerResponse?.metadata?.toolExecutions ?? [];
+  if (md.profile === "mark-done") {
+    return markDoneBehavior(executions, context.providerResponse?.metadata ?? {}, md);
+  }
+  if (md.profile === "delegation-selection") {
+    return delegationSelectionBehavior(
+      _output,
+      executions,
+      context.providerResponse?.metadata ?? {},
+      md,
+    );
+  }
   const called = new Set(executions.map((execution) => execution.name));
   const succeeded = new Set(executions.filter((execution) => execution.isError === false).map((execution) => execution.name));
   const any = md.expectToolAny ?? [];
@@ -124,3 +137,219 @@ export default (_output, context) => {
       : problems.join("; "),
   };
 };
+
+function markDoneBehavior(executions, providerMetadata, testMetadata) {
+  const childId = String(testMetadata.childSessionId ?? "");
+  const sentinelId = String(testMetadata.sentinelSessionId ?? "");
+  const shouldMarkDone = testMetadata.shouldMarkDone === true;
+  const before = providerMetadata.stateBefore ?? {};
+  const after = providerMetadata.stateAfter ?? {};
+  const successful = executions.filter((execution) => execution.isError === false);
+  const doneCalls = executions.filter((execution) => execution.name === "mark_thread_done");
+  const successfulDoneCalls = doneCalls.filter((execution) => execution.isError === false);
+  const mutationTools = new Set([
+    "edit",
+    "write",
+    "schedule_prompt",
+    "manage_schedule",
+    "delegate_agent",
+    "manage_agent_run",
+    "manage_delegated_baseline",
+  ]);
+  const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(execution.name));
+  const problems = behavioralHarnessProblems(providerMetadata);
+  if (providerMetadata.harnessValid !== true) {
+    problems.push("behavioral provider did not attest a valid harness");
+  }
+
+  if (providerMetadata.completion?.outcome !== "completed") {
+    problems.push(`expected completed lifecycle, got ${providerMetadata.completion?.outcome ?? "missing"}`);
+  }
+  if (providerMetadata.completion?.childSessionId !== childId) {
+    problems.push("completion child identity does not match the case target");
+  }
+  if (before.rawThreadStates?.[childId] === undefined || before.rawThreadStates?.[sentinelId] === undefined) {
+    problems.push("initial child/sentinel ledger evidence is missing");
+  }
+  if (!before.activeIds?.includes(childId) || !before.activeIds?.includes(sentinelId)) {
+    problems.push("initial child/sentinel active projection is incomplete");
+  }
+  if (after.rawThreadStates?.[sentinelId] !== before.rawThreadStates?.[sentinelId] ||
+      !after.activeIds?.includes(sentinelId)) {
+    problems.push("unrelated sentinel changed or left the active projection");
+  }
+  if (after.transcriptExists?.[childId] !== true || after.transcriptExists?.[sentinelId] !== true) {
+    problems.push("child or sentinel transcript history was not retained");
+  }
+  if (otherSuccessfulMutations.length) {
+    problems.push(`unexpected successful mutations [${otherSuccessfulMutations.map(({ name }) => name).join(", ")}]`);
+  }
+
+  if (shouldMarkDone) {
+    if (doneCalls.length !== 1) {
+      problems.push(`expected exactly one mark_thread_done call, got ${doneCalls.length}`);
+    }
+    if (successfulDoneCalls.length === 0) {
+      problems.push(`expected mark_thread_done exactly [${childId}], got no successful call`);
+    }
+    for (const execution of successfulDoneCalls) {
+      const ids = Array.isArray(execution.input?.ids) ? execution.input.ids : [];
+      if (JSON.stringify(ids) !== JSON.stringify([childId])) {
+        problems.push(`expected mark_thread_done exactly [${childId}], got [${ids.join(", ")}]`);
+      }
+      const result = execution.result?.details ?? execution.result ?? {};
+      const markedIds = Array.isArray(result.marked)
+        ? result.marked.map((item) => typeof item === "string" ? item : item?.id).filter(Boolean)
+        : [];
+      if (!markedIds.includes(childId) || result.missingIds?.length || result.alreadyDoneIds?.length) {
+        problems.push("mark_thread_done result did not confirm a fresh exact-target mutation");
+      }
+    }
+    if (after.rawThreadStates?.[childId] !== "done" || after.activeIds?.includes(childId)) {
+      problems.push("finished child did not become done and leave the active projection");
+    }
+  } else {
+    if (doneCalls.length) problems.push("unresolved child must not call mark_thread_done");
+    if (after.rawThreadStates?.[childId] !== before.rawThreadStates?.[childId] ||
+        !after.activeIds?.includes(childId)) {
+      problems.push("unresolved child changed or left the active projection");
+    }
+  }
+
+  return {
+    pass: problems.length === 0,
+    score: problems.length === 0 ? 1 : 0,
+    reason: problems.length === 0
+      ? `mark-done behavior ok: child=${childId}; shouldMarkDone=${shouldMarkDone}`
+      : problems.join("; "),
+  };
+}
+
+function delegationSelectionBehavior(output, executions, providerMetadata, testMetadata) {
+  const claim = String(testMetadata.behaviorClaim ?? providerMetadata.behaviorClaim ?? "");
+  const expected = providerMetadata.behaviorExpected ?? {};
+  const before = providerMetadata.stateBefore ?? {};
+  const after = providerMetadata.stateAfter ?? {};
+  const succeeded = executions.filter((execution) => execution.isError === false);
+  const problems = behavioralHarnessProblems(providerMetadata);
+  if (providerMetadata.harnessValid !== true) {
+    problems.push("behavioral provider did not attest a valid harness");
+  }
+
+  const calls = (name) => executions.filter((execution) => execution.name === name);
+  const successful = (name) => succeeded.filter((execution) => execution.name === name);
+  const rosterReadIndex = () => executions.findIndex((execution) => execution.isError === false && (
+    execution.name === "read" && String(execution.input?.path ?? "").endsWith("harness-roster.md")
+    || execution.name === "bash" && /harness-roster\.md/.test(String(execution.input?.command ?? ""))
+  ));
+  const changed = ["edit", "write", "schedule_prompt", "manage_schedule", "manage_agent_run", "mark_thread_done"]
+    .filter((name) => successful(name).length);
+  if (changed.length) problems.push(`unexpected successful mutations [${changed.join(", ")}]`);
+  if (before.harnessRoster !== after.harnessRoster) problems.push("harness roster changed during selection");
+
+  if (claim === "natural-first-delegation") {
+    const rosterIndex = rosterReadIndex();
+    const detailsIndex = executions.findIndex((execution) =>
+      execution.name === "get_harness_details" && execution.isError === false);
+    const proposalIndex = executions.findIndex((execution) =>
+      execution.name === "manage_delegated_baseline" && execution.isError === false
+      && execution.input?.action === "propose");
+    if (rosterIndex < 0 || detailsIndex <= rosterIndex || proposalIndex <= detailsIndex) {
+      problems.push("expected roster, current harness details, and a read-only proposal in order");
+    }
+    const expectedHarness = expected.candidate?.harness;
+    const detailsHarnesses = executions[detailsIndex]?.input?.harnesses;
+    if (expectedHarness && (!Array.isArray(detailsHarnesses) || !detailsHarnesses.includes(expectedHarness))) {
+      problems.push("current details did not cover the controlled candidate harness");
+    }
+    if (calls("delegate_agent").length || executions.some((execution) =>
+      execution.name === "manage_delegated_baseline" && execution.input?.action === "approve")) {
+      problems.push("natural first delegation crossed the consent boundary");
+    }
+    if (!sameValue(before.delegatedBaselines, after.delegatedBaselines)
+        || !sameValue(before.agentRuns, after.agentRuns)) {
+      problems.push("natural first delegation persisted a baseline or launch");
+    }
+    for (const value of Object.values(expected.candidate ?? {})) {
+      if (value != null && !String(output).toLowerCase().includes(String(value).toLowerCase())) {
+        problems.push("consent request omitted the exact controlled candidate");
+        break;
+      }
+    }
+    if (!/approve|approval|confirm|permission/i.test(String(output))) {
+      problems.push("natural first delegation did not present a clear consent boundary");
+    }
+  } else if (claim === "usage-explanation") {
+    if (rosterReadIndex() < 0) problems.push("usage explanation did not read the controlled roster policy");
+    if (successful("get_harness_details").length < 1) {
+      problems.push("usage explanation did not consult current harness details");
+    }
+    if (calls("delegate_agent").length || calls("manage_delegated_baseline").length
+        || !sameValue(before, after)) {
+      problems.push("usage explanation mutated delegation state");
+    }
+    if (!new RegExp(`(?:^|\\D)${Number(expected.usedPercent)}\\s*%`).test(String(output))) {
+      problems.push(`usage explanation omitted source-of-truth ${expected.usedPercent}%`);
+    }
+    if (!/unknown|not (?:available|exposed|known)/i.test(String(output))) {
+      problems.push("usage explanation did not preserve unknown facts");
+    }
+    if (expected.unknownHarness
+        && !String(output).toLowerCase().includes(String(expected.unknownHarness).toLowerCase())) {
+      problems.push("usage explanation did not identify the harness with unknown usage");
+    }
+    if (expected.recommendedHarness
+        && !String(output).toLowerCase().includes(String(expected.recommendedHarness).toLowerCase())) {
+      problems.push("usage explanation omitted the controlled recommendation");
+    }
+    if (!/recommend/i.test(String(output)) || !/(?:affect|change|because|so\b)/i.test(String(output))) {
+      problems.push("usage explanation omitted whether usage affected the recommendation");
+    }
+  } else if (claim === "approved-default-reuse") {
+    const identity = expected.identity ?? {};
+    const delegated = successful("delegate_agent");
+    if (delegated.length !== 1) problems.push(`expected exactly one successful delegated launch, got ${delegated.length}`);
+    const launchIndex = executions.indexOf(delegated[0]);
+    const detailsIndex = executions.findIndex((execution) =>
+      execution.name === "get_harness_details" && execution.isError === false
+      && Array.isArray(execution.input?.harnesses)
+      && execution.input.harnesses.includes(identity.harness));
+    if (detailsIndex < 0 || detailsIndex >= launchIndex) {
+      problems.push("approved-default reuse did not refresh the pinned harness before launch");
+    }
+    if (executions.some((execution) =>
+      execution.name === "manage_delegated_baseline" && execution.input?.action === "approve")) {
+      problems.push("approved-default reuse repeated baseline approval");
+    }
+    if (!sameValue(before.delegatedBaselines, after.delegatedBaselines)) {
+      problems.push("approved baseline changed during reuse");
+    }
+    const priorIds = new Set((before.agentRuns ?? []).map((run) => run.id));
+    const added = (after.agentRuns ?? []).filter((run) => !priorIds.has(run.id));
+    if (added.length !== 1 || !sameIdentity(added[0], identity)
+        || added[0]?.parentThreadId !== providerMetadata.sessionId) {
+      problems.push("delegated run did not reuse the exact saved identity and parent lineage");
+    }
+    if (delegated[0]?.input?.harness !== identity.harness) {
+      problems.push("delegation replaced the owner's partial harness pin");
+    }
+  } else {
+    problems.push(`unsupported delegation behavior claim: ${claim || "missing"}`);
+  }
+
+  return {
+    pass: problems.length === 0,
+    score: problems.length === 0 ? 1 : 0,
+    reason: problems.length === 0 ? `delegation behavior ok: ${claim}` : [...new Set(problems)].join("; "),
+  };
+}
+
+function sameIdentity(actual, expected) {
+  return actual?.harness === expected?.harness
+    && actual?.model === expected?.model
+    && actual?.effort === expected?.effort;
+}
+
+function sameValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
