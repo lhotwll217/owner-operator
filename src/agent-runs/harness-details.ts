@@ -1,20 +1,29 @@
-/** Read-only, ephemeral observation of what a delegation harness currently offers: its model
- * catalog, the reasoning levels each model supports, the subscription plan, and how much of each
- * subscription allowance window is spent.
+/** Launch-authoritative, read-only harness snapshot.
  *
- * Boundaries this module holds:
- * - Nothing here is persisted or cached. Every call re-observes and the result is a snapshot.
- * - `null` means "unknown — no surface exposed this"; `[]` means "observed, and there are none".
- * - One harness failing cannot erase another: failures land in that harness's own `errors`.
- * - No task selection or ranking happens here. Callers decide what to do with the facts.
+ * User preferences, ACP capability facts, and provider account/allowance facts are deliberately
+ * separate. Every source is observed independently; `null` means unknown and `[]` means the
+ * source advertised none. No result is persisted or cached.
  */
 
-import { AGENT_RUN_CAPABILITIES, AgentRunHarness, isAgentRunEffort } from "@owner-operator/core";
+import { readFileSync } from "node:fs";
 import {
+  AGENT_RUN_CAPABILITIES,
+  AgentRunHarness,
+  ownerOperatorPaths,
+} from "@owner-operator/core";
+import { ownerOperatorHome } from "../shared/paths";
+import {
+  baselineCandidateFromObservation,
   discoverAcpBaselineCandidate,
   type BaselineProbeDeps,
   type HarnessBaselineCandidate,
 } from "./harness-details-baseline-probe";
+import {
+  observeAcpHarness,
+  readAcpRegistryProvenance,
+  type AcpRegistryProvenance,
+  type HarnessCapabilityObservation,
+} from "./harness-details-acp-observer";
 import {
   readCodexAppServerPayloads,
   type CodexAppServerOptions,
@@ -26,34 +35,31 @@ import {
   type CursorCliPayloads,
 } from "./harness-details-cursor-client";
 
-export { discoverAcpBaselineCandidate, readCodexAppServerPayloads, readCursorCliPayloads };
-export type { BaselineProbeDeps, CodexAppServerOptions, CodexAppServerPayloads, CursorCliOptions, CursorCliPayloads };
+export {
+  discoverAcpBaselineCandidate,
+  observeAcpHarness,
+  readAcpRegistryProvenance,
+  readCodexAppServerPayloads,
+  readCursorCliPayloads,
+};
+export type {
+  BaselineProbeDeps,
+  CodexAppServerOptions,
+  CodexAppServerPayloads,
+  CursorCliOptions,
+  CursorCliPayloads,
+  HarnessBaselineCandidate,
+  HarnessCapabilityObservation,
+};
 
-/** Identifies which first-party protocol produced a harness's facts, so a reader can tell an
- * observation apart from an assumption. `null` on a harness that exposes no such surface. */
-export const CODEX_DETAILS_SOURCE = "codex-app-server";
-export const CURSOR_DETAILS_SOURCE = "cursor-agent-cli";
+export const CODEX_ACCOUNT_SOURCE = "codex-app-server";
+export const CURSOR_ACCOUNT_SOURCE = "cursor-agent-cli";
 
-export interface HarnessModelDetail {
-  id: string;
-  displayName: string;
-  /** Advertised reasoning levels the delegation contract can apply. `null` = the catalog entry
-   * carried no readable levels (unknown); `[]` = none were advertised or all are unsupported. */
-  reasoningLevels: string[] | null;
-  /** Advertised values the public delegation contract cannot apply. Never selectable. */
-  unsupportedReasoningLevels: string[];
-  /** The level the harness itself picks for this model when the caller pins nothing. */
-  defaultReasoningLevel: string | null;
-  isDefault: boolean;
-}
-
-/** One subscription allowance window. `usedPercent` is share of the subscription allowance
- * consumed — never a token count and never a list-price figure. */
 export interface HarnessAllowanceWindow {
   id: string;
   label: string | null;
   usedPercent: number;
-  /** Epoch seconds when the window rolls over. */
+  /** Epoch seconds when the allowance window rolls over. */
   resetsAt: number | null;
   windowMinutes: number | null;
 }
@@ -62,32 +68,62 @@ export interface HarnessAccountDetail {
   plan: string | null;
 }
 
-/** What the harness selects for itself when Owner Operator pins nothing. Reported, never saved:
- * persisting an approved baseline is a separate, owner-consented step. */
-export type { HarnessBaselineCandidate };
+export interface HarnessPreferencesObservation {
+  path: string;
+  source: "user-harness-preferences" | "legacy-harness-roster" | null;
+  content: string | null;
+  error: string | null;
+}
 
-export interface HarnessDetails {
+export interface HarnessAccountObservation {
   harness: AgentRunHarness;
   observedAt: string;
-  source: string | null;
+  source: typeof CODEX_ACCOUNT_SOURCE | typeof CURSOR_ACCOUNT_SOURCE | null;
   account: HarnessAccountDetail | null;
-  models: HarnessModelDetail[] | null;
+  authenticated: boolean | null;
   allowanceWindows: HarnessAllowanceWindow[] | null;
-  baselineCandidate: HarnessBaselineCandidate | null;
   notes: string[];
   errors: string[];
 }
 
+export interface HarnessCapabilitySnapshot extends HarnessCapabilityObservation {
+  baselineCandidate: HarnessBaselineCandidate | null;
+}
+
+export interface HarnessUnknown {
+  harness?: AgentRunHarness;
+  fact: string;
+  reason: string;
+}
+
+export interface HarnessDetailsSnapshot {
+  observedAt: string;
+  ephemeral: true;
+  preferences: HarnessPreferencesObservation;
+  capabilities: {
+    registry: AcpRegistryProvenance;
+    harnesses: HarnessCapabilitySnapshot[];
+  };
+  account: HarnessAccountObservation[];
+  unknowns: HarnessUnknown[];
+}
+
 export interface HarnessDetailsDeps {
+  observeCapability?: (
+    harness: AgentRunHarness,
+    observedAt: string,
+  ) => Promise<HarnessCapabilityObservation>;
   readCodexPayloads?: () => Promise<CodexAppServerPayloads>;
   readCursorPayloads?: () => Promise<CursorCliPayloads>;
-  discoverBaselineCandidate?: (harness: AgentRunHarness) => Promise<HarnessBaselineCandidate>;
+  readPreferences?: () => HarnessPreferencesObservation | Promise<HarnessPreferencesObservation>;
+  readRegistryProvenance?: () => AcpRegistryProvenance;
   now?: () => Date;
 }
 
 export interface ReadHarnessDetailsOptions {
   harnesses?: readonly AgentRunHarness[];
-  /** Off by default: discovery starts a real harness session, which costs seconds. */
+  /** Off by default. When requested, the unpinned ACP observation is also projected as a
+   * consent-neutral baseline candidate; it is never saved. */
   includeBaselineCandidates?: boolean;
   deps?: HarnessDetailsDeps;
 }
@@ -98,148 +134,175 @@ const ALL_HARNESSES: readonly AgentRunHarness[] = [
   AgentRunHarness.Cursor,
 ];
 
-/** Observe each requested harness independently and concurrently. A harness that throws still
- * returns a row carrying its own error, so one broken harness cannot erase another's facts. */
+/** Observe preferences, every requested ACP session, and account sources concurrently. A source
+ * failure stays in its own namespace and cannot erase successful sibling observations. */
 export async function readHarnessDetails(
   options: ReadHarnessDetailsOptions = {},
-): Promise<HarnessDetails[]> {
+): Promise<HarnessDetailsSnapshot> {
   const requested = options.harnesses?.length ? [...new Set(options.harnesses)] : ALL_HARNESSES;
-  const known = requested.filter((harness) => AGENT_RUN_CAPABILITIES[harness]);
+  const harnesses = requested.filter((harness) => AGENT_RUN_CAPABILITIES[harness]);
   const observedAt = (options.deps?.now?.() ?? new Date()).toISOString();
-  return await Promise.all(known.map((harness) =>
-    readOneHarness(harness, observedAt, options)
-  ));
+  const observe = options.deps?.observeCapability
+    ?? ((harness: AgentRunHarness) => observeAcpHarness(harness, {
+      now: () => new Date(observedAt),
+    }));
+
+  const [preferences, capabilityRows, account] = await Promise.all([
+    Promise.resolve((options.deps?.readPreferences ?? readLegacyHarnessPreferences)()),
+    Promise.all(harnesses.map(async (harness) => {
+      try {
+        return await observe(harness, observedAt);
+      } catch (error) {
+        return failedCapability(harness, observedAt, messageOf(error));
+      }
+    })),
+    Promise.all(harnesses.map((harness) => readHarnessAccount(harness, observedAt, options.deps))),
+  ]);
+  const capabilities = capabilityRows.map((observation): HarnessCapabilitySnapshot => {
+    if (!options.includeBaselineCandidates) return { ...observation, baselineCandidate: null };
+    try {
+      return { ...observation, baselineCandidate: baselineCandidateFromObservation(observation) };
+    } catch (error) {
+      return {
+        ...observation,
+        baselineCandidate: null,
+        error: observation.error ?? `baseline candidate: ${messageOf(error)}`,
+      };
+    }
+  });
+  const snapshot: HarnessDetailsSnapshot = {
+    observedAt,
+    ephemeral: true,
+    preferences,
+    capabilities: {
+      registry: (options.deps?.readRegistryProvenance ?? readAcpRegistryProvenance)(),
+      harnesses: capabilities,
+    },
+    account,
+    unknowns: [],
+  };
+  snapshot.unknowns = unknownsIn(snapshot);
+  return snapshot;
 }
 
-async function readOneHarness(
+function failedCapability(
   harness: AgentRunHarness,
   observedAt: string,
-  options: ReadHarnessDetailsOptions,
-): Promise<HarnessDetails> {
-  const details = harness === AgentRunHarness.Codex
-    ? await readCodexDetails(observedAt, options.deps)
-    : harness === AgentRunHarness.Cursor
-      ? await readCursorDetails(observedAt, options.deps)
-      : claudeCodeDetails(observedAt);
-  if (!options.includeBaselineCandidates) return details;
-
-  const discover = options.deps?.discoverBaselineCandidate ?? discoverAcpBaselineCandidate;
-  try {
-    return { ...details, baselineCandidate: await discover(harness) };
-  } catch (error) {
-    // A failed candidate probe must not discard facts already read from the first-party surface.
-    return { ...details, errors: [...details.errors, `baseline candidate: ${messageOf(error)}`] };
-  }
-}
-
-async function readCodexDetails(
-  observedAt: string,
-  deps: HarnessDetailsDeps | undefined,
-): Promise<HarnessDetails> {
-  try {
-    const payloads = await (deps?.readCodexPayloads ?? readCodexAppServerPayloads)();
-    return normalizeCodexHarnessDetails(payloads, observedAt);
-  } catch (error) {
-    return {
-      ...emptyDetails(AgentRunHarness.Codex, observedAt),
-      source: CODEX_DETAILS_SOURCE,
-      errors: [messageOf(error)],
-    };
-  }
-}
-
-async function readCursorDetails(
-  observedAt: string,
-  deps: HarnessDetailsDeps | undefined,
-): Promise<HarnessDetails> {
-  try {
-    const payloads = await (deps?.readCursorPayloads ?? readCursorCliPayloads)();
-    return normalizeCursorHarnessDetails(payloads, observedAt);
-  } catch (error) {
-    return {
-      ...emptyDetails(AgentRunHarness.Cursor, observedAt),
-      source: CURSOR_DETAILS_SOURCE,
-      errors: [messageOf(error)],
-    };
-  }
-}
-
-/** Claude Code exposes no first-party protocol for its catalog, plan, or allowance windows, so
- * those facts stay explicitly unknown rather than being inferred from docs or pricing pages. */
-function claudeCodeDetails(observedAt: string): HarnessDetails {
+  error: string,
+): HarnessCapabilityObservation {
   return {
-    ...emptyDetails(AgentRunHarness.ClaudeCode, observedAt),
-    notes: [
-      "Claude Code exposes no first-party model catalog, plan, or allowance surface; those facts are unknown, not empty.",
-    ],
+    harness,
+    acpxAgent: AGENT_RUN_CAPABILITIES[harness].acpAgent,
+    observedAt,
+    runtime: null,
+    requestedInspection: null,
+    session: null,
+    confirmation: null,
+    error,
   };
 }
 
-function emptyDetails(harness: AgentRunHarness, observedAt: string): HarnessDetails {
+export function readLegacyHarnessPreferences(): HarnessPreferencesObservation {
+  const path = ownerOperatorPaths(ownerOperatorHome()).harnessRoster;
+  try {
+    return {
+      path,
+      source: "legacy-harness-roster",
+      content: readFileSync(path, "utf8"),
+      error: null,
+    };
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return { path, source: null, content: null, error: null };
+    return {
+      path,
+      source: "legacy-harness-roster",
+      content: null,
+      error: messageOf(error),
+    };
+  }
+}
+
+async function readHarnessAccount(
+  harness: AgentRunHarness,
+  observedAt: string,
+  deps: HarnessDetailsDeps | undefined,
+): Promise<HarnessAccountObservation> {
+  if (harness === AgentRunHarness.Codex) {
+    try {
+      return normalizeCodexAccountObservation(
+        await (deps?.readCodexPayloads ?? readCodexAppServerPayloads)(),
+        observedAt,
+      );
+    } catch (error) {
+      return {
+        ...emptyAccount(harness, observedAt),
+        source: CODEX_ACCOUNT_SOURCE,
+        errors: [messageOf(error)],
+      };
+    }
+  }
+  if (harness === AgentRunHarness.Cursor) {
+    try {
+      return normalizeCursorAccountObservation(
+        await (deps?.readCursorPayloads ?? readCursorCliPayloads)(),
+        observedAt,
+      );
+    } catch (error) {
+      return {
+        ...emptyAccount(harness, observedAt),
+        source: CURSOR_ACCOUNT_SOURCE,
+        errors: [messageOf(error)],
+      };
+    }
+  }
+  return {
+    ...emptyAccount(harness, observedAt),
+    notes: ["Claude Code exposes no first-party plan or allowance surface; those facts are unknown."],
+  };
+}
+
+export function normalizeCodexAccountObservation(
+  payloads: CodexAppServerPayloads,
+  observedAt: string,
+): HarnessAccountObservation {
+  return {
+    ...emptyAccount(AgentRunHarness.Codex, observedAt),
+    source: CODEX_ACCOUNT_SOURCE,
+    account: normalizeCodexAccount(payloads.account),
+    allowanceWindows: normalizeCodexAllowanceWindows(payloads.rateLimits),
+  };
+}
+
+export function normalizeCursorAccountObservation(
+  payloads: CursorCliPayloads,
+  observedAt: string,
+): HarnessAccountObservation {
+  const status = record(payloads.status);
+  const authenticated = typeof status?.isAuthenticated === "boolean"
+    ? status.isAuthenticated
+    : null;
+  const errors = [...payloads.errors];
+  if (authenticated === false) errors.push("cursor-agent is not authenticated; run `cursor-agent login`");
+  return {
+    ...emptyAccount(AgentRunHarness.Cursor, observedAt),
+    source: CURSOR_ACCOUNT_SOURCE,
+    account: normalizeCursorAccount(payloads.about),
+    authenticated,
+    notes: ["Cursor exposes no allowance-window surface; allowance facts are unknown."],
+    errors,
+  };
+}
+
+function emptyAccount(harness: AgentRunHarness, observedAt: string): HarnessAccountObservation {
   return {
     harness,
     observedAt,
     source: null,
     account: null,
-    models: null,
+    authenticated: null,
     allowanceWindows: null,
-    baselineCandidate: null,
     notes: [],
     errors: [],
-  };
-}
-
-/** Map raw `codex app-server` results onto the normalized shape. Each fact degrades on its own:
- * an unreadable catalog leaves `models` null without touching plan or allowance windows. */
-export function normalizeCodexHarnessDetails(
-  payloads: CodexAppServerPayloads,
-  observedAt: string,
-): HarnessDetails {
-  return {
-    harness: AgentRunHarness.Codex,
-    observedAt,
-    source: CODEX_DETAILS_SOURCE,
-    account: normalizeCodexAccount(payloads.account),
-    models: normalizeCodexModels(payloads.models),
-    allowanceWindows: normalizeCodexAllowanceWindows(payloads.rateLimits),
-    baselineCandidate: null,
-    notes: [],
-    errors: [],
-  };
-}
-
-/** Map raw `cursor-agent` CLI results onto the normalized shape. Cursor encodes reasoning effort
- * inside its model ids (`gpt-5.6-sol-xhigh`, bracket overrides), so the catalog carries no
- * separate reasoning levels; those stay unknown rather than being parsed out of id suffixes. */
-export function normalizeCursorHarnessDetails(
-  payloads: CursorCliPayloads,
-  observedAt: string,
-): HarnessDetails {
-  const status = record(payloads.status);
-  const errors = [...payloads.errors];
-  if (status && status.isAuthenticated !== true) {
-    errors.push("cursor-agent is not authenticated; run `cursor-agent login`");
-  }
-  const models = normalizeCursorModels(payloads.acpModels);
-  // A present payload that yields no readable catalog means the shape was not recognized, not an
-  // empty catalog; only an advertised empty list is "observed and none".
-  if (payloads.acpModels !== null && models === null) {
-    errors.push("cursor-agent acp: no model catalog recognized in session response");
-  }
-  return {
-    harness: AgentRunHarness.Cursor,
-    observedAt,
-    source: CURSOR_DETAILS_SOURCE,
-    account: normalizeCursorAccount(payloads.about),
-    models,
-    allowanceWindows: null,
-    baselineCandidate: null,
-    notes: [
-      "Model ids are the ACP-advertised launch catalog; the broader `cursor-agent models` account catalog uses ids a delegated launch cannot select.",
-      "Cursor exposes no allowance-window surface; allowance facts are unknown, not empty.",
-      "Reasoning effort is encoded in Cursor model ids (bracket parameters), not advertised as separate levels.",
-    ],
-    errors,
   };
 }
 
@@ -249,72 +312,12 @@ function normalizeCursorAccount(payload: unknown): HarnessAccountDetail | null {
   return { plan: text(about.subscriptionTier) };
 }
 
-/** Map the ACP session/new `models` object onto the normalized shape. `isDefault` marks the
- * entry an unpinned session actually selected (`currentModelId`) — the same semantics as the
- * baseline candidate, read without a turn. */
-function normalizeCursorModels(payload: unknown): HarnessModelDetail[] | null {
-  const models = record(payload);
-  if (!models || !Array.isArray(models.availableModels)) return null;
-  const currentModelId = text(models.currentModelId);
-  return models.availableModels.flatMap((entry) => {
-    const model = record(entry);
-    const id = model && text(model.modelId);
-    if (!id) return [];
-    return [{
-      id,
-      displayName: text(model.name) ?? id,
-      reasoningLevels: null,
-      unsupportedReasoningLevels: [],
-      defaultReasoningLevel: null,
-      isDefault: id === currentModelId,
-    }];
-  });
-}
-
 function normalizeCodexAccount(payload: unknown): HarnessAccountDetail | null {
   const account = record(record(payload)?.account);
   if (!account) return null;
   return { plan: text(account.planType) };
 }
 
-function normalizeCodexModels(payload: unknown): HarnessModelDetail[] | null {
-  const data = record(payload)?.data;
-  if (!Array.isArray(data)) return null;
-  return data.flatMap((entry) => {
-    const model = record(entry);
-    const id = model && text(model.id);
-    // A catalog entry without an id cannot be selected later, so it is not a fact worth carrying.
-    if (!model || !id || model.hidden === true) return [];
-    const advertisedLevels = normalizeReasoningLevels(model.supportedReasoningEfforts);
-    return [{
-      id,
-      displayName: text(model.displayName) ?? id,
-      reasoningLevels: advertisedLevels?.filter(isAgentRunEffort) ?? advertisedLevels,
-      unsupportedReasoningLevels: advertisedLevels?.filter((level) => !isAgentRunEffort(level)) ?? [],
-      defaultReasoningLevel: isAgentRunEffort(text(model.defaultReasoningEffort))
-        ? text(model.defaultReasoningEffort)
-        : null,
-      isDefault: model.isDefault === true,
-    }];
-  });
-}
-
-/** Only an advertised empty list means "this model has no reasoning levels". An absent or
- * unreadable field is unknown: collapsing it to `[]` would let a caller conclude the harness
- * offers no levels when in fact none were observed. */
-function normalizeReasoningLevels(payload: unknown): string[] | null {
-  if (!Array.isArray(payload)) return null;
-  if (!payload.length) return [];
-  const levels = payload.flatMap((entry) => {
-    const level = text(record(entry)?.reasoningEffort);
-    return level ? [level] : [];
-  });
-  return levels.length ? levels : null;
-}
-
-/** Codex reports allowance either as one snapshot or keyed by limit id, and each entry carries up
- * to two windows. Prefer the keyed view when populated — it is the superset — and emit one row per
- * window so a short and a long window are never averaged together. */
 function normalizeCodexAllowanceWindows(payload: unknown): HarnessAllowanceWindow[] | null {
   const root = record(payload);
   if (!root) return null;
@@ -322,7 +325,6 @@ function normalizeCodexAllowanceWindows(payload: unknown): HarnessAllowanceWindo
   const snapshots = byLimitId && Object.keys(byLimitId).length
     ? Object.entries(byLimitId).map(([key, value]) => ({ fallbackId: key, snapshot: value }))
     : [{ fallbackId: "codex", snapshot: root.rateLimits }];
-
   const windows = snapshots.flatMap(({ fallbackId, snapshot }) => {
     const limit = record(snapshot);
     if (!limit) return [];
@@ -333,7 +335,6 @@ function normalizeCodexAllowanceWindows(payload: unknown): HarnessAllowanceWindo
       return window ? [window] : [];
     });
   });
-  // Code-unit order, not locale collation: the output must be identical on every machine.
   return windows.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
 
@@ -354,6 +355,37 @@ function normalizeCodexWindow(
   };
 }
 
+function unknownsIn(snapshot: HarnessDetailsSnapshot): HarnessUnknown[] {
+  const unknowns: HarnessUnknown[] = [];
+  if (snapshot.preferences.content === null) {
+    unknowns.push({ fact: "preferences.content", reason: snapshot.preferences.error ?? "no preference file observed" });
+  }
+  for (const row of snapshot.capabilities.harnesses) {
+    if (row.runtime === null) unknowns.push({ harness: row.harness, fact: "capabilities.runtime", reason: row.error ?? "not observed" });
+    if (row.session === null) {
+      unknowns.push({ harness: row.harness, fact: "capabilities.session", reason: row.error ?? "not observed" });
+      continue;
+    }
+    if (row.session.models === null) {
+      unknowns.push({ harness: row.harness, fact: "capabilities.session.models", reason: "not advertised" });
+    } else if (row.session.models.currentModelId === undefined) {
+      unknowns.push({ harness: row.harness, fact: "capabilities.session.models.currentModelId", reason: "not advertised" });
+    }
+    if (row.session.configOptions === null) unknowns.push({ harness: row.harness, fact: "capabilities.session.configOptions", reason: "not advertised" });
+    if (row.session.usage === null) unknowns.push({ harness: row.harness, fact: "capabilities.session.usage", reason: "not advertised" });
+  }
+  for (const row of snapshot.account) {
+    if (row.account === null || row.account.plan === null) {
+      unknowns.push({ harness: row.harness, fact: "account.plan", reason: row.errors[0] ?? "no provider surface" });
+    }
+    if (row.authenticated === null) {
+      unknowns.push({ harness: row.harness, fact: "account.authenticated", reason: row.errors[0] ?? "no provider surface" });
+    }
+    if (row.allowanceWindows === null) unknowns.push({ harness: row.harness, fact: "account.allowanceWindows", reason: row.errors[0] ?? "no provider surface" });
+  }
+  return unknowns;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -366,6 +398,12 @@ function text(value: unknown): string | null {
 
 function numeric(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
 }
 
 function messageOf(error: unknown): string {

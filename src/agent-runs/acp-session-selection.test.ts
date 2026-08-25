@@ -7,6 +7,7 @@ import {
   advertisedSelectValues,
   applyAndConfirmAcpSelection,
   configOptionsFromStatus,
+  resolveThoughtLevelSelector,
   type RequestedAcpSelection,
 } from "./acp-session-selection";
 
@@ -94,16 +95,23 @@ const preserved = [
     type: "select",
     currentValue: "high",
     options: [
-      { group: "ordinary", name: "Ordinary", options: [{ value: "low", name: "Low" }] },
+      {
+        group: "ordinary",
+        name: "Ordinary",
+        options: [{ value: "low", name: "Low", futureChoice: true }],
+        futureGroup: true,
+      },
       { group: "deep", name: "Deep", options: [{ value: "xhigh", name: "Xhigh" }] },
     ],
     description: "preserved",
     _meta: { future: true },
-  } satisfies SessionConfigOption,
-];
+    futureOption: true,
+  },
+] as unknown as SessionConfigOption[];
 assert.equal(configOptionsFromStatus(status(requested.model, preserved)), preserved);
 assert.deepEqual(advertisedSelectValues(preserved[1]!), ["low", "xhigh"]);
 assert.deepEqual(configOptionsFromStatus(status(requested.model, [])), []);
+assert.equal(resolveThoughtLevelSelector([select("effort", "high", ["high"], "thought_level")]).kind, "found");
 
 for (const malformed of [
   null,
@@ -117,6 +125,42 @@ for (const malformed of [
   [{ id: "effort", type: "select", currentValue: "high", options: [{}] }],
   [{ id: "effort", type: "select", currentValue: "high", options: [{ options: [{}] }] }],
   [{ id: "flag", type: "boolean", currentValue: "true" }],
+  [{ id: "flag", type: "boolean", name: 1, currentValue: true }],
+  [{ id: "flag", type: "boolean", name: "Flag", currentValue: true, description: 1 }],
+  [{ id: "flag", type: "boolean", name: "Flag", currentValue: true, _meta: [] }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [{ value: "high" }],
+  }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [{ value: "high", name: "High", description: false }],
+  }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [{ value: "high", name: "High", _meta: [] }],
+  }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [{ group: "ordinary", options: [] }],
+  }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [{ group: "ordinary", name: "Ordinary", options: {} }],
+  }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [{
+      group: "ordinary", name: "Ordinary", options: [{ value: "high" }],
+    }],
+  }],
+  [{
+    id: "effort", type: "select", name: "Effort", currentValue: "high",
+    options: [
+      { value: "high", name: "High" },
+      { group: "other", name: "Other", options: [{ value: "low", name: "Low" }] },
+    ],
+  }],
 ]) {
   assert.throws(
     () => configOptionsFromStatus(status(requested.model, malformed)),

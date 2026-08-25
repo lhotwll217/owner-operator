@@ -3,12 +3,9 @@ import { createInterface } from "node:readline";
 
 const TIMEOUT_MS = 20_000;
 const KILL_GRACE_MS = 2_000;
-const MODEL_LIST_MAX_PAGES = 100;
-
 export interface CodexAppServerPayloads {
   account: unknown;
   rateLimits: unknown;
-  models: unknown;
 }
 
 export interface CodexAppServerOptions {
@@ -26,26 +23,7 @@ export function readCodexAppServerPayloads(options: CodexAppServerOptions = {}):
   return withServer(options, async (client) => ({
     account: await client.request("account/read"),
     rateLimits: await client.request("account/rateLimits/read"),
-    models: await readAllModelPages(client),
   }));
-}
-
-async function readAllModelPages(client: Client): Promise<unknown> {
-  const data: unknown[] = [];
-  const seen = new Set<string>();
-  let cursor: string | null = null;
-  for (let page = 0; page < MODEL_LIST_MAX_PAGES; page += 1) {
-    const payload = await client.request("model/list", cursor ? { cursor } : {});
-    const result = record(payload);
-    if (!result || !Array.isArray(result.data)) return payload;
-    data.push(...result.data);
-    const nextCursor = text(result.nextCursor);
-    if (!nextCursor) return { ...result, data, nextCursor: null };
-    if (seen.has(nextCursor)) throw new Error(`codex model/list pagination loop at cursor ${nextCursor}`);
-    seen.add(nextCursor);
-    cursor = nextCursor;
-  }
-  throw new Error(`codex model/list exceeded ${MODEL_LIST_MAX_PAGES} pages`);
 }
 
 async function withServer<T>(options: CodexAppServerOptions, run: (client: Client) => Promise<T>): Promise<T> {
@@ -118,8 +96,5 @@ function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
   return Promise.race([work.then(() => true), new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms); })])
     .finally(() => clearTimeout(timer));
-}
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 function text(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }

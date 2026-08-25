@@ -1,84 +1,72 @@
 import assert from "node:assert";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness } from "@owner-operator/core";
-import {
-  CODEX_ACCOUNT_READ,
-  CODEX_MODEL_LIST,
-  CODEX_RATE_LIMITS_READ,
-} from "../../test/fixtures/codex-app-server";
-import { CURSOR_ABOUT, CURSOR_ACP_MODELS, CURSOR_STATUS } from "../../test/fixtures/cursor-cli";
-import { readHarnessDetails } from "./harness-details";
+import { readHarnessDetails, type HarnessCapabilityObservation } from "./harness-details";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-harness-details-"));
 const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
+mkdirSync(join(dir, "workspace"), { recursive: true });
+writeFileSync(join(dir, "workspace", "harness-roster.md"), "Owner-authored bytes.\n");
 
-const listing = (): string[] => {
-  try {
-    return readdirSync(dir, { recursive: true }) as string[];
-  } catch {
-    return [];
-  }
-};
+const listing = (): string[] => readdirSync(dir, { recursive: true }) as string[];
+const observed = (harness: AgentRunHarness, observedAt: string): HarnessCapabilityObservation => ({
+  harness,
+  acpxAgent: harness === AgentRunHarness.ClaudeCode ? "claude" : harness,
+  observedAt,
+  runtime: {
+    acpxVersion: "0.13.1",
+    adapter: { packageName: null, packageVersion: null, resolution: "path" },
+    backend: { name: "fixture", version: "1", source: "path-command" },
+  },
+  requestedInspection: null,
+  session: {
+    models: { currentModelId: "fixture", availableModelIds: ["fixture"] },
+    configOptions: [],
+    usage: null,
+  },
+  confirmation: null,
+  error: null,
+});
 
 try {
   const before = listing();
-  const firstObservedAt = new Date("2026-08-13T08:00:00.000Z");
-
+  const firstObservedAt = "2026-08-13T08:00:00.000Z";
   const first = await readHarnessDetails({
     deps: {
-      now: () => firstObservedAt,
-      readCodexPayloads: async () => ({
-        account: CODEX_ACCOUNT_READ,
-        rateLimits: CODEX_RATE_LIMITS_READ,
-        models: CODEX_MODEL_LIST,
-      }),
-      readCursorPayloads: async () => ({
-        about: CURSOR_ABOUT,
-        status: CURSOR_STATUS,
-        acpModels: CURSOR_ACP_MODELS,
-        errors: [],
-      }),
-      discoverBaselineCandidate: async () => ({
-        model: "gpt-5.6-sol",
-        effort: "low",
-        availableEfforts: ["low", "high"],
-      }),
+      now: () => new Date(firstObservedAt),
+      observeCapability: async (harness, at) => observed(harness, at),
+      readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: [] }),
+      readCodexPayloads: async () => ({ account: null, rateLimits: null }),
+      readCursorPayloads: async () => ({ about: null, status: null, errors: [] }),
     },
-    includeBaselineCandidates: true,
   });
-  assert.equal(first.length, 3);
-  assert.equal(first[0]?.baselineCandidate?.model, "gpt-5.6-sol");
-  assert.deepEqual(
-    listing(),
-    before,
-    "observing harnesses writes nothing: no cache, no candidate, no failure ledger",
-  );
+  assert.equal(first.capabilities.harnesses.length, 3);
+  assert.equal(first.preferences.content, "Owner-authored bytes.\n");
+  assert.deepEqual(listing(), before, "reading the snapshot creates no cache, ledger, or session store");
 
-  // A second observation must re-read rather than serve a remembered answer.
   const reads: string[] = [];
+  const secondObservedAt = "2026-08-13T08:00:01.000Z";
   const second = await readHarnessDetails({
     harnesses: [AgentRunHarness.Codex],
     deps: {
-      now: () => new Date("2026-08-13T08:00:01.000Z"),
-      readCodexPayloads: async () => {
-        reads.push("codex");
-        return { account: null, rateLimits: null, models: { data: [] } };
+      now: () => new Date(secondObservedAt),
+      observeCapability: async (harness, at) => {
+        reads.push(harness);
+        return { ...observed(harness, at), session: { models: null, configOptions: [], usage: null } };
       },
+      readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: [] }),
+      readCodexPayloads: async () => ({ account: null, rateLimits: null }),
     },
   });
-  assert.deepEqual(reads, ["codex"], "every call re-observes the harness");
-  assert.deepEqual(second[0]?.models, [], "the second snapshot reflects the new observation, not the first");
-  assert.notEqual(
-    second[0]?.observedAt,
-    first[0]?.observedAt,
-    "each snapshot stamps its own observation time",
-  );
+  assert.deepEqual(reads, [AgentRunHarness.Codex], "each call re-observes the requested ACP harness");
+  assert.equal(second.observedAt, secondObservedAt);
+  assert.equal(second.capabilities.harnesses[0]?.session?.models, null);
   assert.deepEqual(listing(), before, "a repeat observation still persists nothing");
 
-  process.stdout.write("ok — harness observation is ephemeral and leaves no durable state\n");
+  process.stdout.write("ok — launch-authoritative harness snapshots are ephemeral and re-observed\n");
 } finally {
   if (previousOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = previousOoHome;

@@ -65,17 +65,22 @@ const detailsTool = createGetHarnessDetailsTool({
   read: async (input) => {
     detailsCalls.push(input);
     assert.ok(input.harnesses?.[0]);
-    return [{
-      harness: input.harnesses[0],
+    return {
       observedAt: "2026-08-12T12:00:00.000Z",
-      source: "captured test observation",
-      account: null,
-      models: null,
-      allowanceWindows: null,
-      baselineCandidate: null,
-      notes: ["Account, catalog, and allowance are unknown."],
-      errors: [],
-    }];
+      ephemeral: true,
+      preferences: {
+        path: paths.harnessRoster,
+        source: "legacy-harness-roster",
+        content: roster,
+        error: null,
+      },
+      capabilities: {
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
+        harnesses: [],
+      },
+      account: [],
+      unknowns: [],
+    };
   },
 });
 const delegateTool = createDelegateAgentTool({ resolveGateway: async () => backend });

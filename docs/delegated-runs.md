@@ -176,48 +176,50 @@ identity reporting. A complete owner-supplied harness/model/effort choice—incl
 effort—bypasses selection and reaches `delegate_agent` unchanged. The permanent product prompt owns
 only that invocation and precedence rule.
 
-`get_harness_details` reads what a harness currently offers — its model catalog, the reasoning
-levels each model supports, the subscription plan, and how much of each subscription allowance
-window is spent. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts) is the
-stable normalization facade; private sibling modules own the Codex JSON-RPC process and ACP probe
-lifecycle. The tool is a thin adapter over the facade.
+`get_harness_details` returns one namespaced snapshot: raw owner preferences, launch-authoritative
+ACP capabilities, and provider account/allowance observations remain separate. Every supported
+harness capability row comes from a disposable session through the same leased ACPX launch seam as
+delegation and includes the complete advertised `SessionConfigOption[]` plus exact ACPX, adapter,
+backend, resolution-source, and observation-time provenance. Provider-specific model projections
+are not launch truth. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts)
+joins the isolated sources; the private
+[ACP observer](../src/agent-runs/harness-details-acp-observer.ts) owns initialization, status
+validation, timeout, termination, and throwaway-store cleanup. The tool remains a thin adapter.
 
 The boundary is read-only and ephemeral:
 
 - **Nothing is stored.** No cache, no polling, no provider registry, no failure ledger. Every call
   re-observes, and a snapshot is only true as of its `observedAt`.
 - **`null` means unknown; `[]` means observed-and-none.** A fact the harness exposes no surface for
-  stays `null` rather than being inferred from documentation or pricing pages. Claude Code exposes
-  no first-party catalog, plan, or allowance surface, so those stay unknown.
-- **One harness cannot erase another.** Each harness is observed independently and a failure lands
-  in that harness's own `errors`.
+  stays `null` rather than being inferred from documentation or pricing pages. Claude Code's ACP
+  session supplies capabilities, while its plan and allowance remain unknown.
+- **One source cannot erase another.** Each ACP harness and provider account surface is observed
+  independently. A capability failure lands in that harness row and cannot erase owner
+  preferences, another harness, or an account observation.
 - **Percentages are subscription allowance**, never token counts and never list-price figures.
-- **No selection happens here.** The details layer reports facts and ranks nothing; choosing a
+- **No selection happens here.** The snapshot reports facts and ranks nothing; choosing a
   harness or model is the caller's decision.
 
-Codex facts come from its first-party `codex app-server` JSON-RPC surface. The catalog request is
-issued last in the handshake because the app-server only begins refreshing its remote catalog after
-`initialized` and announces nothing when that refresh lands; asking earlier returns a stale local
-copy.
+Codex account plan and allowance facts come from its first-party `codex app-server` JSON-RPC
+surface. Its model list is not used as capability evidence; the disposable Codex ACP session owns
+that namespace. The leased wrapper clears inherited `CODEX_PATH` for supported Codex ACP launches,
+so the adapter always executes its package-lock dependency and the reported backend version cannot
+describe a different binary than the session used.
 
-Cursor facts come from its first-party `cursor-agent` CLI: the model catalog from a throwaway
-`cursor-agent acp` session (initialize + session/new, no billed turn), `about` (plan), and
-`status` (auth). The ACP-advertised list is the launch-authoritative catalog — the broader
-`cursor-agent models` account catalog uses different ids a delegated launch cannot select, so it
-is deliberately not read. Cursor speaks ACP natively — the launcher runs the resolved local
-CLI as `cursor-agent acp` through the same registry-override seam as Codex, with no adapter
-package in between. Cursor encodes reasoning effort inside its model ids (bracket parameters),
-so the catalog advertises no separate reasoning levels, and allowance windows have no CLI
-surface — both stay honestly unknown. The CLI is signed into
+Cursor account and authentication facts come from `cursor-agent about` and `cursor-agent status`.
+Cursor speaks ACP natively — the capability observer and launcher run the same resolved local CLI
+as `cursor-agent acp`, with no adapter package in between, and report that path-resolved binary's
+version. The broader `cursor-agent models` account catalog is deliberately not read. Cursor
+allowance windows have no CLI surface and stay honestly unknown. The CLI is signed into
 whatever Cursor account is active on the machine; a delegated run bills that account and sends
 the task's code to it. A launch can also fail with the server's own `ActionRequiredError` (for
 example an unacknowledged data-retention prompt); the run's failure record carries that message
 verbatim as an owner action.
 
-Baseline-candidate discovery is opt-in and separate. It opens one throwaway ACP session pinning
-neither model nor effort, reads back what the harness selected for itself, and reports it as a
-*candidate*. A candidate is never saved: persisting a delegated default requires explicit owner
-approval and is owned by the [launch configuration](../src/agent-runs/launch-config.ts).
+Baseline-candidate discovery remains opt-in. It projects the unpinned disposable ACP observation's
+current model and thought-level option as a *candidate*. A candidate is never saved: persisting a
+delegated default requires explicit owner approval and is owned by the
+[launch configuration](../src/agent-runs/launch-config.ts).
 
 `manage_delegated_baseline` is the narrow consent seam. `propose` performs initial discovery or a
 refresh and only compares the ephemeral candidate with the current approval. `approve` stores the

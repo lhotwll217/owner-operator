@@ -54,6 +54,11 @@ class AcpConfigOptionsInvalidError extends Error {
   }
 }
 
+export type ThoughtLevelSelectorResolution =
+  | { kind: "found"; selector: Extract<SessionConfigOption, { type: "select" }> }
+  | { kind: "missing" }
+  | { kind: "ambiguous"; detail: string };
+
 /** Decode only the ACP option structure this service consumes. Accepted option objects are
  * returned unchanged so callers retain names, descriptions, metadata, and future extensions. */
 export function configOptionsFromStatus(status: AcpRuntimeStatus): SessionConfigOption[] | null {
@@ -74,6 +79,33 @@ export function advertisedSelectValues(option: SessionConfigOption): string[] {
     if ("value" in entry) return [entry.value];
     return entry.options.map(({ value }) => value);
   });
+}
+
+/** One category-first, bounded-fallback policy shared by delegated launch and snapshot baseline
+ * projection. The caller decides whether missing/ambiguous state is fatal for its own contract. */
+export function resolveThoughtLevelSelector(
+  options: SessionConfigOption[],
+): ThoughtLevelSelectorResolution {
+  const selectOptions = options.filter(
+    (option): option is Extract<SessionConfigOption, { type: "select" }> => option.type === "select",
+  );
+  const categorized = selectOptions.filter(({ category }) => category === THOUGHT_LEVEL_CATEGORY);
+  if (categorized.length > 1) {
+    return { kind: "ambiguous", detail: "thought-level category matched multiple options" };
+  }
+  if (categorized.length === 1) return { kind: "found", selector: categorized[0]! };
+
+  for (const id of THOUGHT_LEVEL_FALLBACK_IDS) {
+    const matching = selectOptions.filter((option) => option.id === id);
+    if (matching.length > 1) {
+      return {
+        kind: "ambiguous",
+        detail: `fallback option ${JSON.stringify(id)} matched multiple selectors`,
+      };
+    }
+    if (matching.length === 1) return { kind: "found", selector: matching[0]! };
+  }
+  return { kind: "missing" };
 }
 
 /** Establish the exact requested model and nullable effort on one live ACP session, then prove
@@ -182,41 +214,22 @@ function requireThoughtLevelSelector(
   requested: RequestedAcpSelection,
   phase: "initial" | "confirmed",
 ): Extract<SessionConfigOption, { type: "select" }> {
-  const categorized = selectOptions(options).filter(({ category }) => category === THOUGHT_LEVEL_CATEGORY);
-  if (categorized.length > 1) {
-    throw failure("ACP_SELECTION_SELECTOR_AMBIGUOUS", requested, `${phase} thought-level category matched multiple options`);
+  const resolution = resolveThoughtLevelSelector(options);
+  if (resolution.kind === "ambiguous") {
+    throw failure("ACP_SELECTION_SELECTOR_AMBIGUOUS", requested, `${phase} ${resolution.detail}`);
   }
-  if (categorized.length === 1) return categorized[0]!;
-
-  for (const id of THOUGHT_LEVEL_FALLBACK_IDS) {
-    const matching = selectOptions(options).filter((option) => option.id === id);
-    if (matching.length > 1) {
-      throw failure(
-        "ACP_SELECTION_SELECTOR_AMBIGUOUS",
-        requested,
-        `${phase} fallback option ${JSON.stringify(id)} matched multiple selectors`,
-      );
-    }
-    if (matching.length === 1) return matching[0]!;
-  }
+  if (resolution.kind === "found") return resolution.selector;
   throw failure("ACP_SELECTION_SELECTOR_MISSING", requested, `${phase} status advertised no thought-level selector`);
-}
-
-function selectOptions(
-  options: SessionConfigOption[],
-): Array<Extract<SessionConfigOption, { type: "select" }>> {
-  return options.filter(
-    (option): option is Extract<SessionConfigOption, { type: "select" }> => option.type === "select",
-  );
 }
 
 function validateConfigOption(value: unknown, index: number): void {
   const option = record(value);
   if (!option) throw invalid(index, "must be an object");
   if (typeof option.id !== "string" || !option.id.trim()) throw invalid(index, "id must be a non-empty string");
-  if (option.category !== undefined && option.category !== null && typeof option.category !== "string") {
-    throw invalid(index, "category must be a string or null");
-  }
+  if (typeof option.name !== "string") throw invalid(index, "name must be a string");
+  validateOptionalText(option, "description", index);
+  validateOptionalText(option, "category", index);
+  validateOptionalMeta(option, index);
   if (option.type === "boolean") {
     if (typeof option.currentValue !== "boolean") throw invalid(index, "boolean currentValue must be boolean");
     return;
@@ -224,17 +237,70 @@ function validateConfigOption(value: unknown, index: number): void {
   if (option.type !== "select") throw invalid(index, "type must be select or boolean");
   if (typeof option.currentValue !== "string") throw invalid(index, "select currentValue must be a string");
   if (!Array.isArray(option.options)) throw invalid(index, "select options must be an array");
-  for (const [choiceIndex, value] of option.options.entries()) {
+  const entries = option.options.map((value, choiceIndex) => {
     const choice = record(value);
     if (!choice) throw invalid(index, `choice ${choiceIndex} must be an object`);
-    if (typeof choice.value === "string") continue;
-    if (!Array.isArray(choice.options)) throw invalid(index, `choice ${choiceIndex} has no value or group options`);
-    for (const [nestedIndex, nestedValue] of choice.options.entries()) {
-      const nested = record(nestedValue);
-      if (!nested || typeof nested.value !== "string") {
-        throw invalid(index, `group ${choiceIndex} choice ${nestedIndex} must have a string value`);
-      }
-    }
+    return choice;
+  });
+  const grouped = entries.some((entry) => Object.hasOwn(entry, "group"));
+  if (grouped && entries.some((entry) => !Object.hasOwn(entry, "group"))) {
+    throw invalid(index, "select options must be all direct choices or all groups");
+  }
+  for (const [choiceIndex, choice] of entries.entries()) {
+    if (grouped) validateChoiceGroup(choice, index, choiceIndex);
+    else validateDirectChoice(choice, index, `choice ${choiceIndex}`);
+  }
+}
+
+function validateChoiceGroup(
+  group: Record<string, unknown>,
+  optionIndex: number,
+  groupIndex: number,
+): void {
+  if (typeof group.group !== "string") throw invalid(optionIndex, `group ${groupIndex} id must be a string`);
+  if (typeof group.name !== "string") throw invalid(optionIndex, `group ${groupIndex} name must be a string`);
+  validateOptionalMeta(group, optionIndex, `group ${groupIndex} `);
+  if (!Array.isArray(group.options)) throw invalid(optionIndex, `group ${groupIndex} options must be an array`);
+  for (const [choiceIndex, value] of group.options.entries()) {
+    const choice = record(value);
+    if (!choice) throw invalid(optionIndex, `group ${groupIndex} choice ${choiceIndex} must be an object`);
+    validateDirectChoice(choice, optionIndex, `group ${groupIndex} choice ${choiceIndex}`);
+  }
+}
+
+function validateDirectChoice(
+  choice: Record<string, unknown>,
+  optionIndex: number,
+  label: string,
+): void {
+  if (typeof choice.value !== "string") throw invalid(optionIndex, `${label} value must be a string`);
+  if (typeof choice.name !== "string") throw invalid(optionIndex, `${label} name must be a string`);
+  validateOptionalText(choice, "description", optionIndex, `${label} `);
+  validateOptionalMeta(choice, optionIndex, `${label} `);
+}
+
+function validateOptionalText(
+  value: Record<string, unknown>,
+  key: "description" | "category",
+  optionIndex: number,
+  prefix = "",
+): void {
+  if (
+    value[key] !== undefined
+    && value[key] !== null
+    && typeof value[key] !== "string"
+  ) {
+    throw invalid(optionIndex, `${prefix}${key} must be a string or null`);
+  }
+}
+
+function validateOptionalMeta(
+  value: Record<string, unknown>,
+  optionIndex: number,
+  prefix = "",
+): void {
+  if (value._meta !== undefined && value._meta !== null && !record(value._meta)) {
+    throw invalid(optionIndex, `${prefix}_meta must be an object or null`);
   }
 }
 

@@ -78,17 +78,17 @@ try {
     harnessAdapters: {
       readHarnessDetails: async () => {
         controlledReads += 1;
-        return [{
-          harness: AgentRunHarness.Codex,
+        return {
           observedAt: "2026-08-20T00:00:00.000Z",
-          source: "controlled-production-adapter",
-          account: null,
-          models: [],
-          allowanceWindows: [],
-          baselineCandidate: null,
-          notes: [],
-          errors: [],
-        }];
+          ephemeral: true,
+          preferences: { path: "/fixture/preferences.md", source: null, content: null, error: null },
+          capabilities: {
+            registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
+            harnesses: [],
+          },
+          account: [],
+          unknowns: [],
+        };
       },
     },
   });

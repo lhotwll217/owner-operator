@@ -3,7 +3,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { AgentRunHarness } from "@owner-operator/core";
 import {
   readHarnessDetails,
-  type HarnessDetails,
+  type HarnessDetailsSnapshot,
   type ReadHarnessDetailsOptions,
 } from "../../agent-runs/harness-details";
 
@@ -12,23 +12,10 @@ const HarnessSchema = Type.Union(
   { description: "Harness to observe: claude-code | codex | cursor." },
 );
 
-export interface GetHarnessDetailsResult {
-  observedAt: string;
-  ephemeral: true;
-  details: HarnessDetails[];
-}
-
-/** Thin presentation adapter: it shapes the envelope and does no selection, ranking, or
- * interpretation of the observed facts. */
-export function harnessDetailsResult(
-  details: readonly HarnessDetails[],
-  observedAt: string,
-): GetHarnessDetailsResult {
-  return { observedAt, ephemeral: true, details: [...details] };
-}
+export type GetHarnessDetailsResult = HarnessDetailsSnapshot;
 
 export interface GetHarnessDetailsToolOptions {
-  read?: (input: ReadHarnessDetailsOptions) => Promise<HarnessDetails[]>;
+  read?: (input: ReadHarnessDetailsOptions) => Promise<HarnessDetailsSnapshot>;
 }
 
 export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOptions = {}) {
@@ -37,22 +24,22 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
     name: "get_harness_details",
     label: "Get harness details",
     description:
-      "Read what each delegation harness currently offers: its model catalog, the reasoning " +
-      "levels each model supports, the subscription plan, and how much of each subscription " +
-      "allowance window is spent. Facts are observed live and never cached, so the snapshot is " +
-      "only true as of observedAt. null means the harness exposes no such fact (unknown); an " +
-      "empty array means it was observed and there are none. Percentages are share of " +
-      "subscription allowance, not tokens or cost. Set includeBaselineCandidates to also ask each " +
-      "harness what model and effort it would choose for itself; that answer is a proposal only " +
-      "and is never saved. This tool reports facts and does not choose a harness or model.",
+      "Return one ephemeral, never-cached snapshot with separate preferences, ACP capabilities, " +
+      "and provider account namespaces. Every supported harness capability is observed through " +
+      "the real disposable ACP launch seam and includes complete configOptions plus exact ACPX, " +
+      "adapter, backend, resolution-source, and observation-time provenance. null means unknown; " +
+      "an empty array means observed-and-none. Account allowance percentages are subscription " +
+      "allowance, not tokens or cost. includeBaselineCandidates also projects each unpinned ACP " +
+      "session's current model and effort as an unsaved proposal. This tool reports facts and " +
+      "does not choose a harness or model.",
     parameters: Type.Object({
       harnesses: Type.Optional(Type.Array(HarnessSchema, {
         description: "Limit the observation to these harnesses. Omit to observe all of them.",
       })),
       includeBaselineCandidates: Type.Optional(Type.Boolean({
         description:
-          "Also start one throwaway unpinned session per harness to learn its self-selected model " +
-          "and effort. Costs several seconds per harness. Default false.",
+          "Also project each already-opened unpinned capability session's self-selected model " +
+          "and effort as an unsaved baseline candidate. Starts no additional session. Default false.",
       })),
     }),
     async execute(_id, params) {
@@ -60,10 +47,9 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
         ...(params.harnesses?.length ? { harnesses: params.harnesses as AgentRunHarness[] } : {}),
         ...(params.includeBaselineCandidates ? { includeBaselineCandidates: true } : {}),
       });
-      const result = harnessDetailsResult(details, details[0]?.observedAt ?? new Date().toISOString());
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-        details: result,
+        content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+        details,
       };
     },
   });
