@@ -14,6 +14,8 @@ import { ownerOperatorHome } from "../shared/paths";
 const LEASE_VERSION = 1;
 const PROCESS_LIST_TIMEOUT_MS = 2_000;
 const PROCESS_LIST_MAX_BYTES = 8 * 1024 * 1024;
+const TERMINATION_VERIFY_ATTEMPTS = 5;
+const TERMINATION_VERIFY_INTERVAL_MS = 250;
 const LEASE_ARG = "--oo-agent-run-lease";
 
 interface AgentRunProcessLease {
@@ -110,8 +112,8 @@ async function processesForLease(
 }
 
 /** Terminate the live process tree owned by one lease, including during initialization before
- * acpx has produced a session handle. The lease is removed only after a second process snapshot
- * confirms that the exact wrapper identity is gone. */
+ * acpx has produced a session handle. The lease is removed only after bounded repeated snapshots
+ * confirm that the exact wrapper identity and every captured descendant are gone. */
 export async function terminateAgentRunProcessLease(params: {
   leaseId: string;
   wrapperPath: string;
@@ -132,16 +134,37 @@ export async function terminateAgentRunProcessLease(params: {
   const originalPids = new Set([...(params.trackedPids ?? []), ...livePids]);
   const owned = processes.filter((entry) => livePids.has(entry.pid));
   await terminatePids(uniquePids([...owned].reverse()), params.deps);
-  let after: ProcessInfo[];
-  try {
-    after = await (params.deps?.listProcesses ?? listPlatformProcesses)();
-  } catch {
-    return false;
-  }
-  if (after.some((entry) => originalPids.has(entry.pid)
-    || (entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId))) return false;
+  const confirmed = await waitForProcessTermination({
+    leaseId: params.leaseId,
+    wrapperPath: params.wrapperPath,
+    originalPids,
+    deps: params.deps,
+  });
+  if (!confirmed) return false;
   closeAgentRunProcessLease(params.leaseId);
   return true;
+}
+
+async function waitForProcessTermination(params: {
+  leaseId: string;
+  wrapperPath: string;
+  originalPids: ReadonlySet<number>;
+  deps?: AgentRunProcessCleanupDeps;
+}): Promise<boolean> {
+  const list = params.deps?.listProcesses ?? listPlatformProcesses;
+  const sleep = params.deps?.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < TERMINATION_VERIFY_ATTEMPTS; attempt += 1) {
+    try {
+      const processes = await list();
+      const unresolved = processes.some((entry) => params.originalPids.has(entry.pid)
+        || (entry.command.includes(params.wrapperPath) && leaseIdFromCommand(entry.command) === params.leaseId));
+      if (!unresolved) return true;
+    } catch {
+      // A later bounded snapshot may still provide authoritative absence evidence.
+    }
+    if (attempt < TERMINATION_VERIFY_ATTEMPTS - 1) await sleep(TERMINATION_VERIFY_INTERVAL_MS);
+  }
+  return false;
 }
 
 /** Snapshot the exact live PID tree before requesting a graceful runtime close. */

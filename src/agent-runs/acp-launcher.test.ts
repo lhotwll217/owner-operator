@@ -163,6 +163,55 @@ assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
 
+const cursorModel = "composer-2.5[fast=true]";
+const cursorTerminalError = "Error: RetriableError: [internal] Failed to run step, exceeded max retries";
+const cursorStatus = async () => ({
+  models: { currentModelId: cursorModel, availableModelIds: [cursorModel] },
+  details: { configOptions: [{
+    id: "model", name: "Model", category: "model", type: "select", currentValue: cursorModel,
+    options: [{ value: cursorModel, name: "composer-2.5" }],
+  }] },
+});
+const cursorErrorRuntime = {
+  ensureSession: async () => handle,
+  getStatus: cursorStatus,
+  startTurn: () => ({
+    events: (async function* () {
+      yield { type: "text_delta", stream: "output", text: `\n\n${cursorTerminalError}` };
+    })(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+} as unknown as AcpRuntime;
+const cursorErrorResult = await createAcpLauncher({ runtimeFactory: () => cursorErrorRuntime })({
+  run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
+  turnIntent: { kind: "fresh" },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(cursorErrorResult.status, AgentRunStatus.Failed,
+  "Cursor retry exhaustion cannot be reported as a successful completed task");
+assert.equal(cursorErrorResult.error, cursorTerminalError);
+assert.equal(cursorErrorResult.resultText, `\n\n${cursorTerminalError}`,
+  "the exact harness failure text remains available as bounded result evidence");
+
+const cursorRecoveredRuntime = {
+  ...cursorErrorRuntime,
+  startTurn: () => ({
+    events: (async function* () {
+      yield { type: "text_delta", stream: "output", text: `${cursorTerminalError}\nRecovered and completed successfully.` };
+    })(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+} as unknown as AcpRuntime;
+const cursorRecoveredResult = await createAcpLauncher({ runtimeFactory: () => cursorRecoveredRuntime })({
+  run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
+  turnIntent: { kind: "fresh" },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(cursorRecoveredResult.status, AgentRunStatus.Completed,
+  "non-terminal retry text does not downgrade an otherwise valid completed turn");
+
 const unadvertisedOptions: Array<{ key: string; value: string }> = [];
 let unadvertisedTurns = 0;
 const unadvertisedRuntime = {

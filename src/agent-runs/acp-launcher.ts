@@ -11,8 +11,8 @@ import {
 } from "acpx/runtime";
 import {
   AGENT_RUN_CAPABILITIES,
+  AgentRunHarness,
   AgentRunStatus,
-  type AgentRunHarness,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
   type AgentRunTurnIntent,
@@ -359,19 +359,30 @@ async function runAcpTurn(
   }
 
   const result = await turn.result;
+  const resultText = chunks.join("");
   const identity = identityOf(handle);
   if (result.status === "completed") {
-    return { status: AgentRunStatus.Completed, resultText: chunks.join(""), error: null, ...identity };
+    const terminalError = completedTurnError(request.run.harness, resultText);
+    if (terminalError) {
+      return { status: AgentRunStatus.Failed, resultText, error: terminalError, ...identity };
+    }
+    return { status: AgentRunStatus.Completed, resultText, error: null, ...identity };
   }
   if (result.status === "cancelled") {
-    return { status: AgentRunStatus.Cancelled, resultText: chunks.join(""), error: result.stopReason ?? "cancelled", ...identity };
+    return { status: AgentRunStatus.Cancelled, resultText, error: result.stopReason ?? "cancelled", ...identity };
   }
   return {
     status: AgentRunStatus.Failed,
-    resultText: chunks.join(""),
+    resultText,
     error: result.error.message,
     ...identity,
   };
+}
+
+function completedTurnError(harness: AgentRunHarness, resultText: string): string | null {
+  if (harness !== AgentRunHarness.Cursor) return null;
+  const match = /(?:^|\r?\n)(Error: RetriableError: [^\r\n]*exceeded max retries)\s*$/.exec(resultText);
+  return match?.[1] ?? null;
 }
 
 function ensureAcpSession(
