@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { AgentRunHarness } from "@owner-operator/core";
-import type { AcpRuntime, AcpRuntimeStatus } from "acpx/runtime";
+import type { AcpRuntime, AcpRuntimeEnsureInput, AcpRuntimeStatus } from "acpx/runtime";
 import type { LeasedAcpRuntime } from "./acp-launcher";
 import {
   observeAcpHarness,
@@ -46,10 +46,26 @@ function leasedRuntime(
   lifecycle: Lifecycle,
   terminationConfirmed = true,
   closeWork: () => Promise<void> = async () => undefined,
+  hooks: {
+    calls?: string[];
+    ensureInputs?: AcpRuntimeEnsureInput[];
+    setConfigOption?: (key: string, value: string) => void | Promise<void>;
+  } = {},
 ): LeasedAcpRuntime {
   const runtime = {
-    ensureSession: ensure,
-    getStatus: status,
+    ensureSession: (input: AcpRuntimeEnsureInput) => {
+      hooks.calls?.push("ensure");
+      hooks.ensureInputs?.push(input);
+      return ensure();
+    },
+    getStatus: async () => {
+      hooks.calls?.push("status");
+      return status();
+    },
+    setConfigOption: async ({ key, value }: { key: string; value: string }) => {
+      hooks.calls?.push(`set:${key}:${value}`);
+      await hooks.setConfigOption?.(key, value);
+    },
     close: async () => { lifecycle.close += 1; await closeWork(); },
   } as unknown as AcpRuntime;
   return {
@@ -70,9 +86,101 @@ const temp = mkdtempSync(join(tmpdir(), "oo-acp-observer-"));
 try {
   {
     const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
+    const calls: string[] = [];
+    const ensureInputs: AcpRuntimeEnsureInput[] = [];
+    const candidate = { model: "claude-fable-5[1m]", effort: "xhigh" as const };
+    const initialOptions = [{
+      type: "select", id: "effort", name: "Effort", category: "thought_level",
+      currentValue: "high", options: [{ value: "high", name: "High" }, { value: "xhigh", name: "Xhigh" }],
+    }] as SessionConfigOption[];
+    const confirmedOptions = [
+      { ...initialOptions[0], currentValue: "xhigh", extensionField: { preserved: true } },
+      { type: "boolean", id: "mode", name: "Mode", currentValue: true },
+    ] as unknown as SessionConfigOption[];
+    const statuses: AcpRuntimeStatus[] = [
+      { models: { currentModelId: candidate.model, availableModelIds: [candidate.model] }, details: { configOptions: initialOptions } },
+      { models: { currentModelId: candidate.model, availableModelIds: [candidate.model] }, details: { configOptions: initialOptions } },
+      { models: { currentModelId: candidate.model, availableModelIds: [candidate.model] }, details: { configOptions: confirmedOptions } },
+    ];
+    const observation = await observeAcpHarness({
+      harness: AgentRunHarness.ClaudeCode,
+      inspect: candidate,
+    }, {
+      readRuntimeProvenance: async () => provenance,
+      createRuntime: () => leasedRuntime(
+        async () => ({ sessionKey: "probe", backend: "acpx", runtimeSessionName: "probe" }),
+        async () => statuses.shift()!,
+        lifecycle,
+        true,
+        async () => undefined,
+        { calls, ensureInputs },
+      ),
+    });
+    assert.deepEqual(calls, ["ensure", "status", "status", "set:effort:xhigh", "status"]);
+    assert.deepEqual(ensureInputs[0]?.sessionOptions, { model: candidate.model }, "the exact opaque model is established at initialization");
+    assert.deepEqual(observation.requestedInspection, candidate);
+    assert.deepEqual(observation.confirmation, candidate);
+    assert.equal(observation.session?.configOptions, confirmedOptions, "the row exposes complete post-selection configuration");
+    assert.equal(observation.error, null);
+    assert.deepEqual(lifecycle, { close: 1, processTree: 1, terminate: 1, release: 1 });
+  }
+
+  {
+    const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
+    const ensureInputs: AcpRuntimeEnsureInput[] = [];
+    const candidate = { model: "cursor/opaque:model+thinking", effort: null } as const;
+    const postSelectionOptions = [{
+      type: "select", id: "model", name: "Model", currentValue: candidate.model,
+      options: [{ value: candidate.model, name: "Opaque" }],
+    }] as SessionConfigOption[];
+    const observation = await observeAcpHarness({ harness: AgentRunHarness.Cursor, inspect: candidate }, {
+      readRuntimeProvenance: async () => provenance,
+      createRuntime: () => leasedRuntime(
+        async () => ({ sessionKey: "probe", backend: "acpx", runtimeSessionName: "probe" }),
+        async () => ({
+          models: { currentModelId: candidate.model, availableModelIds: [candidate.model] },
+          details: { configOptions: postSelectionOptions },
+        }),
+        lifecycle,
+        true,
+        async () => undefined,
+        { ensureInputs },
+      ),
+    });
+    assert.deepEqual(ensureInputs[0]?.sessionOptions, { model: candidate.model });
+    assert.deepEqual(observation.requestedInspection, candidate, "explicit null effort survives unchanged");
+    assert.deepEqual(observation.confirmation, { model: candidate.model });
+    assert.equal(observation.session?.configOptions, postSelectionOptions);
+  }
+
+  {
+    const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
+    const requestedCandidate = { model: "requested", effort: null } as const;
+    const observation = await observeAcpHarness({
+      harness: AgentRunHarness.Codex,
+      inspect: requestedCandidate,
+    }, {
+      readRuntimeProvenance: async () => provenance,
+      createRuntime: () => leasedRuntime(
+        async () => ({ sessionKey: "probe", backend: "acpx", runtimeSessionName: "probe" }),
+        async () => ({
+          models: { currentModelId: "silent-fallback", availableModelIds: ["requested", "silent-fallback"] },
+          details: { configOptions: [] },
+        }),
+        lifecycle,
+      ),
+    });
+    assert.deepEqual(observation.requestedInspection, requestedCandidate);
+    assert.equal(observation.confirmation, null, "a mismatch can never become false confirmation");
+    assert.match(observation.error ?? "", /ACP_SELECTION_MODEL_MISMATCH/);
+    assert.deepEqual(lifecycle, { close: 1, processTree: 1, terminate: 1, release: 1 });
+  }
+
+  {
+    const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
     const stateDir = join(temp, "success");
     mkdirSync(stateDir);
-    const observation = await observeAcpHarness(AgentRunHarness.Codex, {
+    const observation = await observeAcpHarness({ harness: AgentRunHarness.Codex }, {
       now: () => new Date(OBSERVED_AT),
       probeStateDir: stateDir,
       readRuntimeProvenance: async () => provenance,
@@ -99,7 +207,7 @@ try {
 
   {
     const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
-    const observation = await observeAcpHarness(AgentRunHarness.Codex, {
+    const observation = await observeAcpHarness({ harness: AgentRunHarness.Codex }, {
       readRuntimeProvenance: async () => provenance,
       createRuntime: () => leasedRuntime(
         async () => ({ sessionKey: "probe", backend: "acpx", runtimeSessionName: "probe" }),
@@ -114,7 +222,7 @@ try {
 
   {
     const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
-    const observation = await observeAcpHarness(AgentRunHarness.Codex, {
+    const observation = await observeAcpHarness({ harness: AgentRunHarness.Codex }, {
       timeoutMs: 5,
       readRuntimeProvenance: async () => provenance,
       createRuntime: () => leasedRuntime(
@@ -135,7 +243,7 @@ try {
     const lifecycle: Lifecycle = { close: 0, processTree: 0, terminate: 0, release: 0 };
     const stateDir = join(temp, "unconfirmed-cleanup");
     mkdirSync(stateDir);
-    const observation = await observeAcpHarness(AgentRunHarness.Codex, {
+    const observation = await observeAcpHarness({ harness: AgentRunHarness.Codex }, {
       probeStateDir: stateDir,
       readRuntimeProvenance: async () => provenance,
       createRuntime: () => leasedRuntime(
@@ -158,7 +266,7 @@ try {
     const stateDir = join(temp, "hung-close");
     mkdirSync(stateDir);
     const startedAt = Date.now();
-    const observation = await observeAcpHarness(AgentRunHarness.Codex, {
+    const observation = await observeAcpHarness({ harness: AgentRunHarness.Codex }, {
       closeTimeoutMs: 5,
       probeStateDir: stateDir,
       readRuntimeProvenance: async () => provenance,

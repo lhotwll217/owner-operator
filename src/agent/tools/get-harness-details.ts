@@ -1,7 +1,8 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import { AgentRunHarness } from "@owner-operator/core";
+import { AGENT_RUN_EFFORTS, AgentRunHarness } from "@owner-operator/core";
 import {
+  assertUniqueHarnessInspections,
   readHarnessDetails,
   type HarnessDetailsSnapshot,
   type ReadHarnessDetailsOptions,
@@ -11,6 +12,12 @@ const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
   { description: "Harness to observe: claude-code | codex | cursor." },
 );
+const EffortSchema = Type.Union([
+  ...AGENT_RUN_EFFORTS.map((effort) => Type.Literal(effort)),
+  Type.Null(),
+], {
+  description: "Exact reasoning effort, or explicit null when reasoning is part of the opaque model ID or has no separate selector.",
+});
 
 export type GetHarnessDetailsResult = HarnessDetailsSnapshot;
 
@@ -29,12 +36,25 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
       "the real disposable ACP launch seam and includes complete configOptions plus exact ACPX, " +
       "adapter, backend, resolution-source, and observation-time provenance. null means unknown; " +
       "an empty array means observed-and-none. Account allowance percentages are subscription " +
-      "allowance, not tokens or cost. includeBaselineCandidates also projects each unpinned ACP " +
+      "allowance, not tokens or cost. inspect verifies one exact candidate per harness with the " +
+      "same apply-and-confirm behavior as delegated launch: the requested model is initialized " +
+      "first, success has a matching confirmation and complete post-selection configOptions, and " +
+      "failure is explicit with no fallback confirmation. includeBaselineCandidates also projects each unpinned ACP " +
       "session's current model and effort as an unsaved proposal. This tool reports facts and " +
       "does not choose a harness or model.",
     parameters: Type.Object({
       harnesses: Type.Optional(Type.Array(HarnessSchema, {
         description: "Limit the observation to these harnesses. Omit to observe all of them.",
+      })),
+      inspect: Type.Optional(Type.Array(Type.Object({
+        harness: HarnessSchema,
+        model: Type.String({ minLength: 1, description: "Exact opaque ACP model ID; pass it unchanged." }),
+        effort: EffortSchema,
+      }), {
+        description:
+          "Inspect one exact model and nullable effort per harness in a disposable session. " +
+          "Each harness may appear once; explicit null and opaque compound model IDs are preserved. " +
+          "An inspect-only call observes only those harnesses.",
       })),
       includeBaselineCandidates: Type.Optional(Type.Boolean({
         description:
@@ -43,8 +63,10 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
       })),
     }),
     async execute(_id, params) {
+      assertUniqueHarnessInspections(params.inspect ?? []);
       const details = await read({
         ...(params.harnesses?.length ? { harnesses: params.harnesses as AgentRunHarness[] } : {}),
+        ...(params.inspect?.length ? { inspect: params.inspect } : {}),
         ...(params.includeBaselineCandidates ? { includeBaselineCandidates: true } : {}),
       });
       return {

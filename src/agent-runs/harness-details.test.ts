@@ -211,4 +211,51 @@ assert.deepEqual(baseline.capabilities.harnesses[0]?.baselineCandidate, {
   availableEfforts: ["low", "high"],
 });
 
+const inspection = {
+  harness: AgentRunHarness.ClaudeCode,
+  model: "claude-fable-5[1m]",
+  effort: null,
+} as const;
+const inspectedCalls: unknown[] = [];
+const inspected = await readHarnessDetails({
+  inspect: [inspection],
+  includeBaselineCandidates: true,
+  deps: {
+    readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: ["claude"] }),
+    readPreferences: () => ({ path: "/fixture/preferences.md", source: null, content: null, error: null }),
+    observeCapability: async (harness, _observedAt, requestedInspection) => {
+      inspectedCalls.push({ harness, requestedInspection });
+      return {
+        ...capability(harness),
+        requestedInspection: requestedInspection ?? null,
+        session: {
+          models: { currentModelId: inspection.model, availableModelIds: [inspection.model] },
+          configOptions: [],
+          usage: null,
+        },
+        confirmation: { model: inspection.model },
+      };
+    },
+  },
+});
+assert.deepEqual(inspectedCalls, [{
+  harness: AgentRunHarness.ClaudeCode,
+  requestedInspection: { model: inspection.model, effort: null },
+}]);
+assert.deepEqual(
+  inspected.capabilities.harnesses.map(({ harness }) => harness),
+  [AgentRunHarness.ClaudeCode],
+  "an inspect-only request opens only the requested harness",
+);
+assert.equal(
+  inspected.capabilities.harnesses[0]?.baselineCandidate,
+  null,
+  "an exact inspected candidate is never exposed as an unpinned baseline proposal",
+);
+
+await assert.rejects(
+  readHarnessDetails({ inspect: [inspection, { ...inspection, model: "second" }] }),
+  /duplicate inspection.*claude-code/i,
+);
+
 process.stdout.write("ok — harness snapshot keeps preferences, ACP capabilities, and account facts isolated\n");

@@ -20,7 +20,7 @@ export async function discoverAcpBaselineCandidate(
   harness: AgentRunHarness,
   deps: BaselineProbeDeps = {},
 ): Promise<HarnessBaselineCandidate> {
-  return baselineCandidateFromObservation(await observeAcpHarness(harness, deps));
+  return baselineCandidateFromObservation(await observeAcpHarness({ harness }, deps));
 }
 
 export function baselineCandidateFromObservation(

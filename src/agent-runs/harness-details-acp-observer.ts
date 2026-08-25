@@ -12,7 +12,11 @@ import {
 } from "@owner-operator/core";
 import { createAgentRegistry, type AcpRuntimeStatus } from "acpx/runtime";
 import { ownerOperatorHome } from "../shared/paths";
-import { configOptionsFromStatus } from "./acp-session-selection";
+import {
+  applyAndConfirmAcpSelection,
+  configOptionsFromStatus,
+  type RequestedAcpSelection,
+} from "./acp-session-selection";
 import {
   agentRunStateDir,
   createLeasedAcpRuntime,
@@ -75,6 +79,11 @@ export interface AcpObservationDeps {
   now?: () => Date;
 }
 
+export interface ObserveAcpHarnessInput {
+  harness: AgentRunHarness;
+  inspect?: RequestedAcpSelection;
+}
+
 /** Read package metadata from the exact installed runtime used by the launcher. */
 export function readAcpRegistryProvenance(): AcpRegistryProvenance {
   return {
@@ -133,9 +142,10 @@ export async function readAcpRuntimeProvenance(
 /** Observe one harness through the exact disposable ACP launch seam used by delegated sessions.
  * All failures are returned on this row after cleanup; callers can safely observe rows in parallel. */
 export async function observeAcpHarness(
-  harness: AgentRunHarness,
+  input: ObserveAcpHarnessInput,
   deps: AcpObservationDeps = {},
 ): Promise<HarnessCapabilityObservation> {
+  const { harness, inspect } = input;
   const observedAt = (deps.now?.() ?? new Date()).toISOString();
   const acpxAgent = AGENT_RUN_CAPABILITIES[harness].acpAgent;
   const base = (): HarnessCapabilityObservation => ({
@@ -143,7 +153,7 @@ export async function observeAcpHarness(
     acpxAgent,
     observedAt,
     runtime: null,
-    requestedInspection: null,
+    requestedInspection: inspect ?? null,
     session: null,
     confirmation: null,
     error: null,
@@ -161,7 +171,7 @@ export async function observeAcpHarness(
   let leased: LeasedAcpRuntime | undefined;
   let session: ReturnType<LeasedAcpRuntime["runtime"]["ensureSession"]> | undefined;
   let handle: Awaited<ReturnType<LeasedAcpRuntime["runtime"]["ensureSession"]>> | undefined;
-  let observation: HarnessCapabilityObservation;
+  let observation: HarnessCapabilityObservation = { ...base(), runtime: provenance };
   try {
     leased = (deps.createRuntime ?? createLeasedAcpRuntime)({ harness, leaseKey: probeKey, stateDir: probeStateDir });
     session = leased.runtime.ensureSession({
@@ -169,6 +179,7 @@ export async function observeAcpHarness(
       agent: acpxAgent,
       mode: "oneshot",
       cwd: ownerOperatorHome(),
+      ...(inspect ? { sessionOptions: { model: inspect.model } } : {}),
     });
     handle = await withDeadline(
       session,
@@ -187,8 +198,29 @@ export async function observeAcpHarness(
       runtime: provenance,
       session: sessionFromStatus(status, configOptions),
     };
+    if (inspect) {
+      const confirmed = await withDeadline(
+        applyAndConfirmAcpSelection(leased.runtime, handle, inspect),
+        deps.timeoutMs ?? OBSERVATION_TIMEOUT_MS,
+        `${harness} ACP candidate inspection timed out during confirmation`,
+      );
+      observation = {
+        ...observation,
+        session: {
+          ...observation.session!,
+          models: observation.session!.models
+            ? { ...observation.session!.models, currentModelId: confirmed.model }
+            : null,
+          configOptions: confirmed.configOptions,
+        },
+        confirmation: {
+          model: confirmed.model,
+          ...(confirmed.effort === undefined ? {} : { effort: confirmed.effort }),
+        },
+      };
+    }
   } catch (error) {
-    observation = { ...base(), runtime: provenance, error: messageOf(error) };
+    observation = { ...observation, error: messageOf(error), confirmation: null };
   } finally {
     if (session) void session.catch(() => undefined);
     if (leased) {
@@ -201,13 +233,14 @@ export async function observeAcpHarness(
         );
       } catch (error) {
         observation = {
-          ...observation!,
-          error: appendError(observation!.error, `cleanup: ${messageOf(error)}`),
+          ...observation,
+          error: appendError(observation.error, `cleanup: ${messageOf(error)}`),
+          confirmation: null,
         };
       }
     }
   }
-  return observation!;
+  return observation;
 }
 
 function sessionFromStatus(

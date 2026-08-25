@@ -10,6 +10,7 @@ import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
   ownerOperatorPaths,
+  type AgentRunEffort,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import {
@@ -112,6 +113,7 @@ export interface HarnessDetailsDeps {
   observeCapability?: (
     harness: AgentRunHarness,
     observedAt: string,
+    inspect?: { model: string; effort: AgentRunEffort | null },
   ) => Promise<HarnessCapabilityObservation>;
   readCodexPayloads?: () => Promise<CodexAppServerPayloads>;
   readCursorPayloads?: () => Promise<CursorCliPayloads>;
@@ -120,8 +122,17 @@ export interface HarnessDetailsDeps {
   now?: () => Date;
 }
 
+export interface HarnessInspectionRequest {
+  harness: AgentRunHarness;
+  model: string;
+  effort: AgentRunEffort | null;
+}
+
 export interface ReadHarnessDetailsOptions {
   harnesses?: readonly AgentRunHarness[];
+  /** Verify at most one exact model/nullable-effort candidate per harness through the same
+   * apply-and-confirm path used by delegated launch. */
+  inspect?: readonly HarnessInspectionRequest[];
   /** Off by default. When requested, the unpinned ACP observation is also projected as a
    * consent-neutral baseline candidate; it is never saved. */
   includeBaselineCandidates?: boolean;
@@ -139,11 +150,21 @@ const ALL_HARNESSES: readonly AgentRunHarness[] = [
 export async function readHarnessDetails(
   options: ReadHarnessDetailsOptions = {},
 ): Promise<HarnessDetailsSnapshot> {
-  const requested = options.harnesses?.length ? [...new Set(options.harnesses)] : ALL_HARNESSES;
+  assertUniqueHarnessInspections(options.inspect ?? []);
+  const inspections = new Map((options.inspect ?? []).map((request) => [request.harness, request]));
+  const ordinary = options.harnesses?.length
+    ? [...new Set(options.harnesses)]
+    : inspections.size
+      ? []
+      : ALL_HARNESSES;
+  const requested = [...new Set([...ordinary, ...inspections.keys()])];
   const harnesses = requested.filter((harness) => AGENT_RUN_CAPABILITIES[harness]);
   const observedAt = (options.deps?.now?.() ?? new Date()).toISOString();
   const observe = options.deps?.observeCapability
-    ?? ((harness: AgentRunHarness) => observeAcpHarness(harness, {
+    ?? ((harness: AgentRunHarness, _observedAt: string, inspect?: { model: string; effort: AgentRunEffort | null }) => observeAcpHarness({
+      harness,
+      ...(inspect ? { inspect: { model: inspect.model, effort: inspect.effort } } : {}),
+    }, {
       now: () => new Date(observedAt),
     }));
 
@@ -151,15 +172,20 @@ export async function readHarnessDetails(
     Promise.resolve((options.deps?.readPreferences ?? readLegacyHarnessPreferences)()),
     Promise.all(harnesses.map(async (harness) => {
       try {
-        return await observe(harness, observedAt);
+        const inspection = inspections.get(harness);
+        return await observe(harness, observedAt, inspection
+          ? { model: inspection.model, effort: inspection.effort }
+          : undefined);
       } catch (error) {
-        return failedCapability(harness, observedAt, messageOf(error));
+        return failedCapability(harness, observedAt, messageOf(error), inspections.get(harness));
       }
     })),
     Promise.all(harnesses.map((harness) => readHarnessAccount(harness, observedAt, options.deps))),
   ]);
   const capabilities = capabilityRows.map((observation): HarnessCapabilitySnapshot => {
-    if (!options.includeBaselineCandidates) return { ...observation, baselineCandidate: null };
+    if (!options.includeBaselineCandidates || observation.requestedInspection) {
+      return { ...observation, baselineCandidate: null };
+    }
     try {
       return { ...observation, baselineCandidate: baselineCandidateFromObservation(observation) };
     } catch (error) {
@@ -189,17 +215,33 @@ function failedCapability(
   harness: AgentRunHarness,
   observedAt: string,
   error: string,
+  inspection?: HarnessInspectionRequest,
 ): HarnessCapabilityObservation {
   return {
     harness,
     acpxAgent: AGENT_RUN_CAPABILITIES[harness].acpAgent,
     observedAt,
     runtime: null,
-    requestedInspection: null,
+    requestedInspection: inspection
+      ? { model: inspection.model, effort: inspection.effort }
+      : null,
     session: null,
     confirmation: null,
     error,
   };
+}
+
+/** Reject ambiguous public requests before any preference, account, or ACP source is touched. */
+export function assertUniqueHarnessInspections(
+  inspections: readonly HarnessInspectionRequest[],
+): void {
+  const seen = new Set<AgentRunHarness>();
+  for (const inspection of inspections) {
+    if (seen.has(inspection.harness)) {
+      throw new Error(`get_harness_details received duplicate inspection entries for harness ${inspection.harness}`);
+    }
+    seen.add(inspection.harness);
+  }
 }
 
 export function readLegacyHarnessPreferences(): HarnessPreferencesObservation {
