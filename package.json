@@ -35,13 +35,14 @@
     "lint": "oxlint --deny-warnings"
   },
   "dependencies": {
-    "@agentclientprotocol/codex-acp": "1.1.5",
+    "@agentclientprotocol/claude-agent-acp": "0.70.0",
+    "@agentclientprotocol/codex-acp": "1.6.2",
     "@earendil-works/pi-ai": "^0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
     "@earendil-works/pi-tui": "^0.84.1",
     "@gotgenes/pi-permission-system": "20.7.1",
     "@owner-operator/core": "*",
-    "acpx": "0.11.2",
+    "acpx": "0.13.1",
     "croner": "10.0.1",
     "jsonc-parser": "3.3.1",
     "pi-tool-display": "0.5.0"

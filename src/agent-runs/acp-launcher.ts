@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createAcpRuntime,
@@ -139,9 +139,11 @@ export function createLeasedAcpRuntime(params: {
 }
 
 function defaultAgentCommand(acpAgent: string): string {
+  if (acpAgent === "claude") return claudeAcpAgentCommand();
   if (acpAgent === "codex") return codexAcpAgentCommand();
   if (acpAgent === "cursor") return cursorAcpAgentCommand();
-  return createAgentRegistry().resolve(acpAgent);
+  const command = createAgentRegistry().resolve(acpAgent);
+  return Array.isArray(command) ? command.map((part) => JSON.stringify(part)).join(" ") : command;
 }
 
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
@@ -431,9 +433,17 @@ function ensureAcpSession(
   });
 }
 
-/** acpx 0.11's built-in Codex registry is pinned to codex-acp 0.0.44, which cannot
- * initialize current Codex. Resolve Owner Operator's tested direct dependency instead so the
- * package lock, not acpx's stale fallback registry, owns adapter compatibility. */
+/** Resolve Owner Operator's exact installed Claude adapter instead of ACPX's npx range. Npx
+ * caches a semver request as an install environment, which left the daemon running adapter 0.37
+ * after newer adapters shipped. The package lock now owns adapter compatibility. */
+export function claudeAcpAgentCommand(): string {
+  const packageRoot = dirname(fileURLToPath(import.meta.resolve("@agentclientprotocol/claude-agent-acp/package.json")));
+  const entrypoint = join(packageRoot, "dist", "index.js");
+  return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");
+}
+
+/** Resolve Owner Operator's tested direct Codex dependency so the package lock, not an npx range,
+ * owns adapter compatibility. */
 export function codexAcpAgentCommand(): string {
   const entrypoint = fileURLToPath(import.meta.resolve("@agentclientprotocol/codex-acp"));
   return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");

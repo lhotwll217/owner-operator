@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { accessSync, constants } from "node:fs";
 import type { AcpRuntime } from "acpx/runtime";
 import {
   AgentRunHarness,
@@ -6,11 +7,35 @@ import {
   type AgentRun,
   type AgentRunActivityUpdate,
 } from "@owner-operator/core";
-import { codexAcpAgentCommand, createAcpLauncher, cursorAcpAgentCommand } from "./acp-launcher";
+import {
+  claudeAcpAgentCommand,
+  codexAcpAgentCommand,
+  createAcpLauncher,
+  cursorAcpAgentCommand,
+} from "./acp-launcher";
+
+// The command is `"<node>" "<entrypoint>"`; the entrypoint must be a real installed file, not
+// just a plausible path — Claude's is joined by convention rather than export resolution.
+const installedEntrypoint = (command: string): string => {
+  const match = /^"[^"]+" "([^"]+)"$/.exec(command);
+  assert.ok(match, `adapter command carries a quoted node + entrypoint pair: ${command}`);
+  accessSync(match[1], constants.R_OK);
+  return match[1];
+};
+
+const claudeCommand = claudeAcpAgentCommand();
+assert.match(claudeCommand, /claude-agent-acp\/dist\/index\.js"?$/,
+  "Claude uses Owner Operator's exact installed adapter");
+assert.doesNotMatch(claudeCommand, /npx|\^0\.60\.0/,
+  "Claude does not reuse ACPX's cached npx range");
+assert.match(installedEntrypoint(claudeCommand), /node_modules\/@agentclientprotocol\/claude-agent-acp\//,
+  "the Claude entrypoint is the package-lock-installed adapter");
 
 const codexCommand = codexAcpAgentCommand();
 assert.match(codexCommand, /codex-acp\/dist\/index\.js"?$/, "Codex uses Owner Operator's pinned adapter");
-assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's stale registry command");
+assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's registry command");
+assert.match(installedEntrypoint(codexCommand), /node_modules\/@agentclientprotocol\/codex-acp\//,
+  "the Codex entrypoint is the package-lock-installed adapter");
 
 // Cursor speaks ACP first-party: the resolved local CLI in server mode, no adapter package.
 try {
