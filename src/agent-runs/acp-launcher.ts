@@ -12,8 +12,6 @@ import {
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunStatus,
-  harnessIdentityObservation,
-  isAgentRunEffort,
   type AgentRunHarness,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
@@ -22,6 +20,7 @@ import {
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import type { AgentRunLauncher } from "./executor";
+import { applyAndConfirmAcpSelection } from "./acp-session-selection";
 import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
@@ -35,7 +34,6 @@ import {
  * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
-const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
 const CHILD_TASK_BOUNDARY =
   "Do the work yourself. Do not launch nested or background agents; delegated children must complete the task directly.";
 
@@ -305,8 +303,24 @@ async function runAcpTurn(
 ): Promise<AgentRunLaunchResult> {
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
-  await applyAdvertisedEffort(runtime, handle, request);
-  await observeHarnessIdentity(runtime, handle, request);
+  if (request.run.model === null) {
+    throw new Error(
+      `ACP selection confirmation requires the recorded model for ${request.run.harness}; `
+      + `requested effort=${request.run.effort === null ? "null" : JSON.stringify(request.run.effort)}`,
+    );
+  }
+  const confirmed = await applyAndConfirmAcpSelection(runtime, handle, {
+    model: request.run.model,
+    effort: request.run.effort,
+  });
+  request.onActivity({
+    effortApplied: confirmed.effort !== undefined,
+    harnessIdentity: {
+      observed: true,
+      model: confirmed.model,
+      ...(confirmed.effort !== undefined ? { effort: confirmed.effort } : {}),
+    },
+  });
 
   // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
@@ -358,51 +372,6 @@ async function runAcpTurn(
     error: result.error.message,
     ...identity,
   };
-}
-
-/** Apply effort only through ACP's self-described config-option control. An absent option is an
- * honest no-op: the durable row retains the requested effort with effortApplied=false. */
-async function applyAdvertisedEffort(
-  runtime: AcpRuntime,
-  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
-  request: AgentRunLaunchRequest,
-): Promise<void> {
-  if (!request.run.effort || !runtime.getCapabilities || !runtime.setConfigOption) return;
-  const capabilities = await runtime.getCapabilities({ handle });
-  if (!capabilities.configOptionKeys?.includes(REASONING_EFFORT_CONFIG_OPTION)) return;
-  await runtime.setConfigOption({
-    handle,
-    key: REASONING_EFFORT_CONFIG_OPTION,
-    value: request.run.effort,
-  });
-  request.onActivity({ effortApplied: true });
-}
-
-/** Read back the session's effective identity after configuration. This is deliberately separate
- * from the persisted launch request, giving status clients live harness evidence. */
-async function observeHarnessIdentity(
-  runtime: AcpRuntime,
-  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
-  request: AgentRunLaunchRequest,
-): Promise<void> {
-  if (!runtime.getStatus) return;
-  let status: Awaited<ReturnType<NonNullable<AcpRuntime["getStatus"]>>>;
-  try {
-    status = await runtime.getStatus({ handle });
-  } catch {
-    // Observation is audit evidence, not a new launch gate. The live proof requires the evidence;
-    // ordinary delegated turns continue if an adapter cannot expose status after configuration.
-    return;
-  }
-  const harnessModel = status.models?.currentModelId;
-  const configOptions = status.details?.configOptions;
-  const effortOption = Array.isArray(configOptions)
-    ? configOptions.find((option) => option && typeof option === "object" && "id" in option
-      && option.id === REASONING_EFFORT_CONFIG_OPTION)
-    : undefined;
-  const value = effortOption && "currentValue" in effortOption ? effortOption.currentValue : null;
-  const harnessEffort = typeof value === "string" && isAgentRunEffort(value) ? value : undefined;
-  request.onActivity({ harnessIdentity: harnessIdentityObservation({ model: harnessModel, effort: harnessEffort }) });
 }
 
 function ensureAcpSession(

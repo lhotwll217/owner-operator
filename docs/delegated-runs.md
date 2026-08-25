@@ -151,11 +151,11 @@ and terminal styling are adapters over that contract.
   durable row before launch. Legacy rows retain `NULL`; clients omit unknown effort instead of
   displaying a placeholder.
 - **Effort application** is owned by the [ACP launcher](../src/agent-runs/acp-launcher.ts), which
-  uses only session-advertised config options. The durable `effort_applied` field distinguishes
-  recorded intent from successful application; its contract lives in
-  [schema docs](../src/state/schema-docs.ts). After configuration, the launcher also reads the
-  effective model and supported effort back from ACP status into the ledger; this observation is
-  distinct from the prelaunch request fields. Public `AgentRun` values expose one discriminated
+  resolves only session-advertised config options and confirms the exact model plus any non-null
+  effort before sending the task. The durable `effort_applied` field distinguishes recorded
+  intent from confirmed application; its contract lives in [schema docs](../src/state/schema-docs.ts).
+  Confirmed model and supported effort are recorded separately from the prelaunch request fields.
+  Public `AgentRun` values expose one discriminated
   `harnessIdentity`: unobserved, model-only, effort-only, or model-and-effort. Empty status and
   wholly unsupported status decode as unobserved, so contradictory public representations cannot
   be constructed. The three SQL columns are only that value's storage encoding.

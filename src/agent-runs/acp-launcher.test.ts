@@ -78,10 +78,6 @@ const turnTexts: string[] = [];
 const runtimeCalls: string[] = [];
 const runtime = {
   ensureSession: async () => { runtimeCalls.push("ensure"); return handle; },
-  getCapabilities: async () => {
-    runtimeCalls.push("capabilities");
-    return { controls: ["session/set_config_option"], configOptionKeys: ["model", "reasoning_effort"] };
-  },
   setConfigOption: async ({ key, value }: { key: string; value: string }) => {
     runtimeCalls.push("set-effort");
     appliedOptions.push({ key, value });
@@ -90,7 +86,15 @@ const runtime = {
     runtimeCalls.push("status");
     return {
       models: { currentModelId: "harness-resolved-model" },
-      details: { configOptions: [{ id: "reasoning_effort", currentValue: "ultra" }] },
+      details: {
+        configOptions: [{
+          id: "reasoning_effort",
+          name: "Reasoning effort",
+          type: "select",
+          currentValue: "ultra",
+          options: [{ value: "ultra", name: "Ultra" }],
+        }],
+      },
     };
   },
   startTurn: ({ text }: { text: string }) => {
@@ -111,7 +115,7 @@ const run: AgentRun = {
   task: "produce a report",
   cwd: process.cwd(),
   parentThreadId: "parent",
-  model: null,
+  model: "harness-resolved-model",
   effort: "ultra",
   effortApplied: false,
   harnessIdentity: { observed: false },
@@ -146,54 +150,64 @@ assert.ok(Buffer.byteLength(result.resultText) <= 64 * 1024, "one oversized even
 assert.ok(result.resultText.endsWith("newest-tail"), "the rolling buffer preserves the newest bytes");
 assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "acpx-record" });
 assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "ultra" }], "the launcher applies the exact selected identity");
-assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
-assert.deepEqual(activity[2], {
+assert.deepEqual(activity[1], {
+  effortApplied: true,
   harnessIdentity: { observed: true, model: "harness-resolved-model", effort: "ultra" },
-}, "effective identity is independently read back from harness status");
-
-for (const [status, expected] of [
-  [{}, { observed: false }],
-  [{ models: { currentModelId: "  " }, details: { configOptions: [{ id: "reasoning_effort", currentValue: "turbo" }] } }, { observed: false }],
-  [{ models: { currentModelId: "model-only" } }, { observed: true, model: "model-only" }],
-  [{ details: { configOptions: [{ id: "reasoning_effort", currentValue: "max" }] } }, { observed: true, effort: "max" }],
-] as const) {
-  const observed: AgentRunActivityUpdate[] = [];
-  const statusRuntime = { ...runtime, getStatus: async () => status } as unknown as AcpRuntime;
-  await createAcpLauncher({ runtimeFactory: () => statusRuntime })({
-    run: { ...run, effort: null }, turnIntent: { kind: "fresh" }, signal: new AbortController().signal,
-    onActivity: (update) => observed.push(update),
-  });
-  assert.deepEqual(observed[1], { harnessIdentity: expected }, "status observation preserves only actual supported facts");
-}
-assert.deepEqual(runtimeCalls.slice(0, 5), ["ensure", "capabilities", "set-effort", "status", "turn"], "effort and identity observation happen before the turn");
+}, "confirmed identity and effort application become durable together before the turn");
+assert.deepEqual(
+  runtimeCalls.slice(0, 5),
+  ["ensure", "status", "set-effort", "status", "turn"],
+  "the delegated task starts only after exact state is read back",
+);
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
 
 const unadvertisedOptions: Array<{ key: string; value: string }> = [];
+let unadvertisedTurns = 0;
 const unadvertisedRuntime = {
   ensureSession: async () => handle,
-  getCapabilities: async () => ({ controls: ["session/set_config_option"], configOptionKeys: ["model"] }),
+  getStatus: async () => ({
+    models: { currentModelId: run.model },
+    details: { configOptions: [{
+      id: "model", name: "Model", type: "select", currentValue: run.model,
+      options: [{ value: run.model, name: "Model" }],
+    }] },
+  }),
   setConfigOption: async (option: { key: string; value: string }) => { unadvertisedOptions.push(option); },
-  startTurn: runtime.startTurn,
+  startTurn: () => {
+    unadvertisedTurns += 1;
+    return {
+      events: (async function* () {})(),
+      result: Promise.resolve({ status: "completed" }),
+    };
+  },
 } as unknown as AcpRuntime;
-await createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
-  run,
-  turnIntent: { kind: "fresh" },
-  signal: new AbortController().signal,
-  onActivity: () => undefined,
-});
+await assert.rejects(
+  () => createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
+    run,
+    turnIntent: { kind: "fresh" },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  }),
+  /ACP_SELECTION_SELECTOR_MISSING.*harness-resolved-model.*ultra/,
+);
 assert.deepEqual(unadvertisedOptions, [], "effort is not applied when the session does not advertise reasoning_effort");
+assert.equal(unadvertisedTurns, 0, "a forced selection mismatch never starts the delegated task");
 
 const backendOnlyRuntime = {
   ensureSession: async () => ({ backendSessionId: "backend-session", acpxRecordId: "backend-record" }),
+  getStatus: async () => ({
+    models: { currentModelId: "harness-resolved-model" },
+    details: { configOptions: [] },
+  }),
   startTurn: () => ({
     events: (async function* () {})(),
     result: Promise.resolve({ status: "completed" }),
   }),
 } as unknown as AcpRuntime;
 const backendIdentity = await createAcpLauncher({ runtimeFactory: () => backendOnlyRuntime })({
-  run,
+  run: { ...run, effort: null },
   turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
@@ -230,6 +244,7 @@ const resumeRun = {
   id: "resumed-run",
   harness: AgentRunHarness.Codex,
   task: "answer a follow-up",
+  effort: null,
   childSessionId: "resumed-child",
   acpxRecordId: "completed-acpx-record",
   resumeOfRunId: "completed-run",
@@ -254,6 +269,10 @@ const resumeRuntime = {
       acpxRecordId: "completed-acpx-record",
     };
   },
+  getStatus: async () => ({
+    models: { currentModelId: resumeRun.model },
+    details: { configOptions: [] },
+  }),
   startTurn: () => ({
     events: (async function* () {})(),
     result: Promise.resolve({ status: "completed" }),
