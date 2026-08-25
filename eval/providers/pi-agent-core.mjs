@@ -275,8 +275,9 @@ async function runBehavioralTrial({
       } : {
         behaviorClaim: vars.behaviorClaim,
         behaviorExpected: vars.behaviorExpected,
-        harnessRoster: vars.harnessRoster,
+        userHarnessPreferences: vars.userHarnessPreferences,
         harnessDetails: vars.harnessDetails,
+        harnessInspections: vars.harnessInspections,
         baselineCandidate: vars.baselineCandidate,
         approvedBaseline: vars.approvedBaseline,
       }),

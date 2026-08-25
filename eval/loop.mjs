@@ -29,6 +29,10 @@ const BEHAVIORAL_IDS = [
   "delegation-natural-first",
   "delegation-usage-explanation",
   "delegation-approved-default-reuse",
+  "delegation-explicit-pass-through",
+  "delegation-implicit-current-choice",
+  "delegation-implicit-non-current-inspection",
+  "delegation-inspection-mismatch",
 ];
 
 const PROBE_IDS = [
@@ -305,7 +309,7 @@ function metric(value) {
 function stateEvidencePresent(profile, value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   if (profile === "delegation-selection") {
-    return typeof value.harnessRoster === "string"
+    return typeof value.userHarnessPreferences === "string"
       && value.delegatedBaselines && typeof value.delegatedBaselines === "object"
       && !Array.isArray(value.delegatedBaselines)
       && Array.isArray(value.agentRuns);

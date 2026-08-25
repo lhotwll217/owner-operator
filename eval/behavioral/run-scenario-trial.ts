@@ -9,7 +9,10 @@ import {
   loadDelegatedBaselines,
   type AgentRunEffort,
 } from "@owner-operator/core";
-import type { HarnessBaselineCandidate, HarnessDetails } from "../../src/agent-runs/harness-details";
+import type {
+  HarnessBaselineCandidate,
+  HarnessDetailsSnapshot,
+} from "../../src/agent-runs/harness-details";
 import {
   configuredOwnerOperatorTools,
   lastAssistantError,
@@ -30,7 +33,11 @@ import { materializeMarkDoneScenario } from "./scenario-operations";
 type DelegationClaim =
   | "natural-first-delegation"
   | "usage-explanation"
-  | "approved-default-reuse";
+  | "approved-default-reuse"
+  | "explicit-pass-through"
+  | "implicit-current-choice"
+  | "implicit-non-current-inspection"
+  | "inspection-mismatch";
 
 type ModelSettings = {
   defaultProvider: string;
@@ -61,8 +68,12 @@ type DelegationInput = CommonInput & {
   behaviorProfile: "delegation-selection";
   behaviorClaim: DelegationClaim;
   behaviorExpected: Record<string, unknown>;
-  harnessRoster: string;
-  harnessDetails: HarnessDetails[];
+  userHarnessPreferences: string;
+  harnessDetails: HarnessDetailsSnapshot;
+  harnessInspections?: Array<{
+    request: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null };
+    snapshot: HarnessDetailsSnapshot;
+  }>;
   baselineCandidate?: (HarnessBaselineCandidate & { harness: AgentRunHarness }) | null;
   approvedBaseline?: {
     harness: AgentRunHarness;
@@ -230,7 +241,7 @@ function delegationAdapter(
 ): ScenarioAdapter {
   return {
     configureSandbox(environment) {
-      writeFileSync(environment.paths.harnessRoster, scenario.harnessRoster);
+      writeFileSync(environment.paths.userHarnessPreferences, scenario.userHarnessPreferences);
       if (scenario.approvedBaseline) {
         approveDelegatedBaseline(scenario.approvedBaseline.harness, {
           model: scenario.approvedBaseline.model,
@@ -240,11 +251,28 @@ function delegationAdapter(
     },
     sessionOptions: () => ({
       harnessAdapters: {
-        readHarnessDetails: async ({ harnesses }) => {
-          const selected = harnesses?.length
-            ? scenario.harnessDetails.filter((detail) => harnesses.includes(detail.harness))
-            : scenario.harnessDetails;
-          return selected.map((detail) => structuredClone(detail));
+        readHarnessDetails: async ({ harnesses, inspect }) => {
+          if (inspect?.length) {
+            if (inspect.length !== 1) {
+              throw new Error("controlled behavioral inspection requires exactly one candidate");
+            }
+            const fixture = scenario.harnessInspections?.find(({ request }) =>
+              sameInspectionRequest(request, inspect[0]));
+            if (!fixture) {
+              throw new Error(`no controlled inspection snapshot for ${inspectionLabel(inspect[0])}`);
+            }
+            return structuredClone(fixture.snapshot);
+          }
+          const selectedHarnesses = new Set(harnesses ?? []);
+          const snapshot = structuredClone(scenario.harnessDetails);
+          if (selectedHarnesses.size) {
+            snapshot.capabilities.harnesses = snapshot.capabilities.harnesses
+              .filter(({ harness }) => selectedHarnesses.has(harness));
+            snapshot.account = snapshot.account.filter(({ harness }) => selectedHarnesses.has(harness));
+            snapshot.unknowns = snapshot.unknowns
+              .filter(({ harness }) => harness === undefined || selectedHarnesses.has(harness));
+          }
+          return snapshot;
         },
         proposeDelegatedBaseline: async (harness) => {
           const approved = loadDelegatedBaseline(harness, paths.ooHome);
@@ -275,7 +303,7 @@ function delegationAdapter(
       return captureDelegationState(
         environment.daemon,
         environment.ooHome,
-        environment.paths.harnessRoster,
+        environment.paths.userHarnessPreferences,
       );
     },
     async execute(_environment, created) {
@@ -316,12 +344,23 @@ function captureMarkDoneState(
   }
 }
 
-function captureDelegationState(running: RunningDaemon, home: string, roster: string) {
+function captureDelegationState(running: RunningDaemon, home: string, preferences: string) {
   return {
-    harnessRoster: readFileSync(roster, "utf8"),
+    userHarnessPreferenceBytes: readFileSync(preferences).toString("base64"),
     delegatedBaselines: loadDelegatedBaselines(home),
     agentRuns: running.state.listAgentRuns(),
   };
+}
+
+function sameInspectionRequest(
+  left: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null },
+  right: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null },
+): boolean {
+  return left.harness === right.harness && left.model === right.model && left.effort === right.effort;
+}
+
+function inspectionLabel(request: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null }): string {
+  return `${request.harness}/${request.model}/${request.effort === null ? "null" : request.effort}`;
 }
 
 function subscribeToTrajectory(
@@ -379,12 +418,22 @@ function readInput(value: string | undefined): TrialInput {
     return parsed;
   }
   if (parsed.behaviorProfile === "delegation-selection") {
-    if (!(["natural-first-delegation", "usage-explanation", "approved-default-reuse"] as string[])
+    if (!([
+      "natural-first-delegation",
+      "usage-explanation",
+      "approved-default-reuse",
+      "explicit-pass-through",
+      "implicit-current-choice",
+      "implicit-non-current-inspection",
+      "inspection-mismatch",
+    ] as string[])
       .includes(parsed.behaviorClaim)) {
       throw new Error("unsupported delegation behavior claim");
     }
-    if (!parsed.harnessRoster?.trim() || !Array.isArray(parsed.harnessDetails)) {
-      throw new Error("delegation scenario requires a harness roster and controlled details");
+    if (!parsed.userHarnessPreferences?.trim()
+        || !parsed.harnessDetails?.preferences
+        || !Array.isArray(parsed.harnessDetails.capabilities?.harnesses)) {
+      throw new Error("delegation scenario requires user harness preferences and a controlled snapshot");
     }
     return parsed;
   }

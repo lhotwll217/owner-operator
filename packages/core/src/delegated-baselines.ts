@@ -2,7 +2,7 @@
  * none — one atomically replaced file per harness under `delegated-baselines/` in the Owner
  * Operator home. Independent files make concurrent approvals independent across processes.
  *
- * Three durable records stay separate on purpose: the harness roster holds the task preferences
+ * Three durable records stay separate on purpose: user harness preferences hold task routing
  * the owner writes by hand, the `agent_runs` ledger holds what actually ran, and this holds the
  * single fallback identity per harness that the owner explicitly approved.
  *

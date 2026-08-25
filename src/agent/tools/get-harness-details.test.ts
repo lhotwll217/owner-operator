@@ -11,8 +11,8 @@ const snapshot: HarnessDetailsSnapshot = {
   observedAt: OBSERVED_AT,
   ephemeral: true,
   preferences: {
-    path: "/fixture/harness-roster.md",
-    source: "legacy-harness-roster",
+    path: "/fixture/user-harness-preferences.md",
+    source: "user-harness-preferences",
     content: "owner preference\n",
     error: null,
   },
@@ -40,6 +40,10 @@ assert.match(tool.description, /separate preferences, ACP capabilities/, "namesp
 assert.match(tool.description, /null means unknown/i, "the tool states the unknown-versus-none contract");
 assert.match(tool.description, /same apply-and-confirm behavior as delegated launch/i);
 assert.match(tool.description, /matching confirmation/i);
+assert.match(tool.description, /preferences\.content is raw owner-authored routing guidance/i);
+assert.match(tool.description, /migration\/conflict error/i);
+assert.match(tool.description, /separate call.*non-current or model-dependent candidate/i);
+assert.match(tool.description, /failed or mismatched inspection/i);
 assert.match(tool.description, /does not choose/i, "the tool states it performs no selection");
 const inspectParameter = tool.parameters.properties.inspect;
 assert.match(inspectParameter.description ?? "", /one exact model and nullable effort per harness/i);

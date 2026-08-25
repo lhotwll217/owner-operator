@@ -238,24 +238,33 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
 
   const calls = (name) => executions.filter((execution) => execution.name === name);
   const successful = (name) => succeeded.filter((execution) => execution.name === name);
-  const rosterReadIndex = () => executions.findIndex((execution) => execution.isError === false && (
-    execution.name === "read" && String(execution.input?.path ?? "").endsWith("harness-roster.md")
-    || execution.name === "bash" && /harness-roster\.md/.test(String(execution.input?.command ?? ""))
-  ));
+  const successfulDetails = successful("get_harness_details");
+  const directPreferenceReads = succeeded.filter((execution) =>
+    execution.name === "read" && /(?:roster|preferences)\.md$/.test(String(execution.input?.path ?? ""))
+    || execution.name === "bash" && /(?:roster|preferences)\.md/.test(String(execution.input?.command ?? ""))
+  );
   const changed = ["edit", "write", "schedule_prompt", "manage_schedule", "manage_agent_run", "mark_thread_done"]
     .filter((name) => successful(name).length);
   if (changed.length) problems.push(`unexpected successful mutations [${changed.join(", ")}]`);
-  if (before.harnessRoster !== after.harnessRoster) problems.push("harness roster changed during selection");
+  if (directPreferenceReads.length) problems.push("selection read a preference file directly instead of the snapshot");
+  if (before.userHarnessPreferenceBytes !== after.userHarnessPreferenceBytes) {
+    problems.push("user harness preferences changed during selection");
+  }
+  if (!sameValue(before.delegatedBaselines, after.delegatedBaselines)) {
+    problems.push("delegated baselines changed during selection");
+  }
 
   if (claim === "natural-first-delegation") {
-    const rosterIndex = rosterReadIndex();
     const detailsIndex = executions.findIndex((execution) =>
       execution.name === "get_harness_details" && execution.isError === false);
     const proposalIndex = executions.findIndex((execution) =>
       execution.name === "manage_delegated_baseline" && execution.isError === false
       && execution.input?.action === "propose");
-    if (rosterIndex < 0 || detailsIndex <= rosterIndex || proposalIndex <= detailsIndex) {
-      problems.push("expected roster, current harness details, and a read-only proposal in order");
+    if (detailsIndex < 0 || proposalIndex <= detailsIndex) {
+      problems.push("expected a current snapshot followed by a read-only proposal");
+    }
+    if (!snapshotPreferences(executions[detailsIndex], before.userHarnessPreferenceBytes)) {
+      problems.push("current snapshot did not carry raw user preferences");
     }
     const expectedHarness = expected.candidate?.harness;
     const detailsHarnesses = executions[detailsIndex]?.input?.harnesses;
@@ -280,9 +289,10 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
       problems.push("natural first delegation did not present a clear consent boundary");
     }
   } else if (claim === "usage-explanation") {
-    if (rosterReadIndex() < 0) problems.push("usage explanation did not read the controlled roster policy");
-    if (successful("get_harness_details").length < 1) {
+    if (successfulDetails.length < 1) {
       problems.push("usage explanation did not consult current harness details");
+    } else if (!snapshotPreferences(successfulDetails[0], before.userHarnessPreferenceBytes)) {
+      problems.push("usage explanation did not consume snapshot-owned preferences");
     }
     if (calls("delegate_agent").length || calls("manage_delegated_baseline").length
         || !sameValue(before, after)) {
@@ -333,6 +343,51 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (delegated[0]?.input?.harness !== identity.harness) {
       problems.push("delegation replaced the owner's partial harness pin");
     }
+  } else if (claim === "explicit-pass-through") {
+    const identity = expected.identity ?? {};
+    const delegated = successful("delegate_agent");
+    if (calls("get_harness_details").length || calls("manage_delegated_baseline").length) {
+      problems.push("explicit identity performed implicit discovery");
+    }
+    if (delegated.length !== 1 || !sameIdentity(delegated[0]?.input, identity)) {
+      problems.push("explicit identity did not pass through exactly once");
+    }
+    gradeLaunchState(problems, before, after, identity, providerMetadata.sessionId);
+  } else if (claim === "implicit-current-choice") {
+    gradeImplicitSelection({
+      problems, executions, expected, before, after,
+      parentThreadId: providerMetadata.sessionId,
+      requireInspection: false,
+    });
+  } else if (claim === "implicit-non-current-inspection") {
+    gradeImplicitSelection({
+      problems, executions, expected, before, after,
+      parentThreadId: providerMetadata.sessionId,
+      requireInspection: true,
+    });
+  } else if (claim === "inspection-mismatch") {
+    const identity = expected.identity ?? {};
+    const ordinary = ordinarySnapshots(successfulDetails, identity);
+    const inspections = successfulDetails.filter((execution) => inspectionIdentity(execution, identity));
+    const ordinaryIndex = executions.indexOf(ordinary[0]);
+    const inspectionIndex = executions.indexOf(inspections[0]);
+    if (ordinary.length !== 1 || inspections.length !== 1 || ordinaryIndex >= inspectionIndex) {
+      problems.push("mismatched candidate did not use one ordinary snapshot followed by one exact inspection");
+    }
+    if (![...ordinary, ...inspections].every((execution) =>
+      snapshotPreferences(execution, before.userHarnessPreferenceBytes))) {
+      problems.push("mismatched inspection snapshots did not preserve exact raw preference bytes");
+    }
+    const row = inspectionRow(inspections[0], identity);
+    if (!requestedInspectionMatches(row, identity)) {
+      problems.push("mismatched inspection output did not echo the exact requestedInspection");
+    }
+    if (typeof row?.error !== "string" || !row.error.trim() || confirmationMatches(row, identity)) {
+      problems.push("mismatched inspection did not return an actual error without false confirmation");
+    }
+    if (calls("delegate_agent").length || !sameValue(before.agentRuns, after.agentRuns)) {
+      problems.push("mismatched inspection delegated or persisted a lower-quality run");
+    }
   } else {
     problems.push(`unsupported delegation behavior claim: ${claim || "missing"}`);
   }
@@ -344,6 +399,105 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
   };
 }
 
+function gradeImplicitSelection({
+  problems,
+  executions,
+  expected,
+  before,
+  after,
+  parentThreadId,
+  requireInspection,
+}) {
+  const identity = expected.identity ?? {};
+  const details = executions.filter((execution) =>
+    execution.name === "get_harness_details" && execution.isError === false);
+  const delegated = executions.filter((execution) =>
+    execution.name === "delegate_agent" && execution.isError === false);
+  const launchIndex = executions.indexOf(delegated[0]);
+  const ordinary = ordinarySnapshots(details, identity);
+  const inspections = details.filter((execution) => inspectionIdentity(execution, identity));
+  if (ordinary.length !== 1 || executions.indexOf(ordinary[0]) >= launchIndex) {
+    problems.push("implicit selection did not use exactly one current snapshot before launch");
+  }
+  if (!details.every((execution) => snapshotPreferences(execution, before.userHarnessPreferenceBytes))) {
+    problems.push("implicit selection snapshots did not preserve exact raw preference bytes");
+  }
+  const advertised = advertisedIdentity(ordinary[0], identity);
+  if (!advertised.available || (!requireInspection && !advertised.current)) {
+    problems.push("implicit selection did not use exact values from the current capability snapshot");
+  }
+  if (requireInspection) {
+    const ordinaryIndex = executions.indexOf(ordinary[0]);
+    const inspectionIndex = executions.indexOf(inspections[0]);
+    if (inspections.length !== 1 || ordinaryIndex >= inspectionIndex || inspectionIndex >= launchIndex) {
+      problems.push("non-current selection did not use ordinary snapshot then exact inspection before launch");
+    }
+    const row = inspectionRow(inspections[0], identity);
+    if (!requestedInspectionMatches(row, identity)) {
+      problems.push("inspection output did not echo the exact requestedInspection");
+    }
+    if (!confirmationMatches(row, identity) || row?.error !== null) {
+      problems.push("inspection result did not confirm the exact candidate");
+    }
+  } else if (inspections.length || details.length !== 1) {
+    problems.push("current choice opened an unnecessary second snapshot");
+  }
+  if (delegated.length !== 1 || !sameIdentity(delegated[0]?.input, identity)) {
+    problems.push("implicit selection did not delegate the exact selected identity once");
+  }
+  gradeLaunchState(problems, before, after, identity, parentThreadId);
+}
+
+function ordinarySnapshots(executions, identity) {
+  return executions.filter((execution) =>
+    !execution.input?.inspect?.length
+    && inspectionRow(execution, identity));
+}
+
+function inspectionIdentity(execution, identity) {
+  const inspections = execution.input?.inspect;
+  return Array.isArray(inspections) && inspections.length === 1
+    && sameIdentity(inspections[0], identity);
+}
+
+function snapshotPreferences(execution, expectedBytes) {
+  const preferences = execution?.result?.details?.preferences;
+  return typeof preferences?.content === "string"
+    && typeof preferences?.path === "string"
+    && Buffer.from(preferences.content, "utf8").toString("base64") === expectedBytes;
+}
+
+function inspectionRow(execution, identity) {
+  const rows = execution?.result?.details?.capabilities?.harnesses;
+  return Array.isArray(rows) ? rows.find(({ harness }) => harness === identity.harness) : null;
+}
+
+function requestedInspectionMatches(row, identity) {
+  return sameIdentity({ ...row?.requestedInspection, harness: row?.harness }, identity);
+}
+
+function confirmationMatches(row, identity) {
+  return sameIdentity({ ...row?.confirmation, harness: row?.harness }, identity);
+}
+
+function advertisedIdentity(execution, identity) {
+  const rows = execution?.result?.details?.capabilities?.harnesses;
+  const row = Array.isArray(rows) ? rows.find(({ harness }) => harness === identity.harness) : null;
+  const models = row?.session?.models;
+  const options = row?.session?.configOptions;
+  const effortAdvertised = identity.effort === null || (Array.isArray(options) && options.some((option) =>
+    option.category === "thought_level"
+    && Array.isArray(option.options)
+    && option.options.some(({ value }) => value === identity.effort)
+  ));
+  return {
+    available: Array.isArray(models?.availableModelIds)
+      && models.availableModelIds.includes(identity.model)
+      && effortAdvertised,
+    current: models?.currentModelId === identity.model,
+  };
+}
+
 function sameIdentity(actual, expected) {
   return actual?.harness === expected?.harness
     && actual?.model === expected?.model
@@ -352,4 +506,16 @@ function sameIdentity(actual, expected) {
 
 function sameValue(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function gradeLaunchState(problems, before, after, identity, parentThreadId) {
+  const beforeRuns = Array.isArray(before.agentRuns) ? before.agentRuns : [];
+  const afterRuns = Array.isArray(after.agentRuns) ? after.agentRuns : [];
+  const beforeById = new Map(beforeRuns.map((run) => [run.id, run]));
+  const priorChanged = beforeRuns.some((run) => !sameValue(run, afterRuns.find(({ id }) => id === run.id)));
+  const added = afterRuns.filter((run) => !beforeById.has(run.id));
+  if (priorChanged || added.length !== 1 || !sameIdentity(added[0], identity)
+      || added[0]?.parentThreadId !== parentThreadId) {
+    problems.push("delegation state did not preserve prior runs and add exactly the selected identity");
+  }
 }

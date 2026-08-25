@@ -170,7 +170,7 @@ and terminal styling are adapters over that contract.
 
 Before an implicit delegation, the Operator loads the bundled
 [`select-harness-for-delegation`](../src/agent/skills/select-harness-for-delegation/SKILL.md)
-skill. The skill owns roster interpretation, baseline and owner-defined task-role classification,
+skill. The skill owns preference interpretation, baseline and owner-defined task-role classification,
 current-details consultation, exact identity selection, approved-baseline consent, and concise
 identity reporting. A complete owner-supplied harness/model/effort choice—including explicit null
 effort—bypasses selection and reaches `delegate_agent` unchanged. The permanent product prompt owns
@@ -186,9 +186,12 @@ joins the isolated sources; the private
 [ACP observer](../src/agent-runs/harness-details-acp-observer.ts) owns initialization, status
 validation, timeout, termination, and throwaway-store cleanup. The tool remains a thin adapter.
 
-The boundary is read-only and ephemeral:
+Capability and account observation is read-only and ephemeral. Preference resolution first uses
+`$OO_HOME/workspace/user-harness-preferences.md`: a legacy-only install is migrated through
+exclusive canonical creation without rewriting bytes, a failed move falls back with an error, and
+a both-file conflict uses the canonical file without merging owner prose.
 
-- **Nothing is stored.** No cache, no polling, no provider registry, no failure ledger. Every call
+- **No capability truth is stored.** No cache, polling, provider registry, or failure ledger. Every call
   re-observes, and a snapshot is only true as of its `observedAt`.
 - **`null` means unknown; `[]` means observed-and-none.** A fact the harness exposes no surface for
   stays `null` rather than being inferred from documentation or pricing pages. Claude Code's ACP
@@ -224,8 +227,8 @@ delegated default requires explicit owner approval and is owned by the
 `manage_delegated_baseline` is the narrow consent seam. `propose` performs initial discovery or a
 refresh and only compares the ephemeral candidate with the current approval. `approve` stores the
 exact owner-approved model and nullable effort in one atomically replaced file per harness under
-`delegated-baselines/`, separate from the owner-edited roster and the run ledger. Declining a
-proposal performs no write.
+`delegated-baselines/`, separate from the owner-edited user harness preferences and the run ledger.
+Declining a proposal performs no write.
 
 The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
 harness config cannot contaminate a global candidate. The active probe owns termination: timeout

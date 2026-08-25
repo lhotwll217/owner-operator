@@ -67,7 +67,7 @@ function markDoneStateEvidence(value) {
 
 function delegationStateEvidence(value) {
   return plainObject(value)
-    && typeof value.harnessRoster === "string"
+    && nonEmpty(value.userHarnessPreferenceBytes)
     && plainObject(value.delegatedBaselines)
     && Array.isArray(value.agentRuns)
     && value.agentRuns.every(plainObject);

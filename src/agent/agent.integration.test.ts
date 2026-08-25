@@ -185,7 +185,7 @@ assert.match(harnessPrompt, /select-harness-for-delegation/);
 assert.match(harnessPrompt, /unless the owner explicitly supplied harness, model, and\s+effort/i);
 assert.match(harnessPrompt, /explicit owner choices win/i);
 for (const mechanic of [
-  "harness-roster.md",
+  "user-harness-preferences.md",
   "get_harness_details",
   "manage_delegated_baseline",
   "Task roles",
@@ -208,7 +208,7 @@ const delegationSelectionSkill = readFileSync(
   "utf8",
 );
 for (const mechanic of [
-  "harness-roster.md",
+  "snapshot.preferences.content",
   "get_harness_details",
   "manage_delegated_baseline",
   "owner-added role",
@@ -220,6 +220,10 @@ for (const mechanic of [
   "Retry selection",
   "fill omitted execution-identity fields",
   "without replacing",
+  "current-model choice",
+  "inspect that exact candidate",
+  "confirmation exactly matches",
+  "equal-or-higher-quality",
   "delegate_agent",
 ]) {
   assert.ok(
@@ -227,6 +231,8 @@ for (const mechanic of [
     `the bundled selection skill owns ${mechanic} mechanics`,
   );
 }
+assert.doesNotMatch(delegationSelectionSkill, /\$OO_HOME\/workspace\/.*\.md/,
+  "the selection skill consumes snapshot-owned preferences instead of reading either file directly");
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
 }

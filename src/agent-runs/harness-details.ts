@@ -1,16 +1,18 @@
-/** Launch-authoritative, read-only harness snapshot.
+/** Launch-authoritative harness snapshot.
  *
  * User preferences, ACP capability facts, and provider account/allowance facts are deliberately
  * separate. Every source is observed independently; `null` means unknown and `[]` means the
- * source advertised none. No result is persisted or cached.
+ * source advertised none. Capability and account results are never persisted or cached; preference
+ * resolution may perform the one compatibility migration owned by the workspace path layer.
  */
 
 import { readFileSync } from "node:fs";
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
-  ownerOperatorPaths,
+  resolveUserHarnessPreferences,
   type AgentRunEffort,
+  type UserHarnessPreferencesOperations,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import {
@@ -169,7 +171,7 @@ export async function readHarnessDetails(
     }));
 
   const [preferences, capabilityRows, account] = await Promise.all([
-    Promise.resolve((options.deps?.readPreferences ?? readLegacyHarnessPreferences)()),
+    Promise.resolve((options.deps?.readPreferences ?? readUserHarnessPreferences)()),
     Promise.all(harnesses.map(async (harness) => {
       try {
         const inspection = inspections.get(harness);
@@ -244,22 +246,21 @@ export function assertUniqueHarnessInspections(
   }
 }
 
-export function readLegacyHarnessPreferences(): HarnessPreferencesObservation {
-  const path = ownerOperatorPaths(ownerOperatorHome()).harnessRoster;
+export function readUserHarnessPreferences(
+  operations?: UserHarnessPreferencesOperations,
+): HarnessPreferencesObservation {
+  const resolution = resolveUserHarnessPreferences(ownerOperatorHome(), operations);
   try {
     return {
-      path,
-      source: "legacy-harness-roster",
-      content: readFileSync(path, "utf8"),
-      error: null,
+      ...resolution,
+      content: readFileSync(resolution.path, "utf8"),
     };
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return { path, source: null, content: null, error: null };
     return {
-      path,
-      source: "legacy-harness-roster",
+      path: resolution.path,
+      source: resolution.source,
       content: null,
-      error: messageOf(error),
+      error: [resolution.error, messageOf(error)].filter(Boolean).join("; "),
     };
   }
 }
@@ -440,12 +441,6 @@ function text(value: unknown): string | null {
 
 function numeric(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
-    ? error.code
-    : undefined;
 }
 
 function messageOf(error: unknown): string {

@@ -36,12 +36,16 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
       "the real disposable ACP launch seam and includes complete configOptions plus exact ACPX, " +
       "adapter, backend, resolution-source, and observation-time provenance. null means unknown; " +
       "an empty array means observed-and-none. Account allowance percentages are subscription " +
-      "allowance, not tokens or cost. inspect verifies one exact candidate per harness with the " +
+      "allowance, not tokens or cost. preferences.content is raw owner-authored routing guidance; " +
+      "its path, source, and migration/conflict error identify the resolved file without rewriting " +
+      "its prose. Use harnesses for an ordinary current-state snapshot. Use inspect in a separate " +
+      "call to verify one exact non-current or model-dependent candidate per harness with the " +
       "same apply-and-confirm behavior as delegated launch: the requested model is initialized " +
       "first, success has a matching confirmation and complete post-selection configOptions, and " +
-      "failure is explicit with no fallback confirmation. includeBaselineCandidates also projects each unpinned ACP " +
-      "session's current model and effort as an unsaved proposal. This tool reports facts and " +
-      "does not choose a harness or model.",
+      "failure is explicit with no fallback confirmation. Never treat a failed or mismatched " +
+      "inspection as confirmation for another identity. includeBaselineCandidates also projects " +
+      "each unpinned ACP session's current model and effort as an unsaved proposal. This tool " +
+      "reports facts and does not choose a harness or model.",
     parameters: Type.Object({
       harnesses: Type.Optional(Type.Array(HarnessSchema, {
         description: "Limit the observation to these harnesses. Omit to observe all of them.",
