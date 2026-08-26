@@ -360,7 +360,6 @@ const detailsResult = (
   details: {
     preferences: {
       path: "/fixture/user-harness-preferences.md",
-      source: "user-harness-preferences",
       content,
       error: null,
     },

@@ -103,7 +103,6 @@ const snapshot = await readHarnessDetails({
     }),
     readPreferences: () => ({
       path: "/fixture/workspace/user-harness-preferences.md",
-      source: "user-harness-preferences",
       content: "# Owner preferences\n",
       error: null,
     }),
@@ -148,7 +147,6 @@ const isolated = await readHarnessDetails({
     readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: [] }),
     readPreferences: () => ({
       path: "/fixture/preferences.md",
-      source: "user-harness-preferences",
       content: "owner content survives\n",
       error: null,
     }),

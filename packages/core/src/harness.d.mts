@@ -36,14 +36,9 @@ export interface OwnerOperatorPaths {
 export const DEFAULT_SKILL_POLICY: Readonly<SkillPolicy>;
 export const DEFAULT_TOOL_POSTURE: readonly string[];
 export const DEFAULT_PERMISSION_MODE: PermissionMode;
-export interface UserHarnessPreferencesResolution {
-  path: string;
-  source: "user-harness-preferences" | "legacy-harness-roster" | null;
-}
 export const USER_HARNESS_PREFERENCES_TEMPLATE: string;
 export function isPermissionMode(value: unknown): value is PermissionMode;
 export function ownerOperatorPaths(ooHome?: string): OwnerOperatorPaths;
-export function resolveUserHarnessPreferences(ooHome?: string): UserHarnessPreferencesResolution;
 export function ensureOwnerOperatorWorkspace(ooHome?: string): OwnerOperatorPaths;
 export function loadHarnessSettings(ooHome?: string): HarnessSettings;
 export function saveHarnessSettings(

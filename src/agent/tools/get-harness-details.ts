@@ -36,14 +36,13 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
       "adapter, backend, resolution-source, and observation-time provenance. null means unknown; " +
       "an empty array means observed-and-none. Account allowance percentages are subscription " +
       "allowance, not tokens or cost. preferences.content is raw owner-authored routing guidance; " +
-      "its path, source, and read error identify the resolved file without rewriting " +
-      "its prose. harnesses limits an ordinary current-state snapshot. inspect verifies one " +
-      "exact model and nullable effort per harness on a disposable session with the " +
-      "same apply-and-confirm behavior as delegated launch: success carries a matching " +
-      "confirmation and complete post-selection configOptions, and failure is an explicit " +
-      "per-harness error with no fallback confirmation. includeBaselineCandidates also projects " +
-      "each unpinned ACP session's current model and effort as an unsaved proposal. This tool " +
-      "reports facts and does not choose a harness or model.",
+      "its path and read error identify the canonical file without rewriting its prose. harnesses " +
+      "limits an ordinary current-state snapshot. inspect verifies one exact model and nullable " +
+      "effort per harness on a disposable session with the same apply-and-confirm behavior as " +
+      "delegated launch: success carries a matching confirmation and complete post-selection " +
+      "configOptions, and failure is an explicit per-harness error with no fallback confirmation. " +
+      "includeBaselineCandidates also projects each unpinned ACP session's current model and " +
+      "effort as an unsaved proposal. This tool reports facts and does not choose a harness or model.",
     parameters: Type.Object({
       harnesses: Type.Optional(Type.Array(HarnessSchema, {
         description: "Limit the observation to these harnesses. Omit to observe all of them.",

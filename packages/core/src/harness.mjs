@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_ACTIVE_WINDOW, isWindowSpec } from "./settings.mjs";
@@ -98,19 +98,6 @@ Add roles of your own below, as headings in the same shape. Owner Operator reads
 the roles above.
 `;
 
-/** Canonical-first compatibility, no migration: an existing user-harness-preferences.md wins, a
- * legacy harness-roster.md is read in place without ever being renamed or rewritten, and a null
- * source means a fresh install with neither owner file. */
-export function resolveUserHarnessPreferences(ooHome = defaultHome()) {
-  const paths = ownerOperatorPaths(ooHome);
-  if (existsSync(paths.userHarnessPreferences)) {
-    return { path: paths.userHarnessPreferences, source: "user-harness-preferences" };
-  }
-  const legacy = join(paths.workspace, "harness-roster.md");
-  if (existsSync(legacy)) return { path: legacy, source: "legacy-harness-roster" };
-  return { path: paths.userHarnessPreferences, source: null };
-}
-
 export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
   const paths = ownerOperatorPaths(ooHome);
   mkdirSync(paths.workspaceSkills, { recursive: true });
@@ -118,9 +105,7 @@ export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
   mkdirSync(paths.piAgentDir, { recursive: true });
   writeMissing(paths.workspaceInstructions, "# Owner Operator instructions\n\nRecord persistent instructions for the Operator here.\n");
   writeMissing(paths.workspaceMemory, "# Memory\n\nRecord durable facts for the Operator here.\n");
-  if (resolveUserHarnessPreferences(ooHome).source === null) {
-    writeMissing(paths.userHarnessPreferences, USER_HARNESS_PREFERENCES_TEMPLATE);
-  }
+  writeMissing(paths.userHarnessPreferences, USER_HARNESS_PREFERENCES_TEMPLATE);
   return paths;
 }
 

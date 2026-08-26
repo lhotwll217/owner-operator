@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
-  resolveUserHarnessPreferences,
+  ownerOperatorPaths,
   type AgentRunEffort,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
@@ -72,7 +72,6 @@ export interface HarnessAccountDetail {
 
 export interface HarnessPreferencesObservation {
   path: string;
-  source: "user-harness-preferences" | "legacy-harness-roster" | null;
   content: string | null;
   error: string | null;
 }
@@ -246,16 +245,16 @@ function assertUniqueHarnessInspections(
 }
 
 export function readUserHarnessPreferences(): HarnessPreferencesObservation {
-  const resolution = resolveUserHarnessPreferences(ownerOperatorHome());
+  const path = ownerOperatorPaths(ownerOperatorHome()).userHarnessPreferences;
   try {
     return {
-      ...resolution,
-      content: readFileSync(resolution.path, "utf8"),
+      path,
+      content: readFileSync(path, "utf8"),
       error: null,
     };
   } catch (error) {
     return {
-      ...resolution,
+      path,
       content: null,
       error: messageOf(error),
     };

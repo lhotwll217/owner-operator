@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness } from "@owner-operator/core";
@@ -13,9 +13,8 @@ const dir = mkdtempSync(join(tmpdir(), "oo-harness-details-"));
 const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
 mkdirSync(join(dir, "workspace"), { recursive: true });
-const legacyPreferences = join(dir, "workspace", "harness-roster.md");
 const canonicalPreferences = join(dir, "workspace", "user-harness-preferences.md");
-writeFileSync(legacyPreferences, "Owner-authored bytes.\n");
+writeFileSync(canonicalPreferences, "Owner-authored preferences.\n");
 
 const listing = (): string[] => readdirSync(dir, { recursive: true }) as string[];
 const observed = (harness: AgentRunHarness, observedAt: string): HarnessCapabilityObservation => ({
@@ -49,11 +48,10 @@ try {
     },
   });
   assert.equal(first.capabilities.harnesses.length, 3);
-  assert.equal(first.preferences.path, legacyPreferences, "a legacy roster is read in place");
-  assert.equal(first.preferences.source, "legacy-harness-roster");
-  assert.equal(first.preferences.content, "Owner-authored bytes.\n");
+  assert.equal(first.preferences.path, canonicalPreferences);
+  assert.equal(first.preferences.content, "Owner-authored preferences.\n");
   assert.equal(first.preferences.error, null);
-  assert.equal(existsSync(canonicalPreferences), false, "observation never creates the canonical file");
+  assert.equal(existsSync(canonicalPreferences), true, "observation reads the canonical file");
   const afterFirstRead = listing();
 
   const reads: string[] = [];
@@ -75,24 +73,10 @@ try {
   assert.equal(second.capabilities.harnesses[0]?.session?.models, null);
   assert.deepEqual(listing(), afterFirstRead, "a repeat observation creates no cache, ledger, or session store");
 
-  writeFileSync(canonicalPreferences, "canonical owner prose\n");
-  const conflict = await readHarnessDetails({
-    harnesses: [AgentRunHarness.ClaudeCode],
-    deps: {
-      observeCapability: async (harness, at) => observed(harness, at),
-      readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: [] }),
-    },
-  });
-  assert.equal(conflict.preferences.path, canonicalPreferences, "the canonical file wins when both exist");
-  assert.equal(conflict.preferences.source, "user-harness-preferences");
-  assert.equal(conflict.preferences.content, "canonical owner prose\n");
-  assert.equal(conflict.preferences.error, null);
-  assert.equal(readFileSync(legacyPreferences, "utf8"), "Owner-authored bytes.\n", "the legacy file stays untouched");
-
   const freshDir = mkdtempSync(join(tmpdir(), "oo-harness-details-fresh-"));
   process.env.OO_HOME = freshDir;
   const fresh = readUserHarnessPreferences();
-  assert.equal(fresh.source, null, "a fresh install has no owner preference file yet");
+  assert.equal(fresh.path, join(freshDir, "workspace", "user-harness-preferences.md"));
   assert.equal(fresh.content, null);
   assert.ok(fresh.error, "an unreadable preference path is an explicit error, not silence");
   rmSync(freshDir, { recursive: true, force: true });

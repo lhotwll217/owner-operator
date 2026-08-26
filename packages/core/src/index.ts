@@ -65,7 +65,6 @@ export {
   ensureOwnerOperatorWorkspace,
   loadHarnessSettings,
   ownerOperatorPaths,
-  resolveUserHarnessPreferences,
   saveHarnessSettings,
   isPermissionMode,
 } from "./harness.mjs";
@@ -74,7 +73,6 @@ export type {
   OwnerOperatorPaths,
   PermissionMode,
   SkillPolicy,
-  UserHarnessPreferencesResolution,
 } from "./harness.mjs";
 
 // The owner-approved per-harness model/effort a delegated run falls back to. Separate from the

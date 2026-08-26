@@ -70,7 +70,6 @@ const detailsTool = createGetHarnessDetailsTool({
       ephemeral: true,
       preferences: {
         path: paths.userHarnessPreferences,
-        source: "user-harness-preferences",
         content: preferences,
         error: null,
       },

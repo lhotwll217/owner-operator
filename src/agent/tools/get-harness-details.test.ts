@@ -12,7 +12,6 @@ const snapshot: HarnessDetailsSnapshot = {
   ephemeral: true,
   preferences: {
     path: "/fixture/user-harness-preferences.md",
-    source: "user-harness-preferences",
     content: "owner preference\n",
     error: null,
   },

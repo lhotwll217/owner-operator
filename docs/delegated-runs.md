@@ -186,10 +186,9 @@ joins the isolated sources; the private
 [ACP observer](../src/agent-runs/harness-details-acp-observer.ts) owns initialization, status
 validation, timeout, termination, and throwaway-store cleanup. The tool remains a thin adapter.
 
-Capability and account observation is read-only and ephemeral. Preference resolution is
-canonical-first: `$OO_HOME/workspace/user-harness-preferences.md` wins when it exists, a legacy
-`harness-roster.md` is read in place without being renamed or rewritten, and only a fresh install
-with neither file gets the canonical template seeded.
+Capability and account observation is read-only and ephemeral. Owner preferences live only at
+`$OO_HOME/workspace/user-harness-preferences.md`; workspace setup seeds that file when absent and
+never overwrites it.
 
 - **No capability truth is stored.** No cache, polling, provider registry, or failure ledger. Every call
   re-observes, and a snapshot is only true as of its `observedAt`.

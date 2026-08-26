@@ -240,7 +240,6 @@ function delegationAdapter(
     ...structuredClone(snapshot),
     preferences: {
       path: preferencesPath,
-      source: "user-harness-preferences",
       content: scenario.userHarnessPreferences,
       error: null,
     },
