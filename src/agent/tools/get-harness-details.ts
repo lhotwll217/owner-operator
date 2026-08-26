@@ -30,19 +30,11 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
     name: "get_harness_details",
     label: "Get harness details",
     description:
-      "Return one ephemeral, never-cached snapshot with separate preferences, ACP capabilities, " +
-      "and provider account namespaces. Every supported harness capability is observed through " +
-      "the real disposable ACP launch seam and includes complete configOptions plus exact ACPX, " +
-      "adapter, backend, resolution-source, and observation-time provenance. null means unknown; " +
-      "an empty array means observed-and-none. Account allowance percentages are subscription " +
-      "allowance, not tokens or cost. preferences.content is raw owner-authored routing guidance; " +
-      "its path and read error identify the canonical file without rewriting its prose. harnesses " +
-      "limits an ordinary current-state snapshot. inspect verifies one exact model and nullable " +
-      "effort per harness on a disposable session with the same apply-and-confirm behavior as " +
-      "delegated launch: success carries a matching confirmation and complete post-selection " +
-      "configOptions, and failure is an explicit per-harness error with no fallback confirmation. " +
-      "includeBaselineCandidates also projects each unpinned ACP session's current model and " +
-      "effort as an unsaved proposal. This tool reports facts and does not choose a harness or model.",
+      "Observe current delegation-harness capabilities, provider accounts, and owner preferences " +
+      "in one ephemeral, never-cached snapshot. Capability rows come from disposable ACP sessions " +
+      "through the delegated-launch seam and include complete configOptions and runtime provenance. null " +
+      "means unknown; an empty array means observed-and-none. Allowance percentages are shares " +
+      "of subscription limits. This tool reports facts and does not choose or save a model or effort.",
     parameters: Type.Object({
       harnesses: Type.Optional(Type.Array(HarnessSchema, {
         description: "Limit the observation to these harnesses. Omit to observe all of them.",

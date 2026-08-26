@@ -32,16 +32,12 @@ const tool = createGetHarnessDetailsTool({
 });
 
 assert.equal(tool.name, "get_harness_details");
-assert.match(tool.description, /never-cached/i, "the tool states its snapshot is ephemeral");
-assert.match(tool.description, /complete configOptions/, "the tool promises complete ACP configuration objects");
-assert.match(tool.description, /adapter, backend/, "the tool names exact runtime provenance");
-assert.match(tool.description, /separate preferences, ACP capabilities/, "namespace ownership is explicit");
-assert.match(tool.description, /null means unknown/i, "the tool states the unknown-versus-none contract");
-assert.match(tool.description, /same apply-and-confirm behavior as delegated launch/i);
-assert.match(tool.description, /matching confirmation/i);
-assert.match(tool.description, /preferences\.content is raw owner-authored routing guidance/i);
-assert.match(tool.description, /no fallback confirmation/i);
-assert.match(tool.description, /does not choose/i, "the tool states it performs no selection");
+assert.match(tool.description, /never-cached/i, "the snapshot lifetime is explicit");
+assert.match(tool.description, /complete configOptions/, "capability completeness is explicit");
+assert.match(tool.description, /runtime provenance/, "provenance is explicit without duplicating its schema");
+assert.match(tool.description, /null means unknown/i, "the unknown-versus-none contract is explicit");
+assert.match(tool.description, /subscription limits/i, "allowance percentages name their denominator");
+assert.match(tool.description, /does not choose or save/i, "observation stays separate from selection");
 const inspectParameter = tool.parameters.properties.inspect;
 assert.match(inspectParameter.description ?? "", /one exact model and nullable effort per harness/i);
 assert.match(inspectParameter.description ?? "", /opaque/i);

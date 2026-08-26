@@ -57,7 +57,6 @@ type MarkDoneInput = CommonInput & {
 
 type DelegationInput = CommonInput & {
   behaviorProfile: "delegation-selection";
-  // Claim semantics live in the trajectory grader; the runner only threads the name through.
   behaviorClaim: string;
   behaviorExpected: Record<string, unknown>;
   userHarnessPreferences: string;
