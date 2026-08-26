@@ -41,8 +41,7 @@ assert.match(tool.description, /null means unknown/i, "the tool states the unkno
 assert.match(tool.description, /same apply-and-confirm behavior as delegated launch/i);
 assert.match(tool.description, /matching confirmation/i);
 assert.match(tool.description, /preferences\.content is raw owner-authored routing guidance/i);
-assert.match(tool.description, /separate call.*non-current or model-dependent candidate/i);
-assert.match(tool.description, /failed or mismatched inspection/i);
+assert.match(tool.description, /no fallback confirmation/i);
 assert.match(tool.description, /does not choose/i, "the tool states it performs no selection");
 const inspectParameter = tool.parameters.properties.inspect;
 assert.match(inspectParameter.description ?? "", /one exact model and nullable effort per harness/i);

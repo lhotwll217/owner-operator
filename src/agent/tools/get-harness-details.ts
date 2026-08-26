@@ -37,12 +37,11 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
       "an empty array means observed-and-none. Account allowance percentages are subscription " +
       "allowance, not tokens or cost. preferences.content is raw owner-authored routing guidance; " +
       "its path, source, and read error identify the resolved file without rewriting " +
-      "its prose. Use harnesses for an ordinary current-state snapshot. Use inspect in a separate " +
-      "call to verify one exact non-current or model-dependent candidate per harness with the " +
-      "same apply-and-confirm behavior as delegated launch: the requested model is initialized " +
-      "first, success has a matching confirmation and complete post-selection configOptions, and " +
-      "failure is explicit with no fallback confirmation. Never treat a failed or mismatched " +
-      "inspection as confirmation for another identity. includeBaselineCandidates also projects " +
+      "its prose. harnesses limits an ordinary current-state snapshot. inspect verifies one " +
+      "exact model and nullable effort per harness on a disposable session with the " +
+      "same apply-and-confirm behavior as delegated launch: success carries a matching " +
+      "confirmation and complete post-selection configOptions, and failure is an explicit " +
+      "per-harness error with no fallback confirmation. includeBaselineCandidates also projects " +
       "each unpinned ACP session's current model and effort as an unsaved proposal. This tool " +
       "reports facts and does not choose a harness or model.",
     parameters: Type.Object({
