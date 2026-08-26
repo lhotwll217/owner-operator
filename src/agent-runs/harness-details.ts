@@ -2,8 +2,8 @@
  *
  * User preferences, ACP capability facts, and provider account/allowance facts are deliberately
  * separate. Every source is observed independently; `null` means unknown and `[]` means the
- * source advertised none. Capability and account results are never persisted or cached; the
- * workspace path layer resolves which owner preference file to read without moving it.
+ * source advertised none. Capability and account results are never persisted or cached; owner
+ * preferences are read from the one canonical workspace file.
  */
 
 import { readFileSync } from "node:fs";

@@ -240,8 +240,8 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
   const successful = (name) => succeeded.filter((execution) => execution.name === name);
   const successfulDetails = successful("get_harness_details");
   const directPreferenceReads = succeeded.filter((execution) =>
-    execution.name === "read" && /(?:roster|preferences)\.md$/.test(String(execution.input?.path ?? ""))
-    || execution.name === "bash" && /(?:roster|preferences)\.md/.test(String(execution.input?.command ?? ""))
+    execution.name === "read" && String(execution.input?.path ?? "").endsWith("preferences.md")
+    || execution.name === "bash" && /preferences\.md/.test(String(execution.input?.command ?? ""))
   );
   const changed = ["edit", "write", "schedule_prompt", "manage_schedule", "manage_agent_run", "mark_thread_done"]
     .filter((name) => successful(name).length);
