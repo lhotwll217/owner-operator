@@ -84,16 +84,4 @@ assert.deepEqual(calls[1], {
   includeBaselineCandidates: true,
 }, "the harness filter and baseline projection request reach the snapshot facade unchanged");
 
-await assert.rejects(
-  tool.execute("call-3", {
-    inspect: [
-      { harness: AgentRunHarness.Codex, model: "first", effort: "low" },
-      { harness: AgentRunHarness.Codex, model: "second", effort: null },
-    ],
-  }, undefined, undefined, context),
-  /duplicate inspection.*codex/i,
-  "the public tool rejects two inspection entries for one harness before reading",
-);
-assert.equal(calls.length, 2);
-
 process.stdout.write("ok — get_harness_details returns the namespaced ACP snapshot unchanged\n");

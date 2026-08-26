@@ -2,7 +2,6 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { AGENT_RUN_EFFORTS, AgentRunHarness } from "@owner-operator/core";
 import {
-  assertUniqueHarnessInspections,
   readHarnessDetails,
   type HarnessDetailsSnapshot,
   type ReadHarnessDetailsOptions,
@@ -67,7 +66,6 @@ export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOption
       })),
     }),
     async execute(_id, params) {
-      assertUniqueHarnessInspections(params.inspect ?? []);
       const details = await read({
         ...(params.harnesses?.length ? { harnesses: params.harnesses as AgentRunHarness[] } : {}),
         ...(params.inspect?.length ? { inspect: params.inspect } : {}),

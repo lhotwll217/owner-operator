@@ -362,7 +362,7 @@ async function runAcpTurn(
   const resultText = chunks.join("");
   const identity = identityOf(handle);
   if (result.status === "completed") {
-    const terminalError = completedTurnError(request.run.harness, resultText);
+    const terminalError = COMPLETED_TURN_ERRORS[request.run.harness]?.(resultText) ?? null;
     if (terminalError) {
       return { status: AgentRunStatus.Failed, resultText, error: terminalError, ...identity };
     }
@@ -379,11 +379,16 @@ async function runAcpTurn(
   };
 }
 
-function completedTurnError(harness: AgentRunHarness, resultText: string): string | null {
-  if (harness !== AgentRunHarness.Cursor) return null;
-  const match = /(?:^|\r?\n)(Error: RetriableError: [^\r\n]*exceeded max retries)\s*$/.exec(resultText);
-  return match?.[1] ?? null;
-}
+/** Harness-owned interpretations of a "completed" turn's result text. The generic runner only
+ * consults this table; each entry belongs to the harness whose adapter misreports the failure.
+ * Cursor's adapter completes the turn normally after retry exhaustion, leaving the error only as
+ * the trailing line of the result text. */
+const COMPLETED_TURN_ERRORS: Partial<Record<AgentRunHarness, (resultText: string) => string | null>> = {
+  [AgentRunHarness.Cursor]: (resultText) => {
+    const match = /(?:^|\r?\n)(Error: RetriableError: [^\r\n]*exceeded max retries)\s*$/.exec(resultText);
+    return match?.[1] ?? null;
+  },
+};
 
 function ensureAcpSession(
   runtime: AcpRuntime,

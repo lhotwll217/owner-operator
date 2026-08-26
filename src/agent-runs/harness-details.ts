@@ -233,7 +233,7 @@ function failedCapability(
 }
 
 /** Reject ambiguous public requests before any preference, account, or ACP source is touched. */
-export function assertUniqueHarnessInspections(
+function assertUniqueHarnessInspections(
   inspections: readonly HarnessInspectionRequest[],
 ): void {
   const seen = new Set<AgentRunHarness>();
