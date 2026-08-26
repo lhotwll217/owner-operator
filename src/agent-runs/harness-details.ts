@@ -2,8 +2,8 @@
  *
  * User preferences, ACP capability facts, and provider account/allowance facts are deliberately
  * separate. Every source is observed independently; `null` means unknown and `[]` means the
- * source advertised none. Capability and account results are never persisted or cached; preference
- * resolution may perform the one compatibility migration owned by the workspace path layer.
+ * source advertised none. Capability and account results are never persisted or cached; the
+ * workspace path layer resolves which owner preference file to read without moving it.
  */
 
 import { readFileSync } from "node:fs";
@@ -12,7 +12,6 @@ import {
   AgentRunHarness,
   resolveUserHarnessPreferences,
   type AgentRunEffort,
-  type UserHarnessPreferencesOperations,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import {
@@ -246,21 +245,19 @@ export function assertUniqueHarnessInspections(
   }
 }
 
-export function readUserHarnessPreferences(
-  operations?: UserHarnessPreferencesOperations,
-): HarnessPreferencesObservation {
-  const resolution = resolveUserHarnessPreferences(ownerOperatorHome(), operations);
+export function readUserHarnessPreferences(): HarnessPreferencesObservation {
+  const resolution = resolveUserHarnessPreferences(ownerOperatorHome());
   try {
     return {
       ...resolution,
       content: readFileSync(resolution.path, "utf8"),
+      error: null,
     };
   } catch (error) {
     return {
-      path: resolution.path,
-      source: resolution.source,
+      ...resolution,
       content: null,
-      error: [resolution.error, messageOf(error)].filter(Boolean).join("; "),
+      error: messageOf(error),
     };
   }
 }

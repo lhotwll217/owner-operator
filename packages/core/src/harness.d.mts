@@ -39,21 +39,11 @@ export const DEFAULT_PERMISSION_MODE: PermissionMode;
 export interface UserHarnessPreferencesResolution {
   path: string;
   source: "user-harness-preferences" | "legacy-harness-roster" | null;
-  error: string | null;
-}
-export interface UserHarnessPreferencesOperations {
-  existsSync?: (path: string) => boolean;
-  linkSync?: (existingPath: string, newPath: string) => void;
-  unlinkSync?: (path: string) => void;
-  writeFileSync?: (path: string, content: string, options: { flag: "wx" }) => void;
 }
 export const USER_HARNESS_PREFERENCES_TEMPLATE: string;
 export function isPermissionMode(value: unknown): value is PermissionMode;
 export function ownerOperatorPaths(ooHome?: string): OwnerOperatorPaths;
-export function resolveUserHarnessPreferences(
-  ooHome?: string,
-  operations?: UserHarnessPreferencesOperations,
-): UserHarnessPreferencesResolution;
+export function resolveUserHarnessPreferences(ooHome?: string): UserHarnessPreferencesResolution;
 export function ensureOwnerOperatorWorkspace(ooHome?: string): OwnerOperatorPaths;
 export function loadHarnessSettings(ooHome?: string): HarnessSettings;
 export function saveHarnessSettings(

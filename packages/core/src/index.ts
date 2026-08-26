@@ -74,7 +74,6 @@ export type {
   OwnerOperatorPaths,
   PermissionMode,
   SkillPolicy,
-  UserHarnessPreferencesOperations,
   UserHarnessPreferencesResolution,
 } from "./harness.mjs";
 

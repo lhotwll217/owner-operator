@@ -49,13 +49,12 @@ try {
     },
   });
   assert.equal(first.capabilities.harnesses.length, 3);
-  assert.equal(first.preferences.path, canonicalPreferences);
-  assert.equal(first.preferences.source, "user-harness-preferences");
+  assert.equal(first.preferences.path, legacyPreferences, "a legacy roster is read in place");
+  assert.equal(first.preferences.source, "legacy-harness-roster");
   assert.equal(first.preferences.content, "Owner-authored bytes.\n");
   assert.equal(first.preferences.error, null);
-  assert.equal(existsSync(legacyPreferences), false);
-  assert.equal(readFileSync(canonicalPreferences, "utf8"), "Owner-authored bytes.\n");
-  const afterMigration = listing();
+  assert.equal(existsSync(canonicalPreferences), false, "observation never creates the canonical file");
+  const afterFirstRead = listing();
 
   const reads: string[] = [];
   const secondObservedAt = "2026-08-13T08:00:01.000Z";
@@ -74,9 +73,9 @@ try {
   assert.deepEqual(reads, [AgentRunHarness.Codex], "each call re-observes the requested ACP harness");
   assert.equal(second.observedAt, secondObservedAt);
   assert.equal(second.capabilities.harnesses[0]?.session?.models, null);
-  assert.deepEqual(listing(), afterMigration, "a repeat observation creates no cache, ledger, or session store");
+  assert.deepEqual(listing(), afterFirstRead, "a repeat observation creates no cache, ledger, or session store");
 
-  writeFileSync(legacyPreferences, "conflicting legacy prose\n");
+  writeFileSync(canonicalPreferences, "canonical owner prose\n");
   const conflict = await readHarnessDetails({
     harnesses: [AgentRunHarness.ClaudeCode],
     deps: {
@@ -84,26 +83,22 @@ try {
       readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: [] }),
     },
   });
-  assert.equal(conflict.preferences.content, "Owner-authored bytes.\n");
-  assert.match(conflict.preferences.error ?? "", /both .* exist.*legacy.*untouched/i);
-  assert.equal(readFileSync(legacyPreferences, "utf8"), "conflicting legacy prose\n");
+  assert.equal(conflict.preferences.path, canonicalPreferences, "the canonical file wins when both exist");
+  assert.equal(conflict.preferences.source, "user-harness-preferences");
+  assert.equal(conflict.preferences.content, "canonical owner prose\n");
+  assert.equal(conflict.preferences.error, null);
+  assert.equal(readFileSync(legacyPreferences, "utf8"), "Owner-authored bytes.\n", "the legacy file stays untouched");
 
-  const failedDir = mkdtempSync(join(tmpdir(), "oo-harness-details-failed-move-"));
-  process.env.OO_HOME = failedDir;
-  mkdirSync(join(failedDir, "workspace"), { recursive: true });
-  const failedLegacy = join(failedDir, "workspace", "harness-roster.md");
-  writeFileSync(failedLegacy, "fallback owner prose\n");
-  const fallback = readUserHarnessPreferences({
-    linkSync() { throw new Error("forced move failure"); },
-  });
-  assert.equal(fallback.path, failedLegacy);
-  assert.equal(fallback.source, "legacy-harness-roster");
-  assert.equal(fallback.content, "fallback owner prose\n");
-  assert.match(fallback.error ?? "", /forced move failure.*using the legacy file/i);
-  rmSync(failedDir, { recursive: true, force: true });
+  const freshDir = mkdtempSync(join(tmpdir(), "oo-harness-details-fresh-"));
+  process.env.OO_HOME = freshDir;
+  const fresh = readUserHarnessPreferences();
+  assert.equal(fresh.source, null, "a fresh install has no owner preference file yet");
+  assert.equal(fresh.content, null);
+  assert.ok(fresh.error, "an unreadable preference path is an explicit error, not silence");
+  rmSync(freshDir, { recursive: true, force: true });
   process.env.OO_HOME = dir;
 
-  process.stdout.write("ok — harness snapshots migrate raw preferences once and re-observe capabilities\n");
+  process.stdout.write("ok — harness snapshots read owner preferences in place and re-observe capabilities\n");
 } finally {
   if (previousOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = previousOoHome;

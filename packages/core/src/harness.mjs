@@ -1,4 +1,4 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_ACTIVE_WINDOW, isWindowSpec } from "./settings.mjs";
@@ -98,89 +98,17 @@ Add roles of your own below, as headings in the same shape. Owner Operator reads
 the roles above.
 `;
 
-const legacyHarnessRosterPath = (workspace) => join(workspace, "harness-roster.md");
-
-/** Resolve the one active owner-preference file before seeding. The optional operations exist so
- * migration races and failures can be exercised without weakening the production filesystem path. */
-export function resolveUserHarnessPreferences(ooHome = defaultHome(), operations = {}) {
+/** Canonical-first compatibility, no migration: an existing user-harness-preferences.md wins, a
+ * legacy harness-roster.md is read in place without ever being renamed or rewritten, and a null
+ * source means a fresh install with neither owner file. */
+export function resolveUserHarnessPreferences(ooHome = defaultHome()) {
   const paths = ownerOperatorPaths(ooHome);
-  const exists = operations.existsSync ?? existsSync;
-  const link = operations.linkSync ?? linkSync;
-  const unlink = operations.unlinkSync ?? unlinkSync;
-  const write = operations.writeFileSync ?? writeFileSync;
-  const canonical = paths.userHarnessPreferences;
-  const legacy = legacyHarnessRosterPath(paths.workspace);
-  mkdirSync(paths.workspace, { recursive: true });
-
-  const initial = existingPreferencesResolution(canonical, legacy, exists);
-  if (initial.source === "user-harness-preferences") return initial;
-
-  if (initial.source === "legacy-harness-roster") {
-    try {
-      // link(2) is exclusive: unlike rename, it cannot replace canonical bytes created by
-      // another process between the existence check and this migration attempt.
-      link(legacy, canonical);
-      unlink(legacy);
-    } catch (error) {
-      const resolved = existingPreferencesResolution(canonical, legacy, exists);
-      if (resolved.source === "user-harness-preferences") return resolved;
-      return resolved.source === "legacy-harness-roster"
-        ? {
-            ...resolved,
-            error: `Could not migrate ${legacy} to ${canonical}: ${messageOf(error)}. Using the legacy file without rewriting it.`,
-          }
-        : {
-            path: canonical,
-            source: null,
-            error: `Could not migrate ${legacy} to ${canonical}: ${messageOf(error)}. Neither preference file is now available.`,
-          };
-    }
-    const resolved = existingPreferencesResolution(canonical, legacy, exists);
-    return resolved.source
-      ? resolved
-      : {
-          path: canonical,
-          source: null,
-          error: `Migrated ${legacy} to ${canonical}, but neither preference file is now available.`,
-        };
+  if (existsSync(paths.userHarnessPreferences)) {
+    return { path: paths.userHarnessPreferences, source: "user-harness-preferences" };
   }
-
-  try {
-    write(canonical, USER_HARNESS_PREFERENCES_TEMPLATE, { flag: "wx" });
-  } catch (error) {
-    if (error?.code !== "EEXIST") {
-      return {
-        path: canonical,
-        source: null,
-        error: `Could not create ${canonical}: ${messageOf(error)}`,
-      };
-    }
-  }
-  const resolved = existingPreferencesResolution(canonical, legacy, exists);
-  return resolved.source
-    ? resolved
-    : {
-        path: canonical,
-        source: null,
-        error: `Could not resolve ${canonical} after creating it.`,
-      };
-}
-
-function existingPreferencesResolution(canonical, legacy, exists) {
-  const canonicalExists = exists(canonical);
-  const legacyExists = exists(legacy);
-  if (canonicalExists) {
-    return {
-      path: canonical,
-      source: "user-harness-preferences",
-      error: legacyExists
-        ? `Both ${canonical} and legacy ${legacy} exist; using the canonical file and leaving the legacy file untouched.`
-        : null,
-    };
-  }
-  return legacyExists
-    ? { path: legacy, source: "legacy-harness-roster", error: null }
-    : { path: canonical, source: null, error: null };
+  const legacy = join(paths.workspace, "harness-roster.md");
+  if (existsSync(legacy)) return { path: legacy, source: "legacy-harness-roster" };
+  return { path: paths.userHarnessPreferences, source: null };
 }
 
 export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
@@ -190,12 +118,10 @@ export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
   mkdirSync(paths.piAgentDir, { recursive: true });
   writeMissing(paths.workspaceInstructions, "# Owner Operator instructions\n\nRecord persistent instructions for the Operator here.\n");
   writeMissing(paths.workspaceMemory, "# Memory\n\nRecord durable facts for the Operator here.\n");
-  resolveUserHarnessPreferences(ooHome);
+  if (resolveUserHarnessPreferences(ooHome).source === null) {
+    writeMissing(paths.userHarnessPreferences, USER_HARNESS_PREFERENCES_TEMPLATE);
+  }
   return paths;
-}
-
-function messageOf(error) {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function readJson(path) {
