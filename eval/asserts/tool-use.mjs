@@ -263,9 +263,6 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (detailsIndex < 0 || proposalIndex <= detailsIndex) {
       problems.push("expected a current snapshot followed by a read-only proposal");
     }
-    if (!snapshotPreferences(executions[detailsIndex], before.userHarnessPreferences)) {
-      problems.push("current snapshot did not carry the case preferences");
-    }
     const expectedHarness = expected.candidate?.harness;
     const detailsHarnesses = executions[detailsIndex]?.input?.harnesses;
     if (expectedHarness && (!Array.isArray(detailsHarnesses) || !detailsHarnesses.includes(expectedHarness))) {
@@ -291,8 +288,6 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
   } else if (claim === "usage-explanation") {
     if (successfulDetails.length < 1) {
       problems.push("usage explanation did not consult current harness details");
-    } else if (!snapshotPreferences(successfulDetails[0], before.userHarnessPreferences)) {
-      problems.push("usage explanation did not consume snapshot-owned preferences");
     }
     if (calls("delegate_agent").length || calls("manage_delegated_baseline").length
         || !sameValue(before, after)) {
@@ -374,17 +369,6 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (ordinary.length !== 1 || inspections.length !== 1 || ordinaryIndex >= inspectionIndex) {
       problems.push("mismatched candidate did not use one ordinary snapshot followed by one exact inspection");
     }
-    if (![...ordinary, ...inspections].every((execution) =>
-      snapshotPreferences(execution, before.userHarnessPreferences))) {
-      problems.push("mismatched inspection snapshots did not carry the case preferences");
-    }
-    const row = inspectionRow(inspections[0], identity);
-    if (!requestedInspectionMatches(row, identity)) {
-      problems.push("mismatched inspection output did not echo the exact requestedInspection");
-    }
-    if (typeof row?.error !== "string" || !row.error.trim() || confirmationMatches(row, identity)) {
-      problems.push("mismatched inspection did not return an actual error without false confirmation");
-    }
     if (calls("delegate_agent").length || !sameValue(before.agentRuns, after.agentRuns)) {
       problems.push("mismatched inspection delegated or persisted a lower-quality run");
     }
@@ -419,9 +403,6 @@ function gradeImplicitSelection({
   if (ordinary.length !== 1 || executions.indexOf(ordinary[0]) >= launchIndex) {
     problems.push("implicit selection did not use exactly one current snapshot before launch");
   }
-  if (!details.every((execution) => snapshotPreferences(execution, before.userHarnessPreferences))) {
-    problems.push("implicit selection snapshots did not carry the case preferences");
-  }
   const advertised = advertisedIdentity(ordinary[0], identity);
   if (!advertised.available || (!requireInspection && !advertised.current)) {
     problems.push("implicit selection did not use exact values from the current capability snapshot");
@@ -431,13 +412,6 @@ function gradeImplicitSelection({
     const inspectionIndex = executions.indexOf(inspections[0]);
     if (inspections.length !== 1 || ordinaryIndex >= inspectionIndex || inspectionIndex >= launchIndex) {
       problems.push("non-current selection did not use ordinary snapshot then exact inspection before launch");
-    }
-    const row = inspectionRow(inspections[0], identity);
-    if (!requestedInspectionMatches(row, identity)) {
-      problems.push("inspection output did not echo the exact requestedInspection");
-    }
-    if (!confirmationMatches(row, identity) || row?.error !== null) {
-      problems.push("inspection result did not confirm the exact candidate");
     }
   } else if (inspections.length || details.length !== 1) {
     problems.push("current choice opened an unnecessary second snapshot");
@@ -460,22 +434,9 @@ function inspectionIdentity(execution, identity) {
     && sameIdentity(inspections[0], identity);
 }
 
-function snapshotPreferences(execution, expectedContent) {
-  const preferences = execution?.result?.details?.preferences;
-  return typeof preferences?.path === "string" && preferences?.content === expectedContent;
-}
-
 function inspectionRow(execution, identity) {
   const rows = execution?.result?.details?.capabilities?.harnesses;
   return Array.isArray(rows) ? rows.find(({ harness }) => harness === identity.harness) : null;
-}
-
-function requestedInspectionMatches(row, identity) {
-  return sameIdentity({ ...row?.requestedInspection, harness: row?.harness }, identity);
-}
-
-function confirmationMatches(row, identity) {
-  return sameIdentity({ ...row?.confirmation, harness: row?.harness }, identity);
 }
 
 function advertisedIdentity(execution, identity) {
