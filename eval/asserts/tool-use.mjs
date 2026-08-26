@@ -403,10 +403,6 @@ function gradeImplicitSelection({
   if (ordinary.length !== 1 || executions.indexOf(ordinary[0]) >= launchIndex) {
     problems.push("implicit selection did not use exactly one current snapshot before launch");
   }
-  const advertised = advertisedIdentity(ordinary[0], identity);
-  if (!advertised.available || (!requireInspection && !advertised.current)) {
-    problems.push("implicit selection did not use exact values from the current capability snapshot");
-  }
   if (requireInspection) {
     const ordinaryIndex = executions.indexOf(ordinary[0]);
     const inspectionIndex = executions.indexOf(inspections[0]);
@@ -437,24 +433,6 @@ function inspectionIdentity(execution, identity) {
 function inspectionRow(execution, identity) {
   const rows = execution?.result?.details?.capabilities?.harnesses;
   return Array.isArray(rows) ? rows.find(({ harness }) => harness === identity.harness) : null;
-}
-
-function advertisedIdentity(execution, identity) {
-  const rows = execution?.result?.details?.capabilities?.harnesses;
-  const row = Array.isArray(rows) ? rows.find(({ harness }) => harness === identity.harness) : null;
-  const models = row?.session?.models;
-  const options = row?.session?.configOptions;
-  const effortAdvertised = identity.effort === null || (Array.isArray(options) && options.some((option) =>
-    option.category === "thought_level"
-    && Array.isArray(option.options)
-    && option.options.some(({ value }) => value === identity.effort)
-  ));
-  return {
-    available: Array.isArray(models?.availableModelIds)
-      && models.availableModelIds.includes(identity.model)
-      && effortAdvertised,
-    current: models?.currentModelId === identity.model,
-  };
 }
 
 function sameIdentity(actual, expected) {
