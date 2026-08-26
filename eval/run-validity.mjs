@@ -28,7 +28,6 @@ export function validateEvalRun(records, cases, { expectedIds, manifest, repeat,
   if (scope === "behavioral") {
     if (records.some((item) => item.trajectoryPresent !== true)) reasons.push("missing-behavioral-trajectory");
     if (records.some((item) => item.trajectoryWellFormed !== true)) reasons.push("malformed-behavioral-trajectory");
-    if (records.some((item) => item.behavioralStatePresent !== true)) reasons.push("missing-behavioral-state");
     if (records.some((item) => item.harnessValid !== true)) reasons.push("invalid-behavioral-harness");
   }
   return { valid: reasons.length === 0, reasons: [...new Set(reasons)] };

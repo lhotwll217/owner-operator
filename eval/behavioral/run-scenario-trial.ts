@@ -30,15 +30,6 @@ import { materializeMarkDoneScenario } from "./scenario-operations";
  * not own session, trace, failure, result, or teardown lifecycle.
  */
 
-type DelegationClaim =
-  | "natural-first-delegation"
-  | "usage-explanation"
-  | "approved-default-reuse"
-  | "explicit-pass-through"
-  | "implicit-current-choice"
-  | "implicit-non-current-inspection"
-  | "inspection-mismatch";
-
 type ModelSettings = {
   defaultProvider: string;
   defaultModel: string;
@@ -66,7 +57,8 @@ type MarkDoneInput = CommonInput & {
 
 type DelegationInput = CommonInput & {
   behaviorProfile: "delegation-selection";
-  behaviorClaim: DelegationClaim;
+  // Claim semantics live in the trajectory grader; the runner only threads the name through.
+  behaviorClaim: string;
   behaviorExpected: Record<string, unknown>;
   userHarnessPreferences: string;
   harnessDetails: HarnessDetailsSnapshot;
@@ -418,17 +410,8 @@ function readInput(value: string | undefined): TrialInput {
     return parsed;
   }
   if (parsed.behaviorProfile === "delegation-selection") {
-    if (!([
-      "natural-first-delegation",
-      "usage-explanation",
-      "approved-default-reuse",
-      "explicit-pass-through",
-      "implicit-current-choice",
-      "implicit-non-current-inspection",
-      "inspection-mismatch",
-    ] as string[])
-      .includes(parsed.behaviorClaim)) {
-      throw new Error("unsupported delegation behavior claim");
+    if (!parsed.behaviorClaim?.trim()) {
+      throw new Error("delegation scenario requires a behavior claim");
     }
     if (!parsed.userHarnessPreferences?.trim()
         || !parsed.harnessDetails?.preferences

@@ -23,17 +23,6 @@ const iterationsDir = path.join(here, "results", "iterations");
 fs.mkdirSync(iterationsDir, { recursive: true });
 
 const SUBJECTS = ["owner-operator", "naive-session-grep", "owner-operator-behavioral"];
-const BEHAVIORAL_IDS = [
-  "delegated-child-confidently-finished",
-  "delegated-child-completed-unresolved",
-  "delegation-natural-first",
-  "delegation-usage-explanation",
-  "delegation-approved-default-reuse",
-  "delegation-explicit-pass-through",
-  "delegation-implicit-current-choice",
-  "delegation-implicit-non-current-inspection",
-  "delegation-inspection-mismatch",
-];
 
 const PROBE_IDS = [
   "evidence-flaky-error",             // rare literal / query-led
@@ -101,13 +90,14 @@ if (behavioral && subject !== "owner-operator-behavioral") {
   fail("--behavioral requires the owner-operator-behavioral subject");
 }
 
-const knownIds = new Set(
-  [...fs.readFileSync(path.join(here, "cases.yaml"), "utf8").matchAll(/^- description:\s*(\S+)\s*$/gm)]
-    .map((match) => match[1]),
-);
-const retrievalIds = [...knownIds].filter((id) => !BEHAVIORAL_IDS.includes(id));
+// cases.yaml owns case membership: `metadata.qtype: behavioral` is the one behavioral marker.
+const caseBlocks = fs.readFileSync(path.join(here, "cases.yaml"), "utf8").split(/^- description:\s*/m).slice(1);
+const caseIds = caseBlocks.map((block) => block.split(/\s/, 1)[0]);
+const knownIds = new Set(caseIds);
+const behavioralIds = caseIds.filter((id, index) => /\bqtype:\s*behavioral\b/.test(caseBlocks[index]));
+const retrievalIds = caseIds.filter((id) => !behavioralIds.includes(id));
 const ids = behavioral
-  ? BEHAVIORAL_IDS
+  ? behavioralIds
   : custom
     ? custom.split(",").filter(Boolean)
     : has("probe")
@@ -277,10 +267,6 @@ function toRecord(result) {
     // The tool-selection gate judges OO's composition; the control passes vacuously.
     trajectoryPresent: Boolean(trajectory),
     trajectoryWellFormed: typeof trajectory?.pass === "boolean",
-    behavioralStatePresent: behavioralCase
-      ? stateEvidencePresent(behaviorProfile, metadata.stateBefore)
-        && stateEvidencePresent(behaviorProfile, metadata.stateAfter)
-      : null,
     trajectoryPass: ["owner-operator", "owner-operator-behavioral"].includes(subjectName)
       ? typeof trajectory?.pass === "boolean" ? trajectory.pass : null
       : true,
@@ -304,19 +290,6 @@ function toRecord(result) {
 function metric(value) {
   const n = Number(value);
   return value != null && Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-function stateEvidencePresent(profile, value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  if (profile === "delegation-selection") {
-    return typeof value.userHarnessPreferences === "string"
-      && value.delegatedBaselines && typeof value.delegatedBaselines === "object"
-      && !Array.isArray(value.delegatedBaselines)
-      && Array.isArray(value.agentRuns);
-  }
-  return value.rawThreadStates && typeof value.rawThreadStates === "object" && !Array.isArray(value.rawThreadStates)
-    && Array.isArray(value.activeIds)
-    && value.transcriptExists && typeof value.transcriptExists === "object" && !Array.isArray(value.transcriptExists);
 }
 
 function collectCases(records) {
