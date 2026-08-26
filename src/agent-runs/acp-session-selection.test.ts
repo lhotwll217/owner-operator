@@ -89,6 +89,9 @@ assert.equal(configOptionsFromStatus({}), null);
 assert.equal(configOptionsFromStatus({ details: {} }), null);
 const preserved = [
   select("mode", "agent", ["agent"]),
+  // Non-select options and unconsumed fields are opaque: they pass through unvalidated.
+  { id: "flag", type: "boolean", currentValue: "unexpected-shape" },
+  { type: "future-option-kind", payload: { nested: true } },
   {
     id: "reasoning_effort",
     name: "Reasoning effort",
@@ -109,7 +112,7 @@ const preserved = [
   },
 ] as unknown as SessionConfigOption[];
 assert.equal(configOptionsFromStatus(status(requested.model, preserved)), preserved);
-assert.deepEqual(advertisedSelectValues(preserved[1]!), ["low", "xhigh"]);
+assert.deepEqual(advertisedSelectValues(preserved[3]!), ["low", "xhigh"]);
 assert.deepEqual(configOptionsFromStatus(status(requested.model, [])), []);
 assert.equal(resolveThoughtLevelSelector([select("effort", "high", ["high"], "thought_level")]).kind, "found");
 
@@ -117,49 +120,17 @@ for (const malformed of [
   null,
   {},
   [null],
-  [{ id: "" }],
+  [{ type: "select", currentValue: "high", options: [] }],
+  [{ id: "", type: "select", currentValue: "high", options: [] }],
   [{ id: "effort", category: 1, type: "select", currentValue: "high", options: [] }],
-  [{ id: "effort", type: "unknown", currentValue: "high", options: [] }],
   [{ id: "effort", type: "select", currentValue: true, options: [] }],
   [{ id: "effort", type: "select", currentValue: "high", options: {} }],
   [{ id: "effort", type: "select", currentValue: "high", options: [{}] }],
+  [{ id: "effort", type: "select", currentValue: "high", options: [{ value: 1 }] }],
   [{ id: "effort", type: "select", currentValue: "high", options: [{ options: [{}] }] }],
-  [{ id: "flag", type: "boolean", currentValue: "true" }],
-  [{ id: "flag", type: "boolean", name: 1, currentValue: true }],
-  [{ id: "flag", type: "boolean", name: "Flag", currentValue: true, description: 1 }],
-  [{ id: "flag", type: "boolean", name: "Flag", currentValue: true, _meta: [] }],
-  [{
-    id: "effort", type: "select", name: "Effort", currentValue: "high",
-    options: [{ value: "high" }],
-  }],
-  [{
-    id: "effort", type: "select", name: "Effort", currentValue: "high",
-    options: [{ value: "high", name: "High", description: false }],
-  }],
-  [{
-    id: "effort", type: "select", name: "Effort", currentValue: "high",
-    options: [{ value: "high", name: "High", _meta: [] }],
-  }],
-  [{
-    id: "effort", type: "select", name: "Effort", currentValue: "high",
-    options: [{ group: "ordinary", options: [] }],
-  }],
   [{
     id: "effort", type: "select", name: "Effort", currentValue: "high",
     options: [{ group: "ordinary", name: "Ordinary", options: {} }],
-  }],
-  [{
-    id: "effort", type: "select", name: "Effort", currentValue: "high",
-    options: [{
-      group: "ordinary", name: "Ordinary", options: [{ value: "high" }],
-    }],
-  }],
-  [{
-    id: "effort", type: "select", name: "Effort", currentValue: "high",
-    options: [
-      { value: "high", name: "High" },
-      { group: "other", name: "Other", options: [{ value: "low", name: "Low" }] },
-    ],
   }],
 ]) {
   assert.throws(

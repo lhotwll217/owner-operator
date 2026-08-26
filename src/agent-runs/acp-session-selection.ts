@@ -222,85 +222,33 @@ function requireThoughtLevelSelector(
   throw failure("ACP_SELECTION_SELECTOR_MISSING", requested, `${phase} status advertised no thought-level selector`);
 }
 
+/** Validate only what this service consumes: select discrimination, id, category, currentValue,
+ * and the advertised select values. Everything else on an option — names, descriptions, _meta,
+ * non-select option shapes, future extensions — is opaque and passes through unchanged. */
 function validateConfigOption(value: unknown, index: number): void {
   const option = record(value);
   if (!option) throw invalid(index, "must be an object");
-  if (typeof option.id !== "string" || !option.id.trim()) throw invalid(index, "id must be a non-empty string");
-  if (typeof option.name !== "string") throw invalid(index, "name must be a string");
-  validateOptionalText(option, "description", index);
-  validateOptionalText(option, "category", index);
-  validateOptionalMeta(option, index);
-  if (option.type === "boolean") {
-    if (typeof option.currentValue !== "boolean") throw invalid(index, "boolean currentValue must be boolean");
-    return;
+  if (option.type !== "select") return;
+  if (typeof option.id !== "string" || !option.id.trim()) throw invalid(index, "select id must be a non-empty string");
+  if (option.category !== undefined && option.category !== null && typeof option.category !== "string") {
+    throw invalid(index, "select category must be a string or null");
   }
-  if (option.type !== "select") throw invalid(index, "type must be select or boolean");
   if (typeof option.currentValue !== "string") throw invalid(index, "select currentValue must be a string");
   if (!Array.isArray(option.options)) throw invalid(index, "select options must be an array");
-  const entries = option.options.map((value, choiceIndex) => {
-    const choice = record(value);
+  for (const [choiceIndex, choiceValue] of option.options.entries()) {
+    const choice = record(choiceValue);
     if (!choice) throw invalid(index, `choice ${choiceIndex} must be an object`);
-    return choice;
-  });
-  const grouped = entries.some((entry) => Object.hasOwn(entry, "group"));
-  if (grouped && entries.some((entry) => !Object.hasOwn(entry, "group"))) {
-    throw invalid(index, "select options must be all direct choices or all groups");
-  }
-  for (const [choiceIndex, choice] of entries.entries()) {
-    if (grouped) validateChoiceGroup(choice, index, choiceIndex);
-    else validateDirectChoice(choice, index, `choice ${choiceIndex}`);
-  }
-}
-
-function validateChoiceGroup(
-  group: Record<string, unknown>,
-  optionIndex: number,
-  groupIndex: number,
-): void {
-  if (typeof group.group !== "string") throw invalid(optionIndex, `group ${groupIndex} id must be a string`);
-  if (typeof group.name !== "string") throw invalid(optionIndex, `group ${groupIndex} name must be a string`);
-  validateOptionalMeta(group, optionIndex, `group ${groupIndex} `);
-  if (!Array.isArray(group.options)) throw invalid(optionIndex, `group ${groupIndex} options must be an array`);
-  for (const [choiceIndex, value] of group.options.entries()) {
-    const choice = record(value);
-    if (!choice) throw invalid(optionIndex, `group ${groupIndex} choice ${choiceIndex} must be an object`);
-    validateDirectChoice(choice, optionIndex, `group ${groupIndex} choice ${choiceIndex}`);
-  }
-}
-
-function validateDirectChoice(
-  choice: Record<string, unknown>,
-  optionIndex: number,
-  label: string,
-): void {
-  if (typeof choice.value !== "string") throw invalid(optionIndex, `${label} value must be a string`);
-  if (typeof choice.name !== "string") throw invalid(optionIndex, `${label} name must be a string`);
-  validateOptionalText(choice, "description", optionIndex, `${label} `);
-  validateOptionalMeta(choice, optionIndex, `${label} `);
-}
-
-function validateOptionalText(
-  value: Record<string, unknown>,
-  key: "description" | "category",
-  optionIndex: number,
-  prefix = "",
-): void {
-  if (
-    value[key] !== undefined
-    && value[key] !== null
-    && typeof value[key] !== "string"
-  ) {
-    throw invalid(optionIndex, `${prefix}${key} must be a string or null`);
-  }
-}
-
-function validateOptionalMeta(
-  value: Record<string, unknown>,
-  optionIndex: number,
-  prefix = "",
-): void {
-  if (value._meta !== undefined && value._meta !== null && !record(value._meta)) {
-    throw invalid(optionIndex, `${prefix}_meta must be an object or null`);
+    if (Object.hasOwn(choice, "value")) {
+      if (typeof choice.value !== "string") throw invalid(index, `choice ${choiceIndex} value must be a string`);
+      continue;
+    }
+    if (!Array.isArray(choice.options)) throw invalid(index, `group ${choiceIndex} options must be an array`);
+    for (const [groupedIndex, groupedValue] of choice.options.entries()) {
+      const grouped = record(groupedValue);
+      if (!grouped || typeof grouped.value !== "string") {
+        throw invalid(index, `group ${choiceIndex} choice ${groupedIndex} value must be a string`);
+      }
+    }
   }
 }
 
