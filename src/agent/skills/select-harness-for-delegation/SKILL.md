@@ -12,27 +12,22 @@ model, and effort value—including `effort: null`—while selecting only omitte
 
 ## Select
 
-1. Call `get_harness_details` for every plausible harness. Read `snapshot.preferences.content` as
-   owner-controlled routing guidance. Treat its standard and owner-added roles uniformly, matching
-   the task by meaning. Use only exact model IDs and reasoning values advertised in that harness's
-   capability row; preserve supplied identity fields and required quality. Unknown account or
-   allowance facts are not evidence of availability or constraint.
-2. If no task preference applies, use that harness's owner-approved delegated baseline only to
-   fill omitted execution-identity fields. Call
-   `manage_delegated_baseline` with `action: "propose"` to inspect its `approved` value; the
-   unpinned ACP candidate returned alongside it is only a proposal and never replaces an approved
-   baseline. Merge the approved model and nullable effort into omitted fields without replacing
-   any owner-supplied value.
-3. Complete a current-model choice from that one snapshot when its reasoning choices are fully
-   advertised; `effort: null` requires no separate reasoning selector. If the chosen model is
-   non-current or its reasoning choices are model-dependent or unknown, call `get_harness_details`
-   again to inspect that exact candidate. Continue only when
-   the returned confirmation exactly matches its harness, model, and nullable effort. A failed or
-   mismatched inspection rejects that candidate; select an equal-or-higher-quality candidate with
-   its required evidence, or ask the owner.
-4. Call `delegate_agent` with the exact selected harness, model, and effort. Keep the owner's
-   task and working directory intact. The existing delegated-run lifecycle is the execution record;
-   do not create another record and do not poll after launch.
+1. **Observe.** Call `get_harness_details` once with every plausible harness.
+2. **Apply owner preferences.** Read `snapshot.preferences.content` as owner-controlled routing
+   guidance. Match the task by meaning against standard and owner-added roles, or establish that no
+   task preference applies.
+3. **Fill omissions.** When no task preference applies, use that harness's owner-approved delegated
+   baseline only for missing execution-identity fields. Call `manage_delegated_baseline` with
+   `action: "propose"` to inspect its `approved` value; its unpinned candidate is only a proposal.
+4. **Verify the candidate.** Use exact model IDs and reasoning values advertised by that harness.
+   A current model whose reasoning choices are fully advertised needs no second observation;
+   `effort: null` needs no separate selector. Otherwise inspect the exact candidate with
+   `get_harness_details`. An inspection succeeds only when its confirmation exactly matches the
+   harness, model, and nullable effort. Reject failed or mismatched inspections; choose an
+   equal-or-higher-quality candidate with its required evidence, or ask the owner.
+5. **Delegate.** Call `delegate_agent` with the selected harness, model, and effort. Keep the
+   owner's task and working directory intact. The delegated-run lifecycle is the execution record;
+   create no duplicate record and do not poll after launch.
 
 ## Constrained or rejected selections
 
