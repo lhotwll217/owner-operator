@@ -67,7 +67,7 @@ function markDoneStateEvidence(value) {
 
 function delegationStateEvidence(value) {
   return plainObject(value)
-    && nonEmpty(value.userHarnessPreferenceBytes)
+    && nonEmpty(value.userHarnessPreferences)
     && plainObject(value.delegatedBaselines)
     && Array.isArray(value.agentRuns)
     && value.agentRuns.every(plainObject);

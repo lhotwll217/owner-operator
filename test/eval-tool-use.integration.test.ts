@@ -346,7 +346,7 @@ const delegationContext = (
 });
 const preferenceContent = "# User harness preferences\n";
 const emptyDelegationState = {
-  userHarnessPreferenceBytes: Buffer.from(preferenceContent).toString("base64"),
+  userHarnessPreferences: preferenceContent,
   delegatedBaselines: {},
   agentRuns: [],
 };
@@ -616,7 +616,7 @@ const alteredPreferenceSnapshot = toolUseAssertion("Delegated current choice.", 
   { identity: currentIdentity },
 ));
 assert.equal(alteredPreferenceSnapshot.pass, false);
-assert.match(alteredPreferenceSnapshot.reason, /exact raw preference bytes/i);
+assert.match(alteredPreferenceSnapshot.reason, /did not carry the case preferences/i);
 
 const mismatchWithMutation = toolUseAssertion("The candidate failed, then I launched anyway.", delegationContext(
   "inspection-mismatch",

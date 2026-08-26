@@ -329,11 +329,6 @@
     harnessDetails:
       observedAt: "2026-08-20T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: "# User harness preferences\n\n### Quick mechanical work\n\n_No preference configured._"
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex] }
         harnesses:
@@ -404,17 +399,6 @@
     harnessDetails:
       observedAt: "2026-08-20T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: |-
-          # User harness preferences
-
-          ### Implementation review
-
-          Prefer codex / codex-review / high. When Codex weekly usage is above 60%, prefer
-          claude-code / claude-review / high instead.
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex, claude] }
         harnesses:
@@ -495,11 +479,6 @@
     harnessDetails:
       observedAt: "2026-08-20T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: "# User harness preferences\n\n### Quick mechanical work\n\n_No preference configured._"
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex] }
         harnesses:
@@ -558,16 +537,6 @@
     harnessDetails:
       observedAt: "2026-08-25T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: |-
-          # User harness preferences
-
-          ### Review
-
-          Prefer claude-code / controlled-opus / high.
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [] }
         harnesses: []
@@ -599,16 +568,6 @@
     harnessDetails:
       observedAt: "2026-08-25T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: |-
-          # User harness preferences
-
-          ### Implementation
-
-          Use codex / controlled-current / high.
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex] }
         harnesses:
@@ -654,16 +613,6 @@
     harnessDetails:
       observedAt: "2026-08-25T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: |-
-          # User harness preferences
-
-          ### Review
-
-          Use claude-code / opus[1m] / xhigh.
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
         harnesses:
@@ -688,16 +637,6 @@
         snapshot:
           observedAt: "2026-08-25T12:00:01.000Z"
           ephemeral: true
-          preferences:
-            path: /fixture/user-harness-preferences.md
-            source: user-harness-preferences
-            content: |-
-              # User harness preferences
-
-              ### Review
-
-              Use claude-code / opus[1m] / xhigh.
-            error: null
           capabilities:
             registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
             harnesses:
@@ -743,16 +682,6 @@
     harnessDetails:
       observedAt: "2026-08-25T12:00:00.000Z"
       ephemeral: true
-      preferences:
-        path: /fixture/user-harness-preferences.md
-        source: user-harness-preferences
-        content: |-
-          # User harness preferences
-
-          ### Review
-
-          Require claude-code / opus[1m] / xhigh. Lower-quality alternatives are unacceptable.
-        error: null
       capabilities:
         registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
         harnesses:
@@ -777,16 +706,6 @@
         snapshot:
           observedAt: "2026-08-25T12:00:01.000Z"
           ephemeral: true
-          preferences:
-            path: /fixture/user-harness-preferences.md
-            source: user-harness-preferences
-            content: |-
-              # User harness preferences
-
-              ### Review
-
-              Require claude-code / opus[1m] / xhigh. Lower-quality alternatives are unacceptable.
-            error: null
           capabilities:
             registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
             harnesses:

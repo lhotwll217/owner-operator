@@ -61,10 +61,12 @@ type DelegationInput = CommonInput & {
   behaviorClaim: string;
   behaviorExpected: Record<string, unknown>;
   userHarnessPreferences: string;
-  harnessDetails: HarnessDetailsSnapshot;
+  // Case fixtures state the owner preferences once; the adapter derives every snapshot's
+  // preferences namespace from that value, so a case cannot disagree with itself.
+  harnessDetails: ControlledSnapshot;
   harnessInspections?: Array<{
     request: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null };
-    snapshot: HarnessDetailsSnapshot;
+    snapshot: ControlledSnapshot;
   }>;
   baselineCandidate?: (HarnessBaselineCandidate & { harness: AgentRunHarness }) | null;
   approvedBaseline?: {
@@ -73,6 +75,8 @@ type DelegationInput = CommonInput & {
     effort: AgentRunEffort | null;
   } | null;
 };
+
+type ControlledSnapshot = Omit<HarnessDetailsSnapshot, "preferences">;
 
 type TrialInput = MarkDoneInput | DelegationInput;
 type SandboxEnvironment = Awaited<ReturnType<typeof createSandboxUser>>;
@@ -231,9 +235,20 @@ function delegationAdapter(
   scenario: DelegationInput,
   paths: { ooHome: string },
 ): ScenarioAdapter {
+  let preferencesPath = "";
+  const withPreferences = (snapshot: ControlledSnapshot): HarnessDetailsSnapshot => ({
+    ...structuredClone(snapshot),
+    preferences: {
+      path: preferencesPath,
+      source: "user-harness-preferences",
+      content: scenario.userHarnessPreferences,
+      error: null,
+    },
+  });
   return {
     configureSandbox(environment) {
-      writeFileSync(environment.paths.userHarnessPreferences, scenario.userHarnessPreferences);
+      preferencesPath = environment.paths.userHarnessPreferences;
+      writeFileSync(preferencesPath, scenario.userHarnessPreferences);
       if (scenario.approvedBaseline) {
         approveDelegatedBaseline(scenario.approvedBaseline.harness, {
           model: scenario.approvedBaseline.model,
@@ -253,10 +268,10 @@ function delegationAdapter(
             if (!fixture) {
               throw new Error(`no controlled inspection snapshot for ${inspectionLabel(inspect[0])}`);
             }
-            return structuredClone(fixture.snapshot);
+            return withPreferences(fixture.snapshot);
           }
           const selectedHarnesses = new Set(harnesses ?? []);
-          const snapshot = structuredClone(scenario.harnessDetails);
+          const snapshot = withPreferences(scenario.harnessDetails);
           if (selectedHarnesses.size) {
             snapshot.capabilities.harnesses = snapshot.capabilities.harnesses
               .filter(({ harness }) => selectedHarnesses.has(harness));
@@ -338,7 +353,7 @@ function captureMarkDoneState(
 
 function captureDelegationState(running: RunningDaemon, home: string, preferences: string) {
   return {
-    userHarnessPreferenceBytes: readFileSync(preferences).toString("base64"),
+    userHarnessPreferences: readFileSync(preferences, "utf8"),
     delegatedBaselines: loadDelegatedBaselines(home),
     agentRuns: running.state.listAgentRuns(),
   };
@@ -414,8 +429,7 @@ function readInput(value: string | undefined): TrialInput {
       throw new Error("delegation scenario requires a behavior claim");
     }
     if (!parsed.userHarnessPreferences?.trim()
-        || !parsed.harnessDetails?.preferences
-        || !Array.isArray(parsed.harnessDetails.capabilities?.harnesses)) {
+        || !Array.isArray(parsed.harnessDetails?.capabilities?.harnesses)) {
       throw new Error("delegation scenario requires user harness preferences and a controlled snapshot");
     }
     return parsed;

@@ -99,8 +99,8 @@ const delegationTrial = normalizeBehavioralTrialResult({
   behaviorClaim: "usage-explanation",
   behaviorExpected: { usedPercent: 63, remainingPercent: 37, usageAffectedRecommendation: true },
   completion: null,
-  stateBefore: { userHarnessPreferenceBytes: "IyBuZXV0cmFsCg==", delegatedBaselines: {}, agentRuns: [] },
-  stateAfter: { userHarnessPreferenceBytes: "IyBuZXV0cmFsCg==", delegatedBaselines: {}, agentRuns: [] },
+  stateBefore: { userHarnessPreferences: "# neutral\n", delegatedBaselines: {}, agentRuns: [] },
+  stateAfter: { userHarnessPreferences: "# neutral\n", delegatedBaselines: {}, agentRuns: [] },
   traceEvents: [
     {
       event: "tool_call", id: "details", tool: "get_harness_details",

@@ -247,7 +247,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     .filter((name) => successful(name).length);
   if (changed.length) problems.push(`unexpected successful mutations [${changed.join(", ")}]`);
   if (directPreferenceReads.length) problems.push("selection read a preference file directly instead of the snapshot");
-  if (before.userHarnessPreferenceBytes !== after.userHarnessPreferenceBytes) {
+  if (before.userHarnessPreferences !== after.userHarnessPreferences) {
     problems.push("user harness preferences changed during selection");
   }
   if (!sameValue(before.delegatedBaselines, after.delegatedBaselines)) {
@@ -263,8 +263,8 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (detailsIndex < 0 || proposalIndex <= detailsIndex) {
       problems.push("expected a current snapshot followed by a read-only proposal");
     }
-    if (!snapshotPreferences(executions[detailsIndex], before.userHarnessPreferenceBytes)) {
-      problems.push("current snapshot did not carry raw user preferences");
+    if (!snapshotPreferences(executions[detailsIndex], before.userHarnessPreferences)) {
+      problems.push("current snapshot did not carry the case preferences");
     }
     const expectedHarness = expected.candidate?.harness;
     const detailsHarnesses = executions[detailsIndex]?.input?.harnesses;
@@ -291,7 +291,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
   } else if (claim === "usage-explanation") {
     if (successfulDetails.length < 1) {
       problems.push("usage explanation did not consult current harness details");
-    } else if (!snapshotPreferences(successfulDetails[0], before.userHarnessPreferenceBytes)) {
+    } else if (!snapshotPreferences(successfulDetails[0], before.userHarnessPreferences)) {
       problems.push("usage explanation did not consume snapshot-owned preferences");
     }
     if (calls("delegate_agent").length || calls("manage_delegated_baseline").length
@@ -375,8 +375,8 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
       problems.push("mismatched candidate did not use one ordinary snapshot followed by one exact inspection");
     }
     if (![...ordinary, ...inspections].every((execution) =>
-      snapshotPreferences(execution, before.userHarnessPreferenceBytes))) {
-      problems.push("mismatched inspection snapshots did not preserve exact raw preference bytes");
+      snapshotPreferences(execution, before.userHarnessPreferences))) {
+      problems.push("mismatched inspection snapshots did not carry the case preferences");
     }
     const row = inspectionRow(inspections[0], identity);
     if (!requestedInspectionMatches(row, identity)) {
@@ -419,8 +419,8 @@ function gradeImplicitSelection({
   if (ordinary.length !== 1 || executions.indexOf(ordinary[0]) >= launchIndex) {
     problems.push("implicit selection did not use exactly one current snapshot before launch");
   }
-  if (!details.every((execution) => snapshotPreferences(execution, before.userHarnessPreferenceBytes))) {
-    problems.push("implicit selection snapshots did not preserve exact raw preference bytes");
+  if (!details.every((execution) => snapshotPreferences(execution, before.userHarnessPreferences))) {
+    problems.push("implicit selection snapshots did not carry the case preferences");
   }
   const advertised = advertisedIdentity(ordinary[0], identity);
   if (!advertised.available || (!requireInspection && !advertised.current)) {
@@ -460,11 +460,9 @@ function inspectionIdentity(execution, identity) {
     && sameIdentity(inspections[0], identity);
 }
 
-function snapshotPreferences(execution, expectedBytes) {
+function snapshotPreferences(execution, expectedContent) {
   const preferences = execution?.result?.details?.preferences;
-  return typeof preferences?.content === "string"
-    && typeof preferences?.path === "string"
-    && Buffer.from(preferences.content, "utf8").toString("base64") === expectedBytes;
+  return typeof preferences?.path === "string" && preferences?.content === expectedContent;
 }
 
 function inspectionRow(execution, identity) {
