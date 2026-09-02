@@ -14,7 +14,6 @@ const record = {
   trajectoryPresent: true,
   trajectoryWellFormed: true,
   trajectoryPass: false,
-  behavioralStatePresent: true,
   tokens: 20,
   toolCalls: 0,
   cost: 0.01,
@@ -50,9 +49,5 @@ assert.ok(missingTrajectory.reasons.includes("malformed-behavioral-trajectory"))
 const invalidHarness = validateEvalRun([{ ...record, harnessValid: false }], cases, options);
 assert.equal(invalidHarness.valid, false);
 assert.ok(invalidHarness.reasons.includes("invalid-behavioral-harness"));
-
-const missingState = validateEvalRun([{ ...record, behavioralStatePresent: false }], cases, options);
-assert.equal(missingState.valid, false);
-assert.ok(missingState.reasons.includes("missing-behavioral-state"));
 
 process.stdout.write("ok — eval run validity: behavioral grades may fail, harness/trajectory wiring may not\n");

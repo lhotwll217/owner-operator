@@ -109,6 +109,39 @@ try {
   assert.equal(JSON.parse(readFileSync(reparented.path, "utf8")).leaseId, reparented.leaseId,
     "reparented-survivor evidence retains its lease");
 
+  const settling = createAgentRunProcessLease({ runId: "run-settling", wrapperPath });
+  let settlingSnapshot = 0;
+  const settlingTree = [
+    { pid: 620, ppid: 1, command: `node ${wrapperPath} --oo-agent-run-lease ${settling.leaseId}` },
+    { pid: 621, ppid: 620, command: "node claude-agent-acp" },
+    { pid: 622, ppid: 621, command: "claude backend" },
+  ];
+  const settlingResult = await terminateAgentRunProcessLease({
+    leaseId: settling.leaseId,
+    wrapperPath,
+    trackedPids: settlingTree.map(({ pid }) => pid),
+    deps: {
+      listProcesses: async () => {
+        settlingSnapshot += 1;
+        if (settlingSnapshot === 1) return settlingTree;
+        if (settlingSnapshot === 2) {
+          return [
+            { pid: 620, ppid: 1, command: "(node)" },
+            { pid: 621, ppid: 620, command: "(node)" },
+            { pid: 622, ppid: 1, command: "claude backend" },
+          ];
+        }
+        return [];
+      },
+      killProcess: () => undefined,
+      sleep: async () => undefined,
+    },
+  });
+  assert.equal(settlingResult, true,
+    "exited wrapper rows and a briefly reparented Claude backend settle before cleanup is judged");
+  assert.throws(() => readFileSync(settling.path), /ENOENT/,
+    "a tree confirmed gone after bounded settling drops its lease");
+
   const recycled = createAgentRunProcessLease({ runId: "run-recycled", wrapperPath });
   const recycledSignals: number[] = [];
   const recycledPid = 701;

@@ -34,10 +34,13 @@ const WRAPPER_PATH = "/nonexistent/acp-process-wrapper.mjs";
 const PROBE_TIMEOUT_MS = 50;
 const HANDLE = { sessionId: "probe-session" } as unknown as AcpRuntimeHandle;
 const STATUS = {
-  models: { currentModelId: "gpt-5.6-sol" },
+  models: { currentModelId: "gpt-5.6-sol", availableModelIds: ["gpt-5.6-sol"] },
   details: {
     configOptions: [
-      { id: "reasoning_effort", currentValue: "low", options: [{ value: "low" }, { value: "high" }] },
+      {
+        type: "select", id: "reasoning_effort", name: "Effort", currentValue: "low",
+        options: [{ value: "low", name: "Low" }, { value: "high", name: "High" }],
+      },
     ],
   },
 };
@@ -153,9 +156,12 @@ try {
   assert.equal(existsSync(settled.stateDirs[0] ?? ""), false, "a settled probe deletes its session directory");
 
   for (const [status, message] of [
-    [{ models: { currentModelId: null }, details: {} }, /no usable model/],
-    [{ models: { currentModelId: "model" }, details: { configOptions: [
-      { id: "reasoning_effort", currentValue: "turbo", options: [{ value: "turbo" }] },
+    [{ models: { currentModelId: undefined, availableModelIds: [] }, details: {} }, /no usable model/],
+    [{ models: { currentModelId: "model", availableModelIds: ["model"] }, details: { configOptions: [
+      {
+        type: "select", id: "reasoning_effort", name: "Effort", currentValue: "turbo",
+        options: [{ value: "turbo", name: "Turbo" }],
+      },
     ] } }, /unsupported effort/],
   ] as const) {
     const invalid = probeRig({ openImmediately: true, status });
@@ -175,7 +181,7 @@ try {
       createRuntime: late.createRuntime,
       timeoutMs: PROBE_TIMEOUT_MS,
     }),
-    /did not finish initializing/,
+    /timed out during initialization/,
     "a harness that never initializes fails the probe rather than hanging it",
   );
   assert.equal(late.terminationCalls(), 1, "timeout invokes the owned pre-handle termination seam");
@@ -191,7 +197,7 @@ try {
       createRuntime: stuck.createRuntime,
       timeoutMs: PROBE_TIMEOUT_MS,
     }),
-    /did not finish initializing/,
+    /timed out during initialization/,
   );
   assert.equal(stuck.terminationCalls(), 1);
   assert.equal(existsSync(stuck.stateDirs[0] ?? ""), true,

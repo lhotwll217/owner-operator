@@ -47,8 +47,11 @@ try {
   );
   const selectionSkill = isolated.getSkills().skills.find((skill) => skill.name === "select-harness-for-delegation");
   assert.ok(selectionSkill, "the bundled selection skill resolves to a file");
-  assert.match(readFileSync(selectionSkill.filePath, "utf8"), /\$OO_HOME\/workspace\/harness-roster\.md/,
-    "the shipped workflow resolves the roster through configured OO_HOME");
+  const selectionText = readFileSync(selectionSkill.filePath, "utf8");
+  assert.match(selectionText, /snapshot\.preferences\.content/,
+    "the shipped workflow consumes preferences owned by the harness snapshot");
+  assert.doesNotMatch(selectionText, /\$OO_HOME\/workspace\/.*\.md/,
+    "the workflow does not read preference files directly");
   assert.ok(isolatedNames.includes("workspace-helper"), "workspace skills are loaded");
   assert.ok(!isolatedNames.includes("project-helper"), "task .pi skills are absent");
   assert.ok(!isolatedNames.includes("pi-user-helper"), "Pi user skills are absent");

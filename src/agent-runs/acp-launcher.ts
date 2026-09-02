@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createAcpRuntime,
@@ -11,10 +11,8 @@ import {
 } from "acpx/runtime";
 import {
   AGENT_RUN_CAPABILITIES,
+  AgentRunHarness,
   AgentRunStatus,
-  harnessIdentityObservation,
-  isAgentRunEffort,
-  type AgentRunHarness,
   type AgentRunLaunchRequest,
   type AgentRunLaunchResult,
   type AgentRunTurnIntent,
@@ -22,6 +20,7 @@ import {
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import type { AgentRunLauncher } from "./executor";
+import { applyAndConfirmAcpSelection } from "./acp-session-selection";
 import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
@@ -35,7 +34,6 @@ import {
  * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
-const REASONING_EFFORT_CONFIG_OPTION = "reasoning_effort";
 const CHILD_TASK_BOUNDARY =
   "Do the work yourself. Do not launch nested or background agents; delegated children must complete the task directly.";
 
@@ -139,9 +137,11 @@ export function createLeasedAcpRuntime(params: {
 }
 
 function defaultAgentCommand(acpAgent: string): string {
+  if (acpAgent === "claude") return claudeAcpAgentCommand();
   if (acpAgent === "codex") return codexAcpAgentCommand();
   if (acpAgent === "cursor") return cursorAcpAgentCommand();
-  return createAgentRegistry().resolve(acpAgent);
+  const command = createAgentRegistry().resolve(acpAgent);
+  return Array.isArray(command) ? command.map((part) => JSON.stringify(part)).join(" ") : command;
 }
 
 /** Bridges the executor's launcher seam to acpx: one child ACP session per run, the child's
@@ -303,8 +303,24 @@ async function runAcpTurn(
 ): Promise<AgentRunLaunchResult> {
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
-  await applyAdvertisedEffort(runtime, handle, request);
-  await observeHarnessIdentity(runtime, handle, request);
+  if (request.run.model === null) {
+    throw new Error(
+      `ACP selection confirmation requires the recorded model for ${request.run.harness}; `
+      + `requested effort=${request.run.effort === null ? "null" : JSON.stringify(request.run.effort)}`,
+    );
+  }
+  const confirmed = await applyAndConfirmAcpSelection(runtime, handle, {
+    model: request.run.model,
+    effort: request.run.effort,
+  });
+  request.onActivity({
+    effortApplied: confirmed.effort !== undefined,
+    harnessIdentity: {
+      observed: true,
+      model: confirmed.model,
+      ...(confirmed.effort !== undefined ? { effort: confirmed.effort } : {}),
+    },
+  });
 
   // OO owns the deadline (executor timeout drives the abort signal); acpx must not treat a
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
@@ -343,65 +359,36 @@ async function runAcpTurn(
   }
 
   const result = await turn.result;
+  const resultText = chunks.join("");
   const identity = identityOf(handle);
   if (result.status === "completed") {
-    return { status: AgentRunStatus.Completed, resultText: chunks.join(""), error: null, ...identity };
+    const terminalError = COMPLETED_TURN_ERRORS[request.run.harness]?.(resultText) ?? null;
+    if (terminalError) {
+      return { status: AgentRunStatus.Failed, resultText, error: terminalError, ...identity };
+    }
+    return { status: AgentRunStatus.Completed, resultText, error: null, ...identity };
   }
   if (result.status === "cancelled") {
-    return { status: AgentRunStatus.Cancelled, resultText: chunks.join(""), error: result.stopReason ?? "cancelled", ...identity };
+    return { status: AgentRunStatus.Cancelled, resultText, error: result.stopReason ?? "cancelled", ...identity };
   }
   return {
     status: AgentRunStatus.Failed,
-    resultText: chunks.join(""),
+    resultText,
     error: result.error.message,
     ...identity,
   };
 }
 
-/** Apply effort only through ACP's self-described config-option control. An absent option is an
- * honest no-op: the durable row retains the requested effort with effortApplied=false. */
-async function applyAdvertisedEffort(
-  runtime: AcpRuntime,
-  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
-  request: AgentRunLaunchRequest,
-): Promise<void> {
-  if (!request.run.effort || !runtime.getCapabilities || !runtime.setConfigOption) return;
-  const capabilities = await runtime.getCapabilities({ handle });
-  if (!capabilities.configOptionKeys?.includes(REASONING_EFFORT_CONFIG_OPTION)) return;
-  await runtime.setConfigOption({
-    handle,
-    key: REASONING_EFFORT_CONFIG_OPTION,
-    value: request.run.effort,
-  });
-  request.onActivity({ effortApplied: true });
-}
-
-/** Read back the session's effective identity after configuration. This is deliberately separate
- * from the persisted launch request, giving status clients live harness evidence. */
-async function observeHarnessIdentity(
-  runtime: AcpRuntime,
-  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
-  request: AgentRunLaunchRequest,
-): Promise<void> {
-  if (!runtime.getStatus) return;
-  let status: Awaited<ReturnType<NonNullable<AcpRuntime["getStatus"]>>>;
-  try {
-    status = await runtime.getStatus({ handle });
-  } catch {
-    // Observation is audit evidence, not a new launch gate. The live proof requires the evidence;
-    // ordinary delegated turns continue if an adapter cannot expose status after configuration.
-    return;
-  }
-  const harnessModel = status.models?.currentModelId;
-  const configOptions = status.details?.configOptions;
-  const effortOption = Array.isArray(configOptions)
-    ? configOptions.find((option) => option && typeof option === "object" && "id" in option
-      && option.id === REASONING_EFFORT_CONFIG_OPTION)
-    : undefined;
-  const value = effortOption && "currentValue" in effortOption ? effortOption.currentValue : null;
-  const harnessEffort = typeof value === "string" && isAgentRunEffort(value) ? value : undefined;
-  request.onActivity({ harnessIdentity: harnessIdentityObservation({ model: harnessModel, effort: harnessEffort }) });
-}
+/** Harness-owned interpretations of a "completed" turn's result text. The generic runner only
+ * consults this table; each entry belongs to the harness whose adapter misreports the failure.
+ * Cursor's adapter completes the turn normally after retry exhaustion, leaving the error only as
+ * the trailing line of the result text. */
+const COMPLETED_TURN_ERRORS: Partial<Record<AgentRunHarness, (resultText: string) => string | null>> = {
+  [AgentRunHarness.Cursor]: (resultText) => {
+    const match = /(?:^|\r?\n)(Error: RetriableError: [^\r\n]*exceeded max retries)\s*$/.exec(resultText);
+    return match?.[1] ?? null;
+  },
+};
 
 function ensureAcpSession(
   runtime: AcpRuntime,
@@ -431,9 +418,17 @@ function ensureAcpSession(
   });
 }
 
-/** acpx 0.11's built-in Codex registry is pinned to codex-acp 0.0.44, which cannot
- * initialize current Codex. Resolve Owner Operator's tested direct dependency instead so the
- * package lock, not acpx's stale fallback registry, owns adapter compatibility. */
+/** Resolve Owner Operator's exact installed Claude adapter instead of ACPX's npx range. Npx
+ * caches a semver request as an install environment, which left the daemon running adapter 0.37
+ * after newer adapters shipped. The package lock now owns adapter compatibility. */
+export function claudeAcpAgentCommand(): string {
+  const packageRoot = dirname(fileURLToPath(import.meta.resolve("@agentclientprotocol/claude-agent-acp/package.json")));
+  const entrypoint = join(packageRoot, "dist", "index.js");
+  return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");
+}
+
+/** Resolve Owner Operator's tested direct Codex dependency so the package lock, not an npx range,
+ * owns adapter compatibility. */
 export function codexAcpAgentCommand(): string {
   const entrypoint = fileURLToPath(import.meta.resolve("@agentclientprotocol/codex-acp"));
   return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");

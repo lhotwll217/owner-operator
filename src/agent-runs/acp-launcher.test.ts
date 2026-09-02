@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { accessSync, constants } from "node:fs";
 import type { AcpRuntime } from "acpx/runtime";
 import {
   AgentRunHarness,
@@ -6,11 +7,35 @@ import {
   type AgentRun,
   type AgentRunActivityUpdate,
 } from "@owner-operator/core";
-import { codexAcpAgentCommand, createAcpLauncher, cursorAcpAgentCommand } from "./acp-launcher";
+import {
+  claudeAcpAgentCommand,
+  codexAcpAgentCommand,
+  createAcpLauncher,
+  cursorAcpAgentCommand,
+} from "./acp-launcher";
+
+// The command is `"<node>" "<entrypoint>"`; the entrypoint must be a real installed file, not
+// just a plausible path — Claude's is joined by convention rather than export resolution.
+const installedEntrypoint = (command: string): string => {
+  const match = /^"[^"]+" "([^"]+)"$/.exec(command);
+  assert.ok(match, `adapter command carries a quoted node + entrypoint pair: ${command}`);
+  accessSync(match[1], constants.R_OK);
+  return match[1];
+};
+
+const claudeCommand = claudeAcpAgentCommand();
+assert.match(claudeCommand, /claude-agent-acp\/dist\/index\.js"?$/,
+  "Claude uses Owner Operator's exact installed adapter");
+assert.doesNotMatch(claudeCommand, /npx|\^0\.60\.0/,
+  "Claude does not reuse ACPX's cached npx range");
+assert.match(installedEntrypoint(claudeCommand), /node_modules\/@agentclientprotocol\/claude-agent-acp\//,
+  "the Claude entrypoint is the package-lock-installed adapter");
 
 const codexCommand = codexAcpAgentCommand();
 assert.match(codexCommand, /codex-acp\/dist\/index\.js"?$/, "Codex uses Owner Operator's pinned adapter");
-assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's stale registry command");
+assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's registry command");
+assert.match(installedEntrypoint(codexCommand), /node_modules\/@agentclientprotocol\/codex-acp\//,
+  "the Codex entrypoint is the package-lock-installed adapter");
 
 // Cursor speaks ACP first-party: the resolved local CLI in server mode, no adapter package.
 try {
@@ -53,10 +78,6 @@ const turnTexts: string[] = [];
 const runtimeCalls: string[] = [];
 const runtime = {
   ensureSession: async () => { runtimeCalls.push("ensure"); return handle; },
-  getCapabilities: async () => {
-    runtimeCalls.push("capabilities");
-    return { controls: ["session/set_config_option"], configOptionKeys: ["model", "reasoning_effort"] };
-  },
   setConfigOption: async ({ key, value }: { key: string; value: string }) => {
     runtimeCalls.push("set-effort");
     appliedOptions.push({ key, value });
@@ -65,7 +86,15 @@ const runtime = {
     runtimeCalls.push("status");
     return {
       models: { currentModelId: "harness-resolved-model" },
-      details: { configOptions: [{ id: "reasoning_effort", currentValue: "ultra" }] },
+      details: {
+        configOptions: [{
+          id: "reasoning_effort",
+          name: "Reasoning effort",
+          type: "select",
+          currentValue: "ultra",
+          options: [{ value: "ultra", name: "Ultra" }],
+        }],
+      },
     };
   },
   startTurn: ({ text }: { text: string }) => {
@@ -86,7 +115,7 @@ const run: AgentRun = {
   task: "produce a report",
   cwd: process.cwd(),
   parentThreadId: "parent",
-  model: null,
+  model: "harness-resolved-model",
   effort: "ultra",
   effortApplied: false,
   harnessIdentity: { observed: false },
@@ -121,54 +150,113 @@ assert.ok(Buffer.byteLength(result.resultText) <= 64 * 1024, "one oversized even
 assert.ok(result.resultText.endsWith("newest-tail"), "the rolling buffer preserves the newest bytes");
 assert.deepEqual(activity[0], { childSessionId: "child-session", acpxRecordId: "acpx-record" });
 assert.deepEqual(appliedOptions, [{ key: "reasoning_effort", value: "ultra" }], "the launcher applies the exact selected identity");
-assert.deepEqual(activity[1], { effortApplied: true }, "successful application becomes durable audit activity");
-assert.deepEqual(activity[2], {
+assert.deepEqual(activity[1], {
+  effortApplied: true,
   harnessIdentity: { observed: true, model: "harness-resolved-model", effort: "ultra" },
-}, "effective identity is independently read back from harness status");
-
-for (const [status, expected] of [
-  [{}, { observed: false }],
-  [{ models: { currentModelId: "  " }, details: { configOptions: [{ id: "reasoning_effort", currentValue: "turbo" }] } }, { observed: false }],
-  [{ models: { currentModelId: "model-only" } }, { observed: true, model: "model-only" }],
-  [{ details: { configOptions: [{ id: "reasoning_effort", currentValue: "max" }] } }, { observed: true, effort: "max" }],
-] as const) {
-  const observed: AgentRunActivityUpdate[] = [];
-  const statusRuntime = { ...runtime, getStatus: async () => status } as unknown as AcpRuntime;
-  await createAcpLauncher({ runtimeFactory: () => statusRuntime })({
-    run: { ...run, effort: null }, turnIntent: { kind: "fresh" }, signal: new AbortController().signal,
-    onActivity: (update) => observed.push(update),
-  });
-  assert.deepEqual(observed[1], { harnessIdentity: expected }, "status observation preserves only actual supported facts");
-}
-assert.deepEqual(runtimeCalls.slice(0, 5), ["ensure", "capabilities", "set-effort", "status", "turn"], "effort and identity observation happen before the turn");
+}, "confirmed identity and effort application become durable together before the turn");
+assert.deepEqual(
+  runtimeCalls.slice(0, 5),
+  ["ensure", "status", "set-effort", "status", "turn"],
+  "the delegated task starts only after exact state is read back",
+);
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
 
-const unadvertisedOptions: Array<{ key: string; value: string }> = [];
-const unadvertisedRuntime = {
+const cursorModel = "composer-2.5[fast=true]";
+const cursorTerminalError = "Error: RetriableError: [internal] Failed to run step, exceeded max retries";
+const cursorStatus = async () => ({
+  models: { currentModelId: cursorModel, availableModelIds: [cursorModel] },
+  details: { configOptions: [{
+    id: "model", name: "Model", category: "model", type: "select", currentValue: cursorModel,
+    options: [{ value: cursorModel, name: "composer-2.5" }],
+  }] },
+});
+const cursorErrorRuntime = {
   ensureSession: async () => handle,
-  getCapabilities: async () => ({ controls: ["session/set_config_option"], configOptionKeys: ["model"] }),
-  setConfigOption: async (option: { key: string; value: string }) => { unadvertisedOptions.push(option); },
-  startTurn: runtime.startTurn,
+  getStatus: cursorStatus,
+  startTurn: () => ({
+    events: (async function* () {
+      yield { type: "text_delta", stream: "output", text: `\n\n${cursorTerminalError}` };
+    })(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
 } as unknown as AcpRuntime;
-await createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
-  run,
+const cursorErrorResult = await createAcpLauncher({ runtimeFactory: () => cursorErrorRuntime })({
+  run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
   turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
+assert.equal(cursorErrorResult.status, AgentRunStatus.Failed,
+  "Cursor retry exhaustion cannot be reported as a successful completed task");
+assert.equal(cursorErrorResult.error, cursorTerminalError);
+assert.equal(cursorErrorResult.resultText, `\n\n${cursorTerminalError}`,
+  "the exact harness failure text remains available as bounded result evidence");
+
+const cursorRecoveredRuntime = {
+  ...cursorErrorRuntime,
+  startTurn: () => ({
+    events: (async function* () {
+      yield { type: "text_delta", stream: "output", text: `${cursorTerminalError}\nRecovered and completed successfully.` };
+    })(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+} as unknown as AcpRuntime;
+const cursorRecoveredResult = await createAcpLauncher({ runtimeFactory: () => cursorRecoveredRuntime })({
+  run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
+  turnIntent: { kind: "fresh" },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.equal(cursorRecoveredResult.status, AgentRunStatus.Completed,
+  "non-terminal retry text does not downgrade an otherwise valid completed turn");
+
+const unadvertisedOptions: Array<{ key: string; value: string }> = [];
+let unadvertisedTurns = 0;
+const unadvertisedRuntime = {
+  ensureSession: async () => handle,
+  getStatus: async () => ({
+    models: { currentModelId: run.model },
+    details: { configOptions: [{
+      id: "model", name: "Model", type: "select", currentValue: run.model,
+      options: [{ value: run.model, name: "Model" }],
+    }] },
+  }),
+  setConfigOption: async (option: { key: string; value: string }) => { unadvertisedOptions.push(option); },
+  startTurn: () => {
+    unadvertisedTurns += 1;
+    return {
+      events: (async function* () {})(),
+      result: Promise.resolve({ status: "completed" }),
+    };
+  },
+} as unknown as AcpRuntime;
+await assert.rejects(
+  () => createAcpLauncher({ runtimeFactory: () => unadvertisedRuntime })({
+    run,
+    turnIntent: { kind: "fresh" },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  }),
+  /ACP_SELECTION_SELECTOR_MISSING.*harness-resolved-model.*ultra/,
+);
 assert.deepEqual(unadvertisedOptions, [], "effort is not applied when the session does not advertise reasoning_effort");
+assert.equal(unadvertisedTurns, 0, "a forced selection mismatch never starts the delegated task");
 
 const backendOnlyRuntime = {
   ensureSession: async () => ({ backendSessionId: "backend-session", acpxRecordId: "backend-record" }),
+  getStatus: async () => ({
+    models: { currentModelId: "harness-resolved-model" },
+    details: { configOptions: [] },
+  }),
   startTurn: () => ({
     events: (async function* () {})(),
     result: Promise.resolve({ status: "completed" }),
   }),
 } as unknown as AcpRuntime;
 const backendIdentity = await createAcpLauncher({ runtimeFactory: () => backendOnlyRuntime })({
-  run,
+  run: { ...run, effort: null },
   turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
@@ -205,6 +293,7 @@ const resumeRun = {
   id: "resumed-run",
   harness: AgentRunHarness.Codex,
   task: "answer a follow-up",
+  effort: null,
   childSessionId: "resumed-child",
   acpxRecordId: "completed-acpx-record",
   resumeOfRunId: "completed-run",
@@ -229,6 +318,10 @@ const resumeRuntime = {
       acpxRecordId: "completed-acpx-record",
     };
   },
+  getStatus: async () => ({
+    models: { currentModelId: resumeRun.model },
+    details: { configOptions: [] },
+  }),
   startTurn: () => ({
     events: (async function* () {})(),
     result: Promise.resolve({ status: "completed" }),

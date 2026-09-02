@@ -159,7 +159,7 @@ export interface AgentRun {
   model: string | null;
   /** Resolved reasoning-effort intent; null means no intent was resolved, never a filler value. */
   effort: AgentRunEffort | null;
-  /** True only after the launcher successfully applies effort through an advertised option. */
+  /** True only after the launcher applies effort through an advertised option and reads it back. */
   effortApplied: boolean;
   /** Canonical identity independently read back from the live harness after configuration. */
   harnessIdentity: HarnessIdentityObservation;
@@ -311,7 +311,7 @@ export interface ChildIdentity {
 /** An explicit activity update from the child's runtime: a progress line and/or its identity. */
 export interface AgentRunActivityUpdate extends ChildIdentity {
   activity?: string;
-  /** Runtime acknowledgement that the resolved effort was applied. */
+  /** Confirmed readback that the resolved effort was applied. */
   effortApplied?: boolean;
   harnessIdentity?: HarnessIdentityObservation;
 }

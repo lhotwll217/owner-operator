@@ -46,7 +46,43 @@ try {
 
   assert.deepEqual(exit, { code: 0, signal: null }, stderr);
   assert.equal(stdout, "ACP pipe stays transparent\n");
-  process.stdout.write("ok — leased ACP wrapper preserves stdio and exposes verifiable ownership\n");
+
+  const codexEnvCommand = [
+    JSON.stringify(process.execPath),
+    "-e",
+    JSON.stringify("process.stdout.write(process.env.CODEX_PATH ?? '<unset>')"),
+  ].join(" ");
+  const codexChild = spawn(process.execPath, [
+    wrapperPath,
+    "--oo-agent-run-lease",
+    leaseId,
+    "--oo-agent-kind",
+    "codex",
+    "--oo-agent-command",
+    Buffer.from(codexEnvCommand).toString("base64url"),
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      HOME: isolatedHome,
+      OO_HOME: isolatedHome,
+      CODEX_PATH: "/untrusted/inherited/codex",
+    },
+  });
+  let codexStdout = "";
+  let codexStderr = "";
+  codexChild.stdout.on("data", (chunk) => { codexStdout += String(chunk); });
+  codexChild.stderr.on("data", (chunk) => { codexStderr += String(chunk); });
+  const codexExit = await new Promise<number | null>((resolve) => {
+    codexChild.once("exit", (code) => resolve(code));
+  });
+  assert.equal(codexExit, 0, codexStderr);
+  assert.equal(
+    codexStdout,
+    "<unset>",
+    "the Codex wrapper clears inherited CODEX_PATH so reported adapter-dependency provenance is exact",
+  );
+  process.stdout.write("ok — leased ACP wrapper preserves stdio, ownership, and pinned Codex backend selection\n");
 } finally {
   rmSync(isolatedHome, { recursive: true, force: true });
 }

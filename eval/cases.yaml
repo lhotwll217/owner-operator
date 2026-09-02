@@ -320,33 +320,53 @@
     question: >-
       Please delegate a quick inventory of this repository with Codex. Choose the model and
       reasoning effort for me.
-    harnessRoster: |-
-      # Harness roster
+    userHarnessPreferences: |-
+      # User harness preferences
 
       ### Quick mechanical work
 
       _No preference configured._
     harnessDetails:
-      - harness: codex
-        observedAt: "2026-08-20T12:00:00.000Z"
-        source: controlled-current-observation
-        account: { plan: team }
-        models:
-          - id: controlled-default
-            displayName: Controlled Default
-            reasoningLevels: [high]
-            unsupportedReasoningLevels: []
-            defaultReasoningLevel: high
-            isDefault: true
-        allowanceWindows:
-          - id: weekly
-            label: Weekly
-            usedPercent: 12
-            resetsAt: 1787335200
-            windowMinutes: 10080
-        baselineCandidate: null
-        notes: []
-        errors: []
+      observedAt: "2026-08-20T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex] }
+        harnesses:
+          - harness: codex
+            acpxAgent: codex
+            observedAt: "2026-08-20T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: controlled-default, availableModelIds: [controlled-default] }
+              configOptions:
+                - type: select
+                  id: model
+                  name: Model
+                  category: model
+                  currentValue: controlled-default
+                  options: [{ value: controlled-default, name: Controlled Default }]
+                - type: select
+                  id: reasoning_effort
+                  name: Reasoning effort
+                  category: thought_level
+                  currentValue: high
+                  options: [{ value: high, name: High }]
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account:
+        - harness: codex
+          observedAt: "2026-08-20T12:00:00.000Z"
+          source: codex-app-server
+          account: { plan: team }
+          authenticated: null
+          allowanceWindows:
+            - { id: weekly, label: Weekly, usedPercent: 12, resetsAt: 1787335200, windowMinutes: 10080 }
+          notes: []
+          errors: []
+      unknowns: []
     baselineCandidate:
       harness: codex
       model: controlled-default
@@ -369,49 +389,67 @@
     question: >-
       For a careful implementation review, what is our current harness usage, and does it change
       what you would recommend? Please explain what is known and unknown.
-    harnessRoster: |-
-      # Harness roster
+    userHarnessPreferences: |-
+      # User harness preferences
 
       ### Implementation review
 
       Prefer codex / codex-review / high. When Codex weekly usage is above 60%, prefer
       claude-code / claude-review / high instead.
     harnessDetails:
-      - harness: codex
-        observedAt: "2026-08-20T12:00:00.000Z"
-        source: controlled-current-observation
-        account: { plan: team }
-        models:
-          - id: codex-review
-            displayName: Codex Review
-            reasoningLevels: [high]
-            unsupportedReasoningLevels: []
-            defaultReasoningLevel: high
-            isDefault: true
-        allowanceWindows:
-          - id: weekly
-            label: Weekly
-            usedPercent: 63
-            resetsAt: 1787335200
-            windowMinutes: 10080
-        baselineCandidate: null
-        notes: []
-        errors: []
-      - harness: claude-code
-        observedAt: "2026-08-20T12:00:00.000Z"
-        source: controlled-current-observation
-        account: null
-        models:
-          - id: claude-review
-            displayName: Claude Review
-            reasoningLevels: [high]
-            unsupportedReasoningLevels: []
-            defaultReasoningLevel: high
-            isDefault: true
-        allowanceWindows: null
-        baselineCandidate: null
-        notes: ["Allowance usage is not exposed by this harness."]
-        errors: []
+      observedAt: "2026-08-20T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex, claude] }
+        harnesses:
+          - harness: codex
+            acpxAgent: codex
+            observedAt: "2026-08-20T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: codex-review, availableModelIds: [codex-review] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: codex-review, options: [{ value: codex-review, name: Codex Review }] }
+                - { type: select, id: reasoning_effort, name: Reasoning effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }] }
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+          - harness: claude-code
+            acpxAgent: claude
+            observedAt: "2026-08-20T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: claude-review, availableModelIds: [claude-review] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: claude-review, options: [{ value: claude-review, name: Claude Review }] }
+                - { type: select, id: effort, name: Effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }] }
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account:
+        - harness: codex
+          observedAt: "2026-08-20T12:00:00.000Z"
+          source: codex-app-server
+          account: { plan: team }
+          authenticated: null
+          allowanceWindows:
+            - { id: weekly, label: Weekly, usedPercent: 63, resetsAt: 1787335200, windowMinutes: 10080 }
+          notes: []
+          errors: []
+        - harness: claude-code
+          observedAt: "2026-08-20T12:00:00.000Z"
+          source: null
+          account: null
+          authenticated: null
+          allowanceWindows: null
+          notes: ["Allowance usage is not exposed by this harness."]
+          errors: []
+      unknowns:
+        - { harness: claude-code, fact: account.allowanceWindows, reason: no provider surface }
     behaviorExpected:
       usedPercent: 63
       unknownHarness: claude-code
@@ -432,33 +470,43 @@
     question: >-
       Please delegate a repository inventory with Codex, using my approved default for its model
       and reasoning effort.
-    harnessRoster: |-
-      # Harness roster
+    userHarnessPreferences: |-
+      # User harness preferences
 
       ### Quick mechanical work
 
       _No preference configured._
     harnessDetails:
-      - harness: codex
-        observedAt: "2026-08-20T12:00:00.000Z"
-        source: controlled-current-observation
-        account: { plan: team }
-        models:
-          - id: controlled-approved-model
-            displayName: Controlled Approved Model
-            reasoningLevels: [high]
-            unsupportedReasoningLevels: []
-            defaultReasoningLevel: high
-            isDefault: true
-        allowanceWindows:
-          - id: weekly
-            label: Weekly
-            usedPercent: 18
-            resetsAt: 1787335200
-            windowMinutes: 10080
-        baselineCandidate: null
-        notes: []
-        errors: []
+      observedAt: "2026-08-20T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex] }
+        harnesses:
+          - harness: codex
+            acpxAgent: codex
+            observedAt: "2026-08-20T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: controlled-approved-model, availableModelIds: [controlled-approved-model] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: controlled-approved-model, options: [{ value: controlled-approved-model, name: Controlled Approved Model }] }
+                - { type: select, id: reasoning_effort, name: Reasoning effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }] }
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account:
+        - harness: codex
+          observedAt: "2026-08-20T12:00:00.000Z"
+          source: codex-app-server
+          account: { plan: team }
+          authenticated: null
+          allowanceWindows:
+            - { id: weekly, label: Weekly, usedPercent: 18, resetsAt: 1787335200, windowMinutes: 10080 }
+          notes: []
+          errors: []
+      unknowns: []
     approvedBaseline:
       harness: codex
       model: controlled-approved-model
@@ -469,3 +517,217 @@
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: approved-default-reuse
+
+- description: delegation-explicit-pass-through
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-explicit-pass-through
+    behaviorProfile: delegation-selection
+    behaviorClaim: explicit-pass-through
+    question: >-
+      Please delegate a review of the release notes to Codex using model owner-review and no
+      separate reasoning effort.
+    userHarnessPreferences: |-
+      # User harness preferences
+
+      ### Review
+
+      Prefer claude-code / controlled-opus / high.
+    harnessDetails:
+      observedAt: "2026-08-25T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [] }
+        harnesses: []
+      account: []
+      unknowns: []
+    behaviorExpected:
+      identity: { harness: codex, model: owner-review, effort: null }
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: explicit-pass-through
+
+- description: delegation-implicit-current-choice
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-implicit-current-choice
+    behaviorProfile: delegation-selection
+    behaviorClaim: implicit-current-choice
+    question: >-
+      Please delegate the implementation of the configuration cleanup. Choose the execution
+      identity for me.
+    userHarnessPreferences: |-
+      # User harness preferences
+
+      ### Implementation
+
+      Use codex / controlled-current / high.
+    harnessDetails:
+      observedAt: "2026-08-25T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [codex] }
+        harnesses:
+          - harness: codex
+            acpxAgent: codex
+            observedAt: "2026-08-25T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: controlled-current, availableModelIds: [controlled-current, controlled-next] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: controlled-current, options: [{ value: controlled-current, name: Current }, { value: controlled-next, name: Next }] }
+                - { type: select, id: reasoning_effort, name: Reasoning effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }] }
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account: []
+      unknowns: []
+    behaviorExpected:
+      identity: { harness: codex, model: controlled-current, effort: high }
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: implicit-current-choice
+
+- description: delegation-implicit-non-current-inspection
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-implicit-non-current-inspection
+    behaviorProfile: delegation-selection
+    behaviorClaim: implicit-non-current-inspection
+    question: >-
+      Please delegate a careful architecture review. Choose the execution identity from my saved
+      preferences and the current harness choices.
+    userHarnessPreferences: |-
+      # User harness preferences
+
+      ### Review
+
+      Use claude-code / opus[1m] / xhigh.
+    harnessDetails:
+      observedAt: "2026-08-25T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
+        harnesses:
+          - harness: claude-code
+            acpxAgent: claude
+            observedAt: "2026-08-25T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: controlled-fable, availableModelIds: [controlled-fable, "opus[1m]"] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: controlled-fable, options: [{ value: controlled-fable, name: Fable }, { value: "opus[1m]", name: Opus }] }
+                - { type: select, id: effort, name: Effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }, { value: xhigh, name: Extra high }] }
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account: []
+      unknowns: []
+    harnessInspections:
+      - request: { harness: claude-code, model: "opus[1m]", effort: xhigh }
+        snapshot:
+          observedAt: "2026-08-25T12:00:01.000Z"
+          ephemeral: true
+          capabilities:
+            registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
+            harnesses:
+              - harness: claude-code
+                acpxAgent: claude
+                observedAt: "2026-08-25T12:00:01.000Z"
+                runtime: null
+                requestedInspection: { model: "opus[1m]", effort: xhigh }
+                session:
+                  models: { currentModelId: "opus[1m]", availableModelIds: [controlled-fable, "opus[1m]"] }
+                  configOptions:
+                    - { type: select, id: model, name: Model, category: model, currentValue: "opus[1m]", options: [{ value: controlled-fable, name: Fable }, { value: "opus[1m]", name: Opus }] }
+                    - { type: select, id: effort, name: Effort, category: thought_level, currentValue: xhigh, options: [{ value: high, name: High }, { value: xhigh, name: Extra high }] }
+                  usage: null
+                confirmation: { model: "opus[1m]", effort: xhigh }
+                error: null
+                baselineCandidate: null
+          account: []
+          unknowns: []
+    behaviorExpected:
+      identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: implicit-non-current-inspection
+
+- description: delegation-inspection-mismatch
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: delegation-inspection-mismatch
+    behaviorProfile: delegation-selection
+    behaviorClaim: inspection-mismatch
+    question: >-
+      Please delegate the critical architecture decision. Choose the execution identity from my
+      saved preferences while preserving the requested quality.
+    userHarnessPreferences: |-
+      # User harness preferences
+
+      ### Review
+
+      Require claude-code / opus[1m] / xhigh. Lower-quality alternatives are unacceptable.
+    harnessDetails:
+      observedAt: "2026-08-25T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
+        harnesses:
+          - harness: claude-code
+            acpxAgent: claude
+            observedAt: "2026-08-25T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: controlled-fable, availableModelIds: [controlled-fable, "opus[1m]"] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: controlled-fable, options: [{ value: controlled-fable, name: Fable }, { value: "opus[1m]", name: Opus }] }
+                - { type: select, id: effort, name: Effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }, { value: xhigh, name: Extra high }] }
+              usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account: []
+      unknowns: []
+    harnessInspections:
+      - request: { harness: claude-code, model: "opus[1m]", effort: xhigh }
+        snapshot:
+          observedAt: "2026-08-25T12:00:01.000Z"
+          ephemeral: true
+          capabilities:
+            registry: { acpxVersion: "0.13.1", registeredAgentNames: [claude] }
+            harnesses:
+              - harness: claude-code
+                acpxAgent: claude
+                observedAt: "2026-08-25T12:00:01.000Z"
+                runtime: null
+                requestedInspection: { model: "opus[1m]", effort: xhigh }
+                session:
+                  models: { currentModelId: controlled-sonnet, availableModelIds: [controlled-sonnet, "opus[1m]"] }
+                  configOptions:
+                    - { type: select, id: model, name: Model, category: model, currentValue: controlled-sonnet, options: [{ value: controlled-sonnet, name: Sonnet }, { value: "opus[1m]", name: Opus }] }
+                    - { type: select, id: effort, name: Effort, category: thought_level, currentValue: high, options: [{ value: high, name: High }, { value: xhigh, name: Extra high }] }
+                  usage: null
+                confirmation: null
+                error: "ACP model mismatch: requested opus[1m], observed controlled-sonnet"
+                baselineCandidate: null
+          account: []
+          unknowns: []
+    behaviorExpected:
+      identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: inspection-mismatch

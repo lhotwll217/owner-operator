@@ -12,42 +12,35 @@ model, and effort value—including `effort: null`—while selecting only omitte
 
 ## Select
 
-1. Read `$OO_HOME/workspace/harness-roster.md` through `bash`; Owner Operator supplies `OO_HOME`
-   from its authoritative configured home even when it is not the default. It is owner-controlled
-   guidance; edit it only as the owner explicitly directs. Treat its baseline role headings and
-   any owner-added role headings uniformly. Classify
-   the requested task by meaning, not by a fixed heading allowlist. A matching custom role can
-   therefore extend the taxonomy without product changes.
-2. Call `get_harness_details` for every harness that remains a plausible choice. Do this before
-   launch even when the roster appears decisive. Use advertised model IDs only with the harness
-   that advertised them, and use its supported effort values. Advertisement is evidence, not proof
-   of account entitlement.
-3. Select the exact harness, model, and effort that best follows the owner request and matching
-   roster role while preserving the task's required quality. Consider current allowance facts when
-   they exist. `null` in harness details means unknown, not empty, unavailable, unused, or zero;
-   unknown account, catalog, entitlement, or allowance facts do not block an otherwise defensible
-   selection.
-4. If no task preference applies, use that harness's owner-approved delegated baseline only to
-   fill omitted execution-identity fields. Call
-   `manage_delegated_baseline` with `action: "propose"` to inspect its `approved` value; the
-   unpinned ACP candidate returned alongside it is only a proposal and never replaces an approved
-   baseline. Merge the approved model and nullable effort into omitted fields without replacing
-   any owner-supplied value.
-5. Call `delegate_agent` with the exact selected harness, model, and effort. Keep the owner's
-   task and working directory intact. The existing delegated-run lifecycle is the execution record;
-   do not create another record and do not poll after launch.
+1. **Observe.** Call `get_harness_details` once with every plausible harness.
+2. **Apply owner preferences.** Read `snapshot.preferences.content` as owner-controlled routing
+   guidance. Match the task by meaning against standard and owner-added roles, or establish that no
+   task preference applies.
+3. **Fill omissions.** When no task preference applies, use that harness's owner-approved delegated
+   baseline only for missing execution-identity fields. Call `manage_delegated_baseline` with
+   `action: "propose"` to inspect its `approved` value; its unpinned candidate is only a proposal.
+4. **Verify the candidate.** Use exact model IDs and reasoning values advertised by that harness.
+   A current model whose reasoning choices are fully advertised needs no second observation;
+   `effort: null` needs no separate selector. Otherwise inspect the exact candidate with
+   `get_harness_details`. An inspection succeeds only when its confirmation exactly matches the
+   harness, model, and nullable effort. Reject failed or mismatched inspections; choose an
+   equal-or-higher-quality candidate with its required evidence, or ask the owner.
+5. **Delegate.** Call `delegate_agent` with the selected harness, model, and effort. Keep the
+   owner's task and working directory intact. The delegated-run lifecycle is the execution record;
+   create no duplicate record and do not poll after launch.
 
 ## Constrained or rejected selections
 
 Allowance pressure is pre-launch evidence, not merely a failure-recovery signal. When a current
-allowance window is materially spent, consider another acceptable roster choice before launching.
+allowance window is materially spent, consider another acceptable preference before launching.
 Do not treat an unknown window as unused or constrained.
 
 If `delegate_agent` rejects a choice for capacity, access, entitlement, an invalid harness/model
-pairing, or availability—or a delivered run-completion reports that rejection—consult the roster
-and refresh `get_harness_details` after the rejection for both the rejected harness and every
-replacement harness under consideration before retrying. A stale advertisement can explain a
-rejection; never describe advertisement as demonstrated access.
+pairing, or availability—or a delivered run-completion reports that rejection—reapply the matching
+preference and refresh `get_harness_details` after the rejection for both the rejected harness and every
+replacement harness under consideration before retrying. Inspect a replacement when step 3
+requires it. A stale advertisement can explain a rejection; never describe advertisement as
+demonstrated access.
 
 Retry automatically only with an exact harness/model/effort that preserves or improves the quality
 required for the task. Cross-harness fallback is allowed on that basis. Never reduce the required
@@ -56,8 +49,8 @@ evidence does not support an acceptable replacement, ask the owner to choose and
 
 For an automatic retry, state all three facts in the transcript: the failed exact identity, the
 replacement exact identity, and the material capacity/access/availability reason. The failed call
-or existing delegated-run row remains the execution evidence. Do not edit the harness roster,
-approved baseline, or any other durable preference, and do not create a failure ledger.
+or existing delegated-run row remains the execution evidence. Do not edit the user harness
+preferences, approved baseline, or any other durable preference, and do not create a failure ledger.
 Before finishing that turn, verify the report literally identifies both triples as
 `harness / model / effort`; a generic provider name or “the preferred model” is not the failed
 exact identity.
@@ -81,5 +74,5 @@ baseline, **MUST NOT delegate yet**:
 
 After launch, state the actual `harness / model / effort` returned by the launch lifecycle concisely;
 do not report an intended identity as actual when the returned row differs. Say `effort null` when
-null was selected. Explain a material departure from a matching roster preference, but do not claim
-that the roster changed. Never silently lower required quality merely to make a launch succeed.
+null was selected. Explain a material departure from a matching preference, but do not claim the
+preferences changed. Never silently lower required quality merely to make a launch succeed.

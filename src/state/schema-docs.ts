@@ -106,7 +106,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "parent_thread_id", description: "Delegating session's thread id; NULL if unattributed. Children nest under this." },
       { name: "model", description: "Resolved model intent recorded before launch; NULL only when unknown." },
       { name: "effort", description: "Resolved reasoning effort intent; NULL for legacy rows or runs with neither a caller pin nor a harness default. Values are defined by AgentRunEffort in packages/core/src/agent-runs.ts." },
-      { name: "effort_applied", description: "1 only after the launcher applied effort through an adapter-advertised config option; 0 distinguishes unapplied intent." },
+      { name: "effort_applied", description: "1 only after the launcher applied effort through an adapter-advertised config option and confirmed exact readback; 0 distinguishes unconfirmed intent." },
       { name: "harness_model", description: "Model independently read back from the live harness after configuration; NULL when not observed." },
       { name: "harness_effort", description: "Storage encoding for supported reasoning effort independently read from live status; NULL when effort was absent or unsupported." },
       { name: "harness_identity_observed", description: "Storage discriminator: 1 only when harness_model or harness_effort contains a supported observed fact. Decoded publicly as AgentRun.harnessIdentity." },

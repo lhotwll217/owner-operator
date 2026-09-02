@@ -303,6 +303,7 @@ const delegationContext = (
   executions: Array<Execution & { result?: unknown }>,
   before: Record<string, unknown>,
   after: Record<string, unknown>,
+  behaviorExpected?: Record<string, unknown>,
 ) => ({
   provider: { label: "owner-operator-behavioral" },
   test: { metadata: { profile: "delegation-selection", behaviorClaim: claim } },
@@ -311,7 +312,7 @@ const delegationContext = (
       trialVersion: 1,
       behaviorProfile: "delegation-selection",
       behaviorClaim: claim,
-      behaviorExpected: claim === "natural-first-delegation"
+      behaviorExpected: behaviorExpected ?? (claim === "natural-first-delegation"
         ? { candidate: { harness: "codex", model: "controlled-default", effort: "high" } }
         : claim === "usage-explanation"
           ? {
@@ -322,7 +323,7 @@ const delegationContext = (
               recommendedHarness: "claude-code",
               usageAffectedRecommendation: true,
             }
-          : { identity: { harness: "codex", model: "controlled-approved-model", effort: "high" } },
+          : { identity: { harness: "codex", model: "controlled-approved-model", effort: "high" } }),
       modelLabel: "test-provider/test-model",
       sessionId: "parent-135",
       numTurns: 1,
@@ -343,20 +344,35 @@ const delegationContext = (
     },
   },
 });
+const preferenceContent = "# User harness preferences\n";
 const emptyDelegationState = {
-  harnessRoster: "# Harness roster\n\nNo preferences configured.\n",
+  userHarnessPreferences: preferenceContent,
   delegatedBaselines: {},
   agentRuns: [],
 };
 const successful = (name: string, input: Record<string, unknown>, result: unknown = {}) => ({
   name, input, result, isError: false, resultChars: 100,
 });
+const detailsResult = (
+  content = preferenceContent,
+  rows: Array<Record<string, unknown>> = [],
+) => ({
+  details: {
+    preferences: {
+      path: "/fixture/user-harness-preferences.md",
+      content,
+      error: null,
+    },
+    capabilities: { registry: { acpxVersion: "0.13.1", registeredAgentNames: [] }, harnesses: rows },
+    account: [],
+    unknowns: [],
+  },
+});
 
 const naturalFirst = toolUseAssertion(
   "Codex proposed controlled-default / high. Please approve that exact choice before I save or launch it.",
   delegationContext("natural-first-delegation", [
-    successful("bash", { command: "cat \"$OO_HOME/workspace/harness-roster.md\"" }),
-    successful("get_harness_details", { harnesses: ["codex"] }),
+    successful("get_harness_details", { harnesses: ["codex"] }, detailsResult()),
     successful("manage_delegated_baseline", { action: "propose", harness: "codex" }, {
       approved: null, candidate: { model: "controlled-default", effort: "high" },
     }),
@@ -367,8 +383,7 @@ assert.equal(naturalFirst.pass, true, naturalFirst.reason);
 const usageExplanation = toolUseAssertion(
   "Codex has used 63% of the weekly window, so 37% remains; it resets at 18:00 UTC. claude-code usage is unknown. This changes my recommendation to claude-code.",
   delegationContext("usage-explanation", [
-    successful("bash", { command: "cat \"$OO_HOME/workspace/harness-roster.md\"" }),
-    successful("get_harness_details", { harnesses: ["codex", "claude-code"] }),
+    successful("get_harness_details", { harnesses: ["codex", "claude-code"] }, detailsResult()),
   ], emptyDelegationState, emptyDelegationState),
 );
 assert.equal(usageExplanation.pass, true, usageExplanation.reason);
@@ -379,7 +394,7 @@ const approvedBaseline = {
 const approvedReuse = toolUseAssertion(
   "Delegated the inventory with codex / controlled-approved-model / high.",
   delegationContext("approved-default-reuse", [
-    successful("get_harness_details", { harnesses: ["codex"] }),
+    successful("get_harness_details", { harnesses: ["codex"] }, detailsResult()),
     successful("delegate_agent", {
       harness: "codex", task: "Inventory the repository.",
     }),
@@ -413,5 +428,144 @@ const reuseThatReonboards = toolUseAssertion(
 );
 assert.equal(reuseThatReonboards.pass, false);
 assert.match(reuseThatReonboards.reason, /approved baseline|onboarding|exact saved identity/i);
+
+const explicitIdentity = { harness: "codex", model: "owner-model", effort: null };
+const explicitPassThrough = toolUseAssertion("Delegated exactly as requested.", delegationContext(
+  "explicit-pass-through",
+  [successful("delegate_agent", { ...explicitIdentity, task: "Review." })],
+  emptyDelegationState,
+  {
+    ...emptyDelegationState,
+    agentRuns: [{ id: "explicit-run", ...explicitIdentity, parentThreadId: "parent-135" }],
+  },
+  { identity: explicitIdentity },
+));
+assert.equal(explicitPassThrough.pass, true, explicitPassThrough.reason);
+
+const currentIdentity = { harness: "codex", model: "current-model", effort: "high" };
+const currentChoice = toolUseAssertion("Delegated current choice.", delegationContext(
+  "implicit-current-choice",
+  [
+    successful("get_harness_details", { harnesses: ["codex"] }, detailsResult(undefined, [{
+      harness: "codex",
+      session: {
+        models: { currentModelId: "current-model", availableModelIds: ["current-model"] },
+        configOptions: [{ category: "thought_level", options: [{ value: "high" }] }],
+      },
+    }])),
+    successful("delegate_agent", { ...currentIdentity, task: "Implement." }),
+  ],
+  emptyDelegationState,
+  {
+    ...emptyDelegationState,
+    agentRuns: [{ id: "current-run", ...currentIdentity, parentThreadId: "parent-135" }],
+  },
+  { identity: currentIdentity },
+));
+assert.equal(currentChoice.pass, true, currentChoice.reason);
+
+const nonCurrentIdentity = { harness: "claude-code", model: "opus[1m]", effort: "xhigh" };
+const nonCurrentChoice = toolUseAssertion("Delegated inspected choice.", delegationContext(
+  "implicit-non-current-inspection",
+  [
+    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      session: {
+        models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
+        configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
+      },
+    }])),
+    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      requestedInspection: { model: "opus[1m]", effort: "xhigh" },
+      confirmation: { model: "opus[1m]", effort: "xhigh" },
+      error: null,
+    }])),
+    successful("delegate_agent", { ...nonCurrentIdentity, task: "Review." }),
+  ],
+  emptyDelegationState,
+  {
+    ...emptyDelegationState,
+    agentRuns: [{ id: "inspected-run", ...nonCurrentIdentity, parentThreadId: "parent-135" }],
+  },
+  { identity: nonCurrentIdentity },
+));
+assert.equal(nonCurrentChoice.pass, true, nonCurrentChoice.reason);
+
+const mismatch = toolUseAssertion("The candidate could not be confirmed; I need your choice.", delegationContext(
+  "inspection-mismatch",
+  [
+    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      session: {
+        models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
+        configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
+      },
+    }])),
+    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      requestedInspection: { model: "opus[1m]", effort: "xhigh" },
+      confirmation: { model: "sonnet", effort: "high" },
+      error: "requested identity was not confirmed",
+    }])),
+  ],
+  emptyDelegationState,
+  emptyDelegationState,
+  { identity: nonCurrentIdentity },
+));
+assert.equal(mismatch.pass, true, mismatch.reason);
+
+const inspectionBeforeOrdinary = toolUseAssertion("Delegated inspected choice.", delegationContext(
+  "implicit-non-current-inspection",
+  [
+    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      requestedInspection: { model: "opus[1m]", effort: "xhigh" },
+      confirmation: { model: "opus[1m]", effort: "xhigh" },
+      error: null,
+    }])),
+    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      session: {
+        models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
+        configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
+      },
+    }])),
+    successful("delegate_agent", { ...nonCurrentIdentity, task: "Review." }),
+  ],
+  emptyDelegationState,
+  {
+    ...emptyDelegationState,
+    agentRuns: [{ id: "out-of-order-run", ...nonCurrentIdentity, parentThreadId: "parent-135" }],
+  },
+  { identity: nonCurrentIdentity },
+));
+assert.equal(inspectionBeforeOrdinary.pass, false);
+assert.match(inspectionBeforeOrdinary.reason, /ordinary snapshot then exact inspection/i);
+
+const mismatchWithMutation = toolUseAssertion("The candidate failed, then I launched anyway.", delegationContext(
+  "inspection-mismatch",
+  [
+    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      session: {
+        models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
+        configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
+      },
+    }])),
+    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+      harness: "claude-code",
+      requestedInspection: { model: "opus[1m]", effort: "xhigh" },
+      confirmation: null,
+      error: "mismatch",
+    }])),
+    { name: "delegate_agent", input: { harness: "claude-code", model: "sonnet", effort: "high" }, isError: true, resultChars: 1 },
+  ],
+  emptyDelegationState,
+  { ...emptyDelegationState, delegatedBaselines: { codex: { model: "mutated", effort: "low" } } },
+  { identity: nonCurrentIdentity },
+));
+assert.equal(mismatchWithMutation.pass, false);
+assert.match(mismatchWithMutation.reason, /baselines changed|delegated or persisted/i);
 
 process.stdout.write("ok — eval tool gate: retrieval policy plus behavioral trajectory/state profiles hold\n");

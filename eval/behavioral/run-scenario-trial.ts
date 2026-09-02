@@ -9,7 +9,10 @@ import {
   loadDelegatedBaselines,
   type AgentRunEffort,
 } from "@owner-operator/core";
-import type { HarnessBaselineCandidate, HarnessDetails } from "../../src/agent-runs/harness-details";
+import type {
+  HarnessBaselineCandidate,
+  HarnessDetailsSnapshot,
+} from "../../src/agent-runs/harness-details";
 import {
   configuredOwnerOperatorTools,
   lastAssistantError,
@@ -26,11 +29,6 @@ import { materializeMarkDoneScenario } from "./scenario-operations";
  * Behavior-specific code implements OO environment operations and state views; it does
  * not own session, trace, failure, result, or teardown lifecycle.
  */
-
-type DelegationClaim =
-  | "natural-first-delegation"
-  | "usage-explanation"
-  | "approved-default-reuse";
 
 type ModelSettings = {
   defaultProvider: string;
@@ -59,10 +57,16 @@ type MarkDoneInput = CommonInput & {
 
 type DelegationInput = CommonInput & {
   behaviorProfile: "delegation-selection";
-  behaviorClaim: DelegationClaim;
+  behaviorClaim: string;
   behaviorExpected: Record<string, unknown>;
-  harnessRoster: string;
-  harnessDetails: HarnessDetails[];
+  userHarnessPreferences: string;
+  // Case fixtures state the owner preferences once; the adapter derives every snapshot's
+  // preferences namespace from that value, so a case cannot disagree with itself.
+  harnessDetails: ControlledSnapshot;
+  harnessInspections?: Array<{
+    request: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null };
+    snapshot: ControlledSnapshot;
+  }>;
   baselineCandidate?: (HarnessBaselineCandidate & { harness: AgentRunHarness }) | null;
   approvedBaseline?: {
     harness: AgentRunHarness;
@@ -70,6 +74,8 @@ type DelegationInput = CommonInput & {
     effort: AgentRunEffort | null;
   } | null;
 };
+
+type ControlledSnapshot = Omit<HarnessDetailsSnapshot, "preferences">;
 
 type TrialInput = MarkDoneInput | DelegationInput;
 type SandboxEnvironment = Awaited<ReturnType<typeof createSandboxUser>>;
@@ -228,9 +234,19 @@ function delegationAdapter(
   scenario: DelegationInput,
   paths: { ooHome: string },
 ): ScenarioAdapter {
+  let preferencesPath = "";
+  const withPreferences = (snapshot: ControlledSnapshot): HarnessDetailsSnapshot => ({
+    ...structuredClone(snapshot),
+    preferences: {
+      path: preferencesPath,
+      content: scenario.userHarnessPreferences,
+      error: null,
+    },
+  });
   return {
     configureSandbox(environment) {
-      writeFileSync(environment.paths.harnessRoster, scenario.harnessRoster);
+      preferencesPath = environment.paths.userHarnessPreferences;
+      writeFileSync(preferencesPath, scenario.userHarnessPreferences);
       if (scenario.approvedBaseline) {
         approveDelegatedBaseline(scenario.approvedBaseline.harness, {
           model: scenario.approvedBaseline.model,
@@ -240,11 +256,28 @@ function delegationAdapter(
     },
     sessionOptions: () => ({
       harnessAdapters: {
-        readHarnessDetails: async ({ harnesses }) => {
-          const selected = harnesses?.length
-            ? scenario.harnessDetails.filter((detail) => harnesses.includes(detail.harness))
-            : scenario.harnessDetails;
-          return selected.map((detail) => structuredClone(detail));
+        readHarnessDetails: async ({ harnesses, inspect }) => {
+          if (inspect?.length) {
+            if (inspect.length !== 1) {
+              throw new Error("controlled behavioral inspection requires exactly one candidate");
+            }
+            const fixture = scenario.harnessInspections?.find(({ request }) =>
+              sameInspectionRequest(request, inspect[0]));
+            if (!fixture) {
+              throw new Error(`no controlled inspection snapshot for ${inspectionLabel(inspect[0])}`);
+            }
+            return withPreferences(fixture.snapshot);
+          }
+          const selectedHarnesses = new Set(harnesses ?? []);
+          const snapshot = withPreferences(scenario.harnessDetails);
+          if (selectedHarnesses.size) {
+            snapshot.capabilities.harnesses = snapshot.capabilities.harnesses
+              .filter(({ harness }) => selectedHarnesses.has(harness));
+            snapshot.account = snapshot.account.filter(({ harness }) => selectedHarnesses.has(harness));
+            snapshot.unknowns = snapshot.unknowns
+              .filter(({ harness }) => harness === undefined || selectedHarnesses.has(harness));
+          }
+          return snapshot;
         },
         proposeDelegatedBaseline: async (harness) => {
           const approved = loadDelegatedBaseline(harness, paths.ooHome);
@@ -275,7 +308,7 @@ function delegationAdapter(
       return captureDelegationState(
         environment.daemon,
         environment.ooHome,
-        environment.paths.harnessRoster,
+        environment.paths.userHarnessPreferences,
       );
     },
     async execute(_environment, created) {
@@ -316,12 +349,23 @@ function captureMarkDoneState(
   }
 }
 
-function captureDelegationState(running: RunningDaemon, home: string, roster: string) {
+function captureDelegationState(running: RunningDaemon, home: string, preferences: string) {
   return {
-    harnessRoster: readFileSync(roster, "utf8"),
+    userHarnessPreferences: readFileSync(preferences, "utf8"),
     delegatedBaselines: loadDelegatedBaselines(home),
     agentRuns: running.state.listAgentRuns(),
   };
+}
+
+function sameInspectionRequest(
+  left: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null },
+  right: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null },
+): boolean {
+  return left.harness === right.harness && left.model === right.model && left.effort === right.effort;
+}
+
+function inspectionLabel(request: { harness: AgentRunHarness; model: string; effort: AgentRunEffort | null }): string {
+  return `${request.harness}/${request.model}/${request.effort === null ? "null" : request.effort}`;
 }
 
 function subscribeToTrajectory(
@@ -379,12 +423,12 @@ function readInput(value: string | undefined): TrialInput {
     return parsed;
   }
   if (parsed.behaviorProfile === "delegation-selection") {
-    if (!(["natural-first-delegation", "usage-explanation", "approved-default-reuse"] as string[])
-      .includes(parsed.behaviorClaim)) {
-      throw new Error("unsupported delegation behavior claim");
+    if (!parsed.behaviorClaim?.trim()) {
+      throw new Error("delegation scenario requires a behavior claim");
     }
-    if (!parsed.harnessRoster?.trim() || !Array.isArray(parsed.harnessDetails)) {
-      throw new Error("delegation scenario requires a harness roster and controlled details");
+    if (!parsed.userHarnessPreferences?.trim()
+        || !Array.isArray(parsed.harnessDetails?.capabilities?.harnesses)) {
+      throw new Error("delegation scenario requires user harness preferences and a controlled snapshot");
     }
     return parsed;
   }

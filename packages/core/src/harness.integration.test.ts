@@ -1,11 +1,17 @@
 import assert from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_SKILL_POLICY,
   DEFAULT_TOOL_POSTURE,
-  HARNESS_ROSTER_TEMPLATE,
+  USER_HARNESS_PREFERENCES_TEMPLATE,
   ensureOwnerOperatorWorkspace,
   loadHarnessSettings,
   ownerOperatorPaths,
@@ -26,12 +32,12 @@ try {
   assert.ok(existsSync(paths.workspaceMemory), "workspace MEMORY.md is seeded");
   assert.ok(existsSync(paths.workspaceSkills), "workspace skills directory exists");
   assert.ok(existsSync(paths.workspaceArtifacts), "workspace artifacts directory exists");
-  assert.equal(readFileSync(paths.harnessRoster, "utf8"), HARNESS_ROSTER_TEMPLATE);
-  assert.doesNotMatch(HARNESS_ROSTER_TEMPLATE, /claude-code|codex|sonnet|gpt-/i);
+  assert.equal(readFileSync(paths.userHarnessPreferences, "utf8"), USER_HARNESS_PREFERENCES_TEMPLATE);
+  assert.doesNotMatch(USER_HARNESS_PREFERENCES_TEMPLATE, /claude-code|codex|sonnet|gpt-/i);
   assert.ok(existsSync(paths.piAgentDir), "owned Pi config directory exists");
 
   writeFileSync(paths.workspaceInstructions, "Owner instructions stay mine.\n");
-  writeFileSync(paths.harnessRoster, "# My harness roster\n\nKeep this exact preference.\n");
+  writeFileSync(paths.userHarnessPreferences, "# My preferences\n\nKeep this exact preference.\n");
   ensureOwnerOperatorWorkspace(ooHome);
   assert.equal(
     readFileSync(paths.workspaceInstructions, "utf8"),
@@ -39,9 +45,9 @@ try {
     "re-entry never overwrites owner-edited bootstrap files",
   );
   assert.equal(
-    readFileSync(paths.harnessRoster, "utf8"),
-    "# My harness roster\n\nKeep this exact preference.\n",
-    "re-entry never overwrites the owner-edited roster",
+    readFileSync(paths.userHarnessPreferences, "utf8"),
+    "# My preferences\n\nKeep this exact preference.\n",
+    "re-entry never overwrites owner-edited preferences",
   );
 
   const defaults = loadHarnessSettings(ooHome);
@@ -66,7 +72,7 @@ try {
   assert.equal(configured.activeWindow, "36h");
   assert.deepEqual(configured.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
 
-  process.stdout.write("ok — harness: owned paths, missing-only workspace, permissive fresh settings\n");
+  process.stdout.write("ok — harness: canonical preferences and permissive settings\n");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });
 }

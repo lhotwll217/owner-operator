@@ -61,7 +61,7 @@ export {
   DEFAULT_PERMISSION_MODE,
   DEFAULT_SKILL_POLICY,
   DEFAULT_TOOL_POSTURE,
-  HARNESS_ROSTER_TEMPLATE,
+  USER_HARNESS_PREFERENCES_TEMPLATE,
   ensureOwnerOperatorWorkspace,
   loadHarnessSettings,
   ownerOperatorPaths,
@@ -76,7 +76,7 @@ export type {
 } from "./harness.mjs";
 
 // The owner-approved per-harness model/effort a delegated run falls back to. Separate from the
-// harness roster (owner-written task preferences) and the run ledger (what actually ran).
+// user harness preferences (owner-written task routing) and the run ledger (what actually ran).
 export {
   approveDelegatedBaseline,
   loadDelegatedBaseline,

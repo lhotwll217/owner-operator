@@ -36,7 +36,7 @@ mkdirSync(cwd, { recursive: true });
 mkdirSync(agentDir, { recursive: true });
 
 const paths = ensureOwnerOperatorWorkspace(ooHome);
-const roster = `# Harness roster
+const preferences = `# User harness preferences
 
 ## Custom roles
 
@@ -44,7 +44,7 @@ const roster = `# Harness roster
 
 Use Codex model owner-custom-model with no reasoning effort.
 `;
-writeFileSync(paths.harnessRoster, roster);
+writeFileSync(paths.userHarnessPreferences, preferences);
 
 const launches: AgentRunCreateInput[] = [];
 const backend = {
@@ -65,17 +65,21 @@ const detailsTool = createGetHarnessDetailsTool({
   read: async (input) => {
     detailsCalls.push(input);
     assert.ok(input.harnesses?.[0]);
-    return [{
-      harness: input.harnesses[0],
+    return {
       observedAt: "2026-08-12T12:00:00.000Z",
-      source: "captured test observation",
-      account: null,
-      models: null,
-      allowanceWindows: null,
-      baselineCandidate: null,
-      notes: ["Account, catalog, and allowance are unknown."],
-      errors: [],
-    }];
+      ephemeral: true,
+      preferences: {
+        path: paths.userHarnessPreferences,
+        content: preferences,
+        error: null,
+      },
+      capabilities: {
+        registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
+        harnesses: [],
+      },
+      account: [],
+      unknowns: [],
+    };
   },
 });
 const delegateTool = createDelegateAgentTool({ resolveGateway: async () => backend });
@@ -174,7 +178,6 @@ try {
   const beforeProposal = calls.length;
   faux.setResponses([
     fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("read", { path: paths.harnessRoster }), { stopReason: "toolUse" }),
     fauxAssistantMessage(fauxToolCall("get_harness_details", { harnesses: ["claude-code"] }), { stopReason: "toolUse" }),
     fauxAssistantMessage(fauxToolCall("manage_delegated_baseline", {
       action: "propose",
@@ -185,13 +188,12 @@ try {
   await session.prompt("Delegate a routine repository inventory. Choose the execution identity for me.");
   assert.deepEqual(calls.slice(beforeProposal).map(({ name }) => name), [
     "read",
-    "read",
     "get_harness_details",
     "manage_delegated_baseline",
   ]);
   assert.equal(launches.length, 1, "no implicit launch occurs before owner approval");
   assert.equal(existsSync(baselinePath), false, "proposing a baseline does not persist it");
-  assert.equal(readFileSync(paths.harnessRoster, "utf8"), roster, "selection never edits the owner roster");
+  assert.equal(readFileSync(paths.userHarnessPreferences, "utf8"), preferences, "selection never edits owner preferences");
 
   const beforeApproval = calls.length;
   faux.setResponses([
@@ -201,7 +203,6 @@ try {
       model: baselineCandidate.model,
       effort: null,
     }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("read", { path: paths.harnessRoster }), { stopReason: "toolUse" }),
     fauxAssistantMessage(fauxToolCall("get_harness_details", { harnesses: ["claude-code"] }), { stopReason: "toolUse" }),
     fauxAssistantMessage(fauxToolCall("manage_delegated_baseline", {
       action: "propose",
@@ -219,7 +220,6 @@ try {
   await session.prompt("I approve exactly claude-code / harness-observed-model / effort null.");
   assert.deepEqual(calls.slice(beforeApproval).map(({ name }) => name), [
     "manage_delegated_baseline",
-    "read",
     "get_harness_details",
     "manage_delegated_baseline",
     "delegate_agent",
@@ -229,7 +229,7 @@ try {
     effort: null,
     approvedAt: JSON.parse(readFileSync(baselinePath, "utf8")).approvedAt,
   });
-  assert.equal(readFileSync(paths.harnessRoster, "utf8"), roster, "baseline approval leaves the roster unchanged");
+  assert.equal(readFileSync(paths.userHarnessPreferences, "utf8"), preferences, "baseline approval leaves preferences unchanged");
   assert.deepEqual(detailsCalls, [
     { harnesses: [AgentRunHarness.ClaudeCode] },
     { harnesses: [AgentRunHarness.ClaudeCode] },

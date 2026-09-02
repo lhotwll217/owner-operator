@@ -22,7 +22,7 @@ export function ownerOperatorPaths(ooHome = defaultHome()) {
     workspaceMemory: join(workspace, "MEMORY.md"),
     workspaceSkills: join(workspace, "skills"),
     workspaceArtifacts: join(workspace, "artifacts"),
-    harnessRoster: join(workspace, "harness-roster.md"),
+    userHarnessPreferences: join(workspace, "user-harness-preferences.md"),
     delegatedBaselines: join(ooHome, "delegated-baselines"),
     piAgentDir,
     piAuth: join(piAgentDir, "auth.json"),
@@ -50,11 +50,11 @@ function writeMissing(path, content) {
   }
 }
 
-/** The roster is the owner's file. Seeding seeds rules and empty roles only: a guessed harness,
+/** The preferences are the owner's file. Seeding seeds rules and empty roles only: a guessed harness,
  * model, or effort here would read as a decision the owner made, and the owner would then have to
  * discover and undo it. Delegated model/effort baselines are approved separately and stored in
  * delegated-baselines/, so nothing the product decides is ever written into this file. */
-export const HARNESS_ROSTER_TEMPLATE = `# Harness roster
+export const USER_HARNESS_PREFERENCES_TEMPLATE = `# User harness preferences
 
 Your preferences for the coding agents Owner Operator delegates work to. This file is yours:
 Owner Operator edits it only at your explicit direction, and product upgrades leave it alone.
@@ -65,7 +65,7 @@ Owner Operator can report what each harness currently advertises before you name
 
 ## Rules
 
-- A harness, model, or effort you state in a request always wins over this roster.
+- A harness, model, or effort you state in a request always wins over these preferences.
 - Owner Operator reads current harness facts before delegating without an explicit choice.
 - When a preferred choice is unavailable, Owner Operator may use an alternative only if it
   preserves the quality the work needs, and says so in the conversation.
@@ -105,7 +105,7 @@ export function ensureOwnerOperatorWorkspace(ooHome = defaultHome()) {
   mkdirSync(paths.piAgentDir, { recursive: true });
   writeMissing(paths.workspaceInstructions, "# Owner Operator instructions\n\nRecord persistent instructions for the Operator here.\n");
   writeMissing(paths.workspaceMemory, "# Memory\n\nRecord durable facts for the Operator here.\n");
-  writeMissing(paths.harnessRoster, HARNESS_ROSTER_TEMPLATE);
+  writeMissing(paths.userHarnessPreferences, USER_HARNESS_PREFERENCES_TEMPLATE);
   return paths;
 }
 

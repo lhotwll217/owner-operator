@@ -78,17 +78,17 @@ try {
     harnessAdapters: {
       readHarnessDetails: async () => {
         controlledReads += 1;
-        return [{
-          harness: AgentRunHarness.Codex,
+        return {
           observedAt: "2026-08-20T00:00:00.000Z",
-          source: "controlled-production-adapter",
-          account: null,
-          models: [],
-          allowanceWindows: [],
-          baselineCandidate: null,
-          notes: [],
-          errors: [],
-        }];
+          ephemeral: true,
+          preferences: { path: "/fixture/preferences.md", source: null, content: null, error: null },
+          capabilities: {
+            registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
+            harnesses: [],
+          },
+          account: [],
+          unknowns: [],
+        };
       },
     },
   });
@@ -185,7 +185,7 @@ assert.match(harnessPrompt, /select-harness-for-delegation/);
 assert.match(harnessPrompt, /unless the owner explicitly supplied harness, model, and\s+effort/i);
 assert.match(harnessPrompt, /explicit owner choices win/i);
 for (const mechanic of [
-  "harness-roster.md",
+  "user-harness-preferences.md",
   "get_harness_details",
   "manage_delegated_baseline",
   "Task roles",
@@ -207,26 +207,12 @@ const delegationSelectionSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "select-harness-for-delegation", "SKILL.md"),
   "utf8",
 );
-for (const mechanic of [
-  "harness-roster.md",
-  "get_harness_details",
-  "manage_delegated_baseline",
-  "owner-added role",
-  "effort: null",
-  "unknown",
-  "owner-approved delegated baseline",
-  "actual unpinned ACP candidate",
-  "explicitly approve",
-  "Retry selection",
-  "fill omitted execution-identity fields",
-  "without replacing",
-  "delegate_agent",
-]) {
-  assert.ok(
-    delegationSelectionSkill.toLowerCase().includes(mechanic.toLowerCase()),
-    `the bundled selection skill owns ${mechanic} mechanics`,
-  );
+for (const operation of ["get_harness_details", "manage_delegated_baseline", "delegate_agent"]) {
+  assert.match(delegationSelectionSkill, new RegExp(`\\b${operation}\\b`),
+    `the selection workflow invokes ${operation}`);
 }
+assert.doesNotMatch(delegationSelectionSkill, /\$OO_HOME\/workspace\/.*\.md/,
+  "the selection workflow consumes snapshot-owned preferences instead of reading a file directly");
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
 }

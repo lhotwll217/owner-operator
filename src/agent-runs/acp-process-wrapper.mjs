@@ -11,17 +11,23 @@ const valueAfter = (flag) => {
 
 const leaseId = valueAfter("--oo-agent-run-lease");
 const encodedCommand = valueAfter("--oo-agent-command");
+const agentKind = valueAfter("--oo-agent-kind");
 if (!leaseId || !encodedCommand) {
   process.stderr.write("owner-operator ACP wrapper: missing process lease or agent command\n");
   process.exit(2);
 }
 
 const agentCommand = Buffer.from(encodedCommand, "base64url").toString("utf8");
+const childEnv = { ...process.env, OO_AGENT_RUN_LEASE_ID: leaseId };
+// The pinned Codex adapter otherwise honors an inherited CODEX_PATH and can launch a different
+// backend than the package-lock dependency reported by harness provenance. Owner Operator's
+// supported Codex launch contract always uses that adapter dependency.
+if (agentKind === "codex") delete childEnv.CODEX_PATH;
 const child = spawn(agentCommand, {
   shell: true,
   detached: process.platform !== "win32",
   stdio: "inherit",
-  env: { ...process.env, OO_AGENT_RUN_LEASE_ID: leaseId },
+  env: childEnv,
 });
 
 const forward = (signal) => {
