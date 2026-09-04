@@ -20,11 +20,12 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
   createOoSession,
+  createOwnerOperatorCustomTools,
   configuredOwnerOperatorTools,
   ooProvenance,
-  ownerOperatorCustomTools,
   ownerOperatorPiServices,
   ownerOperatorPrompt,
+  ownerOperatorTaskCwd,
   repoRoot,
 } from "../agent/agent";
 import { createPrivacyToolGuardExtension } from "../agent/privacy-tools";
@@ -36,6 +37,11 @@ import {
 import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { createOwnerOperatorToolDisplayExtension } from "../agent/tool-display";
+import {
+  createWorktreeRuntimeRebindExtension,
+  PendingWorktreeCwdChanges,
+  resolveInteractiveRuntimeTarget,
+} from "../agent/worktree-runtime";
 import { agentStateExtension } from "../agent-runs/agent-state-extension";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
 
@@ -53,18 +59,42 @@ const standalonePiAgentDir = getAgentDir();
 const { modelRuntime, paths } = await ownerOperatorPiServices();
 configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
+const invocationCwd = ownerOperatorTaskCwd();
+const pendingCwdChanges = new PendingWorktreeCwdChanges();
+const interactiveCustomTools = createOwnerOperatorCustomTools({}, {
+  onWorktreeSelection: (threadId) => pendingCwdChanges.record(threadId),
+});
 const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayExtension(
   paths.piAgentDir,
-  ownerOperatorCustomTools,
+  interactiveCustomTools,
 );
+let runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>> | undefined;
+const worktreeRuntimeRebindExtension = createWorktreeRuntimeRebindExtension({
+  pending: pendingCwdChanges,
+  rebind: async (threadId) => {
+    if (!runtime) throw new Error("interactive runtime is not ready");
+    const manager = runtime.session.sessionManager;
+    if (manager.getSessionId() !== threadId) {
+      throw new Error(`pending cwd change belongs to inactive session ${threadId}`);
+    }
+    const sessionFile = manager.getSessionFile();
+    if (!sessionFile) throw new Error(`session ${threadId} has no persisted transcript`);
+    await runtime.switchSession(sessionFile);
+  },
+});
 
-// The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
-// whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
-// The privacy guard reads the active session ID from each runtime's tool-call context.
-const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
+// The runtime factory pi reuses for /new, /resume, /fork resolves the active stable session ID
+// before rebuilding our cwd-bound services. The privacy guard reads that live session ID.
+const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ sessionManager, sessionStartEvent }) => {
+  const target = await resolveInteractiveRuntimeTarget(
+    sessionManager,
+    sessionStartEvent,
+    provenance,
+    invocationCwd,
+  );
   const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
-    cwd,
+    cwd: target.cwd,
     agentDir: paths.piAgentDir,
     modelRuntime,
     settingsManager,
@@ -82,6 +112,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },
         { name: "owner-operator-agent-state", factory: agentStateExtension },
+        { name: "owner-operator-worktree-runtime-rebind", factory: worktreeRuntimeRebindExtension },
         {
           name: "owner-operator-onboarding",
           factory: createOnboardingExtension({
@@ -99,15 +130,15 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
   });
   const created = await createAgentSessionFromServices({
     services,
-    sessionManager,
+    sessionManager: target.sessionManager,
     sessionStartEvent,
     tools: [...interactiveTools],
   });
   return { ...created, services, diagnostics: services.diagnostics };
 };
 
-const runtime = await createAgentSessionRuntime(createRuntime, {
-  cwd: process.cwd(),
+runtime = await createAgentSessionRuntime(createRuntime, {
+  cwd: invocationCwd,
   agentDir: paths.piAgentDir,
   sessionManager: createOoSession(provenance), // saved + labeled like every oo surface
 });

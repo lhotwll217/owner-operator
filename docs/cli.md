@@ -42,6 +42,9 @@ never mixed with coding sessions, and labeled with its surface and caller repo.
 
 - `--continue` / `-c` resumes the most recent oo thread; `--session <id-or-path>`
   resumes a specific one.
+- A root with a selected OO worktree resumes with its tools bound to that exact path, including
+  after CLI or daemon restart. Invalid selections fail visibly instead of falling back to the
+  checkout running OO; roots without a selection keep the invocation cwd.
 - Agents pass `--from-session <id>` (or `OO_FROM_SESSION`) so the audit trail
   records who called. Codex callers are detected from `CODEX_THREAD_ID`.
 - Open-ended transcript discovery excludes both the current oo thread and its external

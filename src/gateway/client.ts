@@ -10,6 +10,8 @@ import {
   type GatewayApi,
   type GatewayEvent,
   type MarkThreadsDoneResult,
+  type ResolveWorktreeCwdRequest,
+  type ResolveWorktreeCwdResult,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -198,6 +200,12 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
     useWorktree: (request: UseWorktreeRequest) => post<UseWorktreeResult>(
       "/worktrees/use",
       request,
+      LONG_OPERATION_MS,
+    ),
+    resolveWorktreeCwd: (request: ResolveWorktreeCwdRequest) => json<ResolveWorktreeCwdResult>(
+      `/worktrees/resolve-cwd?threadId=${encodeURIComponent(request.threadId)}` +
+        `&fallbackCwd=${encodeURIComponent(request.fallbackCwd)}`,
+      undefined,
       LONG_OPERATION_MS,
     ),
     subscribe(

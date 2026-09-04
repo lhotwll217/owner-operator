@@ -155,8 +155,14 @@ async function resolveSessionManager(): Promise<SessionManager> {
 
 const sessionManager = await resolveSessionManager();
 await (await import("../daemon/ensure")).ensureDaemon();
+const { resolveOwnerOperatorTaskCwd } = await import("../agent/worktree-runtime");
+const cwd = await resolveOwnerOperatorTaskCwd(
+  sessionManager,
+  (await import("../agent/agent")).ownerOperatorTaskCwd(),
+);
 const { session, modelLabel, toolNames } = await createOwnerOperatorSession("chat", {
   sessionManager,
+  cwd,
   callerSessionId: provenance.fromSession,
 });
 console.error(`[oo] ${modelLabel} · tools: ${toolNames.join(", ")}\n`);

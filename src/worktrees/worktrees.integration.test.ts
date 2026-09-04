@@ -46,9 +46,15 @@ try {
   runGit("-C", repositoryPath, "add", "README.md");
   runGit("-C", repositoryPath, "commit", "-m", "fixture");
 
-  const state = new State(dbPath, { now: () => "2026-09-04T12:00:00.000Z" });
+  let state = new State(dbPath, { now: () => "2026-09-04T12:00:00.000Z" });
   const git = new CountingGitAdapter();
-  const ordinary = new WorktreeService(state, { ooHome, git });
+  let ordinary = new WorktreeService(state, { ooHome, git });
+
+  assert.deepEqual(await ordinary.resolveCwd({
+    threadId: "unselected-root",
+    fallbackCwd: "/invocation/fallback",
+  }), { cwd: "/invocation/fallback", selected: false },
+  "a root without a selection retains the invocation fallback");
 
   await assert.rejects(() => ordinary.use({
     threadId: "failed-root",
@@ -115,6 +121,36 @@ try {
   assert.equal(state.selectedWorktree("later-root")?.id, registered.id,
     "another root selects the same registered worktree after live validation");
 
+  assert.deepEqual(await ordinary.resolveCwd({
+    threadId: "later-root",
+    fallbackCwd: "/must-not-fall-back",
+  }), { cwd: registered.path, selected: true, worktreeId: registered.id },
+  "a selection overrides the invocation fallback only after live Git validation");
+
+  state.close();
+  state = new State(dbPath, { now: () => "2026-09-04T12:05:00.000Z" });
+  ordinary = new WorktreeService(state, { ooHome, git });
+  assert.equal((await ordinary.resolveCwd({
+    threadId: "later-root",
+    fallbackCwd: "/different-process-fallback",
+  })).cwd, registered.path, "process/daemon restart restores the exact selected cwd from State");
+
+  class MismatchedGitAdapter extends CountingGitAdapter {
+    override async inspectWorktree(path: string) {
+      return { ...await super.inspectWorktree(path), gitCommonDir: join(root, "different.git") };
+    }
+  }
+  await assert.rejects(() => new WorktreeService(state, {
+    ooHome,
+    git: new MismatchedGitAdapter(),
+  }).resolveCwd({
+    threadId: "later-root",
+    fallbackCwd: "/must-not-fall-back",
+  }), /selected worktree is unavailable or has changed Git identity/,
+  "Git-common-dir mismatch fails closed instead of using the invocation fallback");
+  assert.equal(state.selectedWorktree("later-root")?.id, registered.id,
+    "identity mismatch retains selection for diagnosis");
+
   renameSync(registered.path, `${registered.path}.missing`);
   const unavailable = await service.use({ threadId: "later-root", input: { action: "list" } });
   assert.equal(unavailable.action, "list");
@@ -125,6 +161,11 @@ try {
   }), /unavailable or has changed Git identity/);
   assert.equal(state.selectedWorktree("later-root")?.id, registered.id,
     "failed validation retains the prior durable selection for diagnosis");
+  await assert.rejects(() => ordinary.resolveCwd({
+    threadId: "later-root",
+    fallbackCwd: "/must-not-fall-back",
+  }), /selected worktree is unavailable or has changed Git identity/,
+  "a missing selected worktree fails closed on startup without fallback");
 
   state.close();
   process.stdout.write("ok — worktree orchestration preserves failure ordering and retry idempotency\n");

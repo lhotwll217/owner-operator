@@ -7,6 +7,7 @@ type UseWorktreeBackend = Pick<GatewayApi, "useWorktree">;
 
 export interface UseWorktreeToolOptions {
   resolveGateway?: () => Promise<UseWorktreeBackend>;
+  onSelection?: (threadId: string) => void;
 }
 
 function result(details: UseWorktreeResult) {
@@ -55,10 +56,14 @@ export function createUseWorktreeTool(options: UseWorktreeToolOptions = {}) {
       }),
     ]),
     async execute(_id, params, _signal, _onUpdate, ctx) {
+      const threadId = ctx.sessionManager.getSessionId();
       const details = await (await getGateway()).useWorktree({
-        threadId: ctx.sessionManager.getSessionId(),
+        threadId,
         input: params,
       });
+      if (details.action === "create" || details.action === "select") {
+        options.onSelection?.(threadId);
+      }
       return result(details);
     },
   });

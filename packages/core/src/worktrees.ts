@@ -30,3 +30,13 @@ export type UseWorktreeResult =
   | { action: "create"; created: boolean; worktree: WorktreeInfo }
   | { action: "list"; worktrees: WorktreeInfo[] }
   | { action: "select"; worktree: WorktreeInfo };
+
+/** Resolve one root's execution cwd without changing its durable selection. */
+export interface ResolveWorktreeCwdRequest {
+  threadId: string;
+  fallbackCwd: string;
+}
+
+export type ResolveWorktreeCwdResult =
+  | { cwd: string; selected: false }
+  | { cwd: string; selected: true; worktreeId: string };

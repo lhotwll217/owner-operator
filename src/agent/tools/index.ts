@@ -10,7 +10,7 @@ import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
 import { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
-import { useWorktreeTool } from "./use-worktree";
+import { createUseWorktreeTool } from "./use-worktree";
 
 export { queryDatabaseTool } from "./query-database";
 export { manageScheduleTool } from "./manage-schedule";
@@ -27,9 +27,16 @@ export interface OwnerOperatorHarnessAdapters {
   proposeDelegatedBaseline?: ManageDelegatedBaselineOptions["propose"];
 }
 
+export interface OwnerOperatorRuntimeAdapters {
+  onWorktreeSelection?: (threadId: string) => void;
+}
+
 /** Production tools with only their external harness observations replaceable for deterministic
  * evaluation. Durable approval, delegation, Gateway, and state behavior remain production-real. */
-export function createOwnerOperatorCustomTools(adapters: OwnerOperatorHarnessAdapters = {}) {
+export function createOwnerOperatorCustomTools(
+  adapters: OwnerOperatorHarnessAdapters = {},
+  runtimeAdapters: OwnerOperatorRuntimeAdapters = {},
+) {
   return [
     getCurrentSessionStateTool,
     markThreadDoneTool,
@@ -40,7 +47,7 @@ export function createOwnerOperatorCustomTools(adapters: OwnerOperatorHarnessAda
     manageAgentRunTool,
     createGetHarnessDetailsTool({ read: adapters.readHarnessDetails }),
     createManageDelegatedBaselineTool({ propose: adapters.proposeDelegatedBaseline }),
-    useWorktreeTool,
+    createUseWorktreeTool({ onSelection: runtimeAdapters.onWorktreeSelection }),
   ];
 }
 

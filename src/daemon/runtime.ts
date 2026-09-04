@@ -118,7 +118,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       resume: (id, task) => agentRuns.resume(id, task),
       wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
     },
-    worktrees: { use: (request) => worktrees.use(request) },
+    worktrees: {
+      use: (request) => worktrees.use(request),
+      resolveCwd: (request) => worktrees.resolveCwd(request),
+    },
     port: options.port,
     health,
     ready,

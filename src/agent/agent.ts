@@ -43,6 +43,7 @@ export { repoRoot };
 export {
   getCurrentSessionStateTool,
   configuredOwnerOperatorTools,
+  createOwnerOperatorCustomTools,
   markThreadDoneTool,
   manageScheduleTool,
   ownerOperatorCustomTools,
@@ -322,8 +323,23 @@ export function ownerOperatorTaskCwd(): string {
 }
 
 /** Keep OO thread lookup stable across caller directories; evals remain sandbox-scoped. */
-function sessionIdentityCwd(): string {
+export function sessionIdentityCwd(): string {
   return process.env.OO_EVAL_CWD || repoRoot;
+}
+
+/** Pi derives empty /new and /fork headers from the execution runtime. Replace that manager before
+ * first persistence so OO keeps stable lookup identity separate from execution cwd. */
+export function normalizeEmptyOoReplacementSession(
+  sm: SessionManager,
+  provenance: OoProvenance,
+): SessionManager {
+  const header = sm.getHeader();
+  const normalized = SessionManager.create(sessionIdentityCwd(), ooSessionsDir(), {
+    id: sm.getSessionId(),
+    ...(header?.parentSession ? { parentSession: header.parentSession } : {}),
+  });
+  stampProvenance(normalized, provenance);
+  return normalized;
 }
 /** Resume the most recent oo thread (or a fresh one if none); each resume re-stamps. */
 export function continueOoSession(provenance: OoProvenance): SessionManager {

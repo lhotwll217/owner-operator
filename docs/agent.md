@@ -26,7 +26,7 @@ Code and agent state have separate roots:
 | Harness home | `OO_HOME` or `~/.owner-operator` | config, copied credentials/model settings, SQLite, transcripts, logs, daemon files |
 | OO worktrees | `OO_HOME/worktrees/<repository>/<name>` | Git linked worktrees created through `use_worktree` |
 | Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
-| Task cwd | caller or scheduled-run cwd | file and command target for that run |
+| Task cwd | selected OO worktree, otherwise caller/scheduled-run cwd | file and command target for that run |
 
 Every entry point creates missing workspace files without overwriting owner edits. The core
 config API is authoritative; onboarding is its first-run TTY client, and incomplete setup
@@ -45,6 +45,13 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
 - `use_worktree` creates, lists, and selects only worktrees created by Owner Operator. The tool
   derives the selecting root from Pi's live session context; Git supplies mutable topology facts,
   while State records creation provenance and one selection per root.
+- Before a root runtime is constructed, the stable OO session ID resolves its current State
+  selection through the Gateway and validates the registered path against live Git identity. A
+  missing or mismatched selection fails closed and stays recorded for diagnosis. With no selection,
+  execution retains the invocation cwd.
+- Pi session headers remain rooted at the install identity used for cross-directory lookup; they do
+  not store task assignment. Interactive selection records a pending runtime change, then replaces
+  the same session and all cwd-bound services after Pi reports the agent run fully settled.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes

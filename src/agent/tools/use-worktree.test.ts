@@ -16,6 +16,7 @@ const row: RegisteredWorktree = {
   createdAt: "2026-09-04T12:00:00.000Z",
 };
 const calls: UseWorktreeRequest[] = [];
+const selections: string[] = [];
 const backend = {
   async useWorktree(request: UseWorktreeRequest): Promise<UseWorktreeResult> {
     calls.push(request);
@@ -26,7 +27,10 @@ const backend = {
     return { action: "create", created: true, worktree: { ...row, available: true, selected: true } };
   },
 } as Pick<GatewayApi, "useWorktree">;
-const tool = createUseWorktreeTool({ resolveGateway: async () => backend });
+const tool = createUseWorktreeTool({
+  resolveGateway: async () => backend,
+  onSelection: (threadId) => selections.push(threadId),
+});
 
 assert.match(tool.description, /create, list, or select/i);
 assert.match(tool.description, /root identity.*active session automatically/i,
@@ -58,5 +62,7 @@ assert.deepEqual(calls, [
   { threadId: "later-root", input: { action: "list" } },
   { threadId: "later-root", input: { action: "select", worktreeId: row.id } },
 ], "every action derives the live runtime session id at execution time");
+assert.deepEqual(selections, ["creating-root", "later-root"],
+  "only successful create/select operations record a pending runtime change");
 
 process.stdout.write("ok — use_worktree derives root identity from tool context\n");

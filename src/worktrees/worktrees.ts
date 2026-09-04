@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   type RegisteredWorktree,
+  type ResolveWorktreeCwdRequest,
+  type ResolveWorktreeCwdResult,
   type UseWorktreeInput,
   type UseWorktreeRequest,
   type UseWorktreeResult,
@@ -76,6 +78,26 @@ export class WorktreeService {
     if (input.action === "list") return this.list(threadId, input.repository);
     if (input.action === "select") return this.select(threadId, required(input.worktreeId, "worktreeId"));
     throw new Error("worktree action must be create, list, or select");
+  }
+
+  /** Resolve execution cwd from the durable root selection and current Git topology. */
+  async resolveCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult> {
+    const threadId = required(request?.threadId, "threadId");
+    const fallbackCwd = required(request?.fallbackCwd, "fallbackCwd");
+    if (!isAbsolute(fallbackCwd)) throw new Error("fallbackCwd must be an absolute path");
+    const selected = this.state.selectedWorktree(threadId);
+    if (!selected) return { cwd: fallbackCwd, selected: false };
+    try {
+      assertExactWorktree(await this.git.inspectWorktree(selected.path), selected);
+    } catch (error) {
+      throw new Error(
+        `selected worktree is unavailable or has changed Git identity: ${selected.path}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    return { cwd: selected.path, selected: true, worktreeId: selected.id };
   }
 
   private async create(

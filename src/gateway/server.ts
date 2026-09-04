@@ -17,6 +17,8 @@ import {
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type ResolveWorktreeCwdRequest,
+  type ResolveWorktreeCwdResult,
   type UseWorktreeRequest,
   type UseWorktreeResult,
 } from "@owner-operator/core";
@@ -54,6 +56,7 @@ export interface GatewayAgentRuns {
 
 export interface GatewayWorktrees {
   use(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
+  resolveCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
 }
 
 export interface GatewayOptions {
@@ -230,6 +233,15 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       if (route === "POST /worktrees/use") {
         return respond(200, await options.worktrees.use(await readBody(request) as UseWorktreeRequest));
+      }
+
+      if (route === "GET /worktrees/resolve-cwd") {
+        return respond(200, await options.worktrees.resolveCwd(
+          {
+            threadId: url.searchParams.get("threadId"),
+            fallbackCwd: url.searchParams.get("fallbackCwd"),
+          } as ResolveWorktreeCwdRequest,
+        ));
       }
 
       return respond(404, { error: "unknown route" });
