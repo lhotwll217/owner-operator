@@ -8,9 +8,9 @@ read_when:
 
 # Daemon
 
-`oo daemon` is the long-lived local process hosting the state, session monitor,
-scheduler, and loopback Gateway. Terminal clients ensure the current daemon is
-ready.
+`oo daemon` is the long-lived local process hosting State, the session monitor,
+scheduler, Git-backed worktree orchestration, and the loopback Gateway. Terminal clients
+ensure the current daemon is ready.
 
 The daemon binds only `127.0.0.1`. Its mode-`0600` discovery file carries a fresh bearer token;
 every HTTP/SSE request authenticates with it. `/health` reports PID, start time, fingerprint, and

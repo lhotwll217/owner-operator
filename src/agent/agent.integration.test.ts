@@ -168,13 +168,13 @@ assert.throws(
 );
 
 // Posture keeps every standard file/shell tool present; the permission mode decides each operation.
-for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule"]) {
+for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule", "use_worktree"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 
 // Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).
 // Built-in privacy enforcement is a tool_call guard, covered by privacy-tools.integration.test.
-for (const t of ["get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule"]) {
+for (const t of ["get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule", "use_worktree"]) {
   assert.ok(ownerOperatorCustomTools.some((tool) => tool.name === t), `owner custom tools must include ${t}`);
 }
 

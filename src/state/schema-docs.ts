@@ -126,6 +126,27 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
     ],
   },
+  {
+    name: "worktrees",
+    description: "Owner Operator-created Git worktrees. Row presence is creation provenance; mutable Git facts remain live-only.",
+    columns: [
+      { name: "id", description: "Stable worktree id, independent of any selecting thread." },
+      { name: "repository", description: "Stable human-facing repository name." },
+      { name: "path", description: "Unique canonical absolute worktree path." },
+      { name: "git_common_dir", description: "Canonical Git common-directory identity used to validate live topology." },
+      { name: "created_by_thread_id", description: "Root thread that created the worktree; deliberately not a foreign key." },
+      { name: "created_at", description: "ISO time Owner Operator registered creation provenance." },
+    ],
+  },
+  {
+    name: "thread_worktrees",
+    description: "Current worktree selection for each root thread. Selection may precede asynchronous thread ingestion.",
+    columns: [
+      { name: "thread_id", description: "Stable root thread id; deliberately not a foreign key to threads." },
+      { name: "worktree_id", description: "References an Owner Operator-created worktree." },
+      { name: "selected_at", description: "ISO time this selection replaced the root's prior selection." },
+    ],
+  },
 ];
 
 export function tableDoc(name: string): TableDoc | undefined {

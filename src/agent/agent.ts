@@ -49,6 +49,7 @@ export {
   ownerOperatorTools,
   queryDatabaseTool,
   schedulePromptTool,
+  useWorktreeTool,
 } from "./tools";
 
 export interface OwnerOperatorSession {

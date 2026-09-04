@@ -23,6 +23,7 @@ import {
   type ThreadDetails,
   type ThreadState,
   type EnrichmentCandidate,
+  type RegisteredWorktree,
 } from "@owner-operator/core";
 import { stateDatabasePath } from "../shared/paths";
 
@@ -214,7 +215,30 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_child_session
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_parent_created
   ON agent_runs(parent_thread_id, created_at DESC) WHERE parent_thread_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS worktrees (
+  id TEXT PRIMARY KEY,
+  repository TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  git_common_dir TEXT NOT NULL,
+  created_by_thread_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS thread_worktrees (
+  thread_id TEXT PRIMARY KEY,
+  worktree_id TEXT NOT NULL REFERENCES worktrees(id),
+  selected_at TEXT NOT NULL
+);
 `;
+
+const WORKTREE_COLUMNS = `
+  id, repository, path, git_common_dir AS gitCommonDir,
+  created_by_thread_id AS createdByThreadId, created_at AS createdAt`;
+
+const JOINED_WORKTREE_COLUMNS = `
+  w.id, w.repository, w.path, w.git_common_dir AS gitCommonDir,
+  w.created_by_thread_id AS createdByThreadId, w.created_at AS createdAt`;
 
 const AGENT_RUN_COLUMNS = `
   id, harness, task, cwd, parent_thread_id AS parentThreadId, model, effort,
@@ -1034,6 +1058,95 @@ export class ThreadDb {
       filter.parentThreadId !== undefined ? statement.all(filter.parentThreadId) : statement.all()
     ) as unknown as AgentRunDbRow[];
     return rows.map((row) => toAgentRun(row)!);
+  }
+
+  /** Register creation provenance and replace the root's selection in one SQLite transaction.
+   * An existing exact path is reused only when its immutable repository identity agrees. */
+  registerAndSelectWorktree(
+    threadId: string,
+    worktree: RegisteredWorktree,
+    selectedAt: string,
+  ): RegisteredWorktree {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.worktreeByPath(worktree.path);
+      if (existing) {
+        if (existing.repository !== worktree.repository || existing.gitCommonDir !== worktree.gitCommonDir) {
+          throw new Error(`registered worktree identity conflicts at ${worktree.path}`);
+        }
+      } else {
+        this.db.prepare(
+          `INSERT INTO worktrees (
+             id, repository, path, git_common_dir, created_by_thread_id, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?)`,
+        ).run(
+          worktree.id,
+          worktree.repository,
+          worktree.path,
+          worktree.gitCommonDir,
+          worktree.createdByThreadId,
+          worktree.createdAt,
+        );
+      }
+      const selected = existing ?? worktree;
+      this.upsertWorktreeSelection(threadId, selected.id, selectedAt);
+      this.db.exec("COMMIT");
+      return selected;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  selectWorktree(threadId: string, worktreeId: string, selectedAt: string): RegisteredWorktree {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const worktree = this.worktreeById(worktreeId);
+      if (!worktree) throw new Error(`worktree not found: ${worktreeId}`);
+      this.upsertWorktreeSelection(threadId, worktreeId, selectedAt);
+      this.db.exec("COMMIT");
+      return worktree;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  worktreeById(id: string): RegisteredWorktree | undefined {
+    return this.db.prepare(`SELECT ${WORKTREE_COLUMNS} FROM worktrees WHERE id = ?`)
+      .get(id) as unknown as RegisteredWorktree | undefined;
+  }
+
+  selectedWorktree(threadId: string): RegisteredWorktree | undefined {
+    return this.db.prepare(
+      `SELECT ${JOINED_WORKTREE_COLUMNS}
+       FROM thread_worktrees selection
+       JOIN worktrees w ON w.id = selection.worktree_id
+       WHERE selection.thread_id = ?`,
+    ).get(threadId) as unknown as RegisteredWorktree | undefined;
+  }
+
+  listWorktrees(repository?: string): RegisteredWorktree[] {
+    const statement = this.db.prepare(
+      `SELECT ${WORKTREE_COLUMNS} FROM worktrees
+       ${repository === undefined ? "" : "WHERE repository = ?"}
+       ORDER BY created_at ASC, id ASC`,
+    );
+    return (repository === undefined ? statement.all() : statement.all(repository)) as unknown as RegisteredWorktree[];
+  }
+
+  private worktreeByPath(path: string): RegisteredWorktree | undefined {
+    return this.db.prepare(`SELECT ${WORKTREE_COLUMNS} FROM worktrees WHERE path = ?`)
+      .get(path) as unknown as RegisteredWorktree | undefined;
+  }
+
+  private upsertWorktreeSelection(threadId: string, worktreeId: string, selectedAt: string): void {
+    this.db.prepare(
+      `INSERT INTO thread_worktrees (thread_id, worktree_id, selected_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(thread_id) DO UPDATE SET
+         worktree_id = excluded.worktree_id, selected_at = excluded.selected_at`,
+    ).run(threadId, worktreeId, selectedAt);
   }
 
   private hasActiveChild(threadId: string): boolean {

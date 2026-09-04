@@ -17,6 +17,8 @@ import {
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type UseWorktreeRequest,
+  type UseWorktreeResult,
 } from "@owner-operator/core";
 import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
 import type { State } from "../state/state";
@@ -50,12 +52,17 @@ export interface GatewayAgentRuns {
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
 }
 
+export interface GatewayWorktrees {
+  use(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
+}
+
 export interface GatewayOptions {
   authToken: string;
   state: State;
   monitor: GatewayMonitor;
   scheduler: GatewayScheduler;
   agentRuns: GatewayAgentRuns;
+  worktrees: GatewayWorktrees;
   query: GatewayQueryService;
   health: () => DaemonHealth;
   ready: () => DaemonReady;
@@ -219,6 +226,10 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           return respond(200, options.query.query(query.sql));
         }
         return respond(400, { error: "invalid database query request" });
+      }
+
+      if (route === "POST /worktrees/use") {
+        return respond(200, await options.worktrees.use(await readBody(request) as UseWorktreeRequest));
       }
 
       return respond(404, { error: "unknown route" });

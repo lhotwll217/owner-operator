@@ -24,6 +24,7 @@ Code and agent state have separate roots:
 |---|---|---|
 | Install root | checkout/package | executable code and bundled prompt, tools, and skills |
 | Harness home | `OO_HOME` or `~/.owner-operator` | config, copied credentials/model settings, SQLite, transcripts, logs, daemon files |
+| OO worktrees | `OO_HOME/worktrees/<repository>/<name>` | Git linked worktrees created through `use_worktree` |
 | Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
 | Task cwd | caller or scheduled-run cwd | file and command target for that run |
 
@@ -41,6 +42,9 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
   `tool_call` preflight guard enforces explicit path, repository-name, symlinked-path, and traversal
   blacklists without replacing Pi's built-ins. The same guard injects Owner Operator provenance
   into Bash; Pi still supplies the task cwd.
+- `use_worktree` creates, lists, and selects only worktrees created by Owner Operator. The tool
+  derives the selecting root from Pi's live session context; Git supplies mutable topology facts,
+  while State records creation provenance and one selection per root.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes

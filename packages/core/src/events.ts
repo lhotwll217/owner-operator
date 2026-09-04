@@ -7,6 +7,7 @@ export enum DomainEventKind {
   ScheduleChanged = "schedule.changed",
   ScheduleRunChanged = "schedule-run.changed",
   AgentRunChanged = "agent-run.changed",
+  WorktreeChanged = "worktree.changed",
 }
 
 export type DomainEvent =
@@ -19,7 +20,8 @@ export type DomainEvent =
     }
   | { kind: DomainEventKind.ScheduleChanged; scheduleId: string }
   | { kind: DomainEventKind.ScheduleRunChanged; scheduleId: string; runId: string; status: ScheduleRunStatus }
-  | { kind: DomainEventKind.AgentRunChanged; runId: string; status: AgentRunStatus };
+  | { kind: DomainEventKind.AgentRunChanged; runId: string; status: AgentRunStatus }
+  | { kind: DomainEventKind.WorktreeChanged; threadId: string; worktreeId: string };
 
 export enum GatewayEventKind {
   StateChanged = "state.changed",

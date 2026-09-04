@@ -42,6 +42,7 @@ const gateway = await startGateway({
   monitor: { poll: async () => undefined },
   scheduler: {} as never,
   agentRuns: {} as never,
+  worktrees: {} as never,
   query: {} as never,
   health,
   ready,

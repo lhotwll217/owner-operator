@@ -16,11 +16,12 @@ widget · oo agent/tools · Pi extension · oo CLI
                       │
               Gateway (HTTP + SSE)
                       │
-        ┌─────────────┼─────────────┐
- session monitor        state       scheduler
- scan + enrich       sole writer   Croner + runs
-        │                │             │
- coding + OO transcripts SQLite    fresh Pi session / argv process
+        ┌─────────────┬───────┴───────┬─────────────┐
+ session monitor   worktrees        state       scheduler
+ scan + enrich   Git topology    sole writer   Croner + runs
+        │              │             │             │
+ coding + OO         git CLI       SQLite    fresh Pi session / argv process
+ transcripts
 ```
 
 ## Module ownership
@@ -32,6 +33,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 | `src/session-monitor` | Transcript scan/watch and its private async enrichment worker | HTTP, scheduling |
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/agent-runs` | Delegated-run executor, ACP launcher over `acpx`, and client-side parent-fleet reconciliation adapters | SQLite access outside `State`, HTTP |
+| `src/worktrees` | Argv-safe Git worktree inspection/creation and create/list/select orchestration | SQLite writes, runtime cwd binding, cleanup |
 | `src/gateway` | Loopback HTTP/SSE translation and client SDK | SQLite, child processes, polling, model calls |
 | `src/daemon` | Composition, process lifecycle, readiness, discovery, source fingerprint | Domain decisions |
 | `src/agent` | Owned Pi runtime, onboarding, diagnostics, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
@@ -39,7 +41,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 Dependencies point toward the owning seam:
 
 ```text
-core ← state ← { session-monitor, scheduler, agent-runs, gateway } ← daemon
+core ← state ← { session-monitor, scheduler, agent-runs, worktrees, gateway } ← daemon
 core ← gateway client ← { agent, CLI, widget }
 ```
 
@@ -54,6 +56,9 @@ writer. The active `/session-state` response is a projection over `threads`, the
 `thread_details` version, and active delegated-child relationships; there is no stored snapshot or
 embedded client store. A root with a pending or running child projects as `working` without
 rewriting its transcript-derived state.
+`worktrees` stores only Owner Operator creation provenance and Git common-directory identity;
+`thread_worktrees` stores one current selection per root without requiring prior transcript
+ingestion. Git remains authoritative for branch, HEAD, dirty state, and live topology.
 
 After a transaction commits, `State` publishes a rich typed event on a fail-isolated in-memory bus.
 The bus wakes consumers; clients refetch truth rather than consuming event payloads. The Gateway maps
