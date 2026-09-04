@@ -124,13 +124,21 @@ if (directRead) {
   }
 }
 
-const sourceArgs = ["--sources-file", sourceFile];
-const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType];
-const excludeArgs = excludePatterns.flatMap((pattern) => ["--exclude-re", pattern]);
 const discoverySessionIds = [...new Set([currentOoSessionId, callerSessionId].filter(Boolean))];
 const sessionExcludeArgs = directRead
   ? []
   : discoverySessionIds.flatMap((sessionId) => ["--exclude-session", sessionId]);
+// Pi names saved transcripts `<timestamp>_<stable-id>.jsonl`, while the vendored
+// primitive's canonical session exclusion falls back to the full filename stem for Pi.
+// Its path-exclusion seam lets the wrapper exclude the same live stable IDs without
+// parsing transcript headers or changing explicit known-ID reads.
+if (!directRead) {
+  excludePatterns.push(...discoverySessionIds.map((sessionId) =>
+    `(?:^|[/_])${escapeRegex(sessionId)}\\.jsonl$`));
+}
+const sourceArgs = ["--sources-file", sourceFile];
+const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType];
+const excludeArgs = excludePatterns.flatMap((pattern) => ["--exclude-re", pattern]);
 
 try {
   if (browse) {
