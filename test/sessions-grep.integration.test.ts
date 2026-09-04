@@ -110,6 +110,16 @@ try {
   writeOwnerOperatorSession(otherOwnerOperatorId);
   writeOwnerOperatorSession(privateOwnerOperatorId, `private ${NEEDLE}`, join(privateRoot, "OO"));
 
+  // Standalone Pi is an external coding store even though OO uses the same transcript format.
+  const externalPiId = "external-1111-2222-3333-444444444444";
+  const externalPiDir = join(home, ".pi", "agent", "sessions");
+  mkdirSync(externalPiDir, { recursive: true });
+  writeFileSync(
+    join(externalPiDir, `${externalPiId}.jsonl`),
+    JSON.stringify({ type: "session", version: 3, id: externalPiId, timestamp: "2026-06-30T10:00:00.000Z", cwd: okCwd }) + "\n" +
+      JSON.stringify({ type: "message", id: "m1", parentId: null, timestamp: "2026-06-30T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: `Standalone Pi found ${NEEDLE}` }] } }) + "\n",
+  );
+
   // Codex indexes and deep links use the canonical UUID from session_meta, while the
   // transcript filename includes a rollout timestamp. The wrapper must accept the DB id.
   const codexId = "0198a111-2222-7333-8444-555555555555";
@@ -151,11 +161,15 @@ try {
 
   const defaultMatches = run();
   assert.ok(idsOf(defaultMatches).includes(okId), "default discovery includes configured coding history");
+  assert.ok(idsOf(defaultMatches).includes(externalPiId), "default discovery includes the configured standalone Pi store");
   assert.ok(idsOf(defaultMatches).includes(ownerOperatorId), "default discovery includes Owner Operator history");
   assert.ok(!idsOf(defaultMatches).includes(privateOwnerOperatorId),
     "default discovery applies the blacklist to OO's provenance cwd rather than its stable header cwd");
   assert.equal(defaultMatches.find((match) => match.id === okId)?.namespace, "coding",
     "coding results retain their namespace");
+  const defaultPiMatch = defaultMatches.find((match) => match.id === externalPiId);
+  assert.equal(defaultPiMatch?.namespace, "coding", "standalone Pi retains its coding namespace");
+  assert.equal(defaultPiMatch?.source, "pi", "standalone Pi retains its transcript format");
   const defaultOwnerOperatorMatch = defaultMatches.find((match) => match.id === ownerOperatorId);
   assert.equal(defaultOwnerOperatorMatch?.namespace, "owner-operator", "Owner Operator results retain their namespace");
   assert.equal(defaultOwnerOperatorMatch?.source, "pi", "Owner Operator results retain their transcript format");
@@ -168,6 +182,9 @@ try {
   );
   assert.ok(ownerOperatorMatches.every((m) => m.namespace === "owner-operator"), "--owner-operator narrows to the OO namespace");
   assert.ok(ownerOperatorMatches.every((m) => m.source === "pi"), "Owner Operator sessions are just pi-format sessions to the primitive");
+  const codingPiMatches = run("--target-type", "pi");
+  assert.ok(idsOf(codingPiMatches).includes(externalPiId), "an explicit Pi target searches standalone Pi coding history");
+  assert.ok(!idsOf(codingPiMatches).includes(ownerOperatorId), "an explicit Pi target remains coding-only");
   assert.match(skim("--target-type", "codex"), new RegExp(`skim id=${codexId}`), "DB canonical Codex UUID resolves its rollout file");
   const any = JSON.parse(execFileSync(process.execPath, [GREP, "--query", `${NEEDLE} NEVERMATCHES`, "--any", "--json", "--target-type", "claude"], {
     env: { ...process.env, HOME: home, OO_HOME: ooHome },
@@ -255,6 +272,18 @@ try {
   assert.deepEqual(selfQuery.excludedSessions, [ownerOperatorId, codexId], "wrapper delegates both stable-id exclusions to the primitive");
   assert.ok(!idsOf(selfQuery.matches).includes(ownerOperatorId), "discovery excludes the current OO session");
   assert.ok(!idsOf(selfQuery.matches).includes(codexId), "discovery excludes the external coding caller");
+  const ownerOperatorSelfQuery = JSON.parse(execFileSync(
+    process.execPath,
+    [GREP, "--query", NEEDLE, "--json", "--owner-operator"],
+    {
+      env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CURRENT_SESSION_ID: ownerOperatorId },
+      encoding: "utf8",
+    },
+  ));
+  assert.ok(!idsOf(ownerOperatorSelfQuery.matches).includes(ownerOperatorId),
+    "OO-only discovery also excludes the current OO session");
+  assert.ok(idsOf(ownerOperatorSelfQuery.matches).includes(otherOwnerOperatorId),
+    "OO-only discovery retains other OO history");
   const selfQueryText = execFileSync(process.execPath, [GREP, "--query", CALLER_CHAIN_NEEDLE], {
     env: {
       ...process.env,

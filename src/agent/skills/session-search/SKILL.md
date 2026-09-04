@@ -62,7 +62,7 @@ query → candidate → skim → window sequence.
   stay in the same session and reduce context or use `--sort oldest` before concluding.
 - `--target-root` accepts only a configured transcript-store root. A thread's project/cwd is
   not a source root; with a DB session id, use `--skim ID` instead.
-- `--target-type claude|codex` narrows by source; `--source` is its compatibility alias.
+- `--target-type claude|codex|pi` narrows to that coding source; `--source` is its compatibility alias.
 
 ## Inspect one session
 

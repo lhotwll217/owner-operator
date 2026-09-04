@@ -63,11 +63,11 @@ for (let index = 0; index < input.length; index += 1) {
   }
 }
 
-if (!["all", "claude", "codex"].includes(targetType)) fail("--target-type must be all, claude, or codex");
+if (!["all", "claude", "codex", "pi"].includes(targetType)) fail("--target-type must be all, claude, codex, or pi");
 if (!Number.isInteger(limit) || limit < 1) fail("--limit must be a positive integer");
 if (!Number.isInteger(maxChars) || maxChars < 500) fail("--max-chars must be an integer of at least 500");
 const codingSources = loadSessionSources(ooHome)
-  .filter((source) => source.source === "claude" || source.source === "codex")
+  .filter((source) => ["claude", "codex", "pi"].includes(source.source))
   .map((source) => ({ type: source.source, root: source.root, namespace: "coding" }));
 const productStore = ownerOperatorTranscriptStore(ooHome);
 const productSource = {
@@ -78,7 +78,9 @@ const productSource = {
 };
 const sources = ownerOperator
   ? [productSource]
-  : [...codingSources, productSource];
+  : targetType === "all"
+    ? [...codingSources, productSource]
+    : codingSources;
 if (targetRoot) {
   const wanted = path.resolve(targetRoot);
   if (!sources.some((source) => path.resolve(source.root) === wanted)) {
@@ -320,9 +322,9 @@ function takeValue(flag, index, { allowLeadingDashes = false } = {}) {
 function printHelp() {
   process.stdout.write(
     "Usage: session-search.mjs (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
-    "Default discovery searches configured Claude/Codex stores plus Owner Operator history.\n" +
-    "  --owner-operator           search Owner Operator history only\n" +
-    "  --target-type claude|codex search that coding transcript format only\n" +
+    "Default discovery searches configured coding-agent stores plus Owner Operator history.\n" +
+    "  --owner-operator              search Owner Operator history only\n" +
+    "  --target-type claude|codex|pi search that coding transcript format only\n" +
     "  --target-root DIR          narrow to a configured transcript-store root\n" +
     "  --help, -h                 show this help\n",
   );
