@@ -14,6 +14,7 @@
 //   node scan-active-transcripts.mjs [--since 24h|7d|today|2026-06-04] [--sample 4] [--thread <id>]
 //      --since default = owner's settings.json `activeWindow` (rolling "1d" if unset)
 //                               [--limit 40] [--all] [--json] [--truncate 280]
+//   --limit N        caps external and product-owned candidate slices independently
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
