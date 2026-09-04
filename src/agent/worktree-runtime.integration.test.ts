@@ -20,6 +20,7 @@ import {
 } from "./agent";
 import {
   createWorktreeRuntimeRebindExtension,
+  InteractiveSessionReplacement,
   PendingWorktreeCwdChanges,
   resolveInteractiveRuntimeTarget,
   resolveOwnerOperatorTaskCwd,
@@ -105,6 +106,7 @@ try {
   ], "every startup and replacement mode uses the same stable-id resolver");
 
   let sameRuntimeSelected = false;
+  let sameRuntimeResolutionError: Error | undefined;
   const sameRuntimeManager = SessionManager.create(identityCwd, join(ooHome, "sessions"), {
     id: "same-runtime",
   });
@@ -127,6 +129,7 @@ try {
   });
   const sameRuntimeGateway = async () => ({
     async resolveWorktreeCwd(request: ResolveWorktreeCwdRequest) {
+      if (sameRuntimeResolutionError) throw sameRuntimeResolutionError;
       return sameRuntimeSelected && request.threadId === "same-runtime"
         ? { cwd: selectedCwd, selected: true as const, worktreeId: "worktree-05" }
         : { cwd: request.fallbackCwd, selected: false as const };
@@ -134,11 +137,18 @@ try {
   });
   const piServices = await ownerOperatorPiServices(ooHome);
   const actualPending = new PendingWorktreeCwdChanges();
+  const actualReplacement = new InteractiveSessionReplacement();
   let sameRuntime: Awaited<ReturnType<typeof createAgentSessionRuntime>> | undefined;
   const actualRebindExtension = createWorktreeRuntimeRebindExtension({
     pending: actualPending,
+    replacement: actualReplacement,
     rebind: async (threadId) => {
       assert.equal(sameRuntime?.session.sessionManager.getSessionId(), threadId);
+      await resolveOwnerOperatorTaskCwd(
+        sameRuntime!.session.sessionManager,
+        fallbackCwd,
+        { resolveGateway: sameRuntimeGateway },
+      );
       await sameRuntime!.switchSession(sameRuntime!.session.sessionManager.getSessionFile()!);
     },
   });
@@ -150,6 +160,8 @@ try {
       fallbackCwd,
       { resolveGateway: sameRuntimeGateway },
     );
+    const replacedThreadId = actualReplacement.complete();
+    if (replacedThreadId) actualPending.discard(replacedThreadId);
     const services = await createAgentSessionServices({
       cwd: target.cwd,
       agentDir: piServices.paths.piAgentDir,
@@ -180,6 +192,15 @@ try {
   });
   assert.equal(sameRuntime.cwd, fallbackCwd);
   sameRuntimeSelected = true;
+  sameRuntimeResolutionError = new Error("selected path disappeared");
+  const survivingSession = sameRuntime.session;
+  actualPending.record("same-runtime");
+  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled" });
+  assert.equal(sameRuntime.session, survivingSession,
+    "failed preflight does not dispose the current session before Pi's replacement factory runs");
+  assert.equal(sameRuntime.cwd, fallbackCwd,
+    "failed preflight leaves the current cwd-bound services usable");
+  sameRuntimeResolutionError = undefined;
   actualPending.record("same-runtime");
   await sameRuntime.session.extensionRunner.emit({ type: "agent_settled" });
   assert.equal(sameRuntime.cwd, selectedCwd, "post-turn replacement rebuilds cwd-bound services");
@@ -195,10 +216,12 @@ try {
   await sameRuntime.dispose();
 
   const pending = new PendingWorktreeCwdChanges();
+  const replacement = new InteractiveSessionReplacement();
   const ordering: string[] = [];
   let settledHandler: ((event: unknown, ctx: ExtensionContext) => Promise<void>) | undefined;
   const extension = createWorktreeRuntimeRebindExtension({
     pending,
+    replacement,
     rebind: async (threadId) => { ordering.push(`rebind:${threadId}`); },
   });
   extension({
@@ -222,11 +245,49 @@ try {
   await settledHandler({}, context);
   assert.equal(ordering.length, 3, "one pending selection causes one runtime rebuild");
 
+  const replacementPending = new PendingWorktreeCwdChanges();
+  const outerReplacement = new InteractiveSessionReplacement();
+  let replacementRebinds = 0;
+  let beforeSwitchHandler: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  let beforeForkHandler: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  let replacementSettledHandler: ((event: unknown, ctx: ExtensionContext) => Promise<void>) | undefined;
+  createWorktreeRuntimeRebindExtension({
+    pending: replacementPending,
+    replacement: outerReplacement,
+    rebind: async () => { replacementRebinds += 1; },
+  })({
+    on(event: string, handler: unknown) {
+      if (event === "session_before_switch") beforeSwitchHandler = handler as typeof beforeSwitchHandler;
+      if (event === "session_before_fork") beforeForkHandler = handler as typeof beforeForkHandler;
+      if (event === "agent_settled") replacementSettledHandler = handler as typeof replacementSettledHandler;
+    },
+  } as never);
+  assert.ok(beforeSwitchHandler);
+  assert.ok(beforeForkHandler);
+  assert.ok(replacementSettledHandler);
+  for (const beginReplacement of [beforeSwitchHandler, beforeForkHandler]) {
+    replacementPending.record("same-session");
+    beginReplacement!({}, context);
+    await replacementSettledHandler({}, context);
+    assert.equal(replacementRebinds, 0,
+      "settling an outgoing turn does not start a nested cwd replacement");
+    assert.equal(replacementPending.has("same-session"), true,
+      "outer replacement startup retains the selection until its resolver applies it");
+    const replacedThreadId = outerReplacement.complete();
+    assert.equal(replacedThreadId, "same-session");
+    replacementPending.discard(replacedThreadId);
+    await replacementSettledHandler({}, context);
+    assert.equal(replacementRebinds, 0,
+      "a completed outer replacement leaves no pending handler or duplicate rebind");
+  }
+
   const failedPending = new PendingWorktreeCwdChanges();
+  const failedReplacement = new InteractiveSessionReplacement();
   const notices: string[] = [];
   let failedHandler: ((event: unknown, ctx: ExtensionContext) => Promise<void>) | undefined;
   createWorktreeRuntimeRebindExtension({
     pending: failedPending,
+    replacement: failedReplacement,
     rebind: async () => { throw new Error("selected path disappeared"); },
   })({
     on(event: string, handler: unknown) {
@@ -235,12 +296,12 @@ try {
   } as never);
   assert.ok(failedHandler);
   failedPending.record("same-session");
-  await assert.rejects(() => failedHandler!({}, {
+  await failedHandler!({}, {
     ...context,
     ui: { notify: (message: string) => notices.push(message) },
-  } as unknown as ExtensionContext), /selected path disappeared/);
+  } as unknown as ExtensionContext);
   assert.match(notices.join("\n"), /Selected worktree could not be activated: selected path disappeared/,
-    "post-turn activation failure is visible instead of leaving a silent fallback");
+    "production-shaped handler failure is visibly reported even though Pi swallows extension errors");
 
   writeFileSync(join(selectedCwd, "cwd-marker.txt"), "selected runtime\n");
   writeFileSync(join(fallbackCwd, "cwd-marker.txt"), "fallback runtime\n");

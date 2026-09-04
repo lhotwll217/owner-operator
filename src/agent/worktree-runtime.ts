@@ -59,10 +59,39 @@ export class PendingWorktreeCwdChanges {
     this.threadIds.delete(threadId);
     return true;
   }
+
+  has(threadId: string): boolean {
+    return this.threadIds.has(threadId);
+  }
+
+  discard(threadId: string): void {
+    this.threadIds.delete(threadId);
+  }
+}
+
+/** Prevents a settling outgoing turn from starting a nested replacement while Pi is already
+ * replacing that session for /new, /resume, or /fork. */
+export class InteractiveSessionReplacement {
+  private threadId: string | undefined;
+
+  begin(threadId: string): void {
+    this.threadId = threadId;
+  }
+
+  includes(threadId: string): boolean {
+    return this.threadId === threadId;
+  }
+
+  complete(): string | undefined {
+    const threadId = this.threadId;
+    this.threadId = undefined;
+    return threadId;
+  }
 }
 
 export interface WorktreeRuntimeRebindOptions {
   pending: PendingWorktreeCwdChanges;
+  replacement: InteractiveSessionReplacement;
   rebind: (threadId: string) => Promise<void>;
 }
 
@@ -71,15 +100,20 @@ export function createWorktreeRuntimeRebindExtension(
   options: WorktreeRuntimeRebindOptions,
 ): ExtensionFactory {
   return (pi) => {
+    const beginReplacement = (_event: unknown, ctx: ExtensionContext): void => {
+      options.replacement.begin(ctx.sessionManager.getSessionId());
+    };
+    pi.on("session_before_switch", beginReplacement);
+    pi.on("session_before_fork", beginReplacement);
     pi.on("agent_settled", async (_event, ctx: ExtensionContext) => {
       const threadId = ctx.sessionManager.getSessionId();
+      if (options.replacement.includes(threadId)) return;
       if (!options.pending.take(threadId)) return;
       try {
         await options.rebind(threadId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         ctx.ui.notify(`Selected worktree could not be activated: ${message}`, "error");
-        throw error;
       }
     });
   };

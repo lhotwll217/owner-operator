@@ -39,8 +39,10 @@ import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { createOwnerOperatorToolDisplayExtension } from "../agent/tool-display";
 import {
   createWorktreeRuntimeRebindExtension,
+  InteractiveSessionReplacement,
   PendingWorktreeCwdChanges,
   resolveInteractiveRuntimeTarget,
+  resolveOwnerOperatorTaskCwd,
 } from "../agent/worktree-runtime";
 import { agentStateExtension } from "../agent-runs/agent-state-extension";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
@@ -61,6 +63,7 @@ configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
 const invocationCwd = ownerOperatorTaskCwd();
 const pendingCwdChanges = new PendingWorktreeCwdChanges();
+const sessionReplacement = new InteractiveSessionReplacement();
 const interactiveCustomTools = createOwnerOperatorCustomTools({}, {
   onWorktreeSelection: (threadId) => pendingCwdChanges.record(threadId),
 });
@@ -71,6 +74,7 @@ const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayEx
 let runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>> | undefined;
 const worktreeRuntimeRebindExtension = createWorktreeRuntimeRebindExtension({
   pending: pendingCwdChanges,
+  replacement: sessionReplacement,
   rebind: async (threadId) => {
     if (!runtime) throw new Error("interactive runtime is not ready");
     const manager = runtime.session.sessionManager;
@@ -79,6 +83,9 @@ const worktreeRuntimeRebindExtension = createWorktreeRuntimeRebindExtension({
     }
     const sessionFile = manager.getSessionFile();
     if (!sessionFile) throw new Error(`session ${threadId} has no persisted transcript`);
+    // Pi tears down the current runtime before calling its factory. Resolve once first so a
+    // missing or invalid selected worktree leaves the current session intact and usable.
+    await resolveOwnerOperatorTaskCwd(manager, invocationCwd);
     await runtime.switchSession(sessionFile);
   },
 });
@@ -92,6 +99,8 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     provenance,
     invocationCwd,
   );
+  const replacedThreadId = sessionReplacement.complete();
+  if (replacedThreadId) pendingCwdChanges.discard(replacedThreadId);
   const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
     cwd: target.cwd,
