@@ -6,7 +6,14 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness, AgentRunStatus, type ScanRow } from "@owner-operator/core";
+import {
+  AgentRunHarness,
+  AgentRunStatus,
+  ScheduledPayloadKind,
+  ScheduleKind,
+  type ScanRow,
+  type ScheduleDefinition,
+} from "@owner-operator/core";
 import { InMemoryEventBus } from "./event-bus";
 import { State } from "./state";
 
@@ -53,6 +60,21 @@ try {
     state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
     "the transcript-derived handoff begins eligible for enrichment",
   );
+  const needsYouSchedule: ScheduleDefinition = {
+    id: "needs-you-job",
+    name: "Needs you job",
+    enabled: true,
+    trigger: { kind: ScheduleKind.NeedsYou },
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt: "Summarize it" },
+    cwd: dir,
+    timeoutSeconds: 60,
+    revision: 1,
+    createdAt: "2026-07-17T10:00:00.000Z",
+    updatedAt: "2026-07-17T10:00:00.000Z",
+    nextRunAt: null,
+  };
+  state.saveSchedule(needsYouSchedule);
+  const queuedNeedsYouChanges = state.listNeedsYouMessageVersions();
 
   // The Operator delegates; the executor records the run and the launcher reports the child's
   // ACP session identity. That identity is what the child's transcript will surface under.
@@ -85,6 +107,11 @@ try {
   assert.ok(
     !state.listNeedsYouMessageVersions().some(({ threadId }) => threadId === "operator-thread"),
     "a pending child's parent is not a needs-you schedule input",
+  );
+  assert.equal(
+    state.claimNeedsYouScheduleRun(needsYouSchedule, queuedNeedsYouChanges),
+    null,
+    "claim-time eligibility rejects needs-you work queued before the child became active",
   );
 
   const running = state.claimNextPendingAgentRun(3)!;
