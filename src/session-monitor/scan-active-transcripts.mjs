@@ -37,6 +37,7 @@ import {
 } from "../../packages/core/src/session-hosts.mjs";
 import { loadActiveWindow, parseWindowMs } from "../../packages/core/src/settings.mjs";
 import { isSessionBoilerplate } from "../../packages/core/src/session-text.mjs";
+import { ownerOperatorProvenance } from "../../packages/core/src/session-cwd.mjs";
 
 // Every catalog format must be named here and exercised by its parser fixture. A catalog-only
 // addition fails on module load rather than appearing as a selectable but unreadable harness.
@@ -458,15 +459,8 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
       if (o.type === "session") {
         if (o.cwd) project = o.cwd;
         if (o.id) sessionId = o.id;
-      } else if (
-        namespace === "owner-operator" && o.type === "custom" &&
-        o.customType === "oo-provenance" &&
-        ["chat", "interactive", "schedule"].includes(o.data?.surface) &&
-        ["owner", "agent", "scheduler"].includes(o.data?.origin) &&
-        typeof o.data?.callerCwd === "string" && o.data.callerCwd.trim() &&
-        typeof o.data?.callerRepo === "string" && o.data.callerRepo.trim()
-      ) {
-        ooProvenance = o.data;
+      } else if (namespace === "owner-operator" && o.type === "custom") {
+        ooProvenance = ownerOperatorProvenance(o) ?? ooProvenance;
       } else if (o.type === "message") {
         const m = o.message || {};
         if (m.role === "user" || m.role === "assistant") {

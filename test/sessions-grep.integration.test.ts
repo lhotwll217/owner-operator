@@ -1,8 +1,8 @@
 // Integration: the real sessions-grep script enforces the privacy blacklist. A match inside a
 // blacklisted tree is never returned (both layers: project-dir slug, and post-parse cwd); a match
-// in a normal repo is. Also: oo's own threads live under <OO_HOME>/sessions and are found
-// by pointing the vendored primitive at that directory as typed pi sessions — never via the
-// wrapper's default `all` search. Needs ripgrep, like the skill — skips cleanly if absent.
+// in a normal repo is. Default discovery searches configured coding stores plus oo's product
+// store while preserving their namespaces; explicit filters narrow without weakening privacy.
+// Needs ripgrep, like the skill — skips cleanly if absent.
 import assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -30,6 +30,7 @@ const home = mkdtempSync(join(tmpdir(), "oo-grep-home-"));
 const ooHome = mkdtempSync(join(tmpdir(), "oo-grep-oohome-"));
 try {
   const NEEDLE = "ZZUNIQUENEEDLEZZ";
+  const CALLER_CHAIN_NEEDLE = "ZZCALLERCHAINNEEDLEZZ";
   const claudeMsg = (id: string, cwd: string, text: string) =>
     JSON.stringify({ type: "user", sessionId: id, cwd, timestamp: "2026-06-30T10:00:00.000Z", message: { content: text } }) + "\n";
   const slugOf = (cwd: string) => cwd.replace(/[^A-Za-z0-9-]/g, "-");
@@ -79,16 +80,35 @@ try {
   // oo's own threads (pi session format) in the separate Owner Operator dir.
   const ownerOperatorDir = join(ooHome, "sessions");
   mkdirSync(ownerOperatorDir, { recursive: true });
-  const writeOwnerOperatorSession = (id: string) =>
+  const writeOwnerOperatorSession = (
+    id: string,
+    text = `I already reported the ${NEEDLE} thread`,
+    callerCwd?: string,
+  ) =>
     writeFileSync(
       join(ownerOperatorDir, `${id}.jsonl`),
       JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-06-30T10:00:00.000Z", cwd: join(home, "dev", "normal-repo") }) + "\n" +
-        JSON.stringify({ type: "message", id: "m1", parentId: null, timestamp: "2026-06-30T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: `I already reported the ${NEEDLE} thread` }] } }) + "\n",
+        (callerCwd
+          ? JSON.stringify({
+              type: "custom",
+              customType: "oo-provenance",
+              timestamp: "2026-06-30T10:00:00.500Z",
+              data: {
+                surface: "chat",
+                origin: "owner",
+                callerCwd,
+                callerRepo: "Private",
+              },
+            }) + "\n"
+          : "") +
+        JSON.stringify({ type: "message", id: "m1", parentId: null, timestamp: "2026-06-30T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text }] } }) + "\n",
     );
   const ownerOperatorId = "owneropr-1111-2222-3333-444444444444";
   const otherOwnerOperatorId = "ooother-1111-2222-3333-444444444444";
-  writeOwnerOperatorSession(ownerOperatorId);
+  const privateOwnerOperatorId = "ooprivat-1111-2222-3333-444444444444";
+  writeOwnerOperatorSession(ownerOperatorId, `I already reported the ${NEEDLE} thread and ${CALLER_CHAIN_NEEDLE}`);
   writeOwnerOperatorSession(otherOwnerOperatorId);
+  writeOwnerOperatorSession(privateOwnerOperatorId, `private ${NEEDLE}`, join(privateRoot, "OO"));
 
   // Codex indexes and deep links use the canonical UUID from session_meta, while the
   // transcript filename includes a rollout timestamp. The wrapper must accept the DB id.
@@ -99,10 +119,10 @@ try {
     join(codexDir, `rollout-2026-07-10T08-30-00-${codexId}.jsonl`),
     JSON.stringify({ type: "session_meta", timestamp: "2026-07-10T08:30:00.000Z", payload: { id: codexId, cwd: okCwd, originator: "codex_cli" } }) + "\n" +
       JSON.stringify({ type: "response_item", timestamp: "2026-07-10T08:30:01.000Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "check the Codex UUID route" }] } }) + "\n" +
-      JSON.stringify({ type: "response_item", timestamp: "2026-07-10T08:30:02.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Codex UUID route works" }] } }) + "\n",
+      JSON.stringify({ type: "response_item", timestamp: "2026-07-10T08:30:02.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `Codex UUID route works with ${CALLER_CHAIN_NEEDLE}` }] } }) + "\n",
   );
 
-  const run = (...extra: string[]): { id: string; source?: string }[] => {
+  const run = (...extra: string[]): { id: string; source?: string; namespace?: string; app?: string }[] => {
     const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--json", ...extra], {
       env: { ...process.env, HOME: home, OO_HOME: ooHome },
       encoding: "utf8",
@@ -126,15 +146,27 @@ try {
   assert.ok(ids.includes(okId), "normal-repo match is returned");
   assert.ok(!ids.includes(slugId), "blacklisted project-dir slug (layer 1) is excluded");
   assert.ok(!ids.includes(cwdId), "blacklisted cwd tree (layer 2) is excluded");
+  assert.ok(!ids.includes(ownerOperatorId), "an explicit Claude target remains coding-only");
   assert.ok(idsOf(run("--source", "claude")).includes(okId), "wrapper preserves the upstream --source compatibility alias");
 
-  assert.ok(!idsOf(run()).includes(ownerOperatorId), "Owner Operator sessions stay out of the wrapper's default `all` search");
+  const defaultMatches = run();
+  assert.ok(idsOf(defaultMatches).includes(okId), "default discovery includes configured coding history");
+  assert.ok(idsOf(defaultMatches).includes(ownerOperatorId), "default discovery includes Owner Operator history");
+  assert.ok(!idsOf(defaultMatches).includes(privateOwnerOperatorId),
+    "default discovery applies the blacklist to OO's provenance cwd rather than its stable header cwd");
+  assert.equal(defaultMatches.find((match) => match.id === okId)?.namespace, "coding",
+    "coding results retain their namespace");
+  const defaultOwnerOperatorMatch = defaultMatches.find((match) => match.id === ownerOperatorId);
+  assert.equal(defaultOwnerOperatorMatch?.namespace, "owner-operator", "Owner Operator results retain their namespace");
+  assert.equal(defaultOwnerOperatorMatch?.source, "pi", "Owner Operator results retain their transcript format");
+  assert.equal(defaultOwnerOperatorMatch?.app, "Owner Operator", "Owner Operator results retain product provenance");
   const ownerOperatorMatches = runOwnerOperator();
   assert.deepEqual(
     idsOf(ownerOperatorMatches).sort(),
     [ownerOperatorId, otherOwnerOperatorId].sort(),
     "the skill policy points the primitive at Owner Operator sessions",
   );
+  assert.ok(ownerOperatorMatches.every((m) => m.namespace === "owner-operator"), "--owner-operator narrows to the OO namespace");
   assert.ok(ownerOperatorMatches.every((m) => m.source === "pi"), "Owner Operator sessions are just pi-format sessions to the primitive");
   assert.match(skim("--target-type", "codex"), new RegExp(`skim id=${codexId}`), "DB canonical Codex UUID resolves its rollout file");
   const any = JSON.parse(execFileSync(process.execPath, [GREP, "--query", `${NEEDLE} NEVERMATCHES`, "--any", "--json", "--target-type", "claude"], {
@@ -205,19 +237,39 @@ try {
     encoding: "utf8",
   });
   assert.ok(Buffer.byteLength(boundedText) <= 1200, "wrapper does not expand the primitive's requested output aperture while overfetching");
-  const selfQuery = JSON.parse(execFileSync(process.execPath, [GREP, "--query", "Codex UUID route", "--json", "--target-type", "codex"], {
-    env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CALLER_SESSION_ID: codexId },
+  const selfQuery = JSON.parse(execFileSync(process.execPath, [GREP, "--query", CALLER_CHAIN_NEEDLE, "--json"], {
+    env: {
+      ...process.env,
+      HOME: home,
+      OO_HOME: ooHome,
+      OO_CURRENT_SESSION_ID: ownerOperatorId,
+      OO_CALLER_SESSION_ID: codexId,
+    },
     encoding: "utf8",
   }));
-  assert.equal(selfQuery.callerSessionExclusion.applied, true, "query output makes caller exclusion explicit");
-  assert.equal(selfQuery.callerSessionExclusion.sessionId, codexId, "query output names the excluded caller");
-  assert.deepEqual(selfQuery.excludedSessions, [codexId], "wrapper delegates stable-id exclusion to the shared primitive");
-  assert.ok(!idsOf(selfQuery.matches).includes(codexId), "discovery excludes the calling coding session");
-  const selfQueryText = execFileSync(process.execPath, [GREP, "--query", "Codex UUID route", "--target-type", "codex"], {
-    env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CALLER_SESSION_ID: codexId },
+  assert.deepEqual(
+    selfQuery.discoverySessionExclusions,
+    { applied: true, sessionIds: [ownerOperatorId, codexId] },
+    "query output names the excluded current OO and external caller sessions",
+  );
+  assert.deepEqual(selfQuery.excludedSessions, [ownerOperatorId, codexId], "wrapper delegates both stable-id exclusions to the primitive");
+  assert.ok(!idsOf(selfQuery.matches).includes(ownerOperatorId), "discovery excludes the current OO session");
+  assert.ok(!idsOf(selfQuery.matches).includes(codexId), "discovery excludes the external coding caller");
+  const selfQueryText = execFileSync(process.execPath, [GREP, "--query", CALLER_CHAIN_NEEDLE], {
+    env: {
+      ...process.env,
+      HOME: home,
+      OO_HOME: ooHome,
+      OO_CURRENT_SESSION_ID: ownerOperatorId,
+      OO_CALLER_SESSION_ID: codexId,
+    },
     encoding: "utf8",
   });
-  assert.match(selfQueryText, new RegExp(`caller_session_exclusion=applied:${codexId}`), "text output explains discovery exclusion");
+  assert.match(
+    selfQueryText,
+    new RegExp(`discovery_session_exclusions=applied:${ownerOperatorId},${codexId}`),
+    "text output explains the caller-chain exclusion",
+  );
   for (const flagLikeQuery of ["--session", "--skim"]) {
     const flagLike = JSON.parse(execFileSync(
       process.execPath,
@@ -225,7 +277,7 @@ try {
       { env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CALLER_SESSION_ID: codexId }, encoding: "utf8" },
     ));
     assert.equal(
-      flagLike.callerSessionExclusion.applied,
+      flagLike.discoverySessionExclusions.applied,
       true,
       `a ${flagLikeQuery} query value is not mistaken for a navigation flag`,
     );
@@ -269,6 +321,18 @@ try {
     encoding: "utf8",
   });
   assert.match(directKnownId, new RegExp(`skim id=${codexId}`), "discovery-only exclusion does not change ordinary known-ID browsing");
+  const directOwnerOperatorId = execFileSync(process.execPath, [GREP, "--skim", ownerOperatorId], {
+    env: {
+      ...process.env,
+      HOME: home,
+      OO_HOME: ooHome,
+      OO_CURRENT_SESSION_ID: ownerOperatorId,
+      OO_CALLER_SESSION_ID: codexId,
+    },
+    encoding: "utf8",
+  });
+  assert.match(directOwnerOperatorId, new RegExp(`skim id=${ownerOperatorId}`),
+    "default explicit-ID retrieval can read the current OO session despite discovery exclusions");
   const pointer = execFileSync(process.execPath, [GREP, "--session", okId, "--at", "0", "--target-type", "claude"], {
     env: { ...process.env, HOME: home, OO_HOME: ooHome },
     encoding: "utf8",
@@ -285,7 +349,7 @@ try {
     encoding: "utf8",
   });
   assert.match(scopedText, new RegExp(`session=${okId}`), "scoped text makes the stable session boundary explicit");
-  assert.match(scopedText, /caller_session_exclusion=not-needed:explicit-session-scope/, "explicit navigation is distinguished from unavailable caller provenance");
+  assert.match(scopedText, /discovery_session_exclusions=not-needed:explicit-session-scope/, "explicit navigation is distinguished from unavailable caller provenance");
   const scopedOmitted = execFileSync(process.execPath, [GREP, "--query", budgetNeedle, "--session", budgetId, "--sort", "oldest", "--max-chars", "1200", "--target-type", "claude"], {
     env: { ...process.env, HOME: home, OO_HOME: ooHome },
     encoding: "utf8",
@@ -297,7 +361,7 @@ try {
   });
   assert.equal(wrongRoot.status, 1);
   assert.match(wrongRoot.stderr, /configured session source/, "a project cwd is rejected as a transcript source root");
-  process.stdout.write("ok — sessions-grep: blacklist layers hold; Owner Operator sessions use typed sources + target-root\n");
+  process.stdout.write("ok — sessions-grep: combined provenance, OO narrowing, caller-chain exclusion, direct IDs, and blacklist layers hold\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });

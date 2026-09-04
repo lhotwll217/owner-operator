@@ -14,6 +14,7 @@ type FileToolName = "read" | "grep" | "find" | "ls" | "edit" | "write";
 const ooHome = (): string => process.env.OO_HOME ?? path.join(homedir(), ".owner-operator");
 export interface PrivacyToolGuardOptions {
   callerSessionId?: string;
+  currentSessionId?: string;
 }
 function normalizeInputPath(raw: string, cwd: string): string {
   let p = raw.trim();
@@ -162,6 +163,7 @@ export function addOwnerOperatorBashEnvironment(command: string, opts: PrivacyTo
     `OO_HOME=${shellQuote(ooHome())}`,
   ];
   if (opts.callerSessionId) assignments.push(`OO_CALLER_SESSION_ID=${shellQuote(opts.callerSessionId)}`);
+  if (opts.currentSessionId) assignments.push(`OO_CURRENT_SESSION_ID=${shellQuote(opts.currentSessionId)}`);
   return `export ${assignments.join(" ")}\n${command}`;
 }
 
@@ -191,7 +193,10 @@ export function guardOwnerOperatorToolCall(
 export const createPrivacyToolGuardExtension = (
   opts: PrivacyToolGuardOptions = {},
 ): ExtensionFactory => (pi) => {
-  pi.on("tool_call", (event, ctx) => guardOwnerOperatorToolCall(event, ctx.cwd, opts));
+  pi.on("tool_call", (event, ctx) => guardOwnerOperatorToolCall(event, ctx.cwd, {
+    ...opts,
+    currentSessionId: ctx.sessionManager.getSessionId(),
+  }));
 };
 
 export const privacyToolGuardExtension = createPrivacyToolGuardExtension();

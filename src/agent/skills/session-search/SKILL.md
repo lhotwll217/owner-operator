@@ -11,13 +11,12 @@ Run the bundled privacy-aware helper through `bash`. `OO_INSTALL_ROOT` points at
 {"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'TEXT' --since 7d"}
 ```
 
-Discovery queries exclude the calling coding-agent session when its stable ID is available
-from provenance. The query header reports `caller_session_exclusion=applied:ID` or
-`unavailable`, so prompt-echo risk is explicit. Owner Operator's own saved conversations
-are a separate namespace, excluded from normal coding-session search; add
-`--owner-operator` only when the user explicitly asks for Owner Operator history or scheduled
-runs. Unqualified “any session” or “every session” broadens only within the normal coding-session
-namespace; it does not opt into Owner Operator history.
+Discovery queries search configured coding-agent stores and Owner Operator history by default,
+preserve each result's namespace and transcript format, and exclude both the current Owner
+Operator session and its external coding-agent caller when their stable IDs are available. The
+query header reports `discovery_session_exclusions=applied:ID,...` or `unavailable`, so
+prompt-echo risk is explicit. Add `--owner-operator` only to narrow discovery to Owner Operator
+history or scheduled runs.
 
 ## Choose the lightest search mode
 
@@ -71,7 +70,7 @@ Use `--skim ID` for a bounded view of one session. Short sessions are returned l
 within `--max-chars`; long sessions preserve the head/tail and sample the middle. Increase
 the aperture or use a shown message index with `--session ID --at IDX` when needed.
 
-Add `--owner-operator` only when searching Owner Operator's own isolated transcripts, such as a prior scheduled run or prior Owner Operator conversation.
+Add `--owner-operator` only when the requested search scope is explicitly limited to Owner Operator's own transcripts, such as scheduled runs.
 
 Use one primary mode: `--query`, `--skim ID`, or `--session ID --at IDX`. A query may add
 `--session ID` as its explicit scope.

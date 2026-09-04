@@ -44,11 +44,10 @@ never mixed with coding sessions, and labeled with its surface and caller repo.
   resumes a specific one.
 - Agents pass `--from-session <id>` (or `OO_FROM_SESSION`) so the audit trail
   records who called. Codex callers are detected from `CODEX_THREAD_ID`.
-- Transcript discovery excludes the caller's own session, so a caller never
-  retrieves its own prompt as evidence.
-- oo's saved conversations stay out of default coding-session search; the
-  session-search skill reaches them only through its explicit `--owner-operator`
-  scope.
+- Open-ended transcript discovery excludes both the current oo thread and its external
+  coding-session caller; explicit stable-ID retrieval remains available.
+- Transcript discovery searches configured coding history and oo's saved conversations by
+  default while retaining their source namespaces. `--owner-operator` narrows to oo history.
 
 ## Model-free calls
 

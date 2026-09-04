@@ -27,7 +27,7 @@ import {
   ownerOperatorPrompt,
   repoRoot,
 } from "../agent/agent";
-import { privacyToolGuardExtension } from "../agent/privacy-tools";
+import { createPrivacyToolGuardExtension } from "../agent/privacy-tools";
 import {
   configurePermissionSystemEnvironment,
   createPermissionSettingsExtension,
@@ -45,6 +45,7 @@ if (!process.stdout.isTTY) {
 }
 
 const prompt = ownerOperatorPrompt();
+const provenance = ooProvenance("interactive");
 // Permission-system initialization points Pi at OO_HOME. Preserve standalone Pi discovery inputs
 // first so onboarding never offers Owner Operator's own sessions as an external transcript source.
 const standalonePiEnvironment = { ...process.env };
@@ -59,6 +60,7 @@ const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayEx
 
 // The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
 // whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
+// The privacy guard reads the active session ID from each runtime's tool-call context.
 const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
@@ -73,7 +75,10 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       additionalExtensionPaths: [permissionSystemExtensionPath()],
       extensionFactories: [
         { name: "owner-operator-tool-display", factory: ownerOperatorToolDisplayExtension },
-        { name: "owner-operator-privacy-guard", factory: privacyToolGuardExtension },
+        {
+          name: "owner-operator-privacy-guard",
+          factory: createPrivacyToolGuardExtension({ callerSessionId: provenance.fromSession }),
+        },
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },
         { name: "owner-operator-agent-state", factory: agentStateExtension },
@@ -104,7 +109,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
 const runtime = await createAgentSessionRuntime(createRuntime, {
   cwd: process.cwd(),
   agentDir: paths.piAgentDir,
-  sessionManager: createOoSession(ooProvenance("interactive")), // saved + labeled like every oo surface
+  sessionManager: createOoSession(provenance), // saved + labeled like every oo surface
 });
 
 initTheme(runtime.services.settingsManager.getTheme(), true);
