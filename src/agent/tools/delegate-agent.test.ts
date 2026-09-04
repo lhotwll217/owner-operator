@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { resolve } from "node:path";
 import {
   AgentRunHarness,
   AgentRunStatus,
@@ -58,19 +59,27 @@ await tool.execute("explicit-cwd", {
 }, undefined, undefined, context);
 assert.equal(inputs[1]?.cwd, explicitCwd, "explicit child cwd is forwarded unchanged");
 
+await tool.execute("relative-cwd", {
+  harness: AgentRunHarness.ClaudeCode,
+  task: "use a child directory within the selected workspace",
+  cwd: "packages/core",
+}, undefined, undefined, context);
+assert.equal(inputs[2]?.cwd, resolve(activeToolCwd, "packages/core"),
+  "a relative explicit cwd resolves from the active tool context, not the daemon process");
+
 await tool.execute("default-claude", {
   harness: AgentRunHarness.ClaudeCode,
   task: "research failures",
   cwd: process.cwd(),
 }, undefined, undefined, context);
-assert.equal(inputs[2]?.model, undefined, "the tool leaves unpinned model resolution to the launch boundary");
+assert.equal(inputs[3]?.model, undefined, "the tool leaves unpinned model resolution to the launch boundary");
 
 await tool.execute("default-codex", {
   harness: AgentRunHarness.Codex,
   task: "review changes",
   cwd: process.cwd(),
 }, undefined, undefined, context);
-assert.equal(inputs[3]?.model, undefined, "the tool does not inherit an ambient Codex harness default");
+assert.equal(inputs[4]?.model, undefined, "the tool does not inherit an ambient Codex harness default");
 
 await tool.execute("pinned-codex", {
   harness: AgentRunHarness.Codex,
@@ -78,7 +87,7 @@ await tool.execute("pinned-codex", {
   cwd: process.cwd(),
   model: "caller-selected-model",
 }, undefined, undefined, context);
-assert.equal(inputs[4]?.model, "caller-selected-model", "a caller-pinned model always wins");
+assert.equal(inputs[5]?.model, "caller-selected-model", "a caller-pinned model always wins");
 
 await tool.execute("pinned-effort", {
   harness: AgentRunHarness.Codex,
@@ -86,7 +95,7 @@ await tool.execute("pinned-effort", {
   cwd: process.cwd(),
   effort: "xhigh",
 }, undefined, undefined, context);
-assert.equal(inputs[5]?.effort, "xhigh", "the tool preserves a caller-pinned effort");
+assert.equal(inputs[6]?.effort, "xhigh", "the tool preserves a caller-pinned effort");
 
 await tool.execute("frontier-effort", {
   harness: AgentRunHarness.Codex,
@@ -94,7 +103,7 @@ await tool.execute("frontier-effort", {
   cwd: process.cwd(),
   effort: "ultra",
 }, undefined, undefined, context);
-assert.equal(inputs[6]?.effort, "ultra", "the tool preserves an advertised frontier effort exactly");
+assert.equal(inputs[7]?.effort, "ultra", "the tool preserves an advertised frontier effort exactly");
 
 await tool.execute("null-effort", {
   harness: AgentRunHarness.Codex,
@@ -102,7 +111,7 @@ await tool.execute("null-effort", {
   cwd: process.cwd(),
   effort: null,
 }, undefined, undefined, context);
-assert.ok(Object.hasOwn(inputs[7] ?? {}, "effort"), "explicit null remains distinguishable from omission");
-assert.equal(inputs[7]?.effort, null, "the tool forwards explicit null effort");
+assert.ok(Object.hasOwn(inputs[8] ?? {}, "effort"), "explicit null remains distinguishable from omission");
+assert.equal(inputs[8]?.effort, null, "the tool forwards explicit null effort");
 
 process.stdout.write("ok — delegate_agent schema and forwarding preserve cwd, model, and nullable effort pins\n");
