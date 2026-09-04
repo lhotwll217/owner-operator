@@ -132,10 +132,13 @@ and terminal styling are adapters over that contract.
   [environmental projection](../src/agent-runs/agent-state-projection.ts) also prevents clients from
   offering a control for an unavailable workspace. Both controls fail closed rather than
   substituting a fresh context.
-- **Workspace follows the active root runtime.** When `delegate_agent` omits `cwd`, the tool uses
-  Pi's active tool-context cwd, including a worktree selected by that OO root; it never consults
-  the daemon process cwd. An explicit child cwd still wins. The initial child row records the
-  resolved absolute path, and retry/resume copy that immutable cwd from the original run lineage.
+- **Workspace follows the root's durable selection.** Immediately before an omitted-cwd launch,
+  `delegate_agent` resolves the exact parent thread through the Gateway, using Pi's active
+  tool-context cwd as the fallback. A worktree selected earlier in the same model turn therefore
+  wins before the post-turn runtime rebind; an unavailable or mismatched selection fails closed.
+  An explicit absolute child cwd remains exact, and an explicit relative cwd resolves from the
+  active tool-context cwd. The initial child row records the resolved absolute path, and
+  retry/resume copy that immutable cwd from the original run lineage.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.

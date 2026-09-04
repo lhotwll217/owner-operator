@@ -110,6 +110,11 @@ try {
     { topic: "Daemon foundation", nextSteps: "Implement the state seam", priority: 4 },
     "2026-07-09T09:59:00.000Z",
   );
+  state.registerAndSelectWorktree("thread-1", {
+    repository: "owner-operator",
+    path: "/worktrees/owner-operator/ticket-07",
+    gitCommonDir: "/repositories/owner-operator/.git",
+  });
   const gatewayFixture = JSON.parse(readFileSync(
     new URL("../../apps/widget/Tests/Fixtures/session-state.gateway.json", import.meta.url),
     "utf8",

@@ -45,6 +45,8 @@ export interface SessionStateRow {
   id: string;
   source: string;
   repo: string;
+  /** Current task cwd; a durable worktree selection overrides transcript provenance. */
+  project: string | null;
   app: string;
   topic: string;
   generatedTopic: string;

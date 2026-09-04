@@ -634,7 +634,9 @@ export class ThreadDb {
              OR ${HAS_ACTIVE_CHILD_SQL})`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
-      `SELECT t.id, COALESCE(t.source, '') AS source, COALESCE(t.repo, '') AS repo,
+      `SELECT t.id, COALESCE(t.source, '') AS source,
+              COALESCE(selected_worktree.repository, t.repo, '') AS repo,
+              COALESCE(selected_worktree.path, t.project) AS project,
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
@@ -651,10 +653,13 @@ export class ThreadDb {
                 ORDER BY run.created_at DESC LIMIT 1) AS parentThreadId
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
+       LEFT JOIN thread_worktrees selection ON selection.thread_id = t.id
+       LEFT JOIN worktrees selected_worktree ON selected_worktree.id = selection.worktree_id
        ${where}
        ORDER BY CASE ${EFFECTIVE_THREAD_STATE_SQL}
                   WHEN 'needs-you' THEN 0 WHEN 'working' THEN 1 WHEN 'idle' THEN 2 ELSE 3 END,
-                t.last_message_at DESC, t.repo COLLATE NOCASE ASC`,
+                t.last_message_at DESC,
+                COALESCE(selected_worktree.repository, t.repo, '') COLLATE NOCASE ASC`,
     );
     const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
       Array<Omit<SessionStateRow, "lastActive">>;

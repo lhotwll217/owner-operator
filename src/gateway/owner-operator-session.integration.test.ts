@@ -28,6 +28,19 @@ const root: ScanRow = {
   working: false,
 };
 state.recordObservation(root);
+state.registerAndSelectWorktree(root.id, {
+  repository: "owner-operator",
+  path: "/worktrees/owner-operator/ticket-07",
+  gitCommonDir: "/repositories/owner-operator/.git",
+});
+const fallbackRoot: ScanRow = {
+  ...root,
+  id: "oo-root-gateway-unselected",
+  repo: "issue-132",
+  project: "/tasks/issue-132",
+  topic: "Monitor an unselected root",
+};
+state.recordObservation(fallbackRoot);
 
 const health = (): DaemonHealth => ({
   ok: true, port: 0, pid: process.pid, startedAt: "now", fingerprint: "test", stale: false,
@@ -55,12 +68,33 @@ try {
   });
   assert.equal(response.status, 200);
   const rows = await response.json() as Array<Record<string, unknown>>;
+  const selected = rows.find((row) => row.id === root.id);
+  const fallback = rows.find((row) => row.id === fallbackRoot.id);
   assert.deepEqual(
-    { id: rows[0]?.id, source: rows[0]?.source, repo: rows[0]?.repo, app: rows[0]?.app, parent: rows[0]?.parentThreadId },
-    { id: root.id, source: "pi", repo: "issue-131", app: "Owner Operator", parent: null },
-    "Gateway exposes the normal root projection without an OO-specific model",
+    {
+      id: selected?.id,
+      source: selected?.source,
+      repo: selected?.repo,
+      project: selected?.project,
+      app: selected?.app,
+      parent: selected?.parentThreadId,
+    },
+    {
+      id: root.id,
+      source: "pi",
+      repo: "owner-operator",
+      project: "/worktrees/owner-operator/ticket-07",
+      app: "Owner Operator",
+      parent: null,
+    },
+    "Gateway exposes the selected worktree's recorded repository and path",
   );
-  process.stdout.write("ok — OO root crosses State → Gateway session-state\n");
+  assert.deepEqual(
+    { repo: fallback?.repo, project: fallback?.project },
+    { repo: fallbackRoot.repo, project: fallbackRoot.project },
+    "Gateway retains transcript provenance when the root has no worktree selection",
+  );
+  process.stdout.write("ok — OO root worktree projection crosses State → Gateway session-state\n");
 } finally {
   await gateway.close();
   state.close();

@@ -62,6 +62,7 @@ struct SessionStateTests {
     private func row(
         id: String,
         repo: String = "repo",
+        project: String? = nil,
         source: String = "claude",
         app: String = "App",
         state: String = "idle",
@@ -80,6 +81,7 @@ struct SessionStateTests {
             "state": state, "lastActive": "now", "createdAt": "2026-01-01T00:00:00.000Z",
             "lastActiveAt": lastMessageAt, "lastMessageAt": lastMessageAt, "stateSince": stateSince,
         ]
+        if let project { d["project"] = project }
         if let generatedTopic { d["generatedTopic"] = generatedTopic }
         if let ownerTitle { d["ownerTitle"] = ownerTitle }
         if let nextSteps { d["nextSteps"] = nextSteps }
@@ -119,6 +121,13 @@ struct SessionStateTests {
         #expect(decoded[0].nextSteps == "Implement the state seam")
         #expect(decoded[0].priority == 4)
         #expect(decoded[0].state == .needsYou)
+        #expect(decoded[0].repo == "owner-operator")
+        #expect(decoded[0].project == "/worktrees/owner-operator/ticket-07")
+        let fallback = try #require(rows([row(
+            id: "thread-2", repo: "issue-132", project: "/tasks/issue-132", source: "pi", app: "Owner Operator"
+        )]).first)
+        #expect(fallback.repo == "issue-132")
+        #expect(fallback.project == "/tasks/issue-132")
     }
 
     @Test func agentStateGatewayContractPreservesSharedVocabularyAndOrder() throws {

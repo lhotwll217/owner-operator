@@ -29,8 +29,6 @@ export type ThreadState = "needs-you" | "working" | "idle" | "done";
 export interface ScanRow {
   id: string;
   source: string;
-  /** Store namespace when the store has product-specific attribution. */
-  namespace?: string;
   repo: string;
   /** Session cwd (absolute) — the identity the privacy blacklist matches on. */
   project?: string;

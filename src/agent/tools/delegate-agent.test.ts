@@ -5,12 +5,22 @@ import {
   AgentRunStatus,
   type AgentRunCreateInput,
   type GatewayApi,
+  type ResolveWorktreeCwdRequest,
 } from "@owner-operator/core";
 import { agentRunFixture as run } from "../../../test/fixtures/agent-run";
 import { createDelegateAgentTool } from "./delegate-agent";
 
 const inputs: AgentRunCreateInput[] = [];
+const resolutions: ResolveWorktreeCwdRequest[] = [];
+let resolutionError: Error | undefined;
 const backend = {
+  async resolveWorktreeCwd(request: ResolveWorktreeCwdRequest) {
+    resolutions.push(request);
+    if (resolutionError) throw resolutionError;
+    return request.threadId === "parent-thread"
+      ? { cwd: "/durably-selected/root-worktree", selected: true as const, worktreeId: "worktree-07" }
+      : { cwd: request.fallbackCwd, selected: false as const };
+  },
   async delegateAgent(input: AgentRunCreateInput) {
     inputs.push(input);
     return run(`run-${inputs.length}`, AgentRunStatus.Pending, {
@@ -23,7 +33,7 @@ const backend = {
     });
   },
   async waitAgentRun() { throw new Error("wait not expected"); },
-} as Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
+} as Pick<GatewayApi, "delegateAgent" | "resolveWorktreeCwd" | "waitAgentRun">;
 const tool = createDelegateAgentTool({ resolveGateway: async () => backend });
 assert.match(tool.description, /do not poll/i, "the tool tells the Operator that completion is delivered automatically");
 assert.match(tool.description, /omits model or effort.*MUST follow.*select-harness-for-delegation/i,
@@ -48,8 +58,11 @@ await tool.execute("omitted-cwd", {
   harness: AgentRunHarness.ClaudeCode,
   task: "inherit the active root workspace",
 }, undefined, undefined, context);
-assert.equal(inputs[0]?.cwd, activeToolCwd, "omitted cwd inherits the active tool context, not the daemon process");
+assert.equal(inputs[0]?.cwd, "/durably-selected/root-worktree",
+  "a durable selection overrides a stale active tool context in the same turn");
 assert.equal(inputs[0]?.parentThreadId, "parent-thread", "cwd inheritance does not replace root session identity");
+assert.deepEqual(resolutions[0], { threadId: "parent-thread", fallbackCwd: activeToolCwd },
+  "omitted cwd resolves the exact root selection with the active context as fallback");
 
 const explicitCwd = "/explicit/child-workspace";
 await tool.execute("explicit-cwd", {
@@ -66,6 +79,7 @@ await tool.execute("relative-cwd", {
 }, undefined, undefined, context);
 assert.equal(inputs[2]?.cwd, resolve(activeToolCwd, "packages/core"),
   "a relative explicit cwd resolves from the active tool context, not the daemon process");
+assert.equal(resolutions.length, 1, "explicit absolute and relative cwd never consult root selection");
 
 await tool.execute("default-claude", {
   harness: AgentRunHarness.ClaudeCode,
@@ -113,5 +127,22 @@ await tool.execute("null-effort", {
 }, undefined, undefined, context);
 assert.ok(Object.hasOwn(inputs[8] ?? {}, "effort"), "explicit null remains distinguishable from omission");
 assert.equal(inputs[8]?.effort, null, "the tool forwards explicit null effort");
+
+const unselectedContext = {
+  cwd: "/unselected/fallback",
+  sessionManager: { getSessionId: () => "unselected-thread" },
+} as Parameters<typeof tool.execute>[4];
+await tool.execute("unselected-cwd", {
+  harness: AgentRunHarness.Codex,
+  task: "retain the active workspace",
+}, undefined, undefined, unselectedContext);
+assert.equal(inputs[9]?.cwd, unselectedContext.cwd, "no durable selection retains the active context fallback");
+
+resolutionError = new Error("selected worktree is unavailable or has changed Git identity");
+await assert.rejects(() => tool.execute("invalid-selection", {
+  harness: AgentRunHarness.Codex,
+  task: "fail before launch",
+}, undefined, undefined, context), /selected worktree is unavailable or has changed Git identity/);
+assert.equal(inputs.length, 10, "an unavailable or mismatched selection fails before delegation");
 
 process.stdout.write("ok — delegate_agent schema and forwarding preserve cwd, model, and nullable effort pins\n");

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { DomainEventKind, type DomainEvent } from "@owner-operator/core";
+import { DomainEventKind, type DomainEvent, type ScanRow } from "@owner-operator/core";
 import { State } from "./state";
 
 const root = mkdtempSync(join(tmpdir(), "oo-state-worktrees-"));
@@ -11,6 +11,20 @@ const dbPath = join(root, "state.db");
 const events: DomainEvent[] = [];
 const state = new State(dbPath, { now: () => "2026-09-04T12:00:00.000Z" });
 state.bus.subscribe((event) => { events.push(event); });
+const observation = (id: string): ScanRow => ({
+  id,
+  source: "pi",
+  repo: "transcript-repository",
+  project: "/transcript/task/path",
+  app: "Owner Operator",
+  topic: "Selected workspace projection",
+  lastRole: "assistant",
+  createdAt: "2026-09-04T11:00:00.000Z",
+  lastMessageAt: "2026-09-04T11:59:00.000Z",
+  secondsSinceLastMessage: 60,
+  secondsSinceActivity: 60,
+  working: false,
+});
 
 try {
   const first = state.registerAndSelectWorktree("root-before-ingestion", {
@@ -30,6 +44,20 @@ try {
   assert.equal(state.selectedWorktree("root-before-ingestion")?.id, second.id,
     "one root selection is replaced rather than appended");
   assert.equal(state.listWorktrees().length, 2, "both OO creation records remain registered");
+
+  state.recordObservation(observation("root-before-ingestion"));
+  state.recordObservation(observation("unselected-root"));
+  const projected = new Map(state.listSessionState().map((row) => [row.id, row]));
+  assert.deepEqual(
+    { repo: projected.get("root-before-ingestion")?.repo, project: projected.get("root-before-ingestion")?.project },
+    { repo: second.repository, project: second.path },
+    "a durable selection overrides transcript repository and project even when State cannot inspect its path",
+  );
+  assert.deepEqual(
+    { repo: projected.get("unselected-root")?.repo, project: projected.get("unselected-root")?.project },
+    { repo: "transcript-repository", project: "/transcript/task/path" },
+    "an unselected root retains transcript provenance in the session projection",
+  );
 
   state.selectWorktree("later-root", first.id);
   assert.equal(state.selectedWorktree("later-root")?.id, first.id,

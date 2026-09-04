@@ -153,6 +153,7 @@ struct SessionStateRow: Decodable, Identifiable {
     let id: String
     let source: String
     let repo: String
+    let project: String?
     let app: String
     let topic: String
     let generatedTopic: String?
@@ -176,7 +177,7 @@ struct SessionStateRow: Decodable, Identifiable {
     var nestingDepth: Int = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, source, repo, app, topic, generatedTopic, ownerTitle, summary, nextSteps, priority
+        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, nextSteps, priority
         case state, stateReason, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
         case diffAdded, diffDeleted, parentThreadId
     }
@@ -186,6 +187,7 @@ struct SessionStateRow: Decodable, Identifiable {
         id = try c.decode(String.self, forKey: .id)
         source = (try? c.decode(String.self, forKey: .source)) ?? "?"
         repo = (try? c.decode(String.self, forKey: .repo)) ?? "?"
+        project = try? c.decode(String.self, forKey: .project)
         app = (try? c.decode(String.self, forKey: .app)) ?? "?"
         topic = (try? c.decode(String.self, forKey: .topic)) ?? "(untitled)"
         generatedTopic = try? c.decode(String.self, forKey: .generatedTopic)

@@ -55,7 +55,10 @@ SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its 
 writer. The active `/session-state` response is a projection over `threads`, the latest dense
 `thread_details` version, and active delegated-child relationships; there is no stored snapshot or
 embedded client store. A root with a pending or running child projects as `working` without
-rewriting its transcript-derived state.
+rewriting its transcript-derived state. Once a root has a worktree selection, the projection uses
+that registered worktree's repository and path for `repo` and `project`; without a selection it
+retains transcript provenance. Projection does not inspect path availability, so an unavailable
+selection stays visible for diagnosis.
 `worktrees` stores only Owner Operator creation provenance and Git common-directory identity;
 `thread_worktrees` stores one current selection per root without requiring prior transcript
 ingestion. Git remains authoritative for branch, HEAD, dirty state, and live topology.

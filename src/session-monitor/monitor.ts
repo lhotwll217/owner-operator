@@ -41,7 +41,6 @@ async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]>
   return parsed.threads.map((thread): ScanRow => ({
     id: String(thread.id),
     source: String(thread.source ?? ""),
-    ...(typeof thread.namespace === "string" ? { namespace: thread.namespace } : {}),
     repo: String(thread.repo ?? ""),
     ...(typeof thread.project === "string" ? { project: thread.project } : {}),
     ...(typeof thread.file === "string" ? { transcriptPath: thread.file } : {}),
