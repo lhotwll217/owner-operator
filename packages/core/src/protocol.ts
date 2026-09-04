@@ -3,6 +3,12 @@ import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
 import type { ThreadState } from "./status";
+import type {
+  ResolveWorktreeCwdRequest,
+  ResolveWorktreeCwdResult,
+  UseWorktreeRequest,
+  UseWorktreeResult,
+} from "./worktrees";
 
 export const DEFAULT_DAEMON_PORT = 47711;
 
@@ -39,6 +45,8 @@ export interface SessionStateRow {
   id: string;
   source: string;
   repo: string;
+  /** Current task cwd; a durable worktree selection overrides transcript provenance. */
+  project: string | null;
   app: string;
   topic: string;
   generatedTopic: string;
@@ -104,6 +112,8 @@ export interface GatewayApi {
   resumeAgentRun(id: string, task: string): Promise<AgentRun>;
   waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
+  useWorktree(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
+  resolveWorktreeCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
   /** Connection callbacks bracket each live SSE stream, including replacement reconnects. */
   subscribe(
     listener: (event: GatewayEvent) => void,

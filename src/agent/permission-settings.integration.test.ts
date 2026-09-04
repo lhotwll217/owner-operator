@@ -218,6 +218,7 @@ try {
       manage_agent_run: "ask",
       get_harness_details: "allow",
       manage_delegated_baseline: "ask",
+      use_worktree: "ask",
     },
     "every registered tool has an explicit permission classification",
   );

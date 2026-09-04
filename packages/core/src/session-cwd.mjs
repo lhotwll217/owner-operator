@@ -29,6 +29,30 @@ export function firstCwd(raw) {
   return null;
 }
 
+/** Return a validated product-owned invocation stamp, or null for any other entry. */
+export function ownerOperatorProvenance(entry) {
+  if (
+    entry?.type !== "custom" || entry.customType !== "oo-provenance" ||
+    !["chat", "interactive", "schedule"].includes(entry.data?.surface) ||
+    !["owner", "agent", "scheduler"].includes(entry.data?.origin) ||
+    typeof entry.data?.callerCwd !== "string" || !entry.data.callerCwd.trim() ||
+    typeof entry.data?.callerRepo !== "string" || !entry.data.callerRepo.trim()
+  ) return null;
+  return entry.data;
+}
+
+/** The latest valid invocation stamp in a product-owned Pi transcript. */
+export function latestOwnerOperatorProvenance(raw) {
+  let latest = null;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    latest = ownerOperatorProvenance(entry) ?? latest;
+  }
+  return latest;
+}
+
 // The cwd sits in a session's first records, so a bounded prefix almost always holds it —
 // 256 KiB is orders of magnitude past any header yet spares reading a multi-MB transcript.
 const CWD_PREFIX_BYTES = 256 * 1024;

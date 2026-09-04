@@ -20,14 +20,15 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
   createOoSession,
+  createOwnerOperatorCustomTools,
   configuredOwnerOperatorTools,
   ooProvenance,
-  ownerOperatorCustomTools,
   ownerOperatorPiServices,
   ownerOperatorPrompt,
+  ownerOperatorTaskCwd,
   repoRoot,
 } from "../agent/agent";
-import { privacyToolGuardExtension } from "../agent/privacy-tools";
+import { createPrivacyToolGuardExtension } from "../agent/privacy-tools";
 import {
   configurePermissionSystemEnvironment,
   createPermissionSettingsExtension,
@@ -36,6 +37,13 @@ import {
 import { createOnboardingExtension } from "../agent/onboarding";
 import { ownerOperatorResourceLoaderOptions } from "../agent/skills";
 import { createOwnerOperatorToolDisplayExtension } from "../agent/tool-display";
+import {
+  createWorktreeRuntimeRebindExtension,
+  InteractiveSessionReplacement,
+  PendingWorktreeCwdChanges,
+  resolveInteractiveRuntimeTarget,
+  resolveOwnerOperatorTaskCwd,
+} from "../agent/worktree-runtime";
 import { agentStateExtension } from "../agent-runs/agent-state-extension";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
 
@@ -45,6 +53,7 @@ if (!process.stdout.isTTY) {
 }
 
 const prompt = ownerOperatorPrompt();
+const provenance = ooProvenance("interactive");
 // Permission-system initialization points Pi at OO_HOME. Preserve standalone Pi discovery inputs
 // first so onboarding never offers Owner Operator's own sessions as an external transcript source.
 const standalonePiEnvironment = { ...process.env };
@@ -52,17 +61,49 @@ const standalonePiAgentDir = getAgentDir();
 const { modelRuntime, paths } = await ownerOperatorPiServices();
 configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
+const invocationCwd = ownerOperatorTaskCwd();
+const pendingCwdChanges = new PendingWorktreeCwdChanges();
+const sessionReplacement = new InteractiveSessionReplacement();
+const interactiveCustomTools = createOwnerOperatorCustomTools({}, {
+  onWorktreeSelection: (threadId) => pendingCwdChanges.record(threadId),
+});
 const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayExtension(
   paths.piAgentDir,
-  ownerOperatorCustomTools,
+  interactiveCustomTools,
 );
+let runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>> | undefined;
+const worktreeRuntimeRebindExtension = createWorktreeRuntimeRebindExtension({
+  pending: pendingCwdChanges,
+  replacement: sessionReplacement,
+  rebind: async (threadId) => {
+    if (!runtime) throw new Error("interactive runtime is not ready");
+    const manager = runtime.session.sessionManager;
+    if (manager.getSessionId() !== threadId) {
+      throw new Error(`pending cwd change belongs to inactive session ${threadId}`);
+    }
+    const sessionFile = manager.getSessionFile();
+    if (!sessionFile) throw new Error(`session ${threadId} has no persisted transcript`);
+    // Pi tears down the current runtime before calling its factory. Resolve once first so a
+    // missing or invalid selected worktree leaves the current session intact and usable.
+    await resolveOwnerOperatorTaskCwd(manager, invocationCwd);
+    await runtime.switchSession(sessionFile);
+  },
+});
 
-// The runtime factory pi reuses for /new, /resume, /fork — rebuild OUR services + session for
-// whatever task cwd it hands us so those flows keep our prompt and tools without ambient Pi state.
-const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ cwd, sessionManager, sessionStartEvent }) => {
+// The runtime factory pi reuses for /new, /resume, /fork resolves the active stable session ID
+// before rebuilding our cwd-bound services. The privacy guard reads that live session ID.
+const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ sessionManager, sessionStartEvent }) => {
+  const target = await resolveInteractiveRuntimeTarget(
+    sessionManager,
+    sessionStartEvent,
+    provenance,
+    invocationCwd,
+  );
+  const replacedThreadId = sessionReplacement.complete();
+  if (replacedThreadId) pendingCwdChanges.discard(replacedThreadId);
   const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
-    cwd,
+    cwd: target.cwd,
     agentDir: paths.piAgentDir,
     modelRuntime,
     settingsManager,
@@ -73,10 +114,14 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
       additionalExtensionPaths: [permissionSystemExtensionPath()],
       extensionFactories: [
         { name: "owner-operator-tool-display", factory: ownerOperatorToolDisplayExtension },
-        { name: "owner-operator-privacy-guard", factory: privacyToolGuardExtension },
+        {
+          name: "owner-operator-privacy-guard",
+          factory: createPrivacyToolGuardExtension({ callerSessionId: provenance.fromSession }),
+        },
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },
         { name: "owner-operator-agent-state", factory: agentStateExtension },
+        { name: "owner-operator-worktree-runtime-rebind", factory: worktreeRuntimeRebindExtension },
         {
           name: "owner-operator-onboarding",
           factory: createOnboardingExtension({
@@ -94,17 +139,17 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
   });
   const created = await createAgentSessionFromServices({
     services,
-    sessionManager,
+    sessionManager: target.sessionManager,
     sessionStartEvent,
     tools: [...interactiveTools],
   });
   return { ...created, services, diagnostics: services.diagnostics };
 };
 
-const runtime = await createAgentSessionRuntime(createRuntime, {
-  cwd: process.cwd(),
+runtime = await createAgentSessionRuntime(createRuntime, {
+  cwd: invocationCwd,
   agentDir: paths.piAgentDir,
-  sessionManager: createOoSession(ooProvenance("interactive")), // saved + labeled like every oo surface
+  sessionManager: createOoSession(provenance), // saved + labeled like every oo surface
 });
 
 initTheme(runtime.services.settingsManager.getTheme(), true);

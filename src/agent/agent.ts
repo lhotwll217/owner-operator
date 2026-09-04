@@ -43,12 +43,14 @@ export { repoRoot };
 export {
   getCurrentSessionStateTool,
   configuredOwnerOperatorTools,
+  createOwnerOperatorCustomTools,
   markThreadDoneTool,
   manageScheduleTool,
   ownerOperatorCustomTools,
   ownerOperatorTools,
   queryDatabaseTool,
   schedulePromptTool,
+  useWorktreeTool,
 } from "./tools";
 
 export interface OwnerOperatorSession {
@@ -256,11 +258,11 @@ export async function shutdownSessionExtensions(session: OwnerOperatorSession["s
 }
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
-// EVERY oo session persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
-// so the session monitor never scans oo's chatter as if it were one of the owner's coding sessions.
-// This module owns that policy: callers build managers through the helpers below, which bake
-// the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
-// manager isn't given one). Same OO_HOME base as the durable state database. Product threads
+// EVERY oo session persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions.
+// The monitor scans this product-owned store independently from authorized external Pi history.
+// This module owns the save-location policy: callers build managers through the helpers below,
+// which bake the dir in instead of naming it themselves (pi silently falls back to its own dir
+// when a manager isn't given one). Same OO_HOME base as the durable state database. Product threads
 // use one stable identity cwd; isolated eval threads use their sandbox cwd consistently for
 // create/list/resume. Tool execution is separate: it defaults to the caller's cwd.
 //
@@ -321,8 +323,23 @@ export function ownerOperatorTaskCwd(): string {
 }
 
 /** Keep OO thread lookup stable across caller directories; evals remain sandbox-scoped. */
-function sessionIdentityCwd(): string {
+export function sessionIdentityCwd(): string {
   return process.env.OO_EVAL_CWD || repoRoot;
+}
+
+/** Pi derives empty /new and /fork headers from the execution runtime. Replace that manager before
+ * first persistence so OO keeps stable lookup identity separate from execution cwd. */
+export function normalizeEmptyOoReplacementSession(
+  sm: SessionManager,
+  provenance: OoProvenance,
+): SessionManager {
+  const header = sm.getHeader();
+  const normalized = SessionManager.create(sessionIdentityCwd(), ooSessionsDir(), {
+    id: sm.getSessionId(),
+    ...(header?.parentSession ? { parentSession: header.parentSession } : {}),
+  });
+  stampProvenance(normalized, provenance);
+  return normalized;
 }
 /** Resume the most recent oo thread (or a fresh one if none); each resume re-stamps. */
 export function continueOoSession(provenance: OoProvenance): SessionManager {

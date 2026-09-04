@@ -142,6 +142,18 @@ Pi has no supported hook that suppresses a built-in tool row while retaining it 
 expansion, so Owner Operator keeps the existing construction-site shim narrow: it gates only the
 row's `render` method and leaves execution, updates, ordering, and expansion ownership with Pi.
 
+Issue #131's root cwd restoration adapts the exact installed
+`@earendil-works/pi-coding-agent` 0.84.4 runtime contract: OO resolves its State/Git selection before
+the shared runtime factory constructs services, and reopens the same session through Pi's
+[`switchSession`](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/agent-session-runtime.ts#L196-L222)
+only after Pi's
+[`agent_settled`](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/agent-session.ts#L630-L638)
+event. OO preserves Pi's teardown-before-rebuild ordering and stable session ID, while deliberately
+keeping the Pi header as install-root lookup identity rather than task assignment. The manager's
+supported
+[`create`/`open` cwd contract](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/session-manager.ts#L1512-L1555)
+is used without introducing a separate runtime or session store.
+
 Permission gating is adopted wholesale from
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system). The full
 contract, with every claim pinned to the extension's source, lives in

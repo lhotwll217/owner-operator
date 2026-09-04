@@ -18,9 +18,11 @@ export {
   KNOWN_TRANSCRIPT_FORMATS,
   SESSION_SOURCE_DESCRIPTORS,
   assertTranscriptFormatCoverage,
+  loadMonitoredTranscriptStores,
   loadSessionSources,
   loadTranscriptAccess,
   loadTranscriptStores,
+  ownerOperatorTranscriptStore,
 } from "./session-sources.mjs";
 export type {
   AgentHarnessDescriptor,
@@ -144,6 +146,7 @@ export * from "./scheduling";
 
 // Delegated runs: lifecycle, per-harness capability records, and the launcher seam.
 export * from "./agent-runs";
+export * from "./worktrees";
 export * from "./events";
 
 // The daemon wire protocol: endpoints, schedules/triggers, and push events — the contract

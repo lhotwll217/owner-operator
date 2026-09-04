@@ -16,11 +16,12 @@ widget · oo agent/tools · Pi extension · oo CLI
                       │
               Gateway (HTTP + SSE)
                       │
-        ┌─────────────┼─────────────┐
- session monitor     state       scheduler
- scan + enrich    sole writer   Croner + runs
-        │             │             │
- coding transcripts  SQLite    fresh Pi session / argv process
+        ┌─────────────┬───────┴───────┬─────────────┐
+ session monitor   worktrees        state       scheduler
+ scan + enrich   Git topology    sole writer   Croner + runs
+        │              │             │             │
+ coding + OO         git CLI       SQLite    fresh Pi session / argv process
+ transcripts
 ```
 
 ## Module ownership
@@ -32,6 +33,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 | `src/session-monitor` | Transcript scan/watch and its private async enrichment worker | HTTP, scheduling |
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/agent-runs` | Delegated-run executor, ACP launcher over `acpx`, and client-side parent-fleet reconciliation adapters | SQLite access outside `State`, HTTP |
+| `src/worktrees` | Argv-safe Git worktree inspection/creation and create/list/select orchestration | SQLite writes, runtime cwd binding, cleanup |
 | `src/gateway` | Loopback HTTP/SSE translation and client SDK | SQLite, child processes, polling, model calls |
 | `src/daemon` | Composition, process lifecycle, readiness, discovery, source fingerprint | Domain decisions |
 | `src/agent` | Owned Pi runtime, onboarding, diagnostics, typed tools, Agent Skills, scheduled prompt runner, typed enrichment completion | Timers or direct SQLite |
@@ -39,7 +41,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 Dependencies point toward the owning seam:
 
 ```text
-core ← state ← { session-monitor, scheduler, agent-runs, gateway } ← daemon
+core ← state ← { session-monitor, scheduler, agent-runs, worktrees, gateway } ← daemon
 core ← gateway client ← { agent, CLI, widget }
 ```
 
@@ -50,8 +52,16 @@ process/model runtime and that application code never loads from development-ski
 ## State and events
 
 SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its only production
-writer. The active `/session-state` response is a projection over `threads` and the latest dense
-`thread_details` version; there is no stored snapshot or embedded client store.
+writer. The active `/session-state` response is a projection over `threads`, the latest dense
+`thread_details` version, and active delegated-child relationships; there is no stored snapshot or
+embedded client store. A root with a pending or running child projects as `working` without
+rewriting its transcript-derived state. Once a root has a worktree selection, the projection uses
+that registered worktree's repository and path for `repo` and `project`; without a selection it
+retains transcript provenance. Projection does not inspect path availability, so an unavailable
+selection stays visible for diagnosis.
+`worktrees` stores only Owner Operator creation provenance and Git common-directory identity;
+`thread_worktrees` stores one current selection per root without requiring prior transcript
+ingestion. Git remains authoritative for branch, HEAD, dirty state, and live topology.
 
 After a transaction commits, `State` publishes a rich typed event on a fail-isolated in-memory bus.
 The bus wakes consumers; clients refetch truth rather than consuming event payloads. The Gateway maps
@@ -60,9 +70,10 @@ clients refetch SQLite-backed truth.
 
 Enrichment sends only bounded transcript samples to the model, read through
 application-owned scan/search modules.
-Enrichment is eligible when the current state is `needs-you` and `last_message_at` differs from
-`enriched_through_message_at`. This catches first discovery, a new assistant message without a state
-transition, and daemon restart. The monitor never awaits the model in its scan hot path.
+Enrichment is eligible when the transcript-derived state is `needs-you`, no delegated child is
+pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
+first discovery, a new assistant message without a state transition, and daemon restart. The
+monitor never awaits the model in its scan hot path.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation
 cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use

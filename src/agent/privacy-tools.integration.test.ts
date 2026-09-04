@@ -86,7 +86,10 @@ try {
     "allowed paths pass through to Pi's built-in tool",
   );
 
-  let registered: ((event: ToolCallEvent, ctx: { cwd: string }) => unknown) | undefined;
+  let registered: ((event: ToolCallEvent, ctx: {
+    cwd: string;
+    sessionManager: { getSessionId(): string };
+  }) => unknown) | undefined;
   createPrivacyToolGuardExtension({ callerSessionId: "caller'id" })({
     on(name: string, handler: typeof registered): void {
       assert.equal(name, "tool_call");
@@ -94,14 +97,27 @@ try {
     },
   } as never);
   assert.ok(registered, "the policy is installed on Pi's supported tool_call hook");
-  const bash = event("bash", { command: "printf command-ok" });
-  assert.equal(registered!(bash, { cwd: publicDir }), undefined);
-  const command = (bash.input as { command: string }).command;
-  const output = execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s|%s' "$OO_INSTALL_ROOT" "$OO_CALLER_SESSION_ID" "$OO_HOME"`], {
-    encoding: "utf8",
-  });
-  assert.equal(output, `command-ok|${process.cwd()}|caller'id|${ooHome}`,
-    "the guard injects the authoritative non-default OO_HOME with shell-safe provenance");
+  const injectedEnvironment = (currentSessionId: string): string => {
+    const bash = event("bash", { command: "printf command-ok" });
+    assert.equal(registered!(bash, {
+      cwd: publicDir,
+      sessionManager: { getSessionId: () => currentSessionId },
+    }), undefined);
+    const command = (bash.input as { command: string }).command;
+    return execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s|%s|%s' "$OO_INSTALL_ROOT" "$OO_CALLER_SESSION_ID" "$OO_CURRENT_SESSION_ID" "$OO_HOME"`], {
+      encoding: "utf8",
+    });
+  };
+  assert.equal(
+    injectedEnvironment("current-session-one"),
+    `command-ok|${process.cwd()}|caller'id|current-session-one|${ooHome}`,
+    "the guard injects the authoritative non-default OO_HOME with shell-safe caller provenance",
+  );
+  assert.equal(
+    injectedEnvironment("current-session-two"),
+    `command-ok|${process.cwd()}|caller'id|current-session-two|${ooHome}`,
+    "the same extension reads a changed current session ID live on every tool call",
+  );
 
   process.stdout.write("ok — privacy guard: supported tool_call preflight blocks every Pi file primitive\n");
 } finally {

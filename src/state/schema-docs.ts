@@ -5,9 +5,9 @@ export interface TableDoc { name: string; description: string; columns: ColumnDo
 export const SCHEMA_DOCS: TableDoc[] = [
   {
     name: "threads",
-    description: "One mutable identity/observation row per external coding-agent thread. Current belief lives in thread_details.",
+    description: "One mutable identity/observation row per monitored session thread. Current belief lives in thread_details.",
     columns: [
-      { name: "id", description: "Stable coding-agent thread id." },
+      { name: "id", description: "Stable monitored-session thread id." },
       { name: "repo", description: "Repository name." },
       { name: "project", description: "Absolute session working directory." },
       { name: "app", description: "Originating app or CLI." },
@@ -91,7 +91,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
     description: "Internal durable dedupe for needs-you event jobs; not a delivery queue.",
     columns: [
       { name: "schedule_id", description: "Event schedule id." },
-      { name: "thread_id", description: "External coding-agent thread id." },
+      { name: "thread_id", description: "Monitored session thread id." },
       { name: "last_message_at", description: "Latest message claimed by this schedule." },
     ],
   },
@@ -124,6 +124,27 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "retry_of_run_id", description: "Exact failed, interrupted, or lost run whose task this row retries; mutually exclusive with resume_of_run_id." },
       { name: "resume_of_run_id", description: "Exact completed run after which this row sends a required new task; mutually exclusive with retry_of_run_id." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
+    ],
+  },
+  {
+    name: "worktrees",
+    description: "Owner Operator-created Git worktrees. Row presence is creation provenance; mutable Git facts remain live-only.",
+    columns: [
+      { name: "id", description: "Stable worktree id, independent of any selecting thread." },
+      { name: "repository", description: "Stable human-facing repository name." },
+      { name: "path", description: "Unique canonical absolute worktree path." },
+      { name: "git_common_dir", description: "Canonical Git common-directory identity used to validate live topology." },
+      { name: "created_by_thread_id", description: "Root thread that created the worktree; deliberately not a foreign key." },
+      { name: "created_at", description: "ISO time Owner Operator registered creation provenance." },
+    ],
+  },
+  {
+    name: "thread_worktrees",
+    description: "Current worktree selection for each root thread. Selection may precede asynchronous thread ingestion.",
+    columns: [
+      { name: "thread_id", description: "Stable root thread id; deliberately not a foreign key to threads." },
+      { name: "worktree_id", description: "References an Owner Operator-created worktree." },
+      { name: "selected_at", description: "ISO time this selection replaced the root's prior selection." },
     ],
   },
 ];

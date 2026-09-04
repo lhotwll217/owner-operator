@@ -6,7 +6,14 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness, type ScanRow } from "@owner-operator/core";
+import {
+  AgentRunHarness,
+  AgentRunStatus,
+  ScheduledPayloadKind,
+  ScheduleKind,
+  type ScanRow,
+  type ScheduleDefinition,
+} from "@owner-operator/core";
 import { InMemoryEventBus } from "./event-bus";
 import { State } from "./state";
 
@@ -14,7 +21,7 @@ const dir = mkdtempSync(join(tmpdir(), "oo-delegated-join-"));
 const previousOoHome = process.env.OO_HOME;
 process.env.OO_HOME = dir;
 
-const scanRow = (id: string): ScanRow => ({
+const scanRow = (id: string, working = true): ScanRow => ({
   id,
   source: "claude",
   repo: "owner-operator",
@@ -26,7 +33,7 @@ const scanRow = (id: string): ScanRow => ({
   lastMessageAt: "2026-07-17T10:05:00.000Z",
   secondsSinceLastMessage: 30,
   secondsSinceActivity: 30,
-  working: true,
+  working,
 });
 
 let closeState: (() => void) | undefined;
@@ -38,6 +45,37 @@ try {
   });
   closeState = () => state.close();
 
+  state.recordObservation({
+    ...scanRow("operator-thread", false),
+    source: "pi",
+    app: "Owner Operator",
+    topic: "Implement delegated workspaces",
+  });
+  assert.equal(
+    state.listCurrentSessionState().find(({ id }) => id === "operator-thread")?.state,
+    "needs-you",
+    "the root begins in its transcript-derived state",
+  );
+  assert.ok(
+    state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
+    "the transcript-derived handoff begins eligible for enrichment",
+  );
+  const needsYouSchedule: ScheduleDefinition = {
+    id: "needs-you-job",
+    name: "Needs you job",
+    enabled: true,
+    trigger: { kind: ScheduleKind.NeedsYou },
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt: "Summarize it" },
+    cwd: dir,
+    timeoutSeconds: 60,
+    revision: 1,
+    createdAt: "2026-07-17T10:00:00.000Z",
+    updatedAt: "2026-07-17T10:00:00.000Z",
+    nextRunAt: null,
+  };
+  state.saveSchedule(needsYouSchedule);
+  const queuedNeedsYouChanges = state.listNeedsYouMessageVersions();
+
   // The Operator delegates; the executor records the run and the launcher reports the child's
   // ACP session identity. That identity is what the child's transcript will surface under.
   const run = state.createAgentRun({
@@ -48,6 +86,34 @@ try {
     depth: 1,
     timeoutSeconds: 3_600,
   });
+  assert.equal(
+    state.listCurrentSessionState().find(({ id }) => id === "operator-thread")?.state,
+    "working",
+    "a pending child makes its exact parent effectively working",
+  );
+  assert.ok(
+    !state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
+    "a pending child's parent is not enriched as an owner handoff",
+  );
+  assert.equal(
+    state.appendEnrichment(
+      "operator-thread",
+      { topic: "Stale handoff", nextSteps: "Interrupt delegated work" },
+      "2026-07-17T10:05:00.000Z",
+    ),
+    false,
+    "an enrichment sampled before delegation cannot land while the child is active",
+  );
+  assert.ok(
+    !state.listNeedsYouMessageVersions().some(({ threadId }) => threadId === "operator-thread"),
+    "a pending child's parent is not a needs-you schedule input",
+  );
+  assert.equal(
+    state.claimNeedsYouScheduleRun(needsYouSchedule, queuedNeedsYouChanges),
+    null,
+    "claim-time eligibility rejects needs-you work queued before the child became active",
+  );
+
   const running = state.claimNextPendingAgentRun(3)!;
   state.recordAgentRunActivity(running.id, { childSessionId: "claude-child-abc" });
 
@@ -57,14 +123,35 @@ try {
   state.recordObservation(scanRow("unrelated-session"));
 
   const rows = state.listCurrentSessionState();
+  const parent = rows.find((row) => row.id === "operator-thread");
   const child = rows.find((row) => row.id === "claude-child-abc");
   const unrelated = rows.find((row) => row.id === "unrelated-session");
+  assert.equal(parent?.state, "working", "a running child keeps its exact parent effectively working");
   assert.ok(child, "the delegated child is observed as a thread, not hidden");
   assert.equal(child?.parentThreadId, "operator-thread", "the child nests under its delegating parent by identity");
   assert.equal(unrelated?.parentThreadId, null, "an ordinary coding session has no parent");
   assert.equal(run.parentThreadId, "operator-thread");
 
-  process.stdout.write("ok — delegated child transcript nests under its parent in State\n");
+  state.finishAgentRun(running.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "done",
+    error: null,
+  });
+  assert.equal(
+    state.listCurrentSessionState().find(({ id }) => id === "operator-thread")?.state,
+    "needs-you",
+    "when the child is terminal the root returns to its transcript-derived state",
+  );
+  assert.ok(
+    state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
+    "a terminal child's parent can be enriched again",
+  );
+  assert.ok(
+    state.listNeedsYouMessageVersions().some(({ threadId }) => threadId === "operator-thread"),
+    "a terminal child's parent can trigger needs-you schedules again",
+  );
+
+  process.stdout.write("ok — delegated child nests and its parent projects truthful attention in State\n");
 } finally {
   closeState?.();
   if (previousOoHome === undefined) delete process.env.OO_HOME;

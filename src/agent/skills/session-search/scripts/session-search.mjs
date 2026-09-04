@@ -7,13 +7,21 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../../../../packages/core/src/blacklist.mjs";
-import { loadSessionSources } from "../../../../../packages/core/src/session-sources.mjs";
-import { firstCwdFromFile, resolveRepo } from "../../../../../packages/core/src/session-cwd.mjs";
+import {
+  loadSessionSources,
+  ownerOperatorTranscriptStore,
+} from "../../../../../packages/core/src/session-sources.mjs";
+import {
+  firstCwdFromFile,
+  latestOwnerOperatorProvenance,
+  resolveRepo,
+} from "../../../../../packages/core/src/session-cwd.mjs";
 
 const skillDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const primitive = path.join(skillDir, "vendor", "session-grep", "session-grep.mjs");
 const ooHome = process.env.OO_HOME ?? path.join(os.homedir(), ".owner-operator");
 const callerSessionId = process.env.OO_CALLER_SESSION_ID?.trim() || null;
+const currentOoSessionId = process.env.OO_CURRENT_SESSION_ID?.trim() || null;
 const input = process.argv.slice(2);
 
 let ownerOperator = false;
@@ -30,6 +38,10 @@ let hasAt = false;
 const passthrough = [];
 for (let index = 0; index < input.length; index += 1) {
   const arg = input[index];
+  if (arg === "--help" || arg === "-h") {
+    printHelp();
+    process.exit(0);
+  }
   if (arg === "--owner-operator") ownerOperator = true;
   else if (arg === "--target-type" || arg === "--source") targetType = takeValue(arg, ++index);
   else if (arg === "--target-root") targetRoot = takeValue(arg, ++index);
@@ -51,14 +63,24 @@ for (let index = 0; index < input.length; index += 1) {
   }
 }
 
-if (!["all", "claude", "codex"].includes(targetType)) fail("--target-type must be all, claude, or codex");
+if (!["all", "claude", "codex", "pi"].includes(targetType)) fail("--target-type must be all, claude, codex, or pi");
 if (!Number.isInteger(limit) || limit < 1) fail("--limit must be a positive integer");
 if (!Number.isInteger(maxChars) || maxChars < 500) fail("--max-chars must be an integer of at least 500");
+const codingSources = loadSessionSources(ooHome)
+  .filter((source) => ["claude", "codex", "pi"].includes(source.source))
+  .map((source) => ({ type: source.source, root: source.root, namespace: "coding" }));
+const productStore = ownerOperatorTranscriptStore(ooHome);
+const productSource = {
+  type: productStore.format,
+  root: productStore.root,
+  namespace: productStore.namespace,
+  app: productStore.app,
+};
 const sources = ownerOperator
-  ? [{ type: "pi", root: path.join(ooHome, "sessions") }]
-  : loadSessionSources(ooHome)
-      .filter((source) => source.source === "claude" || source.source === "codex")
-      .map((source) => ({ type: source.source, root: source.root }));
+  ? [productSource]
+  : targetType === "all"
+    ? [...codingSources, productSource]
+    : codingSources;
 if (targetRoot) {
   const wanted = path.resolve(targetRoot);
   if (!sources.some((source) => path.resolve(source.root) === wanted)) {
@@ -79,7 +101,7 @@ const fileBlacklisted = (file) => {
   if (cwdCache.has(file)) return cwdCache.get(file);
   let blocked = true;
   try {
-    const cwd = firstCwdFromFile(file);
+    const cwd = searchCwdFromFile(file);
     blocked = !!cwd && isBlacklisted(blacklist, { cwd, repo: resolveRepo(cwd) });
   } catch {
     blocked = true;
@@ -102,10 +124,21 @@ if (directRead) {
   }
 }
 
+const discoverySessionIds = [...new Set([currentOoSessionId, callerSessionId].filter(Boolean))];
+const sessionExcludeArgs = directRead
+  ? []
+  : discoverySessionIds.flatMap((sessionId) => ["--exclude-session", sessionId]);
+// Pi names saved transcripts `<timestamp>_<stable-id>.jsonl`, while the vendored
+// primitive's canonical session exclusion falls back to the full filename stem for Pi.
+// Its path-exclusion seam lets the wrapper exclude the same live stable IDs without
+// parsing transcript headers or changing explicit known-ID reads.
+if (!directRead) {
+  excludePatterns.push(...discoverySessionIds.map((sessionId) =>
+    `(?:^|[/_])${escapeRegex(sessionId)}\\.jsonl$`));
+}
 const sourceArgs = ["--sources-file", sourceFile];
 const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType];
 const excludeArgs = excludePatterns.flatMap((pattern) => ["--exclude-re", pattern]);
-const callerExcludeArgs = !directRead && callerSessionId ? ["--exclude-session", callerSessionId] : [];
 
 try {
   if (browse) {
@@ -131,7 +164,7 @@ try {
       "--max-chars", String(maxChars),
       ...sourceArgs,
       ...typeArgs,
-      ...callerExcludeArgs,
+      ...sessionExcludeArgs,
       ...excludeArgs,
     ]);
     if (result.stderr) process.stderr.write(result.stderr);
@@ -149,10 +182,10 @@ try {
         }
         if (candidates) {
           let repo = null;
-          try { repo = resolveRepo(firstCwdFromFile(entry.path)); } catch { /* best effort label */ }
-          allowed.push({ ...entry, repo });
+          try { repo = resolveRepo(searchCwdFromFile(entry.path)); } catch { /* best effort label */ }
+          allowed.push({ ...entry, repo, ...sourceIdentity(entry.path) });
         } else {
-          allowed.push(entry);
+          allowed.push({ ...entry, ...sourceIdentity(entry.path) });
         }
       }
       if (candidates) {
@@ -170,11 +203,11 @@ try {
         output.matches = allowed.slice(0, limit);
         output.shown = output.matches.length;
       }
-      output.callerSessionExclusion = callerExcludeArgs.length
-        ? { applied: true, sessionId: callerSessionId }
+      output.discoverySessionExclusions = sessionExcludeArgs.length
+        ? { applied: true, sessionIds: discoverySessionIds }
         : directRead
-          ? { applied: false, reason: "explicit stable-session scope; caller exclusion is discovery-only" }
-          : { applied: false, reason: "caller session id unavailable; agents can pass oo --from-session ID" };
+          ? { applied: false, reason: "explicit stable-session scope; session exclusion is discovery-only" }
+          : { applied: false, reason: "current OO and external caller session ids unavailable" };
       if (blacklistedDropped) output.blacklistedDropped = blacklistedDropped;
 
       if (json) process.stdout.write(`${JSON.stringify(output)}\n`);
@@ -194,9 +227,9 @@ function runPrimitive(args) {
 }
 
 function renderText(output, context) {
-  const callerExclusion = output.callerSessionExclusion?.applied
-    ? `applied:${output.callerSessionExclusion.sessionId}`
-    : output.callerSessionExclusion?.reason?.startsWith("explicit stable-session scope")
+  const sessionExclusions = output.discoverySessionExclusions?.applied
+    ? `applied:${output.discoverySessionExclusions.sessionIds.join(",")}`
+    : output.discoverySessionExclusions?.reason?.startsWith("explicit stable-session scope")
       ? "not-needed:explicit-session-scope"
       : "unavailable";
   const candidateCount = !output.candidates
@@ -211,7 +244,7 @@ function renderText(output, context) {
     candidateCount +
     `${context.targetType !== "all" ? ` target_type=${context.targetType}` : ""}` +
     `${context.blacklistedDropped ? ` blacklisted_dropped=${context.blacklistedDropped}` : ""} ` +
-    `caller_session_exclusion=${callerExclusion}`,
+    `discovery_session_exclusions=${sessionExclusions}`,
   );
   if (output.wordHits) {
     console.log(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")} (high-count words are low-signal; prefer the rare ones)`);
@@ -223,14 +256,14 @@ function renderText(output, context) {
       ? ` matched=[${candidate.matchedWords.join(",")}] best_score=${candidate.score}`
       : "";
     console.log(
-      `\n[${index + 1}] ${candidate.source} id=${candidate.id} repo=${candidate.repo ?? "unknown"} ` +
+      `\n[${index + 1}] namespace=${candidate.namespace} source=${candidate.source} id=${candidate.id} repo=${candidate.repo ?? "unknown"} ` +
       `best_idx=${candidate.index} ts=${candidate.timestamp ?? ""} hits=${candidate.hitCount}${rank}`,
     );
     console.log(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
   }
   for (const [index, match] of (output.matches ?? []).entries()) {
     const rank = match.matchedWords ? ` matched=[${match.matchedWords.join(",")}] score=${match.score}` : "";
-    console.log(`\n[${index + 1}] ${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}`);
+    console.log(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}`);
     for (const before of match.before ?? []) console.log(`  before ${before.role}: ${before.text}`);
     console.log(`  MATCH ${match.match.role}: ${match.match.text}`);
     for (const after of match.after ?? []) console.log(`  after  ${after.role}: ${after.text}`);
@@ -241,6 +274,30 @@ function renderText(output, context) {
   if (output.candidates?.length) {
     console.log("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
   }
+}
+
+function sourceIdentity(file) {
+  const resolvedFile = path.resolve(file);
+  let best = null;
+  for (const source of sources) {
+    const root = path.resolve(source.root);
+    const prefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    if ((resolvedFile === root || resolvedFile.startsWith(prefix)) && (!best || root.length > best.root.length)) {
+      best = { ...source, root };
+    }
+  }
+  return {
+    namespace: best?.namespace ?? "unknown",
+    ...(best?.app ? { app: best.app } : {}),
+  };
+}
+
+function searchCwdFromFile(file) {
+  if (sourceIdentity(file).namespace === "owner-operator") {
+    const provenance = latestOwnerOperatorProvenance(fs.readFileSync(file, "utf8"));
+    if (provenance) return provenance.callerCwd;
+  }
+  return firstCwdFromFile(file);
 }
 
 function walk(root) {
@@ -268,4 +325,15 @@ function takeValue(flag, index, { allowLeadingDashes = false } = {}) {
   const value = input[index];
   if (!value || (!allowLeadingDashes && value.startsWith("--"))) fail(`${flag} needs a value`);
   return value;
+}
+
+function printHelp() {
+  process.stdout.write(
+    "Usage: session-search.mjs (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
+    "Default discovery searches configured coding-agent stores plus Owner Operator history.\n" +
+    "  --owner-operator              search Owner Operator history only\n" +
+    "  --target-type claude|codex|pi search that coding transcript format only\n" +
+    "  --target-root DIR          narrow to a configured transcript-store root\n" +
+    "  --help, -h                 show this help\n",
+  );
 }

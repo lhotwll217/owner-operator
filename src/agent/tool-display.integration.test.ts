@@ -58,6 +58,7 @@ try {
     "mark_thread_done",
     "query_database",
     "schedule_prompt",
+    "use_worktree",
   ], "every OO custom tool opts into package-owned generic rendering");
 
   const read = session.extensionRunner.getToolDefinition("read");

@@ -3,6 +3,7 @@
     "id": "thread-1",
     "source": "codex",
     "repo": "owner-operator",
+    "project": "/worktrees/owner-operator/ticket-07",
     "app": "Codex",
     "topic": "Daemon foundation",
     "generatedTopic": "Daemon foundation",

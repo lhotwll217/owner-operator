@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { spawn } from "node:child_process";
 import {
+  AgentRunStatus,
   AgentToolId,
   ScheduleKind,
   DomainEventKind,
@@ -206,17 +207,17 @@ export class Scheduler {
     const interrupted = this.state.markRunningScheduleRunsInterrupted("daemon restarted during execution");
     if (interrupted) this.logger({ event: SchedulerLogEvent.StartupInterrupted, count: interrupted });
     this.unsubscribe = this.state.bus.subscribe((event) => {
-      if (
-        event.kind !== DomainEventKind.ThreadChanged || event.state !== "needs-you" ||
-        !event.lastMessageAt || !event.needsEnrichment
-      ) return;
-      this.pendingNeedsYou.set(event.threadId, event.lastMessageAt);
-      this.scheduleEventFlush();
+      if (event.kind === DomainEventKind.ThreadChanged) {
+        if (event.state !== "needs-you" || !event.lastMessageAt || !event.needsEnrichment) return;
+        this.pendingNeedsYou.set(event.threadId, event.lastMessageAt);
+        this.scheduleEventFlush();
+        return;
+      }
+      if (event.kind === DomainEventKind.AgentRunChanged && event.status !== AgentRunStatus.Running) {
+        this.reconcileNeedsYouInputs();
+      }
     });
-    for (const change of this.state.listNeedsYouMessageVersions()) {
-      this.pendingNeedsYou.set(change.threadId, change.lastMessageAt);
-    }
-    this.scheduleEventFlush();
+    this.reconcileNeedsYouInputs();
     this.runInBackground("tick", () => this.tick());
     this.timer = setInterval(() => this.runInBackground("tick", () => this.tick()), this.tickMs);
     this.timer.unref?.();
@@ -395,6 +396,16 @@ export class Scheduler {
       this.runInBackground("needs-you", () => this.flushNeedsYou());
     });
     this.eventFlush.unref?.();
+  }
+
+  /** Agent-run transitions can suppress or restore a transcript-derived handoff without another
+   * transcript event. Re-read the State projection so queued needs-you work follows durable truth. */
+  private reconcileNeedsYouInputs(): void {
+    this.pendingNeedsYou.clear();
+    for (const change of this.state.listNeedsYouMessageVersions()) {
+      this.pendingNeedsYou.set(change.threadId, change.lastMessageAt);
+    }
+    this.scheduleEventFlush();
   }
 
   private async flushNeedsYou(): Promise<void> {

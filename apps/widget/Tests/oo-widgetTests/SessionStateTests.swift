@@ -40,6 +40,7 @@ private actor StubWidgetGateway {
     }
 
     func setAgentState(_ data: Data) { agentStateData = data }
+    func setSessionState(_ data: Data) { sessionStateData = data }
     func setUnavailable(_ value: Bool) { unavailable = value }
     func setAgentStateUnavailable(_ value: Bool) { agentStateUnavailable = value }
     func requestCount(_ path: String) -> Int { paths.filter { $0 == path }.count }
@@ -61,6 +62,9 @@ struct SessionStateTests {
     private func row(
         id: String,
         repo: String = "repo",
+        project: String? = nil,
+        source: String = "claude",
+        app: String = "App",
         state: String = "idle",
         topic: String = "topic",
         generatedTopic: String? = nil,
@@ -73,10 +77,11 @@ struct SessionStateTests {
         diffAdded: Int? = nil
     ) -> [String: Any] {
         var d: [String: Any] = [
-            "id": id, "source": "claude", "repo": repo, "app": "App", "topic": topic,
+            "id": id, "source": source, "repo": repo, "app": app, "topic": topic,
             "state": state, "lastActive": "now", "createdAt": "2026-01-01T00:00:00.000Z",
             "lastActiveAt": lastMessageAt, "lastMessageAt": lastMessageAt, "stateSince": stateSince,
         ]
+        if let project { d["project"] = project }
         if let generatedTopic { d["generatedTopic"] = generatedTopic }
         if let ownerTitle { d["ownerTitle"] = ownerTitle }
         if let nextSteps { d["nextSteps"] = nextSteps }
@@ -116,6 +121,13 @@ struct SessionStateTests {
         #expect(decoded[0].nextSteps == "Implement the state seam")
         #expect(decoded[0].priority == 4)
         #expect(decoded[0].state == .needsYou)
+        #expect(decoded[0].repo == "owner-operator")
+        #expect(decoded[0].project == "/worktrees/owner-operator/ticket-07")
+        let fallback = try #require(rows([row(
+            id: "thread-2", repo: "issue-132", project: "/tasks/issue-132", source: "pi", app: "Owner Operator"
+        )]).first)
+        #expect(fallback.repo == "issue-132")
+        #expect(fallback.project == "/tasks/issue-132")
     }
 
     @Test func agentStateGatewayContractPreservesSharedVocabularyAndOrder() throws {
@@ -189,9 +201,16 @@ struct SessionStateTests {
             """.utf8)
         }
 
-        let stub = StubWidgetGateway(agentStateData: view(
-            status: "running", glyph: "●", category: "active", footer: "Agent state: 1 running"
-        ))
+        let activeSessions = try JSONSerialization.data(withJSONObject: [
+            row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "working"),
+            row(id: "child", repo: "issue-131", state: "working", parentThreadId: "oo-root"),
+        ])
+        let stub = StubWidgetGateway(
+            agentStateData: view(
+                status: "running", glyph: "●", category: "active", footer: "Agent state: 1 running"
+            ),
+            sessionStateData: activeSessions
+        )
         let client = DaemonClient(
             discover: { DaemonClient.Discovery(port: 47711, authToken: "test") },
             fetchData: { path, _ in try await stub.fetch(path) }
@@ -199,14 +218,25 @@ struct SessionStateTests {
 
         await client.refresh()
         #expect(client.agentState.runs[0].status.text == .running)
+        #expect(client.groups.flatMap(\.rows).map(\.id) == ["oo-root", "child"])
+        #expect(client.groups.flatMap(\.rows).map(\.nestingDepth) == [0, 1])
+        #expect(client.groups.flatMap(\.rows).first?.state == .working)
 
+        let terminalSessions = try JSONSerialization.data(withJSONObject: [
+            row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "needs-you"),
+            row(id: "child", repo: "issue-131", state: "working", parentThreadId: "oo-root"),
+        ])
+        await stub.setSessionState(terminalSessions)
         await stub.setAgentState(view(
             status: "interrupted", glyph: "!", category: "attention", footer: "Agent state: 1 needs attention"
         ))
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
         #expect(client.agentState.runs[0].status.text == .interrupted)
         #expect(client.agentState.runs[0].canRetry)
+        #expect(client.groups.flatMap(\.rows).first?.state == .needsYou)
+        #expect(client.groups.flatMap(\.rows).last?.nestingDepth == 1)
         #expect(await stub.requestCount("/agent-state") == 2)
+        #expect(await stub.requestCount("/session-state") == 2)
 
         await stub.setUnavailable(true)
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
@@ -285,13 +315,24 @@ struct SessionStateTests {
         let input = try rows([
             row(id: "other", repo: "repo", state: "needs-you"),
             row(id: "child", repo: "child-repo", state: "working", parentThreadId: "parent"),
-            row(id: "parent", repo: "repo", state: "idle"),
+            row(id: "parent", repo: "repo", state: "working"),
         ])
         let (groups, _) = buildSessionState(rows: input)
         #expect(groups.count == 1)
         #expect(groups[0].repo == "repo")
         #expect(groups[0].rows.map(\.id) == ["other", "parent", "child"])
         #expect(groups[0].rows.map(\.nestingDepth) == [0, 0, 1])
+    }
+
+    @Test func ownerOperatorSessionRendersAsRoot() throws {
+        let input = try rows([
+            row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "needs-you")
+        ])
+        let rendered = buildSessionState(rows: input).groups[0].rows[0]
+        #expect(rendered.id == "oo-root")
+        #expect(rendered.app == "Owner Operator")
+        #expect(rendered.source == "pi")
+        #expect(rendered.nestingDepth == 0)
     }
 
     @Test func hiddenDroppedFromBodyButCountedDone() throws {

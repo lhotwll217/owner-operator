@@ -20,6 +20,7 @@ import {
   type ThreadDetails,
   type Blacklist,
   type MarkThreadsDoneResult,
+  type RegisteredWorktree,
 } from "@owner-operator/core";
 import { randomUUID } from "node:crypto";
 import { ThreadDb, type AgentRunInsert, type SessionStateRow } from "./database";
@@ -336,6 +337,42 @@ export class State {
 
   listAgentRuns(filter: { parentThreadId?: string } = {}): AgentRun[] {
     return this.db.listAgentRuns(filter);
+  }
+
+  registerAndSelectWorktree(
+    threadId: string,
+    worktree: Pick<RegisteredWorktree, "repository" | "path" | "gitCommonDir">,
+  ): RegisteredWorktree {
+    const registered = this.db.registerAndSelectWorktree(threadId, {
+      id: randomUUID(),
+      ...worktree,
+      createdByThreadId: threadId,
+      createdAt: this.now(),
+    }, this.now());
+    this.publish({
+      kind: DomainEventKind.WorktreeChanged,
+      threadId,
+      worktreeId: registered.id,
+    });
+    return registered;
+  }
+
+  selectWorktree(threadId: string, worktreeId: string): RegisteredWorktree {
+    const selected = this.db.selectWorktree(threadId, worktreeId, this.now());
+    this.publish({ kind: DomainEventKind.WorktreeChanged, threadId, worktreeId });
+    return selected;
+  }
+
+  worktreeById(id: string): RegisteredWorktree | undefined {
+    return this.db.worktreeById(id);
+  }
+
+  selectedWorktree(threadId: string): RegisteredWorktree | undefined {
+    return this.db.selectedWorktree(threadId);
+  }
+
+  listWorktrees(repository?: string): RegisteredWorktree[] {
+    return this.db.listWorktrees(repository);
   }
 
   close(): void {

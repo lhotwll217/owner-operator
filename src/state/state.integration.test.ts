@@ -44,6 +44,21 @@ try {
 
   state.recordObservation(row("2026-07-09T09:59:00.000Z"));
   state.recordObservation({
+    ...row("2026-07-09T09:57:00.000Z"),
+    id: "oo-root",
+    source: "pi",
+    repo: "issue-131",
+    app: "Owner Operator",
+    topic: "Monitor the OO root",
+    working: true,
+  });
+  const ooRoot = state.listSessionState().find((item) => item.id === "oo-root");
+  assert.deepEqual(
+    { source: ooRoot?.source, repo: ooRoot?.repo, app: ooRoot?.app, parentThreadId: ooRoot?.parentThreadId },
+    { source: "pi", repo: "issue-131", app: "Owner Operator", parentThreadId: null },
+    "State projects an OO session as an ordinary root thread",
+  );
+  state.recordObservation({
     ...row("2026-07-09T09:59:30.000Z"),
     id: "private-thread",
     repo: "private-repo",
@@ -95,6 +110,11 @@ try {
     { topic: "Daemon foundation", nextSteps: "Implement the state seam", priority: 4 },
     "2026-07-09T09:59:00.000Z",
   );
+  state.registerAndSelectWorktree("thread-1", {
+    repository: "owner-operator",
+    path: "/worktrees/owner-operator/ticket-07",
+    gitCommonDir: "/repositories/owner-operator/.git",
+  });
   const gatewayFixture = JSON.parse(readFileSync(
     new URL("../../apps/widget/Tests/Fixtures/session-state.gateway.json", import.meta.url),
     "utf8",
@@ -201,7 +221,7 @@ try {
   ]));
   state.close();
 
-  writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: ["owner-operator"] }));
+  writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: ["owner-operator", "issue-131"] }));
   const reopened = new State(join(dir, "state.db"), {
     now: () => "2026-07-09T10:03:00.000Z",
     activeWindow: "1d",

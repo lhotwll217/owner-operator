@@ -177,6 +177,30 @@ export function loadTranscriptStores(ooHome = process.env.OO_HOME ?? join(homedi
   });
 }
 
+/** Product-owned transcript store. It is not external harness authorization. */
+export function ownerOperatorTranscriptStore(
+  ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator"),
+) {
+  return {
+    format: "pi",
+    root: join(ooHome, "sessions"),
+    app: "Owner Operator",
+    namespace: "owner-operator",
+  };
+}
+
+/** Stores admitted to current-session monitoring: external consent plus product history. */
+export function loadMonitoredTranscriptStores(
+  ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator"),
+) {
+  const stores = new Map(
+    loadTranscriptStores(ooHome).map((store) => [`${store.format}\0${store.root}`, store]),
+  );
+  const product = ownerOperatorTranscriptStore(ooHome);
+  stores.set(`${product.format}\0${product.root}`, product);
+  return [...stores.values()];
+}
+
 /** Effective harness-format access plus whether each format's standard roots are authorized. */
 export function loadTranscriptAccess(ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator")) {
   let config = {};

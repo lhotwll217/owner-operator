@@ -10,6 +10,7 @@ import { manageScheduleTool } from "./manage-schedule";
 import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
 import { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
+import { createUseWorktreeTool } from "./use-worktree";
 
 export { queryDatabaseTool } from "./query-database";
 export { manageScheduleTool } from "./manage-schedule";
@@ -19,15 +20,23 @@ export { getHarnessDetailsTool } from "./get-harness-details";
 export { manageAgentRunTool } from "./manage-agent-run";
 export { manageDelegatedBaselineTool } from "./manage-delegated-baseline";
 export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
+export { useWorktreeTool } from "./use-worktree";
 
 export interface OwnerOperatorHarnessAdapters {
   readHarnessDetails?: GetHarnessDetailsToolOptions["read"];
   proposeDelegatedBaseline?: ManageDelegatedBaselineOptions["propose"];
 }
 
+export interface OwnerOperatorRuntimeAdapters {
+  onWorktreeSelection?: (threadId: string) => void;
+}
+
 /** Production tools with only their external harness observations replaceable for deterministic
  * evaluation. Durable approval, delegation, Gateway, and state behavior remain production-real. */
-export function createOwnerOperatorCustomTools(adapters: OwnerOperatorHarnessAdapters = {}) {
+export function createOwnerOperatorCustomTools(
+  adapters: OwnerOperatorHarnessAdapters = {},
+  runtimeAdapters: OwnerOperatorRuntimeAdapters = {},
+) {
   return [
     getCurrentSessionStateTool,
     markThreadDoneTool,
@@ -38,6 +47,7 @@ export function createOwnerOperatorCustomTools(adapters: OwnerOperatorHarnessAda
     manageAgentRunTool,
     createGetHarnessDetailsTool({ read: adapters.readHarnessDetails }),
     createManageDelegatedBaselineTool({ propose: adapters.proposeDelegatedBaseline }),
+    createUseWorktreeTool({ onSelection: runtimeAdapters.onWorktreeSelection }),
   ];
 }
 
@@ -53,6 +63,7 @@ const ownerOperatorTypedTools: readonly AgentToolId[] = [
   AgentToolId.ManageAgentRun,
   AgentToolId.GetHarnessDetails,
   AgentToolId.ManageDelegatedBaseline,
+  AgentToolId.UseWorktree,
 ];
 
 // packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.

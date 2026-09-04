@@ -22,7 +22,7 @@ const EffortSchema = Type.Union(
   { description: `Reasoning effort: ${AGENT_RUN_EFFORTS.join(" | ")}, or null to override an approved effort.` },
 );
 
-type DelegateAgentGateway = Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
+type DelegateAgentGateway = Pick<GatewayApi, "delegateAgent" | "resolveWorktreeCwd" | "waitAgentRun">;
 
 export interface DelegateAgentToolOptions {
   resolveGateway?: () => Promise<DelegateAgentGateway>;
@@ -62,16 +62,19 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const cwd = params.cwd ? (isAbsolute(params.cwd) ? params.cwd : resolve(params.cwd)) : process.cwd();
       const backend = await getGateway();
       // Lineage comes from Pi's active session, never model arguments: a spoofed parent id could
       // misattribute nesting or reset the depth guard. Lower-level Gateway clients may supply their
       // own trusted parent identity.
+      const parentThreadId = ctx.sessionManager.getSessionId();
+      const cwd = params.cwd
+        ? (isAbsolute(params.cwd) ? params.cwd : resolve(ctx.cwd, params.cwd))
+        : (await backend.resolveWorktreeCwd({ threadId: parentThreadId, fallbackCwd: ctx.cwd })).cwd;
       let run = await backend.delegateAgent({
         harness: params.harness,
         task: params.task,
         cwd,
-        parentThreadId: ctx.sessionManager.getSessionId(),
+        parentThreadId,
         ...(params.model !== undefined ? { model: params.model } : {}),
         ...(params.effort !== undefined ? { effort: params.effort } : {}),
         ...(params.timeoutSeconds ? { timeoutSeconds: params.timeoutSeconds } : {}),

@@ -10,10 +10,14 @@ import {
   type GatewayApi,
   type GatewayEvent,
   type MarkThreadsDoneResult,
+  type ResolveWorktreeCwdRequest,
+  type ResolveWorktreeCwdResult,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
   type SessionStateRow,
+  type UseWorktreeRequest,
+  type UseWorktreeResult,
 } from "@owner-operator/core";
 import { daemonInfoPath } from "../shared/paths";
 import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
@@ -106,7 +110,14 @@ async function gatewayJson<T>(
       if (!accepted(response) && response.status === 401) options.onUnavailable?.();
     }
   }
-  if (!accepted(response)) throw new Error(`gateway ${path}: ${response.status}`);
+  if (!accepted(response)) {
+    let detail = "";
+    try {
+      const body = await response.json() as { error?: unknown };
+      if (typeof body.error === "string" && body.error.trim()) detail = ` ${body.error.trim()}`;
+    } catch { /* an empty/non-JSON response still reports its route and status */ }
+    throw new Error(`gateway ${path}: ${response.status}${detail}`);
+  }
   return await response.json() as T;
 }
 
@@ -184,6 +195,17 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
     queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>(
       "/query-database",
       request,
+      LONG_OPERATION_MS,
+    ),
+    useWorktree: (request: UseWorktreeRequest) => post<UseWorktreeResult>(
+      "/worktrees/use",
+      request,
+      LONG_OPERATION_MS,
+    ),
+    resolveWorktreeCwd: (request: ResolveWorktreeCwdRequest) => json<ResolveWorktreeCwdResult>(
+      `/worktrees/resolve-cwd?threadId=${encodeURIComponent(request.threadId)}` +
+        `&fallbackCwd=${encodeURIComponent(request.fallbackCwd)}`,
+      undefined,
       LONG_OPERATION_MS,
     ),
     subscribe(

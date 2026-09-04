@@ -41,6 +41,7 @@ export enum AgentToolId {
   ManageAgentRun = "manage_agent_run",
   GetHarnessDetails = "get_harness_details",
   ManageDelegatedBaseline = "manage_delegated_baseline",
+  UseWorktree = "use_worktree",
 }
 
 export type ScheduleTrigger =

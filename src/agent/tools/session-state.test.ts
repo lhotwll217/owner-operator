@@ -7,6 +7,7 @@ const row = (id: string, repo: string, topic: string, state: CurrentSessionState
   id,
   source: "codex",
   repo,
+  project: null,
   app: "Codex App",
   topic,
   generatedTopic: topic,

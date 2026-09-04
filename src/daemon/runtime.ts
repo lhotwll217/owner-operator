@@ -17,7 +17,8 @@ import { createAcpLauncher } from "../agent-runs/acp-launcher";
 import { deriveParentAgentStateWithEnvironment } from "../agent-runs/agent-state-projection";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
-import { daemonInfoPath, stateDatabasePath } from "../shared/paths";
+import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/paths";
+import { WorktreeService } from "../worktrees/worktrees";
 import { runtimeFingerprint } from "./fingerprint";
 
 export interface DaemonOptions {
@@ -39,6 +40,7 @@ export interface RunningDaemon {
   monitor: SessionMonitor;
   scheduler: Scheduler;
   agentRuns: AgentRunExecutor;
+  worktrees: WorktreeService;
   close(): Promise<void>;
 }
 
@@ -56,6 +58,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
 
   const state = new State(dbPath);
   modules.state = true;
+  const worktrees = new WorktreeService(state, { ooHome: ownerOperatorHome() });
   const monitor = new SessionMonitor(state, {
     ...options.monitor,
     canEnrich: options.monitor?.canEnrich ?? (() => isOnboarded()),
@@ -115,6 +118,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       resume: (id, task) => agentRuns.resume(id, task),
       wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
     },
+    worktrees: {
+      use: (request) => worktrees.use(request),
+      resolveCwd: (request) => worktrees.resolveCwd(request),
+    },
     port: options.port,
     health,
     ready,
@@ -151,6 +158,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     monitor,
     scheduler,
     agentRuns,
+    worktrees,
     async close() {
       if (closed) return;
       closed = true;

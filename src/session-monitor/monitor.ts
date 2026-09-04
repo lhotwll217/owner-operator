@@ -1,7 +1,7 @@
 import { watch as fsWatch, type FSWatcher } from "node:fs";
 import {
   loadActiveWindow,
-  loadSessionSources,
+  loadMonitoredTranscriptStores,
   isOnboarded,
   type ScanRow,
   type SessionStateRow,
@@ -107,8 +107,10 @@ export class SessionMonitor {
 
   private armWatchers(): void {
     if (!this.watching || this.watchers.length > 0) return;
-    const watchedRoots = this.watchRoots ?? (isOnboarded() ? loadSessionSources().map((source) => source.root) : []);
-    for (const root of watchedRoots) {
+    const watchedRoots = this.watchRoots ?? (
+      isOnboarded() ? loadMonitoredTranscriptStores().map((store) => store.root) : []
+    );
+    for (const root of new Set(watchedRoots)) {
       try {
         const watcher = fsWatch(root, { recursive: true }, (_event, file) => {
           if (typeof file === "string" && /\.(?:jsonl|ndjson|json)$/.test(file)) this.scheduleReconcile();

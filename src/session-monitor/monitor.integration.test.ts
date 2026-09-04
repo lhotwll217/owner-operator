@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { markOnboarded, saveSessionRoots } from "@owner-operator/core";
+import { KNOWN_SESSION_SOURCES, markOnboarded, saveSessionRoots } from "@owner-operator/core";
 import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { State } from "../state/state";
 import { SessionMonitor } from "./monitor";
@@ -46,6 +46,24 @@ try {
   writeFileSync(join(watchedRoot, "new-session.jsonl"), "{}\n");
   await waitFor(() => watcherScanCalls > 1, 1_000, "watcher to arm after onboarding");
   watcherMonitor.stop();
+
+  const productRoot = join(dir, "sessions");
+  mkdirSync(productRoot, { recursive: true });
+  saveSessionRoots(dir, []);
+  writeFileSync(join(dir, "session_sources.json"), JSON.stringify({ disable: KNOWN_SESSION_SOURCES }));
+  let productWatcherScanCalls = 0;
+  const productWatcherMonitor = new SessionMonitor(state, {
+    debounceMs: 10,
+    scan: async () => {
+      productWatcherScanCalls += 1;
+      return [];
+    },
+  });
+  productWatcherMonitor.watch();
+  await productWatcherMonitor.poll();
+  writeFileSync(join(productRoot, "owner-session.jsonl"), "{}\n");
+  await waitFor(() => productWatcherScanCalls > 1, 1_000, "product-owned OO watcher");
+  productWatcherMonitor.stop();
 
   let gatedEnrichmentCalls = 0;
   const gatedMonitor = new SessionMonitor(state, {

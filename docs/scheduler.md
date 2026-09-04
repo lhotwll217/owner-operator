@@ -50,7 +50,9 @@ from coding-session monitoring, preventing automation loops.
 - Shutdown aborts active runs, terminates command process groups, and drains the queue before State closes.
 - Disabling/deleting prevents future triggers but does not cancel an active run.
 - A monotonic schedule revision prevents an active run from overwriting a concurrent edit.
-- Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit atomically.
+- Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit
+  atomically. Roots with pending or running delegated children are excluded, and an agent-run
+  transition reconciles the inputs so the transcript-derived handoff returns after termination.
 
 Failures and output are inspectable through the read-only `query_database` tool
 over `schedules` and `schedule_runs`. The table intent and columns live once in

@@ -37,6 +37,8 @@ export interface AgentHarnessDescriptor {
 export interface TranscriptStore {
   format: TranscriptFormat;
   root: string;
+  app?: string;
+  namespace?: string;
 }
 
 /** A directory to scan/watch, tagged with the format its files are in. */
@@ -60,6 +62,12 @@ export const KNOWN_TRANSCRIPT_FORMATS: readonly TranscriptFormat[];
 export const AGENT_HARNESS_DESCRIPTORS: readonly AgentHarnessDescriptor[];
 export function assertTranscriptFormatCoverage(implementedFormats: Iterable<string>): void;
 export function loadTranscriptStores(ooHome?: string): TranscriptStore[];
+export function ownerOperatorTranscriptStore(ooHome?: string): TranscriptStore & {
+  format: "pi";
+  app: "Owner Operator";
+  namespace: "owner-operator";
+};
+export function loadMonitoredTranscriptStores(ooHome?: string): TranscriptStore[];
 export function loadTranscriptAccess(ooHome?: string): {
   selectedFormats: TranscriptFormat[];
   defaultFormats: TranscriptFormat[];

@@ -13,8 +13,10 @@ import {
   KNOWN_TRANSCRIPT_FORMATS,
   assertTranscriptFormatCoverage,
   loadSessionSources,
+  loadMonitoredTranscriptStores,
   loadTranscriptAccess,
   loadTranscriptStores,
+  ownerOperatorTranscriptStore,
 } from "./session-sources.mjs";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-sources-"));
@@ -68,6 +70,12 @@ try {
     def,
     "domain loader returns transcript stores while the legacy source loader stays compatible",
   );
+  assert.deepEqual(ownerOperatorTranscriptStore(ooHome), {
+    format: "pi",
+    root: join(ooHome, "sessions"),
+    app: "Owner Operator",
+    namespace: "owner-operator",
+  }, "the product-owned OO store carries explicit attribution outside external configuration");
 
   // add appends; disable drops a default; ~ expands; unknown source ignored.
   writeFileSync(join(ooHome, "session_sources.json"), JSON.stringify({
@@ -99,6 +107,17 @@ try {
   assert.deepEqual(loadSessionSources(ooHome).filter(({ source }) => source === "claude"), [
     { source: "claude", root: "/relocated/claude" },
   ]);
+
+  writeFileSync(join(ooHome, "session_sources.json"), JSON.stringify({
+    disable: ["pi"],
+  }));
+  const noExternalPi = loadTranscriptAccess(ooHome);
+  assert.ok(!noExternalPi.selectedFormats.includes("pi"), "product sessions do not authorize external Pi transcripts");
+  assert.ok(
+    loadMonitoredTranscriptStores(ooHome).some(({ root, namespace }) =>
+      root === join(ooHome, "sessions") && namespace === "owner-operator"),
+    "monitoring always composes the independent product store",
+  );
 
   // De-dup: an `add` restating a default collapses to one entry.
   writeFileSync(join(ooHome, "session_sources.json"), JSON.stringify({

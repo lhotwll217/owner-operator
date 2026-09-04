@@ -48,6 +48,7 @@ writeFileSync(paths.userHarnessPreferences, preferences);
 
 const launches: AgentRunCreateInput[] = [];
 const backend = {
+  async resolveWorktreeCwd() { throw new Error("explicit cwd must not resolve root selection"); },
   async delegateAgent(input: AgentRunCreateInput) {
     launches.push(input);
     return agentRunFixture("implicit-run", AgentRunStatus.Pending, {
@@ -58,7 +59,7 @@ const backend = {
     });
   },
   async waitAgentRun() { throw new Error("wait not expected"); },
-} as Pick<GatewayApi, "delegateAgent" | "waitAgentRun">;
+} as Pick<GatewayApi, "delegateAgent" | "resolveWorktreeCwd" | "waitAgentRun">;
 
 const detailsCalls: unknown[] = [];
 const detailsTool = createGetHarnessDetailsTool({
