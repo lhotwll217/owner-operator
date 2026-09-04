@@ -27,8 +27,10 @@ again. Disconnect clears the rendered snapshots; restart and reconnect therefore
 the durable ledger without preserving stale running indicators.
 
 An OO-delegated child's transcript can also become a session-state row. If both child and parent
-are visible, `parentThreadId` lets the widget render the child beneath the parent. Harness-native
-sub-agents have no delegated-run guarantee; the complete boundary is in
+are visible, `parentThreadId` lets the widget render the child beneath the parent. State projects
+that root as working while any child is pending or running; the existing agent-run invalidation
+refetches the session projection when this changes. Harness-native sub-agents have no delegated-run
+guarantee; the complete boundary is in
 [Sub-agents and delegated runs](delegated-runs.md#tracking-boundary).
 
 Owner-origin Owner Operator conversations are ordinary root rows in `/session-state`; the widget

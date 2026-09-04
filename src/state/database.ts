@@ -30,6 +30,19 @@ export { type SessionStateRow } from "@owner-operator/core";
 
 const AGENT_RUN_EFFORT_SQL = AGENT_RUN_EFFORTS.map((effort) => `'${effort}'`).join(", ");
 
+/** One State-owned definition of an active delegated child. Every persisted owner-attention
+ * projection embeds this predicate instead of growing a parallel run lifecycle. */
+const HAS_ACTIVE_CHILD_SQL = `EXISTS (
+  SELECT 1 FROM agent_runs active_child
+  WHERE active_child.parent_thread_id = t.id
+    AND active_child.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')
+)`;
+
+const EFFECTIVE_THREAD_STATE_SQL = `CASE
+  WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  ELSE detail.state
+END`;
+
 export function defaultDbPath(): string {
   return stateDatabasePath();
 }
@@ -530,13 +543,12 @@ export class ThreadDb {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      // The thread may have flapped out of needs-you while the model ran — the sampled
-      // message is unchanged, so the belief still lands (state is a lifecycle flag, not a
-      // new message). But once a newer message has arrived the sample is stale: reject it
-      // and let the next poll re-enrich. The watermark rejects an already-enriched message
-      // and any out-of-order duplicate.
+      // An ordinary transcript-state flap may happen while the model runs; if the sampled
+      // message is unchanged, that belief can still land. An active delegated child makes
+      // the root ineligible, while a newer message makes the sample stale. The watermark
+      // rejects an already-enriched message and any out-of-order duplicate.
       if (
-        !current || current.lastMessageAt !== throughMessageAt ||
+        !current || this.hasActiveChild(threadId) || current.lastMessageAt !== throughMessageAt ||
         (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
       ) {
         this.db.exec("COMMIT");
@@ -593,15 +605,20 @@ export class ThreadDb {
 
   listSessionState(options: { activeSince?: string } = {}): SessionStateRow[] {
     const where = options.activeSince
-      ? "WHERE detail.state != 'done' AND (t.last_active_at >= ? OR detail.state = 'needs-you')"
-      : "WHERE detail.state != 'done'";
+      ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
+           AND (t.last_active_at >= ? OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
+             OR ${HAS_ACTIVE_CHILD_SQL})`
+      : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source, COALESCE(t.repo, '') AS repo,
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
-              detail.summary, detail.next_steps AS nextSteps, detail.priority, detail.state,
-              detail.state_reason AS stateReason, detail.created_at AS stateSince,
+              detail.summary, detail.next_steps AS nextSteps, detail.priority,
+              ${EFFECTIVE_THREAD_STATE_SQL} AS state,
+              CASE WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'delegated child is active'
+                   ELSE detail.state_reason END AS stateReason,
+              detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
               t.created_at AS createdAt, t.last_message_at AS lastMessageAt,
               t.diff_added AS diffAdded, t.diff_deleted AS diffDeleted,
@@ -611,7 +628,8 @@ export class ThreadDb {
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        ${where}
-       ORDER BY CASE detail.state WHEN 'needs-you' THEN 0 WHEN 'working' THEN 1 WHEN 'idle' THEN 2 ELSE 3 END,
+       ORDER BY CASE ${EFFECTIVE_THREAD_STATE_SQL}
+                  WHEN 'needs-you' THEN 0 WHEN 'working' THEN 1 WHEN 'idle' THEN 2 ELSE 3 END,
                 t.last_message_at DESC, t.repo COLLATE NOCASE ASC`,
     );
     const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
@@ -633,6 +651,7 @@ export class ThreadDb {
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
+         AND NOT ${HAS_ACTIVE_CHILD_SQL}
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at)
        ORDER BY t.last_message_at ASC`,
     ).all() as Array<{ id: string }>;
@@ -1017,12 +1036,19 @@ export class ThreadDb {
     return rows.map((row) => toAgentRun(row)!);
   }
 
+  private hasActiveChild(threadId: string): boolean {
+    return Boolean(this.db.prepare(
+      `SELECT 1 FROM threads t WHERE t.id = ? AND ${HAS_ACTIVE_CHILD_SQL}`,
+    ).get(threadId));
+  }
+
   listNeedsYouMessageVersions(): Array<{ threadId: string; lastMessageAt: string }> {
     return this.db.prepare(
       `SELECT t.id AS threadId, t.last_message_at AS lastMessageAt
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
+         AND NOT ${HAS_ACTIVE_CHILD_SQL}
        ORDER BY t.last_message_at ASC`,
     ).all() as Array<{ threadId: string; lastMessageAt: string }>;
   }
@@ -1036,7 +1062,14 @@ export class ThreadDb {
       const read = this.db.prepare(
         "SELECT last_message_at AS lastMessageAt FROM schedule_event_watermarks WHERE schedule_id = ? AND thread_id = ?",
       );
+      const eligible = this.db.prepare(
+        `SELECT 1 FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
+          AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
+         WHERE t.id = ? AND t.last_message_at = ? AND detail.state = 'needs-you'
+           AND NOT ${HAS_ACTIVE_CHILD_SQL}`,
+      );
       const fresh = params.changes.filter((change) => {
+        if (!eligible.get(change.threadId, change.lastMessageAt)) return false;
         const prior = read.get(params.schedule.id, change.threadId) as { lastMessageAt: string } | undefined;
         return prior?.lastMessageAt !== change.lastMessageAt;
       });

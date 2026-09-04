@@ -21,7 +21,7 @@ import {
 import { delegateAgentTool } from "../agent/tools/delegate-agent";
 import type { AgentRunLauncher } from "../agent-runs/executor";
 import { connectGateway } from "../gateway/client";
-import { tempOoHome, waitFor } from "../gateway/test/helpers";
+import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { startDaemon } from "./runtime";
 
 const { dir: ooHome, cleanup } = tempOoHome("oo-agent-runs-e2e");
@@ -54,7 +54,16 @@ const startOnce = () => startDaemon({
   port: 0,
   watch: false,
   enableEnrichment: false,
-  monitor: { scan: async () => [], intervalMs: 60_000 },
+  monitor: {
+    scan: async () => [fakeScanRow({
+      id: "operator-thread",
+      source: "pi",
+      repo: "issue-131",
+      app: "Owner Operator",
+      topic: "Delegate ticket 02",
+    })],
+    intervalMs: 60_000,
+  },
   scheduler: { tickMs: 60_000 },
   agentRuns: { launcher, tickMs: 20, maxConcurrent: 3, logger: () => undefined },
 });
@@ -70,6 +79,16 @@ try {
   assert.equal(startupReaps, 1, "daemon startup reaps stale delegated process trees before launch");
   gateway = (await connectGateway())!;
   assert.ok(gateway, "ready daemon is discoverable");
+  await waitFor(
+    () => daemon.state.listCurrentSessionState().some(({ id }) => id === "operator-thread"),
+    1_000,
+    "monitored Operator root",
+  );
+  assert.equal(
+    (await gateway.sessionState()).find(({ id }) => id === "operator-thread")?.state,
+    "needs-you",
+    "the root starts from transcript-derived state",
+  );
 
   const sseEvents: GatewayEvent[] = [];
   const unsubscribe = gateway.subscribe((event) => sseEvents.push(event));
@@ -90,6 +109,16 @@ try {
   assert.equal(launched.status, AgentRunStatus.Pending, "delegate returns before the child runs");
   assert.equal(launched.depth, 1);
   assert.equal(launched.parentThreadId, "operator-thread", "the Operator tool binds trusted parent lineage");
+  await waitFor(
+    () => sseEvents.some((event) => event.kind === GatewayEventKind.AgentRunChanged),
+    1_000,
+    "pending child SSE invalidation",
+  );
+  assert.equal(
+    (await gateway.sessionState()).find(({ id }) => id === "operator-thread")?.state,
+    "working",
+    "refetching session state after the agent-run invalidation sees the pending transition",
+  );
 
   // The launcher records activity synchronously before parking, so once the child is parked
   // the ledger row is already running — parked.length is the real synchronization point.
@@ -107,7 +136,11 @@ try {
   );
 
   // --- parent stays responsive while the child runs (non-blocking) ------------------------
-  assert.deepEqual(await gateway.sessionState(), [], "the parent can still call the gateway mid-run");
+  assert.equal(
+    (await gateway.sessionState()).find(({ id }) => id === "operator-thread")?.state,
+    "working",
+    "the parent remains responsive and effectively working while its child runs",
+  );
   assert.equal((await gateway.listAgentRuns("operator-thread")).length, 1, "runs list by parent thread");
 
   // --- graceful shutdown mid-run leaves a DURABLE interrupted row, never lost -------------
@@ -122,6 +155,11 @@ try {
   const afterRestart = await gateway2.agentRun(launched.id);
   assert.equal(afterRestart.status, AgentRunStatus.Interrupted, "the interrupted run survives restart");
   assert.ok(afterRestart.childSessionId, "the child identity survives for retry");
+  assert.equal(
+    (await gateway2.sessionState()).find(({ id }) => id === "operator-thread")?.state,
+    "needs-you",
+    "a terminal child restores the root's transcript-derived state through Gateway",
+  );
   const restartedView = await gateway2.agentState();
   assert.equal(restartedView.footer, "! 1 attention    /agent-state");
   assert.equal(restartedView.runs[0]?.status.text, "attention");

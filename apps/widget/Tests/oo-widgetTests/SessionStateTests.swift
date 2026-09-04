@@ -40,6 +40,7 @@ private actor StubWidgetGateway {
     }
 
     func setAgentState(_ data: Data) { agentStateData = data }
+    func setSessionState(_ data: Data) { sessionStateData = data }
     func setUnavailable(_ value: Bool) { unavailable = value }
     func setAgentStateUnavailable(_ value: Bool) { agentStateUnavailable = value }
     func requestCount(_ path: String) -> Int { paths.filter { $0 == path }.count }
@@ -191,9 +192,16 @@ struct SessionStateTests {
             """.utf8)
         }
 
-        let stub = StubWidgetGateway(agentStateData: view(
-            status: "running", glyph: "●", category: "active", footer: "Agent state: 1 running"
-        ))
+        let activeSessions = try JSONSerialization.data(withJSONObject: [
+            row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "working"),
+            row(id: "child", repo: "issue-131", state: "working", parentThreadId: "oo-root"),
+        ])
+        let stub = StubWidgetGateway(
+            agentStateData: view(
+                status: "running", glyph: "●", category: "active", footer: "Agent state: 1 running"
+            ),
+            sessionStateData: activeSessions
+        )
         let client = DaemonClient(
             discover: { DaemonClient.Discovery(port: 47711, authToken: "test") },
             fetchData: { path, _ in try await stub.fetch(path) }
@@ -201,14 +209,25 @@ struct SessionStateTests {
 
         await client.refresh()
         #expect(client.agentState.runs[0].status.text == .running)
+        #expect(client.groups.flatMap(\.rows).map(\.id) == ["oo-root", "child"])
+        #expect(client.groups.flatMap(\.rows).map(\.nestingDepth) == [0, 1])
+        #expect(client.groups.flatMap(\.rows).first?.state == .working)
 
+        let terminalSessions = try JSONSerialization.data(withJSONObject: [
+            row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "needs-you"),
+            row(id: "child", repo: "issue-131", state: "working", parentThreadId: "oo-root"),
+        ])
+        await stub.setSessionState(terminalSessions)
         await stub.setAgentState(view(
             status: "interrupted", glyph: "!", category: "attention", footer: "Agent state: 1 needs attention"
         ))
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
         #expect(client.agentState.runs[0].status.text == .interrupted)
         #expect(client.agentState.runs[0].canRetry)
+        #expect(client.groups.flatMap(\.rows).first?.state == .needsYou)
+        #expect(client.groups.flatMap(\.rows).last?.nestingDepth == 1)
         #expect(await stub.requestCount("/agent-state") == 2)
+        #expect(await stub.requestCount("/session-state") == 2)
 
         await stub.setUnavailable(true)
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
@@ -287,7 +306,7 @@ struct SessionStateTests {
         let input = try rows([
             row(id: "other", repo: "repo", state: "needs-you"),
             row(id: "child", repo: "child-repo", state: "working", parentThreadId: "parent"),
-            row(id: "parent", repo: "repo", state: "idle"),
+            row(id: "parent", repo: "repo", state: "working"),
         ])
         let (groups, _) = buildSessionState(rows: input)
         #expect(groups.count == 1)

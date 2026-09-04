@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AgentRunHarness,
+  AgentRunStatus,
   ScheduleKind,
   ScheduledPayloadKind,
   type ScanRow,
@@ -63,7 +65,34 @@ try {
   await waitFor(() => contexts.length === 2, 1_000, "same-state new-message run");
   assert.equal(state.listScheduleRuns(job.id).length, 2);
 
-  process.stdout.write("ok — needs-you event batching and durable dedupe\n");
+  state.recordObservation(row("delegating-root", "2026-07-09T10:03:00.000Z"));
+  const child = state.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "handle the root task",
+    cwd: dir,
+    parentThreadId: "delegating-root",
+    depth: 1,
+    timeoutSeconds: 1_800,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 2, "a pending child suppresses an already-queued needs-you trigger");
+
+  state.claimNextPendingAgentRun(1);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 2, "a running child keeps the root out of needs-you triggers");
+
+  state.finishAgentRun(child.id, {
+    status: AgentRunStatus.Completed,
+    resultTail: "handled",
+    error: null,
+  });
+  await waitFor(() => contexts.length === 3, 1_000, "terminal child to restore needs-you trigger");
+  assert.deepEqual(contexts[2], {
+    threadIds: ["delegating-root"],
+    observedThrough: "2026-07-09T10:03:00.000Z",
+  });
+
+  process.stdout.write("ok — needs-you event batching, dedupe, and active-child suppression\n");
 } finally {
   await scheduler.stop();
   state.close();

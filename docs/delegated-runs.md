@@ -48,7 +48,7 @@ Run ownership, transcript observation, and widget visibility are separate:
 | Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Always represented in Agent state; also appears as a normal session row when present in session state |
 | Native Claude, Codex, or Cursor sub-agent | Never | Harness-dependent: it may be folded into its parent, excluded as automated work, or admitted as an ordinary session | Mirrors session state; it has no OO lineage |
 | Any agent launches a separate supported coding CLI | Only if the launch went through `delegate_agent` | Its transcript may be discovered and admitted normally | An ordinary row, without OO lineage |
-| Owner Operator's own conversation | Not a child run; its id may be recorded as a run's parent | Intentionally excluded from external transcript discovery | Not an ordinary session row |
+| Owner-origin Owner Operator conversation | Not a child run; its id may be recorded as a run's parent | Admitted from the product-owned transcript store as an ordinary root | Ordinary root with observed delegated children nested beneath it |
 
 The ledger relationship is authoritative: a session is OO-delegated when its id matches an
 `agent_runs.child_session_id`. Do not infer ownership from process ancestry, transcript location,
@@ -102,7 +102,8 @@ Client behavior follows the same invalidation/refetch contract:
   opening one Gateway subscription, then lists again after attachment to close the snapshot gap.
   Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
   invalidations with an in-flight/dirty refetch rule. Its shared view drives the literal
-  `Agent state` footer and the `/agent-state` picker; it never drives the parent's working indicator.
+  `Agent state` footer and the `/agent-state` picker. State—not this client adapter—projects the
+  parent as working while a delegated child is pending or running.
 - **Headless chat:** opening or resuming a parent thread starts the same `ParentRunSession` and Pi
   completion adapter without the footer or picker. Initial completion delivery is unbatched and
   awaited before the explicit prompt, and shutdown drains current delivery before closing the
@@ -280,10 +281,11 @@ for foreign-harness children is a separate OS-sandbox concern, not a permission-
 A run row carries `parent_thread_id`. When the monitor observes the child's transcript through
 its ordinary scan path, the observed thread joins to its `agent_runs` row by identity
 (`child_session_id`), so the session-state projection exposes `parentThreadId`. This is an
-identity join, never inference from transcript-file growth. A client may use that lineage when
-the parent is also visible. Owner Operator conversations are not session-state rows, so an
-admitted OO-delegated child currently appears in the widget as an ordinary root session; its
-ledger record remains the canonical provenance.
+identity join, never inference from transcript-file growth. When the monitored OO parent is also
+visible, the widget nests the child beneath that exact root. While any child is pending or running,
+State projects the root as `working` and excludes it from needs-you enrichment and schedule inputs.
+Once all children are terminal, the transcript-derived root state applies again. The ledger record
+remains the canonical child provenance.
 
 In the terminal, `pi-tool-display` owns the compact `delegate_agent`/`manage_agent_run` call and
 result components, with raw results available through Pi's ordinary expansion. A successful
