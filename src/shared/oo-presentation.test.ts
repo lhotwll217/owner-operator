@@ -26,7 +26,18 @@ for (const mode of ["truecolor", "256color"] as const) {
     `${mode} tool rows stay neutral when they settle`,
   );
 }
-for (const color of ["accent", "muted", "dim", "text", "searchMatchText", "toolTitle", "success", "error"] as const) {
+for (const color of [
+  "accent",
+  "muted",
+  "dim",
+  "text",
+  "scrollbarTrack",
+  "scrollbarThumb",
+  "searchMatchText",
+  "toolTitle",
+  "success",
+  "error",
+] as const) {
   assert.doesNotThrow(() => theme.fg(color, "x"), `theme has the ${color} token`);
 }
 

@@ -54,6 +54,8 @@ const OO_FG_COLORS: Record<ThemeColor, string> = {
   muted: ooPalette.muted,
   dim: ooPalette.dim,
   text: ooPalette.text,
+  scrollbarTrack: ooPalette.faint,
+  scrollbarThumb: ooPalette.text,
   searchMatchText: ooPalette.text,
   thinkingText: ooPalette.muted,
   userMessageText: ooPalette.text,

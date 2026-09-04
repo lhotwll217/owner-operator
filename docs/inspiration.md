@@ -143,15 +143,15 @@ expansion, so Owner Operator keeps the existing construction-site shim narrow: i
 row's `render` method and leaves execution, updates, ordering, and expansion ownership with Pi.
 
 Issue #131's root cwd restoration adapts the exact installed
-`@earendil-works/pi-coding-agent` 0.84.4 runtime contract: OO resolves its State/Git selection before
+`@earendil-works/pi-coding-agent` 0.85.0 runtime contract: OO resolves its State/Git selection before
 the shared runtime factory constructs services, and reopens the same session through Pi's
-[`switchSession`](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/agent-session-runtime.ts#L196-L222)
+[`switchSession`](https://github.com/earendil-works/pi/blob/107d79f11072bbc8a3a757ed7fd69596bee7d68c/packages/coding-agent/src/core/agent-session-runtime.ts#L196-L222)
 only after Pi's
-[`agent_settled`](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/agent-session.ts#L630-L638)
+[`agent_settled`](https://github.com/earendil-works/pi/blob/107d79f11072bbc8a3a757ed7fd69596bee7d68c/packages/coding-agent/src/core/agent-session.ts#L629-L637)
 event. OO preserves Pi's teardown-before-rebuild ordering and stable session ID, while deliberately
 keeping the Pi header as install-root lookup identity rather than task assignment. The manager's
 supported
-[`create`/`open` cwd contract](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/session-manager.ts#L1512-L1555)
+[`create`/`open` cwd contract](https://github.com/earendil-works/pi/blob/107d79f11072bbc8a3a757ed7fd69596bee7d68c/packages/coding-agent/src/core/session-manager.ts#L1546-L1582)
 is used without introducing a separate runtime or session store.
 
 Permission gating is adopted wholesale from

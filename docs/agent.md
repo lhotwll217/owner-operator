@@ -11,10 +11,14 @@ read_when:
 Owner Operator is built on the [pi coding agent](https://github.com/earendil-works/pi),
 consumed as `@earendil-works/pi-*` npm dependencies, pinned exact while pre-1.0. Embedded
 Pi uses `OO_HOME/pi` for its auth, settings, custom models, and agent state; it does not
-change standalone Pi. The resource loader disables ambient context, extensions, skills,
-prompts, and themes, then adds only the product prompt, bundled skills, workspace
-`AGENTS.md`, workspace skills, and personal skills explicitly selected during onboarding,
-plus the pinned permission-system and tool-display extensions.
+change standalone Pi. Pi 0.85.0's public coding-agent entry point eagerly imports its
+experimental server ([source](https://github.com/earendil-works/pi/blob/107d79f11072bbc8a3a757ed7fd69596bee7d68c/packages/coding-agent/src/main.ts#L68-L72)),
+but the published coding-agent manifest omits `@earendil-works/pi-server` from its dependencies
+([manifest](https://github.com/earendil-works/pi/blob/107d79f11072bbc8a3a757ed7fd69596bee7d68c/packages/coding-agent/package.json#L51-L72));
+Owner Operator therefore pins the matching server package directly until upstream owns that edge.
+The resource loader disables ambient context, extensions, skills, prompts, and themes, then adds only
+the product prompt, bundled skills, workspace `AGENTS.md`, workspace skills, and personal skills
+explicitly selected during onboarding, plus the pinned permission-system and tool-display extensions.
 
 ## Roots
 
