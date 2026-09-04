@@ -62,7 +62,7 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const cwd = params.cwd ? (isAbsolute(params.cwd) ? params.cwd : resolve(params.cwd)) : process.cwd();
+      const cwd = params.cwd ? (isAbsolute(params.cwd) ? params.cwd : resolve(params.cwd)) : ctx.cwd;
       const backend = await getGateway();
       // Lineage comes from Pi's active session, never model arguments: a spoofed parent id could
       // misattribute nesting or reset the depth guard. Lower-level Gateway clients may supply their
