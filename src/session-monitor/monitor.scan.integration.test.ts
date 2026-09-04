@@ -25,6 +25,10 @@ const sid = "abcdef01-2345-6789-abcd-ef0123456789";
 const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
 const cwd = join(home, "dev", "demo-repo"); // no git here → no diff badge, which is fine
 const sessionFile = join(home, ".claude", "projects", "demo", `${sid}.jsonl`);
+const ooSid = "12345678-abcd-4321-abcd-1234567890ab";
+const stableHeaderCwd = join(home, "install", "owner-operator");
+const ooTaskCwd = join(home, "tasks", "issue-131");
+const ooSessionFile = join(dir, "sessions", `2026-01-01T00-00-00-000Z_${ooSid}.jsonl`);
 const msg = (type: "user" | "assistant", content: string, ts: string) =>
   JSON.stringify({
     type, sessionId: sid, cwd, timestamp: ts,
@@ -51,6 +55,19 @@ writeFileSync(
   msg("user", "looks good, ship it", at(12)) +
   msg("assistant", "Done — the loop is tighter now.", at(8)),
 );
+mkdirSync(dirname(ooSessionFile), { recursive: true });
+writeFileSync(join(dir, "session_sources.json"), JSON.stringify({ disable: ["pi"] }));
+writeFileSync(
+  ooSessionFile,
+  JSON.stringify({ type: "session", version: 3, id: ooSid, timestamp: at(22), cwd: stableHeaderCwd }) + "\n" +
+  JSON.stringify({ type: "custom", customType: "oo-provenance", timestamp: at(21), data: {
+    surface: "chat", origin: "owner", callerCwd: ooTaskCwd, callerRepo: "issue-131", ppid: 10,
+  } }) + "\n" +
+  JSON.stringify({ type: "message", timestamp: at(20), message: { role: "user", content: "monitor the Owner Operator root" } }) + "\n" +
+  JSON.stringify({ type: "message", timestamp: at(7), message: {
+    role: "assistant", content: [{ type: "text", text: "The root is monitored." }], stopReason: "stop",
+  } }) + "\n",
+);
 
 try {
   const { State } = await import("../state/state");
@@ -75,8 +92,8 @@ try {
     join(dir, "state.db"),
   );
 
-  assert.equal(current.length, 1, "the real scan found exactly the seeded session");
-  const t = current[0];
+  assert.equal(current.length, 2, "the real scan found the external and product-owned sessions");
+  const t = current.find((row) => row.id === sid)!;
   assert.equal(t.id, sid, "thread id parsed from the session file on disk");
   assert.equal(t.app, "Claude CLI", "runScan maps the scan's `ui` field to `app`");
   assert.equal(t.state, "needs-you", "assistant yielded (end_turn) → needs-you");
@@ -85,6 +102,23 @@ try {
     stored.rows[0]?.transcript_path,
     sessionFile,
     "the real scan persists its transcript path through monitor and State",
+  );
+
+  const oo = current.find((row) => row.id === ooSid)!;
+  assert.equal(oo.source, "pi", "OO retains its actual transcript format");
+  assert.equal(oo.app, "Owner Operator", "the product store supplies owner-facing attribution");
+  assert.equal(oo.repo, "issue-131", "OO provenance wins over the stable session-header cwd");
+  const ooStored = runQuery(
+    `SELECT app, source, project, transcript_path FROM threads WHERE id = '${ooSid}'`,
+    join(dir, "state.db"),
+  ).rows[0];
+  assert.deepEqual(ooStored, {
+    app: "Owner Operator", source: "pi", project: ooTaskCwd, transcript_path: ooSessionFile,
+  }, "OO identity and task attribution persist through the ordinary threads row");
+  assert.equal(
+    runQuery(`SELECT COUNT(*) AS count FROM thread_details WHERE thread_id = '${ooSid}'`, join(dir, "state.db")).rows[0]?.count,
+    1,
+    "the OO root receives an ordinary append-only detail version",
   );
 
   process.stdout.write("ok — monitor real scan path: scan-active-transcripts → current state\n");

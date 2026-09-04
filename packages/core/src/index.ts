@@ -18,9 +18,11 @@ export {
   KNOWN_TRANSCRIPT_FORMATS,
   SESSION_SOURCE_DESCRIPTORS,
   assertTranscriptFormatCoverage,
+  loadMonitoredTranscriptStores,
   loadSessionSources,
   loadTranscriptAccess,
   loadTranscriptStores,
+  ownerOperatorTranscriptStore,
 } from "./session-sources.mjs";
 export type {
   AgentHarnessDescriptor,

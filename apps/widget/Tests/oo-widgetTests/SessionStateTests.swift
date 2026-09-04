@@ -61,6 +61,8 @@ struct SessionStateTests {
     private func row(
         id: String,
         repo: String = "repo",
+        source: String = "claude",
+        app: String = "App",
         state: String = "idle",
         topic: String = "topic",
         generatedTopic: String? = nil,
@@ -73,7 +75,7 @@ struct SessionStateTests {
         diffAdded: Int? = nil
     ) -> [String: Any] {
         var d: [String: Any] = [
-            "id": id, "source": "claude", "repo": repo, "app": "App", "topic": topic,
+            "id": id, "source": source, "repo": repo, "app": app, "topic": topic,
             "state": state, "lastActive": "now", "createdAt": "2026-01-01T00:00:00.000Z",
             "lastActiveAt": lastMessageAt, "lastMessageAt": lastMessageAt, "stateSince": stateSince,
         ]
@@ -292,6 +294,17 @@ struct SessionStateTests {
         #expect(groups[0].repo == "repo")
         #expect(groups[0].rows.map(\.id) == ["other", "parent", "child"])
         #expect(groups[0].rows.map(\.nestingDepth) == [0, 0, 1])
+    }
+
+    @Test func ownerOperatorSessionRendersAsRoot() throws {
+        let input = try rows([
+            row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "needs-you")
+        ])
+        let rendered = buildSessionState(rows: input).groups[0].rows[0]
+        #expect(rendered.id == "oo-root")
+        #expect(rendered.app == "Owner Operator")
+        #expect(rendered.source == "pi")
+        #expect(rendered.nestingDepth == 0)
     }
 
     @Test func hiddenDroppedFromBodyButCountedDone() throws {

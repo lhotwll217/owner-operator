@@ -32,6 +32,14 @@ names apps, CLIs, and internal SDK transports. Rooted hosts win over transcript 
 Codex or Claude session inside a Superset worktree belongs to Superset. Superset roots are read
 from its legacy and current settings databases because the worktree home is configurable.
 
+Owner Operator's own Pi-format transcripts are a product-owned store, composed separately from
+the owner-authorized external harness stores. Owner-origin chat and interactive sessions enter the
+ordinary monitor and session-state pipeline as `Owner Operator` roots. Schedule, scheduler-origin,
+and agent-origin sessions remain automated. Their task repository and directory come from the
+latest valid `oo-provenance` entry because the Pi header cwd is stable lookup identity, not task
+context. This product store never authorizes or reports access to standalone Pi history, and its
+bounded scan slice cannot displace the external-session slice.
+
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
 ignore. Host detection supplies attribution only and does not grant transcript access. The marker
 records the reviewed stable IDs and an access contract hash. Harness identity, transcript format,

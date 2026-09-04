@@ -1,7 +1,7 @@
 import { watch as fsWatch, type FSWatcher } from "node:fs";
 import {
   loadActiveWindow,
-  loadSessionSources,
+  loadMonitoredTranscriptStores,
   isOnboarded,
   type ScanRow,
   type SessionStateRow,
@@ -41,6 +41,7 @@ async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]>
   return parsed.threads.map((thread): ScanRow => ({
     id: String(thread.id),
     source: String(thread.source ?? ""),
+    ...(typeof thread.namespace === "string" ? { namespace: thread.namespace } : {}),
     repo: String(thread.repo ?? ""),
     ...(typeof thread.project === "string" ? { project: thread.project } : {}),
     ...(typeof thread.file === "string" ? { transcriptPath: thread.file } : {}),
@@ -107,8 +108,10 @@ export class SessionMonitor {
 
   private armWatchers(): void {
     if (!this.watching || this.watchers.length > 0) return;
-    const watchedRoots = this.watchRoots ?? (isOnboarded() ? loadSessionSources().map((source) => source.root) : []);
-    for (const root of watchedRoots) {
+    const watchedRoots = this.watchRoots ?? (
+      isOnboarded() ? loadMonitoredTranscriptStores().map((store) => store.root) : []
+    );
+    for (const root of new Set(watchedRoots)) {
       try {
         const watcher = fsWatch(root, { recursive: true }, (_event, file) => {
           if (typeof file === "string" && /\.(?:jsonl|ndjson|json)$/.test(file)) this.scheduleReconcile();

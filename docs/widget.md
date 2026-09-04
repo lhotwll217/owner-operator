@@ -31,5 +31,8 @@ are visible, `parentThreadId` lets the widget render the child beneath the paren
 sub-agents have no delegated-run guarantee; the complete boundary is in
 [Sub-agents and delegated runs](delegated-runs.md#tracking-boundary).
 
+Owner-origin Owner Operator conversations are ordinary root rows in `/session-state`; the widget
+renders them through the same grouping and attention model as coding-agent roots.
+
 Install, lifecycle, and client auth live with the daemon ([daemon.md](daemon.md)); until
 onboarding completes it displays setup-required ([onboarding.md](onboarding.md)).

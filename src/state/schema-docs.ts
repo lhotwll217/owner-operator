@@ -5,9 +5,9 @@ export interface TableDoc { name: string; description: string; columns: ColumnDo
 export const SCHEMA_DOCS: TableDoc[] = [
   {
     name: "threads",
-    description: "One mutable identity/observation row per external coding-agent thread. Current belief lives in thread_details.",
+    description: "One mutable identity/observation row per monitored session thread. Current belief lives in thread_details.",
     columns: [
-      { name: "id", description: "Stable coding-agent thread id." },
+      { name: "id", description: "Stable monitored-session thread id." },
       { name: "repo", description: "Repository name." },
       { name: "project", description: "Absolute session working directory." },
       { name: "app", description: "Originating app or CLI." },
@@ -91,7 +91,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
     description: "Internal durable dedupe for needs-you event jobs; not a delivery queue.",
     columns: [
       { name: "schedule_id", description: "Event schedule id." },
-      { name: "thread_id", description: "External coding-agent thread id." },
+      { name: "thread_id", description: "Monitored session thread id." },
       { name: "last_message_at", description: "Latest message claimed by this schedule." },
     ],
   },

@@ -31,6 +31,10 @@ Every entry point creates missing workspace files without overwriting owner edit
 config API is authoritative; onboarding is its first-run TTY client, and incomplete setup
 fails closed ([onboarding.md](onboarding.md)).
 
+Saved Owner Operator conversations live under `OO_HOME/sessions`. Monitoring treats that as a
+product-owned Pi-format store, independently of standalone Pi transcript authorization; see
+[Sessions](sessions.md).
+
 ## Tools and skills
 
 - **Tools** are executable, typed Pi capabilities defined under `src/agent/tools`. A supported Pi

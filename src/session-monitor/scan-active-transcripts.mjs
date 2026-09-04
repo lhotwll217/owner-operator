@@ -27,7 +27,7 @@ import { resolveCandidates } from "../../packages/core/src/resolve.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src/blacklist.mjs";
 import {
   assertTranscriptFormatCoverage,
-  loadTranscriptStores,
+  loadMonitoredTranscriptStores,
 } from "../../packages/core/src/session-sources.mjs";
 import {
   loadSessionHosts,
@@ -105,11 +105,11 @@ const opencodeInfoFile = (root, f) => {
   const rel = f.slice(root.length + 1).split("/");
   return rel[0] === "session" && rel.length === 3 && rel[1] !== "message" && rel[1] !== "part";
 };
-// Built-in defaults + owner overrides (<ooHome>/session_sources.json). Same list the monitor
-// watches — one source of truth in @owner-operator/core.
-const roots = loadTranscriptStores(ooHome);
+// Owner-authorized external stores plus the product-owned OO store. Same list the monitor
+// watches; the product descriptor stays outside session_sources.json authorization.
+const roots = loadMonitoredTranscriptStores(ooHome);
 const candidates = [];
-for (const { root, format: source } of roots) {
+for (const { root, format: source, app, namespace } of roots) {
   if (!existsSync(root)) continue;
   const files = [];
   walk(root, files);
@@ -125,7 +125,9 @@ for (const { root, format: source } of roots) {
     // Blacklisted tree → skip the file unread (Claude project dirs are cwd slugs).
     if (source === "claude" && slugBlocked(basename(dirname(f)))) continue;
     let st; try { st = statSync(f); } catch { continue; }
-    if (st.mtimeMs >= cutoff) candidates.push({ file: f, source, mtime: st.mtimeMs, btime: st.birthtimeMs });
+    if (st.mtimeMs >= cutoff) candidates.push({
+      file: f, source, mtime: st.mtimeMs, btime: st.birthtimeMs, app, namespace,
+    });
   }
 }
 
@@ -333,12 +335,13 @@ function posthogMainLog() {
 }
 
 // ---------- parse one session ----------
-function parseSession({ file, source, mtime, btime }) {
+function parseSession({ file, source, mtime, btime, app, namespace }) {
   let raw;
   try { raw = readFileSync(file, "utf8"); } catch { return null; }
   const msgs = [];                 // substantive text turns: {role, text, ts, stop?}
   let project = null, sessionId = null, entrypoint = null, firstTs = 0, lastTs = 0, lastLifecycle = null;
   let originator = null, srcHint = null;   // codex session_meta provenance (→ detectUi)
+  let ooProvenance = null;                 // latest valid product-owned invocation stamp
   let cursorTail = null;                   // cursor: {role, lastBlock} of the LAST record
   // posthog-code (ACP): assistant narration arrives as many small agent_message chunks per
   // turn — buffer and flush as ONE assistant turn on the next user prompt. Turn completion is
@@ -454,6 +457,15 @@ function parseSession({ file, source, mtime, btime }) {
       if (o.type === "session") {
         if (o.cwd) project = o.cwd;
         if (o.id) sessionId = o.id;
+      } else if (
+        namespace === "owner-operator" && o.type === "custom" &&
+        o.customType === "oo-provenance" &&
+        ["chat", "interactive", "schedule"].includes(o.data?.surface) &&
+        ["owner", "agent", "scheduler"].includes(o.data?.origin) &&
+        typeof o.data?.callerCwd === "string" && o.data.callerCwd.trim() &&
+        typeof o.data?.callerRepo === "string" && o.data.callerRepo.trim()
+      ) {
+        ooProvenance = o.data;
       } else if (o.type === "message") {
         const m = o.message || {};
         if (m.role === "user" || m.role === "assistant") {
@@ -507,6 +519,10 @@ function parseSession({ file, source, mtime, btime }) {
   }
   if (source === "posthog-code") pcFlush(); // trailing assistant turn (no later user prompt to flush it)
 
+  // OO's Pi header cwd is stable lookup identity, not task context. The latest valid invocation
+  // stamp carries the task cwd/repo; legacy product transcripts keep ordinary Pi behavior.
+  if (namespace === "owner-operator" && ooProvenance) project = ooProvenance.callerCwd;
+
   // Cursor spawns sub-task agents as `agent-transcripts/<parentId>/subagents/<subId>.jsonl`. Fold those
   // into their parent so a multi-task Cursor run stays ONE "core" thread rather than splitting into one
   // per sub-task — key them to the parent id and let it win the dedup below.
@@ -523,7 +539,9 @@ function parseSession({ file, source, mtime, btime }) {
   // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
   // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer. A
   // posthog-code cloud run has no local cwd — its repo comes from the sandbox-image line.
-  let repo = source === "posthog-code" && pcRepo && project === "(unknown)"
+  let repo = namespace === "owner-operator" && ooProvenance
+    ? ooProvenance.callerRepo
+    : source === "posthog-code" && pcRepo && project === "(unknown)"
     ? pcRepo
     : project === "(unknown)" ? "(unknown)" : realRepo(project);
 
@@ -559,11 +577,18 @@ function parseSession({ file, source, mtime, btime }) {
   const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
   const host = sessionHostFor({ format: source, cwd: project, entrypoint, originator, sourceHint: srcHint }, sessionHosts);
   const interactiveHost = host?.overridesAutomation ? host : null;
-  const automated = interactiveHost
+  let automated = interactiveHost
     ? (interactiveHost.surfaceEmpty ? false : userTurns.length === 0)
     : userTurns.length === 0 ||
       host?.automatedTransport ||
       (cliLike && userTurns.length < 2);
+  if (namespace === "owner-operator" && ooProvenance) {
+    if (ooProvenance.surface === "schedule" || ooProvenance.origin === "agent" || ooProvenance.origin === "scheduler") {
+      automated = true;
+    } else if (ooProvenance.origin === "owner" && ["chat", "interactive"].includes(ooProvenance.surface)) {
+      automated = false;
+    }
+  }
 
   const lastMsg = convo[convo.length - 1];
   const createdTs = firstTs || btime || mtime;
@@ -616,8 +641,9 @@ function parseSession({ file, source, mtime, btime }) {
   return {
     id: sessionId,
     source,
+    ...(namespace ? { namespace } : {}),
     repo,                                              // Repo Name (leaf folder of cwd)
-    ui: detectUi(source, project, entrypoint, { originator, srcHint }), // App the session came from
+    ui: app ?? detectUi(source, project, entrypoint, { originator, srcHint }), // App the session came from
     entrypoint: entrypoint || (source === "codex" ? "codex" : null),
     project,
     ...(diff ? { diffAdded: diff.added, diffDeleted: diff.deleted } : {}),
@@ -680,7 +706,11 @@ if (threadArg) {
   threads = threads.filter((t) => !t.automated);
 }
 threads.sort((a, b) => b._sort - a._sort);
-if (!threadArg) threads = threads.slice(0, limit);
+if (!threadArg) {
+  const external = threads.filter((thread) => thread.namespace !== "owner-operator").slice(0, limit);
+  const product = threads.filter((thread) => thread.namespace === "owner-operator").slice(0, limit);
+  threads = [...external, ...product].sort((a, b) => b._sort - a._sort);
+}
 threads.forEach((t) => { delete t._sort; delete t._subagent; });
 
 const result = { since: sinceArg, count: threads.length, threads };

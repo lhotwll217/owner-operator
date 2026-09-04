@@ -17,10 +17,10 @@ widget · oo agent/tools · Pi extension · oo CLI
               Gateway (HTTP + SSE)
                       │
         ┌─────────────┼─────────────┐
- session monitor     state       scheduler
- scan + enrich    sole writer   Croner + runs
-        │             │             │
- coding transcripts  SQLite    fresh Pi session / argv process
+ session monitor        state       scheduler
+ scan + enrich       sole writer   Croner + runs
+        │                │             │
+ coding + OO transcripts SQLite    fresh Pi session / argv process
 ```
 
 ## Module ownership

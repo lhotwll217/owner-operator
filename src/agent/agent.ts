@@ -256,11 +256,11 @@ export async function shutdownSessionExtensions(session: OwnerOperatorSession["s
 }
 
 // ---- Where oo's own threads live, and how they're labeled ----------------------
-// EVERY oo session persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions,
-// so the session monitor never scans oo's chatter as if it were one of the owner's coding sessions.
-// This module owns that policy: callers build managers through the helpers below, which bake
-// the dir in, instead of naming it themselves (pi silently falls back to its own dir when a
-// manager isn't given one). Same OO_HOME base as the durable state database. Product threads
+// EVERY oo session persists under oo's OWN home, NEVER pi's default ~/.pi/agent/sessions.
+// The monitor scans this product-owned store independently from authorized external Pi history.
+// This module owns the save-location policy: callers build managers through the helpers below,
+// which bake the dir in instead of naming it themselves (pi silently falls back to its own dir
+// when a manager isn't given one). Same OO_HOME base as the durable state database. Product threads
 // use one stable identity cwd; isolated eval threads use their sandbox cwd consistently for
 // create/list/resume. Tool execution is separate: it defaults to the caller's cwd.
 //
