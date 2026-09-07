@@ -21,7 +21,7 @@ import {
   agentRunStateDir,
   createLeasedAcpRuntime,
   cursorAgentBinaryPath,
-  openCodeBinaryPath,
+  resolveOpenCodeRuntime,
   type LeasedAcpRuntime,
 } from "./acp-launcher";
 
@@ -42,6 +42,7 @@ export interface AcpRuntimeProvenance {
     version: string | null;
     source: "adapter-dependency" | "path-command";
     executablePath?: string;
+    realPath?: string;
   };
 }
 
@@ -102,21 +103,18 @@ export async function readAcpRuntimeProvenance(
   harness: AgentRunHarness,
   deps: {
     resolveCursorCommand?: () => string;
-    resolveOpenCodeCommand?: (harness: "opencode" | "opencode2") => string;
     readCommandVersion?: (command: string) => Promise<string>;
   } = {},
 ): Promise<AcpRuntimeProvenance> {
   const acpxVersion = packageVersion(packageJsonPath("acpx/package.json"));
   if (harness === AgentRunHarness.OpenCode || harness === AgentRunHarness.OpenCode2) {
-    const command = (deps.resolveOpenCodeCommand ?? openCodeBinaryPath)(harness);
+    const backend = resolveOpenCodeRuntime(harness);
     return {
       acpxVersion,
       adapter: { packageName: null, packageVersion: null, resolution: "path" },
       backend: {
-        name: harness,
-        version: await (deps.readCommandVersion ?? readOpenCodeVersion)(command),
+        ...backend,
         source: "path-command",
-        executablePath: command,
       },
     };
   }
@@ -350,18 +348,12 @@ function resolvedPackageJson(require: NodeJS.Require, packageName: string): stri
   }
 }
 
-function readOpenCodeVersion(command: string): Promise<string> {
-  const env = { ...process.env };
-  delete env.OPENCODE_BIN_PATH;
-  return readCommandVersion(command, env);
-}
-
-function readCommandVersion(command: string, env = process.env): Promise<string> {
+function readCommandVersion(command: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       command,
       ["--version"],
-      { timeout: VERSION_TIMEOUT_MS, maxBuffer: MAX_VERSION_BYTES, encoding: "utf8", env },
+      { timeout: VERSION_TIMEOUT_MS, maxBuffer: MAX_VERSION_BYTES, encoding: "utf8" },
       (error, stdout) => {
         if (error) reject(error);
         else {

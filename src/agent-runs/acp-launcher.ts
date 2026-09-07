@@ -1,4 +1,5 @@
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -447,7 +448,28 @@ export function cursorAcpAgentCommand(): string {
 /** Both native ACP commands use ACPX's existing registry override. Resolve each exact executable
  * independently; V2 must never fall through to the stable profile or an npx download. */
 export function openCodeAcpAgentCommand(harness: "opencode" | "opencode2"): string {
-  return `'${openCodeBinaryPath(harness).replaceAll("'", "'\\''")}' acp`;
+  return `'${resolveOpenCodeRuntime(harness).executablePath.replaceAll("'", "'\\''")}' acp`;
+}
+
+/** Identify the supported CLI version signatures, not merely the requested filename. This rejects
+ * ordinary stable-as-V2 aliases; a user-supplied wrapper can still lie about its version. */
+export function resolveOpenCodeRuntime(harness: "opencode" | "opencode2") {
+  const executablePath = openCodeBinaryPath(harness);
+  const realPath = realpathSync(executablePath);
+  const env = { ...process.env };
+  delete env.OPENCODE_BIN_PATH;
+  const version = execFileSync(executablePath, ["--version"], {
+    env, encoding: "utf8", timeout: 5_000, maxBuffer: 64 * 1024, stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  // Stable prints bare semver; the official V2 CLI prints its command name followed by v<semver>.
+  // Sources and the deliberate local-executable trust boundary: docs/delegated-runs.md, OpenCode.
+  const semver = "\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?";
+  const name = new RegExp(`^opencode2 v${semver}$`).test(version) ? "opencode2"
+    : new RegExp(`^${semver}$`).test(version) ? "opencode" : null;
+  if (name !== harness) {
+    throw new Error(`${harness} backend identity could not be confirmed: ${executablePath} resolves to ${realPath} and reports ${JSON.stringify(version)}; expected ${harness}'s CLI version signature`);
+  }
+  return { name, version, executablePath, realPath };
 }
 
 export function openCodeBinaryPath(harness: "opencode" | "opencode2"): string {

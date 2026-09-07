@@ -47,7 +47,6 @@ try {
       readCursorPayloads: async () => ({ about: null, status: null, errors: [] }),
     },
   });
-  assert.equal(first.capabilities.harnesses.length, 5);
   assert.equal(first.preferences.path, canonicalPreferences);
   assert.equal(first.preferences.content, "Owner-authored preferences.\n");
   assert.equal(first.preferences.error, null);

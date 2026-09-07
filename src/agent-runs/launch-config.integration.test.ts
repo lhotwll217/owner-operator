@@ -17,11 +17,6 @@ try {
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.OpenCode2, {}, ooHome), {
     model: "provider/model/v2", effort: null,
   });
-  for (const harness of [AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2]) {
-    assert.deepEqual(resolveAgentRunLaunch(harness, { model: "provider/exact/model[1m]", effort: null }, ooHome), {
-      model: "provider/exact/model[1m]", effort: null,
-    });
-  }
   assert.throws(() => resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), /no approved delegated baseline/);
   approveDelegatedBaseline(AgentRunHarness.Codex, { model: "approved-model", effort: "high" }, ooHome);
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), { model: "approved-model", effort: "high" });

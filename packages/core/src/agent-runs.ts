@@ -92,6 +92,7 @@ export interface AgentRunCapabilityRecord {
   activitySource: "acp-events";
   steerMidRun: boolean;
   asksToParent: boolean;
+  /** Family-level continuation allowance; not an observed per-session capability. */
   loadSession: boolean;
 }
 
@@ -122,8 +123,8 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
     asksToParent: false,
     loadSession: true,
   },
-  // Native ACP load is advertised by stable and V2; ACPX still verifies support when loading.
-  // Source and runtime validation boundaries: docs/delegated-runs.md, OpenCode.
+  // These harness families permit continuation; retained per-session capabilities gate the
+  // controls and executor. Native sources and ACPX contract: docs/delegated-runs.md, OpenCode.
   [AgentRunHarness.OpenCode]: {
     harness: AgentRunHarness.OpenCode,
     acpAgent: "opencode",
