@@ -10,6 +10,8 @@ export enum AgentRunHarness {
   ClaudeCode = "claude-code",
   Codex = "codex",
   Cursor = "cursor",
+  OpenCode = "opencode",
+  OpenCode2 = "opencode2",
 }
 
 export enum AgentRunStatus {
@@ -115,6 +117,24 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
   [AgentRunHarness.Cursor]: {
     harness: AgentRunHarness.Cursor,
     acpAgent: "cursor",
+    activitySource: "acp-events",
+    steerMidRun: false,
+    asksToParent: false,
+    loadSession: true,
+  },
+  // Native ACP load is advertised by stable and V2; ACPX still verifies support when loading.
+  // Source and runtime validation boundaries: docs/delegated-runs.md, OpenCode.
+  [AgentRunHarness.OpenCode]: {
+    harness: AgentRunHarness.OpenCode,
+    acpAgent: "opencode",
+    activitySource: "acp-events",
+    steerMidRun: false,
+    asksToParent: false,
+    loadSession: true,
+  },
+  [AgentRunHarness.OpenCode2]: {
+    harness: AgentRunHarness.OpenCode2,
+    acpAgent: "opencode2",
     activitySource: "acp-events",
     steerMidRun: false,
     asksToParent: false,

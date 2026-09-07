@@ -13,7 +13,7 @@ read_when:
 **Sub-agent** is the broad relationship: an agent launched to help another agent. Owner Operator
 uses the narrower term **delegated run** for a child execution its daemon issues and owns through
 the AgentRun launch path. `delegate_agent` is the Operator-facing route; authenticated Gateway
-clients can use the same path directly. The child is still a Claude Code, Codex, or Cursor
+clients can use the same path directly. The child is still a Claude Code, Codex, Cursor, OpenCode, or OpenCode2
 session; the delegated run is OO's durable lifecycle record for that execution.
 
 This distinction matters because a harness can launch its own native sub-agents without OO.
@@ -21,7 +21,7 @@ Those helpers are sub-agents, but they are not OO-delegated runs and never enter
 A **schedule run** is a separate domain object; the delegated-run name does not imply that
 schedules or triggers launch sub-agents.
 
-Owner Operator launches child coding agents (Claude Code, Codex, Cursor) as durable, daemon-owned
+Owner Operator launches child coding agents as durable, daemon-owned
 **delegated runs** ([#69](https://github.com/lhotwll217/owner-operator/issues/69)). A run is
 tracked with explicit retry/resume relationships, durable status, controls, and presentation — never inferred from
 transcript activity. The domain terms live in [CONTEXT.md](../CONTEXT.md).
@@ -36,7 +36,7 @@ Operator (delegate_agent / manage_agent_run tool)
         │  Gateway HTTP
    AgentRunExecutor ──── State (agent_runs ledger) ──── SSE agent-run.changed
         │
-   ACP launcher (acpx) ──── child harness session (Claude Code / Codex / Cursor)
+   ACP launcher (acpx) ──── child harness session
 ```
 
 ## Tracking boundary
@@ -243,6 +243,25 @@ requests close, then verifies the leased wrapper tree is absent before releasing
 and disposable session directory. Failed verification retains both the lease and probe session
 directory as termination evidence for startup orphan reaping; neither is presented as a usable
 baseline candidate.
+
+### OpenCode
+
+`opencode` and `opencode2` are distinct delegation and baseline identities. Both run their installed
+native `acp` command through ACPX's existing registry override, using PATH followed by
+`~/.opencode/bin` and `~/.local/bin`. Stable retains the `opencode` ACP agent identity; OO resolves
+the installed executable instead of ACPX's default `npx -y opencode-ai acp` so inspection can report
+the actual path and version without downloading a backend. A missing `opencode2` fails explicitly.
+The npm launchers' inherited `OPENCODE_BIN_PATH` override is cleared for launch and version checks
+so it cannot substitute another backend. Provider accounts and allowance stay unknown.
+
+The observer exposes initialize capabilities retained by ACPX; the installed runtime decides
+whether an individual session load succeeds. V2's source provides the
+[executable](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/package.json#L1-L12),
+[native ACP handler](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/handlers/acp.ts#L1-L39),
+and [load/configuration contract](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/acp/service.ts#L185-L299).
+Source support and advertised models do not establish local installation, authentication, model
+entitlement, or successful inference. Exact model IDs and nullable effort use the shared selection
+contract above; no OpenCode-specific model catalog or effort translation is applied.
 
 ### Manual baseline-consent proof
 

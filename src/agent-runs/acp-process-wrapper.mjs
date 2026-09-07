@@ -23,6 +23,8 @@ const childEnv = { ...process.env, OO_AGENT_RUN_LEASE_ID: leaseId };
 // backend than the package-lock dependency reported by harness provenance. Owner Operator's
 // supported Codex launch contract always uses that adapter dependency.
 if (agentKind === "codex") delete childEnv.CODEX_PATH;
+// OpenCode's npm launchers honor this override, which could silently swap stable and V2.
+if (agentKind === "opencode" || agentKind === "opencode2") delete childEnv.OPENCODE_BIN_PATH;
 const child = spawn(agentCommand, {
   shell: true,
   detached: process.platform !== "win32",

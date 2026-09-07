@@ -116,7 +116,7 @@ assert.equal(snapshot.ephemeral, true);
 assert.equal(snapshot.preferences.content, "# Owner preferences\n");
 assert.deepEqual(
   snapshot.capabilities.harnesses.map(({ harness }) => harness),
-  [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode, AgentRunHarness.Cursor],
+  [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode, AgentRunHarness.Cursor, AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2],
   "capabilities are fixed-order and unranked",
 );
 assert.equal(
@@ -126,7 +126,7 @@ assert.equal(
 );
 assert.deepEqual(
   snapshot.account.map(({ harness }) => harness),
-  [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode, AgentRunHarness.Cursor],
+  [AgentRunHarness.Codex, AgentRunHarness.ClaudeCode, AgentRunHarness.Cursor, AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2],
 );
 assert.ok(
   snapshot.unknowns.some(({ harness, fact }) =>

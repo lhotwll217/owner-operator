@@ -140,6 +140,9 @@ function defaultAgentCommand(acpAgent: string): string {
   if (acpAgent === "claude") return claudeAcpAgentCommand();
   if (acpAgent === "codex") return codexAcpAgentCommand();
   if (acpAgent === "cursor") return cursorAcpAgentCommand();
+  if (acpAgent === "opencode" || acpAgent === "opencode2") {
+    return openCodeAcpAgentCommand(acpAgent);
+  }
   const command = createAgentRegistry().resolve(acpAgent);
   return Array.isArray(command) ? command.map((part) => JSON.stringify(part)).join(" ") : command;
 }
@@ -439,6 +442,29 @@ export function codexAcpAgentCommand(): string {
  * command is supplied through the same override seam Codex uses. */
 export function cursorAcpAgentCommand(): string {
   return `${JSON.stringify(cursorAgentBinaryPath())} acp`;
+}
+
+/** Both native ACP commands use ACPX's existing registry override. Resolve each exact executable
+ * independently; V2 must never fall through to the stable profile or an npx download. */
+export function openCodeAcpAgentCommand(harness: "opencode" | "opencode2"): string {
+  return `'${openCodeBinaryPath(harness).replaceAll("'", "'\\''")}' acp`;
+}
+
+export function openCodeBinaryPath(harness: "opencode" | "opencode2"): string {
+  const candidates = [
+    ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
+    join(homedir(), ".opencode", "bin"),
+    join(homedir(), ".local", "bin"),
+  ].map((dir) => resolve(dir, harness));
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Continue searching only for this exact executable name.
+    }
+  }
+  throw new Error(`${harness} CLI not found on PATH, ~/.opencode/bin or ~/.local/bin; install ${harness} with native ACP support`);
 }
 
 /** Resolve the locally installed `cursor-agent` launcher to an absolute path: the daemon's PATH

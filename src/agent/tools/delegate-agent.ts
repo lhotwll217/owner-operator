@@ -14,7 +14,7 @@ import { agentRunToolResult } from "./agent-run-result";
 
 const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
-  { description: "Child harness to delegate to: claude-code | codex | cursor." },
+  { description: "Child harness to delegate to: claude-code | codex | cursor | opencode | opencode2." },
 );
 
 const EffortSchema = Type.Union(

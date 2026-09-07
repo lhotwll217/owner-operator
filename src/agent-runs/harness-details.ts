@@ -143,6 +143,8 @@ const ALL_HARNESSES: readonly AgentRunHarness[] = [
   AgentRunHarness.Codex,
   AgentRunHarness.ClaudeCode,
   AgentRunHarness.Cursor,
+  AgentRunHarness.OpenCode,
+  AgentRunHarness.OpenCode2,
 ];
 
 /** Observe preferences, every requested ACP session, and account sources concurrently. A source
@@ -296,7 +298,9 @@ async function readHarnessAccount(
   }
   return {
     ...emptyAccount(harness, observedAt),
-    notes: ["Claude Code exposes no first-party plan or allowance surface; those facts are unknown."],
+    notes: [harness === AgentRunHarness.ClaudeCode
+      ? "Claude Code exposes no first-party plan or allowance surface; those facts are unknown."
+      : "No provider account or allowance observation is implemented for this harness; those facts are unknown."],
   };
 }
 
