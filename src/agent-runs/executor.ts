@@ -19,7 +19,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
-import { resumeCwdError } from "./agent-state-projection";
+import { openCodeContinuationError, resumeCwdError } from "./agent-state-projection";
 import { resolveAgentRunLaunch } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
@@ -214,8 +214,10 @@ export class AgentRunExecutor {
       activeRunId: inflight?.id ?? null,
     });
     if (domainError) throw new Error(domainError);
-    // retry()/createAgentRun() are synchronous over DatabaseSync, so this pure validation and
+    // retry()/createAgentRun() are synchronous over DatabaseSync, so eligibility checks and
     // row creation are atomic in the single-process daemon.
+    const capabilityError = openCodeContinuationError(run);
+    if (capabilityError) throw new Error(capabilityError);
     const retried = this.state.createAgentRun({
       harness: run.harness,
       task: run.task,
@@ -250,6 +252,8 @@ export class AgentRunExecutor {
     if (domainError) throw new Error(domainError);
     const cwdError = resumeCwdError(run.cwd);
     if (cwdError) throw new Error(cwdError);
+    const capabilityError = openCodeContinuationError(run);
+    if (capabilityError) throw new Error(capabilityError);
     const resumed = this.state.createAgentRun({
       harness: run.harness,
       task: followUpTask,

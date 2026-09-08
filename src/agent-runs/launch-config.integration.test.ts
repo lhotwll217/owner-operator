@@ -7,6 +7,16 @@ import { proposeDelegatedBaseline, resolveAgentRunLaunch } from "./launch-config
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-launch-config-"));
 try {
+  // A stable approval must never authorize V2, and later V2 approval cannot replace stable.
+  approveDelegatedBaseline(AgentRunHarness.OpenCode, { model: "provider/model/stable", effort: "high" }, ooHome);
+  assert.throws(() => resolveAgentRunLaunch(AgentRunHarness.OpenCode2, {}, ooHome), /no approved delegated baseline/);
+  approveDelegatedBaseline(AgentRunHarness.OpenCode2, { model: "provider/model/v2", effort: null }, ooHome);
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.OpenCode, {}, ooHome), {
+    model: "provider/model/stable", effort: "high",
+  });
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.OpenCode2, {}, ooHome), {
+    model: "provider/model/v2", effort: null,
+  });
   assert.throws(() => resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), /no approved delegated baseline/);
   approveDelegatedBaseline(AgentRunHarness.Codex, { model: "approved-model", effort: "high" }, ooHome);
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), { model: "approved-model", effort: "high" });

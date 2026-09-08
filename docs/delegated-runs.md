@@ -13,15 +13,16 @@ read_when:
 **Sub-agent** is the broad relationship: an agent launched to help another agent. Owner Operator
 uses the narrower term **delegated run** for a child execution its daemon issues and owns through
 the AgentRun launch path. `delegate_agent` is the Operator-facing route; authenticated Gateway
-clients can use the same path directly. The child is still a Claude Code, Codex, or Cursor
-session; the delegated run is OO's durable lifecycle record for that execution.
+clients can use the same path directly. The child is a session of its selected harness; the
+delegated run is OO's durable lifecycle record for that execution. The explicit supported roster
+lives in [`AgentRunHarness`](../packages/core/src/agent-runs.ts).
 
 This distinction matters because a harness can launch its own native sub-agents without OO.
 Those helpers are sub-agents, but they are not OO-delegated runs and never enter OO's run ledger.
 A **schedule run** is a separate domain object; the delegated-run name does not imply that
 schedules or triggers launch sub-agents.
 
-Owner Operator launches child coding agents (Claude Code, Codex, Cursor) as durable, daemon-owned
+Owner Operator launches child coding agents as durable, daemon-owned
 **delegated runs** ([#69](https://github.com/lhotwll217/owner-operator/issues/69)). A run is
 tracked with explicit retry/resume relationships, durable status, controls, and presentation — never inferred from
 transcript activity. The domain terms live in [CONTEXT.md](../CONTEXT.md).
@@ -36,7 +37,7 @@ Operator (delegate_agent / manage_agent_run tool)
         │  Gateway HTTP
    AgentRunExecutor ──── State (agent_runs ledger) ──── SSE agent-run.changed
         │
-   ACP launcher (acpx) ──── child harness session (Claude Code / Codex / Cursor)
+   ACP launcher (acpx) ──── child harness session
 ```
 
 ## Tracking boundary
@@ -46,7 +47,7 @@ Run ownership, transcript observation, and widget visibility are separate:
 | Work | `agent_runs` ledger | `/session-state` | Widget |
 |---|---|---|---|
 | Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Always represented in Agent state; also appears as a normal session row when present in session state |
-| Native Claude, Codex, or Cursor sub-agent | Never | Harness-dependent: it may be folded into its parent, excluded as automated work, or admitted as an ordinary session | Mirrors session state; it has no OO lineage |
+| Harness-native sub-agent | Never | Harness-dependent: it may be folded into its parent, excluded as automated work, or admitted as an ordinary session | Mirrors session state; it has no OO lineage |
 | Any agent launches a separate supported coding CLI | Only if the launch went through `delegate_agent` | Its transcript may be discovered and admitted normally | An ordinary row, without OO lineage |
 | Owner-origin Owner Operator conversation | Not a child run; its id may be recorded as a run's parent | Admitted from the product-owned transcript store as an ordinary root | Ordinary root with observed delegated children nested beneath it |
 
@@ -172,7 +173,7 @@ and terminal styling are adapters over that contract.
   completion closes the ACP process tree, then confirms every PID from the original tree is gone
   before releasing its lease; daemon startup reaps only orphaned trees whose
   live wrapper path and lease id both match. It fails closed on unavailable process listings and
-  never claims a bare Claude, Codex, Cursor, or `acpx` process.
+  never claims an unowned harness or `acpx` process.
 
 ## Harness details
 
@@ -244,6 +245,47 @@ and disposable session directory. Failed verification retains both the lease and
 directory as termination evidence for startup orphan reaping; neither is presented as a usable
 baseline candidate.
 
+### OpenCode
+
+`opencode` and `opencode2` are distinct delegation and baseline identities. Both run their installed
+native `acp` command through ACPX's existing registry override, using PATH followed by
+`~/.opencode/bin` and `~/.local/bin`. Stable retains the `opencode` ACP agent identity; OO resolves
+the installed executable instead of ACPX's default `npx -y opencode-ai acp` so inspection can report
+the actual path and version without downloading a backend. A missing `opencode2` fails explicitly.
+The [V2 npm launcher](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/bin/opencode2.cjs#L33-L39)
+honors `OPENCODE_BIN_PATH`. OO clears it for both identities during launch and version checks;
+this is not a claim that the stable native binary reads that variable. Provider accounts and
+allowance stay unknown.
+
+Inspection and launch both check the CLI's version signature: [stable reports bare semver](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/index.ts#L48-L52); the
+official V2 CLI reports `opencode2 v<semver>` ([command identity](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/commands.ts#L11-L39),
+[version dispatch](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/index.ts#L86-L92)).
+Provenance includes the requested executable path, its real path and the verbatim version output.
+A stable binary aliased as `opencode2` is rejected. This trusts the installed executable's output:
+an arbitrary wrapper can lie about its identity or change after inspection. It is not binary
+attestation. Unknown version signatures fail explicitly rather than being labeled V2 by filename.
+
+The observer exposes initialize capabilities retained by ACPX. Both
+[stable](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L112-L135)
+and V2 advertise continuation. V2's source provides the
+[executable](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/package.json#L1-L12),
+[native ACP handler](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/handlers/acp.ts#L1-L39),
+and [load/configuration contract](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/acp/service.ts#L185-L299).
+Source support and advertised models do not establish local installation, authentication, model
+entitlement, or successful inference. Exact model IDs and nullable effort use the shared selection
+contract above; no OpenCode-specific model catalog or effort translation is applied.
+
+For OpenCode controls, OO additionally reads the same child's retained ACPX initialize capabilities
+before offering or creating retry/resume. Either `loadSession: true` or an advertised
+`sessionCapabilities.resume` object permits continuation, matching ACPX's preference for resume.
+Missing, mismatched or unreadable records, or absence of both methods, fail closed without a new
+run row. This reuses ACPX 0.13.2's [file store](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/runtime/public/file-session-store.ts#L9-L45)
+and [record encoding](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/persistence/serialize.ts#L1-L45);
+there is no second capability store or ledger migration. The synchronous environment check keeps
+eligibility and row creation together. At execution ACPX checks the current backend again, and OO
+rejects a changed child identity. A capability change since the retained observation can still
+fail the new attempt; the roster's boolean is only a harness-family allowance.
+
 ### Manual baseline-consent proof
 
 Use a disposable home so discovery and approval cannot touch the owner's normal configuration.
@@ -256,8 +298,8 @@ HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo
 ```
 
 Complete setup for the real harness credentials in that isolated home. Then use one saved headless
-conversation for the consent loop (replace `claude-code` with `codex` or `cursor` when proving
-that harness):
+conversation for the consent loop (replace `claude-code` with the exact supported harness identity
+being validated):
 
 ```sh
 HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."

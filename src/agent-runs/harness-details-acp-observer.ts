@@ -4,7 +4,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { AgentCapabilities, SessionConfigOption } from "@agentclientprotocol/sdk";
 import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
@@ -21,6 +21,7 @@ import {
   agentRunStateDir,
   createLeasedAcpRuntime,
   cursorAgentBinaryPath,
+  resolveOpenCodeRuntime,
   type LeasedAcpRuntime,
 } from "./acp-launcher";
 
@@ -40,6 +41,8 @@ export interface AcpRuntimeProvenance {
     name: string;
     version: string | null;
     source: "adapter-dependency" | "path-command";
+    executablePath?: string;
+    realPath?: string;
   };
 }
 
@@ -50,6 +53,8 @@ export interface HarnessCapabilityObservation {
   runtime: AcpRuntimeProvenance | null;
   requestedInspection: { model: string; effort: AgentRunEffort | null } | null;
   session: {
+    /** Initialize capabilities retained by ACPX; omitted when the runtime supplied no record. */
+    agentCapabilities?: AgentCapabilities;
     models: {
       currentModelId?: string;
       availableModelIds: string[];
@@ -102,6 +107,17 @@ export async function readAcpRuntimeProvenance(
   } = {},
 ): Promise<AcpRuntimeProvenance> {
   const acpxVersion = packageVersion(packageJsonPath("acpx/package.json"));
+  if (harness === AgentRunHarness.OpenCode || harness === AgentRunHarness.OpenCode2) {
+    const backend = resolveOpenCodeRuntime(harness);
+    return {
+      acpxVersion,
+      adapter: { packageName: null, packageVersion: null, resolution: "path" },
+      backend: {
+        ...backend,
+        source: "path-command",
+      },
+    };
+  }
   if (harness === AgentRunHarness.Cursor) {
     const command = (deps.resolveCursorCommand ?? cursorAgentBinaryPath)();
     return {
@@ -193,10 +209,14 @@ export async function observeAcpHarness(
       `${harness} ACP observation timed out while reading status`,
     );
     const configOptions = configOptionsFromStatus(status);
+    const record = handle.acpxRecordId ? await leased.sessionStore.load(handle.acpxRecordId) : undefined;
     observation = {
       ...base(),
       runtime: provenance,
-      session: sessionFromStatus(status, configOptions),
+      session: {
+        ...sessionFromStatus(status, configOptions),
+        ...(record?.agentCapabilities ? { agentCapabilities: record.agentCapabilities } : {}),
+      },
     };
     if (inspect) {
       const confirmed = await withDeadline(
