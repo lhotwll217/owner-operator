@@ -35,6 +35,9 @@ export function openCodeContinuationError(run: AgentRun): string | null {
       return unavailable;
     }
     const capabilities = record.agent_capabilities;
+    if (capabilities == null) {
+      return `Cannot determine whether this saved session can be continued: ${run.harness} ${run.childSessionId}`;
+    }
     // ACPX prefers session/resume when advertised; loadSession=false alone does not forbid it.
     const resume = capabilities?.sessionCapabilities?.resume;
     if (capabilities?.loadSession === true || (resume && typeof resume === "object" && !Array.isArray(resume))) {
