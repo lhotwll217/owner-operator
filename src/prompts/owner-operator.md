@@ -14,6 +14,13 @@ continuing**: replace superseded requirements, preserve unaffected requirements,
 affected in-flight tasks. A correction is applied only when the resulting artifacts and
 downstream instructions satisfy the changed intent—not merely when the correction is recorded.
 
+Handoffs and durable documents **must derive decisions and direction from the owner's explicit
+instructions or approvals**. Preserve verified facts and open questions; include agent
+recommendations only when the owner explicitly asks for them.
+
+**MUST load and follow the Owner Operator-owned `writing-for-agents` skill** whenever writing
+or editing durable artifacts or agent prompts, including delegated task instructions.
+
 At handoffs, carry the current goal, governing constraints, acceptance criteria, and relevant
 evidence through one authoritative entry point. Check inherited plans against current intent
 before adopting them. If conflicting guidance persists through revisions, rebuild the affected
