@@ -431,6 +431,68 @@ try {
     assert.equal(blocked.status, 1, "private tool evidence fails closed in every direct retrieval mode");
     assert.equal(blocked.stdout, "", "no private transcript content is returned");
   }
+  // Exercise each external format through the public wrapper, including Codex's
+  // separate function/custom-tool records and Claude's nested result blocks.
+  for (const format of ["claude", "codex", "pi"] as const) {
+    const needle = `ZZTOOLS${format.toUpperCase()}ZZ`;
+    const id = `0198a222-1111-7333-8444-${format === "codex" ? "111111111111" : format === "claude" ? "222222222222" : "333333333333"}`;
+    const blockedId = id.replace("0198a222", "0198a333");
+    const root = format === "claude" ? okDir : format === "codex" ? codexDir : externalPiDir;
+    const records = (sessionId: string, cwd: string) => {
+      const timestamp = "2026-07-10T08:30:00.000Z";
+      if (format === "pi") return toolTranscript(sessionId, cwd).replaceAll(toolNeedle, needle);
+      const rows = format === "claude" ? [
+        { type: "user", sessionId, cwd, timestamp, message: { content: "Inspect the handoff" } },
+        { type: "assistant", timestamp, message: { content: [{ type: "tool_use", id: "call-1", name: "read", input: { path: `/skills/${needle}/SKILL.md` } }] } },
+        { type: "user", timestamp, message: { content: [{ type: "tool_result", tool_use_id: "call-1", content: [{ type: "text", text: `${needle} successfully loaded` }] }] } },
+      ] : [
+        { type: "session_meta", timestamp, payload: { id: sessionId, cwd } },
+        { type: "response_item", timestamp, payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Inspect the handoff" }] } },
+        { type: "response_item", timestamp, payload: { type: "function_call", call_id: "call-1", name: "read", arguments: JSON.stringify({ path: `/skills/${needle}/SKILL.md` }) } },
+        { type: "response_item", timestamp, payload: { type: "function_call_output", call_id: "call-1", output: `${needle} successfully loaded` } },
+        { type: "response_item", timestamp, payload: { type: "custom_tool_call", call_id: "call-2", name: "apply_patch", input: `${needle} patch input` } },
+        { type: "response_item", timestamp, payload: { type: "custom_tool_call_output", call_id: "call-2", output: `${needle} patch result` } },
+      ];
+      return rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    };
+    for (const [sessionId, cwd] of [[id, okCwd], [blockedId, privateRoot]]) {
+      const filename = format === "codex" ? `rollout-2026-07-10T08-30-00-${sessionId}` : sessionId;
+      writeFileSync(join(root, `${filename}.jsonl`), records(sessionId, cwd));
+    }
+    const invoke = (args: string[], caller?: string) => spawnSync(process.execPath, [GREP, ...args], {
+      env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CURRENT_SESSION_ID: "", OO_CALLER_SESSION_ID: caller ?? "" }, encoding: "utf8",
+    });
+    const search = (args: string[], caller?: string) => {
+      const result = invoke(["--query", needle, "--json", ...args], caller);
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    };
+    assert.equal(search(["--session", id]).shown, 0, `${format}: default hides tools`);
+    const hits = search(["--include-tools", "--session", id]);
+    assert.equal(hits.shown, format === "codex" ? 4 : 2, `${format}: calls and results are present`);
+    for (const hit of hits.matches) {
+      const window = invoke(["--session", hit.id, "--at", String(hit.index), "--include-tools", "--before", "0", "--after", "0"]);
+      assert.equal(window.status, 0, window.stderr);
+      assert.ok(window.stdout.includes(needle), `${format}: every tool pointer round-trips`);
+    }
+    for (const role of ["assistant", "user"]) {
+      const filtered = search(["--include-tools", "--session", id, "--role", role]);
+      assert.equal(filtered.shown, format === "codex" ? 2 : 1);
+      assert.ok(filtered.matches.every((hit: { match: { role: string } }) => hit.match.role === role));
+    }
+    const skimmed = invoke(["--skim", id, "--include-tools"]);
+    assert.equal(skimmed.status, 0, skimmed.stderr);
+    assert.match(skimmed.stdout, /successfully loaded/);
+    const discovered = search(["--include-tools"]);
+    assert.deepEqual([...new Set(idsOf(discovered.matches))], [id], `${format}: discovery excludes private tool evidence`);
+    assert.equal(search(["--include-tools"], id).shown, 0, `${format}: caller exclusion applies to tools`);
+    assert.equal(search(["--include-tools", "--candidates"]).candidates[0].id, id);
+    for (const args of [["--query", needle, "--session", blockedId], ["--skim", blockedId], ["--session", blockedId, "--at", "1"]]) {
+      const blocked = invoke([...args, "--include-tools"]);
+      assert.equal(blocked.status, 1, `${format}: private direct retrieval fails closed`);
+      assert.equal(blocked.stdout, "");
+    }
+  }
   process.stdout.write("ok — sessions-grep: combined provenance, OO narrowing, caller-chain exclusion, direct IDs, and blacklist layers hold\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
