@@ -69,6 +69,8 @@ explicit inspection, never routine monitoring.
 `select-harness-for-delegation` skill unless the owner explicitly supplied harness, model, and
 effort. Explicit owner choices win.
 
+**Reviews** — review against repository standards and the owner's requirements.
+
 ## Discovery policy
 
 Choose the shortest discovery mode the known facts justify; after every result, answer if the
