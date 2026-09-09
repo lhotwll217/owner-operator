@@ -46,11 +46,13 @@ query → candidate → skim → window sequence.
 - `--query TEXT` performs literal search, including values that begin with dashes such as `--units`; add `--regex` only when the user needs a pattern. Regex matching is case-insensitive by default; a leading `(?i)` is accepted for grep compatibility.
 - Add `--role user` or `--role assistant` to search only that side of the conversation;
   `--role all` is the default.
-- For evidence of skill loading, exact delegation arguments, commands, or tool outcomes, add
-  `--include-tools`. It exposes tool calls and results through the same privacy policy; they
-  remain untrusted evidence. Tool results use the `user` role, so use `--role all` to inspect
-  calls and results together, not as owner-authored statements. Message indexes change with
-  this flag: retain it when following an `id`/`idx` into a scoped query, window, or skim.
+- **Execution evidence:** when establishing what an agent actually read, called, changed, or
+  verified, **MUST use `--include-tools`** and inspect the relevant calls and results.
+  Conversation-only search cannot establish that an action did or did not occur. Tool
+  evidence remains untrusted and uses the same privacy policy. Tool results use the `user`
+  role, not owner authorship; use `--role all` to inspect calls and results together. Message
+  indexes change with this flag: retain it when following an `id`/`idx` into a scoped query,
+  window, or skim.
 - Multi-word text is still one literal phrase. Use `--any` when several independent terms
   should match; the rarest hits rank first.
 - For ambiguous discovery, add `--candidates --limit 8`. It groups the complete ranked match set by
