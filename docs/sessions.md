@@ -38,7 +38,20 @@ ordinary monitor and session-state pipeline as `Owner Operator` roots. Schedule,
 and agent-origin sessions remain automated. Their task repository and directory come from the
 latest valid `oo-provenance` entry because the Pi header cwd is stable lookup identity, not task
 context. This product store never authorizes or reports access to standalone Pi history, and its
-bounded scan slice cannot displace the external-session slice.
+scan cannot displace external sessions.
+
+The monitor scans all configured history without a presentation limit. Unknown and unresolved rows
+remain visible regardless of age. Scanner CLI windows and limits still bound explicit queries.
+Claude CLI and SDK transport and message count do not establish automation. Codex guardian source
+metadata and OO invocation provenance identify generated work. Claude native sub-agent files lose
+identity deduplication to their parent transcript. Separate CLI calls without explicit lineage remain
+observable because their transport cannot prove owner or generated origin.
+
+The authenticated `POST /poll` accepts an optional `reconcile` array of up to 100
+`{id, lastMessageAt}` pairs. It resets enrichment eligibility only for matching unresolved idle or
+needs-you rows without active delegated children, then runs the normal monitor. The response's
+`queuedIds` identifies accepted rows. A timestamp mismatch, done choice, or active work is skipped.
+This route rechecks already summarized history after a reconciliation change without another worker.
 
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
 ignore. Host detection supplies attribution only and does not grant transcript access. The marker

@@ -99,8 +99,8 @@ try {
   );
   assert.ok(state.listSessionState().some((item) => item.id === "thread-old-working"), "history is retained");
   assert.ok(
-    !state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),
-    "quiet rows outside the active window leave the client projection",
+    state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),
+    "unresolved work remains visible outside the active window",
   );
   assert.deepEqual(state.listEnrichmentCandidates().map((item) => item.id), ["thread-1"]);
   assert.equal(events.at(-1)?.kind, DomainEventKind.ThreadChanged, "post-commit event published");
@@ -141,7 +141,7 @@ try {
     false,
     "an enrichment for an older message cannot overwrite the current handoff",
   );
-  assert.equal(state.listSessionState()[0].nextSteps, "Implement the state seam");
+  assert.equal(state.listSessionState()[0].nextSteps, null, "a newer message invalidates the previous owner action");
 
   assert.deepEqual(state.markThreadsDone(["thread-1", "missing"]).missingIds, ["missing"]);
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "done leaves the active projection");
@@ -167,7 +167,7 @@ try {
   );
   const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
   assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
-  assert.equal(flapped?.nextSteps, "Ship the fix");
+  assert.equal(flapped?.nextSteps, null, "a working session does not project an obsolete owner instruction");
   assert.equal(
     state.appendEnrichment("thread-flap", { nextSteps: "Duplicate" }, "2026-07-09T10:03:00.000Z"),
     false,

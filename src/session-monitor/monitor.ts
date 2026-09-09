@@ -1,6 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from "node:fs";
 import {
-  loadActiveWindow,
   loadMonitoredTranscriptStores,
   isOnboarded,
   type ScanRow,
@@ -58,7 +57,7 @@ async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]>
   }));
 }
 
-/** Session ingestion plus its private, asynchronous needs-you enrichment worker. */
+/** Session ingestion and asynchronous reconciliation through State. */
 export class SessionMonitor {
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
@@ -80,8 +79,8 @@ export class SessionMonitor {
     try {
       this.armWatchers();
       const rows = await (this.options.scan ?? scanTranscripts)(
-        this.options.since ?? loadActiveWindow(),
-        this.options.limit ?? 50,
+        this.options.since ?? "1970-01-01",
+        this.options.limit ?? 0,
       );
       this.state.recordPoll(rows);
       this.current = this.state.listCurrentSessionState();

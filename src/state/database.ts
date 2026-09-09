@@ -40,6 +40,7 @@ const HAS_ACTIVE_CHILD_SQL = `EXISTS (
 )`;
 
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
+  WHEN detail.state = 'done' THEN 'done'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
   ELSE detail.state
 END`;
@@ -70,6 +71,7 @@ export interface ThreadResolutionRow {
   state: ThreadState;
   lastMessageAt: string | null;
   enrichedThroughMessageAt: string | null;
+  stateReason: string | null;
 }
 
 export interface DetailsRow {
@@ -572,13 +574,15 @@ export class ThreadDb {
       // the root ineligible, while a newer message makes the sample stale. The watermark
       // rejects an already-enriched message and any out-of-order duplicate.
       if (
-        !current || this.hasActiveChild(threadId) || current.lastMessageAt !== throughMessageAt ||
+        !current || current.state === "done" || this.hasActiveChild(threadId) ||
+        (details.state !== undefined && current.state === "working") || current.lastMessageAt !== throughMessageAt ||
         (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
       ) {
         this.db.exec("COMMIT");
         return null;
       }
       const edge = this.appendDetailsInTx(threadId, {
+        ...(details.state !== undefined ? { state: details.state, stateReason: details.stateReason } : {}),
         priority: details.priority ?? null,
         topic: details.topic ?? null,
         summary: details.summary ?? null,
@@ -619,7 +623,7 @@ export class ThreadDb {
 
   resolutionRow(threadId: string): ThreadResolutionRow | undefined {
     return this.db.prepare(
-      `SELECT t.id, detail.state, t.last_message_at AS lastMessageAt,
+      `SELECT t.id, detail.state, detail.state_reason AS stateReason, t.last_message_at AS lastMessageAt,
               t.enriched_through_message_at AS enrichedThroughMessageAt
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
@@ -640,7 +644,10 @@ export class ThreadDb {
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
-              detail.summary, detail.next_steps AS nextSteps, detail.priority,
+              detail.summary,
+              CASE WHEN ${HAS_ACTIVE_CHILD_SQL} OR detail.state = 'working'
+                     OR t.enriched_through_message_at IS NOT t.last_message_at THEN NULL
+                   ELSE detail.next_steps END AS nextSteps, detail.priority,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
               CASE WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'delegated child is active'
                    ELSE detail.state_reason END AS stateReason,
@@ -679,10 +686,10 @@ export class ThreadDb {
     const ids = this.db.prepare(
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
-       WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
+       WHERE detail.state IN ('needs-you', 'idle') AND t.last_message_at IS NOT NULL
          AND NOT ${HAS_ACTIVE_CHILD_SQL}
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at)
-       ORDER BY t.last_message_at ASC`,
+       ORDER BY t.last_message_at DESC`,
     ).all() as Array<{ id: string }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));
     return ids.flatMap(({ id }) => {
@@ -690,6 +697,13 @@ export class ThreadDb {
       const resolution = this.resolutionRow(id);
       return row ? [{ ...row, enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null }] : [];
     });
+  }
+
+  requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
+    const reset = this.db.prepare(`UPDATE threads AS t SET enriched_through_message_at = NULL
+      WHERE t.id = ? AND t.last_message_at = ? AND NOT ${HAS_ACTIVE_CHILD_SQL}
+        AND (SELECT state FROM thread_details WHERE thread_id = t.id ORDER BY version DESC LIMIT 1) IN ('idle', 'needs-you')`);
+    return requests.flatMap(({ id, lastMessageAt }) => Number(reset.run(id, lastMessageAt).changes) ? [id] : []);
   }
 
   markDone(ids: readonly string[]): { markedIds: string[]; alreadyDoneIds: string[]; missingIds: string[] } {

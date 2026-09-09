@@ -19,7 +19,8 @@ export async function runTranscriptScan(args: readonly string[]): Promise<ScanAc
 /** Bounded transcript context passed across the monitor → model-completion seam. */
 export async function sampleTranscript(threadId: string): Promise<string> {
   const sample = await runTranscriptScan([
-    "--thread", threadId, "--sample", "8", "--since", "30d",
+    "--thread", threadId, "--sample", "8", "--truncate", "2000", "--since", "1970-01-01",
   ]);
+  if (sample.threads.length !== 1) throw new Error(`expected one authorized transcript for ${threadId}`);
   return JSON.stringify(sample, null, 2);
 }

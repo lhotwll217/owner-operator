@@ -308,7 +308,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 12, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode, Antigravity, and Grok Build sessions");
+  assert.equal(fresh.count, 13, "scan finds every fixture format, including Claude SDK work without a GUI host");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -399,10 +399,7 @@ try {
   assert.equal(grok.repo, "grok-app", "cwd from the records");
   assert.equal(grok.state, "needs-you", "assistant replied last → needs-you");
 
-  // The inverse: a headless SDK worker in a plain cwd (no GUI host) stays hidden by default,
-  // and only --all audits it. Exempting GUI hosts must not resurface real workers.
-  assert.equal(byId(fresh, workerId), undefined, "non-GUI sdk-ts worker hidden by default");
-  assert.ok(byId(run("--all"), workerId), "…but --all still audits the worker");
+  assert.equal(byId(fresh, workerId)?.id, workerId, "SDK transport alone cannot hide real work");
 
   // --sample 0 is the monitor's metadata-only mode: NO message bodies may leak through
   // (slice(-0) used to dump the entire tail).
@@ -442,7 +439,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 12, "visible set unchanged");
+  assert.equal(run().count, 13, "privacy filters preserve the authorized set");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 

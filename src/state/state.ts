@@ -3,9 +3,7 @@ import {
   DomainEventKind,
   ScheduleRunStatus,
   isBlacklisted,
-  loadActiveWindow,
   loadBlacklist,
-  parseWindowMs,
   resolveState,
   type AgentRun,
   type AgentRunActivityUpdate,
@@ -38,13 +36,11 @@ export class State {
   readonly bus: InMemoryEventBus;
   private readonly db: ThreadDb;
   private readonly now: () => string;
-  private readonly activeWindow: string;
   private readonly blacklist: () => Blacklist;
 
   constructor(dbPath?: string, options: StateOptions = {}) {
     this.bus = options.bus ?? new InMemoryEventBus();
     this.now = options.now ?? (() => new Date().toISOString());
-    this.activeWindow = options.activeWindow ?? loadActiveWindow(ownerOperatorHome());
     this.blacklist = () => loadBlacklist(ownerOperatorHome());
     this.db = new ThreadDb(dbPath, { now: this.now });
     this.db.purgeBlacklisted(this.blacklist());
@@ -53,7 +49,10 @@ export class State {
   recordObservation(row: ScanRow): void {
     if (isBlacklisted(this.blacklist(), { cwd: row.project, repo: row.repo })) return;
     const previous = this.db.resolutionRow(row.id);
-    const state = resolveState(
+    const state = !row.working && previous?.lastMessageAt === row.lastMessageAt &&
+      previous.enrichedThroughMessageAt === row.lastMessageAt && previous.stateReason
+      ? previous.state
+      : resolveState(
       previous?.lastMessageAt
         ? { state: previous.state, lastMessageAt: previous.lastMessageAt }
         : undefined,
@@ -83,7 +82,7 @@ export class State {
         state,
         lastMessageAt: row.lastMessageAt,
         needsEnrichment:
-          state === "needs-you" && row.lastMessageAt !== previous?.enrichedThroughMessageAt,
+          (state === "needs-you" || state === "idle") && row.lastMessageAt !== previous?.enrichedThroughMessageAt,
       });
     }
   }
@@ -97,17 +96,28 @@ export class State {
     return this.db.listSessionState(options);
   }
 
-  /** Current client projection. SQLite retains history; quiet rows age out of this view. */
+  /** Unresolved work remains visible until evidence or the owner closes it. */
   listCurrentSessionState(): SessionStateRow[] {
-    const nowMs = Date.parse(this.now());
-    const cutoffMs = parseWindowMs(this.activeWindow, nowMs);
-    return this.db.listSessionState({
-      activeSince: new Date(cutoffMs ?? nowMs - 24 * 60 * 60 * 1_000).toISOString(),
-    });
+    return this.db.listSessionState();
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
     return this.db.listEnrichmentCandidates();
+  }
+
+  requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
+    const queuedIds = this.db.requestEnrichment(requests);
+    for (const threadId of queuedIds) {
+      const current = this.db.resolutionRow(threadId)!;
+      this.publish({
+        kind: DomainEventKind.ThreadChanged,
+        threadId,
+        state: current.state,
+        lastMessageAt: current.lastMessageAt,
+        needsEnrichment: true,
+      });
+    }
+    return queuedIds;
   }
 
   appendEnrichment(threadId: string, details: ThreadDetails, throughMessageAt: string): boolean {

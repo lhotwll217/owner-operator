@@ -162,7 +162,7 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
     sessionState: () => json<SessionStateRow[]>("/session-state"),
     markDone: (ids) => post<MarkThreadsDoneResult>("/done", { ids }),
     renameThread: async (id, title) => { await post("/rename", { id, title }); },
-    poll: async () => { await post("/poll", {}, LONG_OPERATION_MS); },
+    poll: async (options = {}) => { await post("/poll", options, LONG_OPERATION_MS); },
     listSchedules: () => json<ScheduleDefinition[]>("/schedules"),
     createSchedule: (input: ScheduleCreateInput) => post<ScheduleDefinition>("/schedules", input),
     updateSchedule: (id: string, input: ScheduleCreateInput) => json<ScheduleDefinition>(

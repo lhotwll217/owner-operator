@@ -96,7 +96,7 @@ export interface GatewayApi {
   sessionState(): Promise<SessionStateRow[]>;
   markDone(ids: readonly string[]): Promise<MarkThreadsDoneResult>;
   renameThread(id: string, title: string): Promise<void>;
-  poll(): Promise<void>;
+  poll(options?: { reconcile?: Array<{ id: string; lastMessageAt: string }> }): Promise<void>;
   listSchedules(): Promise<ScheduleDefinition[]>;
   createSchedule(input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;

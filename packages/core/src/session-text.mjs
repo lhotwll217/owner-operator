@@ -10,9 +10,6 @@ const SESSION_BOILERPLATE = [
   /^<user_action>/i,
   /^<turn_aborted>/i,
   /^# AGENTS\.md/i,
-  /Use the [\w-]+ worker role/i,
-  /^Review the current code changes/i,
-  /^Remember this token/i,
   /^\(Empty session\)/i,
   /A session-scoped Stop hook is now active/i,
 ];

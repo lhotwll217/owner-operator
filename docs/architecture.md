@@ -70,9 +70,13 @@ clients refetch SQLite-backed truth.
 
 Enrichment sends only bounded transcript samples to the model, read through
 application-owned scan/search modules.
-Enrichment is eligible when the transcript-derived state is `needs-you`, no delegated child is
+Enrichment is eligible when the state is `needs-you` or `idle`, no delegated child is
 pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
-first discovery, a new assistant message without a state transition, and daemon restart. The
+first discovery, failed calls followed by inactivity, a new message, and daemon restart. Enrichment
+can reconcile completed work to `done`, retain a genuine owner decision as `needs-you`, or leave
+uncertain work `idle`. A successful state decision holds for the same message through later polls.
+Owner done choices and newer messages reject outdated model results. Active delegated children
+suppress obsolete owner instructions in the projection. The
 monitor never awaits the model in its scan hot path.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation
 cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried

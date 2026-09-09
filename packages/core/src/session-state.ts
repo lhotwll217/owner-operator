@@ -6,7 +6,7 @@
 // appear (raw digest topic + live status) until the model has written details for them. Pure +
 // UI-independent.
 
-import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus } from "./status";
+import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus, type ThreadState } from "./status";
 
 /** The model-authored detail fields we cache and join onto a thread by id (the enrichment). */
 export interface ThreadDetails {
@@ -14,6 +14,8 @@ export interface ThreadDetails {
   summary?: string;    // short card summary, when the model has written one
   nextSteps?: string;  // the concrete next action
   priority?: number;   // 5 (loudest) … 1
+  state?: Exclude<ThreadState, "working">;
+  stateReason?: string;
 }
 
 /** One live thread plus its optional cached model details. */
