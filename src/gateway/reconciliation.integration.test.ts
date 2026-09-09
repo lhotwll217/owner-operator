@@ -6,7 +6,7 @@ import { startGateway } from "./server";
 import { fakeScanRow, tempOoHome, waitFor } from "./test/helpers";
 
 const { dir, cleanup } = tempOoHome("oo-gateway-reconciliation");
-const state = new State(join(dir, "state.db"));
+const state = new State(join(dir, "state.db"), { now: () => "2026-06-09T12:00:00.000Z" });
 const row = fakeScanRow({ secondsSinceLastMessage: 4000 });
 state.recordObservation(row);
 state.appendEnrichment(row.id, { topic: "Thread cleanup", nextSteps: "Review the cleanup" }, row.lastMessageAt);

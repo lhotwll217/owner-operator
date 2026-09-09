@@ -99,8 +99,8 @@ try {
   );
   assert.ok(state.listSessionState().some((item) => item.id === "thread-old-working"), "history is retained");
   assert.ok(
-    state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),
-    "unresolved work remains visible outside the active window",
+    !state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),
+    "quiet rows outside the active window leave the client projection",
   );
   assert.deepEqual(state.listEnrichmentCandidates().map((item) => item.id), ["thread-1"]);
   assert.equal(events.at(-1)?.kind, DomainEventKind.ThreadChanged, "post-commit event published");

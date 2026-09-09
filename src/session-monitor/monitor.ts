@@ -1,5 +1,6 @@
 import { watch as fsWatch, type FSWatcher } from "node:fs";
 import {
+  loadActiveWindow,
   loadMonitoredTranscriptStores,
   isOnboarded,
   type ScanRow,
@@ -79,7 +80,7 @@ export class SessionMonitor {
     try {
       this.armWatchers();
       const rows = await (this.options.scan ?? scanTranscripts)(
-        this.options.since ?? "1970-01-01",
+        this.options.since ?? loadActiveWindow(),
         this.options.limit ?? 0,
       );
       this.state.recordPoll(rows);

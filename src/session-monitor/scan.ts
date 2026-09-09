@@ -17,9 +17,17 @@ export async function runTranscriptScan(args: readonly string[]): Promise<ScanAc
 }
 
 /** Bounded transcript context passed across the monitor → model-completion seam. */
-export async function sampleTranscript(threadId: string): Promise<string> {
+export async function sampleTranscript(threadId: string, source: string): Promise<string> {
+  if (["claude", "codex", "pi"].includes(source)) {
+    const searchScript = fileURLToPath(new URL("../agent/skills/session-search/scripts/session-search.mjs", import.meta.url));
+    const { stdout } = await execFileAsync(process.execPath, [
+      searchScript, "--skim", threadId, "--include-tools", "--max-chars", "24000",
+    ], { encoding: "utf8", maxBuffer: 128 * 1024 });
+    if (!stdout.startsWith(`skim id=${threadId} `)) throw new Error(`missing authorized evidence for ${threadId}`);
+    return stdout;
+  }
   const sample = await runTranscriptScan([
-    "--thread", threadId, "--sample", "8", "--truncate", "2000", "--since", "1970-01-01",
+    "--thread", threadId, "--sample", "8", "--truncate", "2000", "--since", "30d",
   ]);
   if (sample.threads.length !== 1) throw new Error(`expected one authorized transcript for ${threadId}`);
   return JSON.stringify(sample, null, 2);

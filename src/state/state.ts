@@ -4,6 +4,8 @@ import {
   ScheduleRunStatus,
   isBlacklisted,
   loadBlacklist,
+  loadActiveWindow,
+  parseWindowMs,
   resolveState,
   type AgentRun,
   type AgentRunActivityUpdate,
@@ -36,11 +38,13 @@ export class State {
   readonly bus: InMemoryEventBus;
   private readonly db: ThreadDb;
   private readonly now: () => string;
+  private readonly activeWindow: string;
   private readonly blacklist: () => Blacklist;
 
   constructor(dbPath?: string, options: StateOptions = {}) {
     this.bus = options.bus ?? new InMemoryEventBus();
     this.now = options.now ?? (() => new Date().toISOString());
+    this.activeWindow = options.activeWindow ?? loadActiveWindow(ownerOperatorHome());
     this.blacklist = () => loadBlacklist(ownerOperatorHome());
     this.db = new ThreadDb(dbPath, { now: this.now });
     this.db.purgeBlacklisted(this.blacklist());
@@ -96,17 +100,23 @@ export class State {
     return this.db.listSessionState(options);
   }
 
-  /** Unresolved work remains visible until evidence or the owner closes it. */
+  /** Current client projection. SQLite retains history; quiet rows age out of this view. */
   listCurrentSessionState(): SessionStateRow[] {
-    return this.db.listSessionState();
+    const nowMs = Date.parse(this.now());
+    const cutoffMs = parseWindowMs(this.activeWindow, nowMs);
+    return this.db.listSessionState({
+      activeSince: new Date(cutoffMs ?? nowMs - 24 * 60 * 60 * 1_000).toISOString(),
+    });
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
-    return this.db.listEnrichmentCandidates();
+    const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
+    return this.db.listEnrichmentCandidates().filter((row) => visible.has(row.id));
   }
 
   requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
-    const queuedIds = this.db.requestEnrichment(requests);
+    const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
+    const queuedIds = this.db.requestEnrichment(requests.filter((row) => visible.has(row.id)));
     for (const threadId of queuedIds) {
       const current = this.db.resolutionRow(threadId)!;
       this.publish({

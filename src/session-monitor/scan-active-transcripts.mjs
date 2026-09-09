@@ -553,8 +553,31 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
 
   const userTurns = convo.filter((m) => m.role === "user");
   const topicMsg = userTurns[0] || convo[0];
-  // Transport and turn count cannot distinguish owner work from generated work.
-  let automated = source === "codex" && srcHint?.subagent?.other === "guardian";
+  // Worker vs interactive by LAUNCH MODE, not message count (battle-tested: AgentWrapper/
+  // agent-orchestrator keys off `codex exec` / `claude --headless|-p` / sdk). A session is a
+  // single-turn worker — hidden unless --all — when:
+  //   • no real (non-boilerplate) user turn survived — e.g. a Codex direct/worker preamble; or
+  //   • it ran via the SDK (sdk-ts / sdk-cli); or
+  //   • it's a single-turn `cli` session — `claude -p` and Task subagents are
+  //     indistinguishable from a brand-new terminal session at one turn, so treat <2 turns as
+  //     a single-turn worker (a real terminal session surfaces on its 2nd turn).
+  // Interactive entrypoints (codex, claude-desktop, …) show as soon as they have one real turn.
+  //
+  // EXCEPT when an interactive GUI HOST owns the session: Conductor and Superset drive the agent
+  // over the SDK, PostHog Code over ACP — the transport is headless but the owner opened the
+  // session deliberately, so the rules above would WRONGLY hide it (every Conductor thread was
+  // hidden this way until now). A host short-circuits to interactive; `surfaceEmpty` hosts
+  // (PostHog Code cloud tasks, no turns yet) surface even empty. The host list lives in
+  // @owner-operator/core (gui-hosts) — a new GUI is one entry there, never a per-source patch here.
+  const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
+  const host = sessionHostFor({ format: source, cwd: project, entrypoint, originator, sourceHint: srcHint }, sessionHosts);
+  const interactiveHost = host?.overridesAutomation ? host : null;
+  let automated = interactiveHost
+    ? (interactiveHost.surfaceEmpty ? false : userTurns.length === 0)
+    : userTurns.length === 0 ||
+      host?.automatedTransport ||
+      (cliLike && userTurns.length < 2);
+  if (source === "codex" && srcHint?.subagent?.other === "guardian") automated = true;
   if (namespace === "owner-operator" && ooProvenance) {
     if (ooProvenance.surface === "schedule" || ooProvenance.origin === "agent" || ooProvenance.origin === "scheduler") {
       automated = true;

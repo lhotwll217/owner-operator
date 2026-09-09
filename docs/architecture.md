@@ -69,8 +69,9 @@ domain events to four typed SSE invalidations—state, schedule, schedule-run, o
 clients refetch SQLite-backed truth.
 
 Enrichment sends only bounded transcript samples to the model, read through
-application-owned scan/search modules.
-Enrichment is eligible when the state is `needs-you` or `idle`, no delegated child is
+application-owned scan/search modules. Claude, Codex, and Pi samples include bounded tool
+evidence through the privacy-aware session-search helper; other formats retain the scan sample.
+Enrichment is eligible when the row is visible under the configured window and its state is `needs-you` or `idle`, no delegated child is
 pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
 first discovery, failed calls followed by inactivity, a new message, and daemon restart. Enrichment
 can reconcile completed work to `done`, retain a genuine owner decision as `needs-you`, or leave

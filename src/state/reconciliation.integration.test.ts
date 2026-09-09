@@ -6,7 +6,7 @@ import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { AgentRunHarness, AgentRunStatus, DomainEventKind, type DomainEvent } from "@owner-operator/core";
 
 const { dir, cleanup } = tempOoHome("oo-reconcile-state");
-const state = new State(join(dir, "state.db"));
+const state = new State(join(dir, "state.db"), { now: () => "2026-06-09T12:00:00.000Z" });
 let attempts = 0;
 let row = fakeScanRow();
 const monitor = new SessionMonitor(state, {

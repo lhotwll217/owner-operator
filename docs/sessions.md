@@ -40,18 +40,18 @@ latest valid `oo-provenance` entry because the Pi header cwd is stable lookup id
 context. This product store never authorizes or reports access to standalone Pi history, and its
 scan cannot displace external sessions.
 
-The monitor scans all configured history without a presentation limit. Unknown and unresolved rows
-remain visible regardless of age. Scanner CLI windows and limits still bound explicit queries.
-Claude CLI and SDK transport and message count do not establish automation. Codex guardian source
-metadata and OO invocation provenance identify generated work. Claude native sub-agent files lose
-identity deduplication to their parent transcript. Separate CLI calls without explicit lineage remain
-observable because their transport cannot prove owner or generated origin.
+The monitor respects the configured active window and updates all candidates in that window
+without the old per-source count cap. Widget visibility retains the existing window rules,
+including outstanding owner attention and active delegated children. Reconciliation selects
+only visible idle or needs-you rows. It does not queue quiet history outside the widget window.
+Codex guardian source metadata identifies approval machinery rather than independent owner work.
+Other launch-mode admission rules are unchanged by this repair.
 
 The authenticated `POST /poll` accepts an optional `reconcile` array of up to 100
-`{id, lastMessageAt}` pairs. It resets enrichment eligibility only for matching unresolved idle or
+`{id, lastMessageAt}` pairs. It resets enrichment eligibility only for matching visible unresolved idle or
 needs-you rows without active delegated children, then runs the normal monitor. The response's
 `queuedIds` identifies accepted rows. A timestamp mismatch, done choice, or active work is skipped.
-This route rechecks already summarized history after a reconciliation change without another worker.
+This route rechecks already summarized visible rows after a reconciliation change without another worker.
 
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
 ignore. Host detection supplies attribution only and does not grant transcript access. The marker
