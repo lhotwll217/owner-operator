@@ -390,6 +390,47 @@ try {
   });
   assert.equal(wrongRoot.status, 1);
   assert.match(wrongRoot.stderr, /configured session source/, "a project cwd is rejected as a transcript source root");
+  // Tool evidence is opt-in; direct navigation and discovery retain privacy boundaries.
+  const toolNeedle = "ZZHANDOFFTOOLEVIDENCEZZ";
+  const toolId = "toolproof-1111-2222-3333-444444444444";
+  const toolPrivateId = "toolprivate-1111-2222-3333-444444444444";
+  const toolTranscript = (id: string, cwd: string) => [
+    { type: "session", version: 3, id, cwd },
+    { type: "message", message: { role: "user", content: "Prepare the handoff" } },
+    { type: "message", message: { role: "assistant", content: [
+      { type: "toolCall", id: "call-1", name: "read", arguments: { path: `/skills/${toolNeedle}/SKILL.md` } },
+    ] } },
+    { type: "message", message: { role: "toolResult", toolName: "read", toolCallId: "call-1", content: [
+      { type: "text", text: `${toolNeedle} successfully loaded` },
+    ] } },
+  ].map((row) => JSON.stringify(row)).join("\n") + "\n";
+  writeFileSync(join(ownerOperatorDir, `${toolId}.jsonl`), toolTranscript(toolId, okCwd));
+  writeFileSync(join(ownerOperatorDir, `${toolPrivateId}.jsonl`), toolTranscript(toolPrivateId, privateRoot));
+  const toolSearch = (...args: string[]) => execFileSync(process.execPath, [GREP, ...args], {
+    env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CURRENT_SESSION_ID: toolId }, encoding: "utf8",
+  });
+  const toolQuery = (...args: string[]) => JSON.parse(toolSearch("--query", toolNeedle, "--json", ...args));
+  assert.equal(toolQuery("--session", toolId).shown, 0, "tool-only evidence stays hidden by default");
+  const toolHits = toolQuery("--session", toolId, "--include-tools");
+  assert.equal(toolHits.shown, 2, "opt-in retrieves actual call arguments and result");
+  const call = toolHits.matches.find((hit: { match: { role: string } }) => hit.match.role === "assistant");
+  assert.match(call.match.text, /"name":"read"/);
+  assert.match(call.match.text, /SKILL.md/);
+  assert.match(toolSearch("--session", toolId, "--at", String(call.index), "--include-tools", "--before", "0", "--after", "0"), /SKILL.md/,
+    "tool-enabled index round-trips to the actual call");
+  assert.match(toolSearch("--skim", toolId, "--include-tools"), /successfully loaded/);
+  assert.equal(toolQuery("--include-tools").shown, 0, "discovery excludes both current session and private tool evidence");
+  for (const args of [
+    ["--query", toolNeedle, "--session", toolPrivateId],
+    ["--skim", toolPrivateId],
+    ["--session", toolPrivateId, "--at", "1"],
+  ]) {
+    const blocked = spawnSync(process.execPath, [GREP, ...args, "--include-tools"], {
+      env: { ...process.env, HOME: home, OO_HOME: ooHome }, encoding: "utf8",
+    });
+    assert.equal(blocked.status, 1, "private tool evidence fails closed in every direct retrieval mode");
+    assert.equal(blocked.stdout, "", "no private transcript content is returned");
+  }
   process.stdout.write("ok — sessions-grep: combined provenance, OO narrowing, caller-chain exclusion, direct IDs, and blacklist layers hold\n");
 } finally {
   rmSync(home, { recursive: true, force: true });

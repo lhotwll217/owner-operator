@@ -7,7 +7,15 @@ export default {
   name: 'codex',
   detect: (file) => file.includes('/.codex/') || /\/codex\//.test(file),
   message(obj, opts) {
-    if (obj.type !== 'response_item' || !obj.payload || obj.payload.type !== 'message') return null;
+    if (obj.type !== 'response_item' || !obj.payload) return null;
+    if (['function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output'].includes(obj.payload.type)) {
+      if (!opts.includeTools) return null;
+      return {
+        role: obj.payload.type.endsWith('_output') ? 'user' : 'assistant',
+        text: JSON.stringify(obj.payload), timestamp: obj.timestamp,
+      };
+    }
+    if (obj.payload.type !== 'message') return null;
     const role = obj.payload.role || 'unknown';
     if (!['user', 'assistant'].includes(role)) return null;
     const text = contentToText(obj.payload.content, opts);

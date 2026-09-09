@@ -53,7 +53,7 @@ for (let index = 0; index < input.length; index += 1) {
     if (arg === "--skim") hasSkim = true;
     if (arg === "--at") hasAt = true;
     passthrough.push(arg, takeValue(arg, ++index, { allowLeadingDashes: arg === "--query" }));
-  } else if (["--any", "--candidates", "--regex", "--json", "--case-sensitive"].includes(arg)) {
+  } else if (["--any", "--candidates", "--regex", "--json", "--case-sensitive", "--include-tools"].includes(arg)) {
     if (arg === "--candidates") candidates = true;
     if (arg === "--json") json = true;
     passthrough.push(arg);
@@ -334,6 +334,7 @@ function printHelp() {
     "  --owner-operator              search Owner Operator history only\n" +
     "  --target-type claude|codex|pi search that coding transcript format only\n" +
     "  --target-root DIR          narrow to a configured transcript-store root\n" +
+    "  --include-tools           include tool calls/results; retain this flag when following message indexes\n" +
     "  --help, -h                 show this help\n",
   );
 }
