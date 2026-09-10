@@ -197,7 +197,7 @@ for (const mechanic of [
   );
 }
 assert.match(harnessPrompt, /After delegating, do not poll status/i);
-assert.match(harnessPrompt, /`\/agent-state` owns liveness/i);
+assert.match(harnessPrompt, /completion arrives automatically/i);
 assert.match(harnessPrompt, /never routine monitoring/i);
 const sessionSearchSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "session-search", "SKILL.md"),

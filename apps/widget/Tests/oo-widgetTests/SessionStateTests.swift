@@ -6,16 +6,13 @@ import Foundation
 @testable import oo_widget
 
 private actor StubWidgetGateway {
-    private var agentStateData: Data
     private var sessionStateData: Data
     private var unavailable = false
-    private var agentStateUnavailable = false
     private var paths: [String] = []
-    private var holdNextAgentState = false
-    private var heldAgentState: CheckedContinuation<Data, Error>?
+    private var holdNextSessionState = false
+    private var heldSessionState: CheckedContinuation<Data, Error>?
 
-    init(agentStateData: Data, sessionStateData: Data = Data("[]".utf8)) {
-        self.agentStateData = agentStateData
+    init(sessionStateData: Data = Data("[]".utf8)) {
         self.sessionStateData = sessionStateData
     }
 
@@ -26,29 +23,24 @@ private actor StubWidgetGateway {
         case "/ready":
             return Data(#"{"setupRequired":false}"#.utf8)
         case "/session-state":
-            return sessionStateData
-        case "/agent-state":
-            if agentStateUnavailable { throw URLError(.badServerResponse) }
-            if holdNextAgentState {
-                holdNextAgentState = false
-                return try await withCheckedThrowingContinuation { heldAgentState = $0 }
+            if holdNextSessionState {
+                holdNextSessionState = false
+                return try await withCheckedThrowingContinuation { heldSessionState = $0 }
             }
-            return agentStateData
+            return sessionStateData
         default:
             throw URLError(.badURL)
         }
     }
 
-    func setAgentState(_ data: Data) { agentStateData = data }
     func setSessionState(_ data: Data) { sessionStateData = data }
     func setUnavailable(_ value: Bool) { unavailable = value }
-    func setAgentStateUnavailable(_ value: Bool) { agentStateUnavailable = value }
     func requestCount(_ path: String) -> Int { paths.filter { $0 == path }.count }
-    func holdNextAgentStateRequest() { holdNextAgentState = true }
-    func hasHeldAgentStateRequest() -> Bool { heldAgentState != nil }
-    func releaseHeldAgentState(with data: Data) {
-        heldAgentState?.resume(returning: data)
-        heldAgentState = nil
+    func holdNextSessionStateRequest() { holdNextSessionState = true }
+    func hasHeldSessionStateRequest() -> Bool { heldSessionState != nil }
+    func releaseHeldSessionState(with data: Data) {
+        heldSessionState?.resume(returning: data)
+        heldSessionState = nil
     }
 }
 
@@ -96,14 +88,6 @@ struct SessionStateTests {
         return try JSONDecoder().decode([SessionStateRow].self, from: data)
     }
 
-    private func agentStateFixture() throws -> AgentStateView {
-        let payload = try Data(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/agent-state.gateway.json"))
-        return try JSONDecoder().decode(AgentStateView.self, from: payload)
-    }
-
     private func isoNow(_ offset: TimeInterval) -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -130,94 +114,18 @@ struct SessionStateTests {
         #expect(fallback.project == "/tasks/issue-132")
     }
 
-    @Test func agentStateGatewayContractPreservesSharedVocabularyAndOrder() throws {
-        let decoded = try agentStateFixture()
-
-        #expect(decoded.footer == "Agent state: 1 queued · 1 running · 3 need attention")
-        #expect(decoded.runs.map(\.status.text) == [
-            .failed, .interrupted, .lost, .running, .queued, .completed, .cancelled,
-        ])
-        #expect(decoded.runs.map(\.category) == [
-            .attention, .attention, .attention, .active, .active, .recent, .recent,
-        ])
-        #expect(decoded.runs.map(\.canRetry) == [true, true, true, false, false, false, false])
-        #expect(decoded.runs.map(\.canResume) == [false, false, false, false, false, true, false])
-        #expect(decoded.runs[5].resumeOfRunId == "prior-completed-run")
-        #expect(decoded.runs[3].status.glyph == "●")
-    }
-
-    @Test func agentStateMockRendersTimelineRailVocabularyAndOrder() throws {
-        let rendered = renderText(rows: [], agentState: try agentStateFixture(), port: 47711)
-            .replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
-        #expect(rendered.contains("! failed  Investigate startup"))
-        #expect(rendered.contains("! interrupted  Continue migration"))
-        #expect(rendered.contains("· retry available"))
-        #expect(rendered.contains("· resume available"))
-        #expect(rendered.contains("Resume of: prior-completed-run"))
-        #expect(rendered.contains("■ cancelled  Superseded audit"))
-        let failed = try #require(rendered.range(of: "Investigate startup"))
-        let running = try #require(rendered.range(of: "Research widget behavior"))
-        let completed = try #require(rendered.range(of: "Map the Gateway seam"))
-        #expect(failed.lowerBound < running.lowerBound && running.lowerBound < completed.lowerBound)
-    }
-
-    @Test func unknownAgentStatusAndCategoryStillRender() throws {
-        let payload = Data("""
-        {"counts":{"queued":0,"running":1,"attention":0},"footer":"Agent state: 1 running","runs":[{"id":"run-1","harness":"codex","task":"Future lifecycle","status":{"glyph":"◆","text":"paused"},"category":"future","elapsedMs":1000,"latestActivity":"waiting","canCancel":false,"canRetry":false,"canResume":false}]}
-        """.utf8)
-
-        let decoded = try JSONDecoder().decode(AgentStateView.self, from: payload)
-        let rendered = renderText(rows: [], agentState: decoded, port: 47711)
-            .replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
-
-        #expect(rendered.contains("◆ unknown  Future lifecycle"))
-    }
-
-    @Test @MainActor func agentStateFailureLeavesSessionsOnlineWithEmptyAgentState() async throws {
-        let sessionData = try JSONSerialization.data(withJSONObject: [row(id: "thread-1", state: "needs-you")])
-        let stub = StubWidgetGateway(agentStateData: Data("{}".utf8), sessionStateData: sessionData)
-        await stub.setAgentStateUnavailable(true)
-        let client = DaemonClient(
-            discover: { DaemonClient.Discovery(port: 47711, authToken: "test") },
-            fetchData: { path, _ in try await stub.fetch(path) }
-        )
-
-        await client.refresh()
-
-        #expect(client.online)
-        #expect(client.groups.flatMap(\.rows).map(\.id) == ["thread-1"])
-        #expect(client.agentState.runs.isEmpty)
-    }
-
     @Test @MainActor func agentRunInvalidationAndReconnectRefetchDurableTruth() async throws {
-        func view(status: String, glyph: String, category: String, footer: String?) -> Data {
-            let footerJSON = footer.map { "\"\($0)\"" } ?? "null"
-            return Data("""
-            {
-              "counts":{"queued":0,"running":\(status == "running" ? 1 : 0),"attention":\(category == "attention" ? 1 : 0)},
-              "footer":\(footerJSON),
-              "runs":[{"id":"run-1","harness":"codex","task":"Audit state","status":{"glyph":"\(glyph)","text":"\(status)"},"category":"\(category)","elapsedMs":1000,"latestActivity":"bounded","canCancel":\(status == "running"),"canRetry":\(status == "interrupted"),"canResume":false}]
-            }
-            """.utf8)
-        }
-
         let activeSessions = try JSONSerialization.data(withJSONObject: [
             row(id: "oo-root", repo: "issue-131", source: "pi", app: "Owner Operator", state: "working"),
             row(id: "child", repo: "issue-131", state: "working", parentThreadId: "oo-root"),
         ])
-        let stub = StubWidgetGateway(
-            agentStateData: view(
-                status: "running", glyph: "●", category: "active", footer: "Agent state: 1 running"
-            ),
-            sessionStateData: activeSessions
-        )
+        let stub = StubWidgetGateway(sessionStateData: activeSessions)
         let client = DaemonClient(
             discover: { DaemonClient.Discovery(port: 47711, authToken: "test") },
             fetchData: { path, _ in try await stub.fetch(path) }
         )
 
         await client.refresh()
-        #expect(client.agentState.runs[0].status.text == .running)
         #expect(client.groups.flatMap(\.rows).map(\.id) == ["oo-root", "child"])
         #expect(client.groups.flatMap(\.rows).map(\.nestingDepth) == [0, 1])
         #expect(client.groups.flatMap(\.rows).first?.state == .working)
@@ -227,59 +135,47 @@ struct SessionStateTests {
             row(id: "child", repo: "issue-131", state: "working", parentThreadId: "oo-root"),
         ])
         await stub.setSessionState(terminalSessions)
-        await stub.setAgentState(view(
-            status: "interrupted", glyph: "!", category: "attention", footer: "Agent state: 1 needs attention"
-        ))
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
-        #expect(client.agentState.runs[0].status.text == .interrupted)
-        #expect(client.agentState.runs[0].canRetry)
         #expect(client.groups.flatMap(\.rows).first?.state == .needsYou)
         #expect(client.groups.flatMap(\.rows).last?.nestingDepth == 1)
-        #expect(await stub.requestCount("/agent-state") == 2)
+        #expect(await stub.requestCount("/agent-state") == 0)
         #expect(await stub.requestCount("/session-state") == 2)
 
         await stub.setUnavailable(true)
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
         #expect(!client.online)
-        #expect(client.agentState.runs.isEmpty, "a dropped daemon cannot leave a stale running indicator")
+        #expect(client.groups.isEmpty)
 
         await stub.setUnavailable(false)
-        await stub.setAgentState(view(status: "completed", glyph: "✓", category: "recent", footer: nil))
         await client.refresh()
         #expect(client.online)
-        #expect(client.agentState.runs[0].status.text == .completed)
-        #expect(client.agentState.footer == nil)
+        #expect(client.groups.flatMap(\.rows).map(\.id) == ["oo-root", "child"])
+        #expect(client.groups.flatMap(\.rows).first?.state == .needsYou)
     }
 
     @Test @MainActor func invalidationDuringRefetchRequiresAnotherDurableRead() async throws {
-        func view(_ status: String, _ glyph: String, _ category: String) -> Data {
-            Data("""
-            {"counts":{"queued":0,"running":0,"attention":0},"footer":null,"runs":[{"id":"run-1","harness":"codex","task":"Audit state","status":{"glyph":"\(glyph)","text":"\(status)"},"category":"\(category)","elapsedMs":1000,"latestActivity":"","canCancel":false,"canRetry":false,"canResume":false}]}
-            """.utf8)
-        }
-
-        let initial = view("running", "●", "active")
-        let interrupted = view("interrupted", "!", "attention")
-        let completed = view("completed", "✓", "recent")
-        let stub = StubWidgetGateway(agentStateData: initial)
+        let initial = try JSONSerialization.data(withJSONObject: [row(id: "root", state: "working")])
+        let interrupted = try JSONSerialization.data(withJSONObject: [row(id: "root", state: "idle")])
+        let completed = try JSONSerialization.data(withJSONObject: [row(id: "root", state: "needs-you")])
+        let stub = StubWidgetGateway(sessionStateData: initial)
         let client = DaemonClient(
             discover: { DaemonClient.Discovery(port: 47711, authToken: "test") },
             fetchData: { path, _ in try await stub.fetch(path) }
         )
         await client.refresh()
 
-        await stub.holdNextAgentStateRequest()
+        await stub.holdNextSessionStateRequest()
         let first = Task { await client.receive(WidgetGatewayEvent(kind: .agentRunChanged)) }
-        for _ in 0..<100 where !(await stub.hasHeldAgentStateRequest()) { await Task.yield() }
-        #expect(await stub.hasHeldAgentStateRequest())
+        for _ in 0..<100 where !(await stub.hasHeldSessionStateRequest()) { await Task.yield() }
+        #expect(await stub.hasHeldSessionStateRequest())
 
-        await stub.setAgentState(completed)
+        await stub.setSessionState(completed)
         await client.receive(WidgetGatewayEvent(kind: .agentRunChanged))
-        await stub.releaseHeldAgentState(with: interrupted)
+        await stub.releaseHeldSessionState(with: interrupted)
         await first.value
 
-        #expect(client.agentState.runs[0].status.text == .completed)
-        #expect(await stub.requestCount("/agent-state") == 3)
+        #expect(client.groups.flatMap(\.rows).first?.state == .needsYou)
+        #expect(await stub.requestCount("/session-state") == 3)
     }
 
     @Test func loudestFirstWithinGroup() throws {
@@ -322,6 +218,26 @@ struct SessionStateTests {
         #expect(groups[0].repo == "repo")
         #expect(groups[0].rows.map(\.id) == ["other", "parent", "child"])
         #expect(groups[0].rows.map(\.nestingDepth) == [0, 0, 1])
+    }
+
+    @Test func textRenderPreservesNestedChildrenAndThreadStates() throws {
+        let input = try rows([
+            row(id: "child", repo: "child-repo", state: "working", topic: "Child task", parentThreadId: "parent"),
+            row(id: "parent", state: "needs-you", topic: "Parent task"),
+            row(id: "idle", state: "idle", topic: "Idle task"),
+        ])
+        let rendered = renderText(rows: input, port: 47711)
+            .replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+        #expect(rendered == """
+        Threads  3    ◐ 1  ● 1  ○ 1
+
+        ▾ repo  3
+          ◐ Parent task  now
+            ● Child task  now
+          ○ Idle task  now
+
+        127.0.0.1:47711
+        """)
     }
 
     @Test func ownerOperatorSessionRendersAsRoot() throws {
@@ -408,13 +324,6 @@ struct SessionStateTests {
     ])
     func shortAgeCompacts(_ c: (input: String, expected: String)) {
         #expect(shortAge(c.input) == c.expected)
-    }
-
-    @Test(arguments: [
-        (3000, "3s"), (62000, "1m"), (3660000, "1h 1m"),
-    ])
-    func shortDurationCompacts(_ c: (milliseconds: Int, expected: String)) {
-        #expect(shortDuration(milliseconds: c.milliseconds) == c.expected)
     }
 
     @Test func parsesISOWithAndWithoutFractionalSeconds() {
