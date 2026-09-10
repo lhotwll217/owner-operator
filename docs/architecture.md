@@ -74,8 +74,9 @@ evidence through the privacy-aware session-search helper; other formats retain t
 Enrichment is eligible when the row is visible under the configured window and its state is `needs-you` or `idle`, no delegated child is
 pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
 first discovery, failed calls followed by inactivity, a new message, and daemon restart. Enrichment
-can reconcile completed work to `done`, retain a genuine owner decision as `needs-you`, or leave
-uncertain work `idle`. A successful state decision holds for the same message through later polls.
+classifies owner attention as `needs-you` or `idle` and updates the title and progress reason.
+Completed work remains idle until an explicit Done action removes it. Both the model parser and
+state boundary reject model-driven `done`. A successful assessment holds for the same message through later polls.
 Owner done choices and newer messages reject outdated model results. Active delegated children
 suppress obsolete owner instructions in the projection. The
 monitor never awaits the model in its scan hot path.

@@ -14,7 +14,7 @@ const monitor = new SessionMonitor(state, {
   enrich: async () => {
     attempts++;
     if (attempts === 1) throw new Error("temporary model outage");
-    return { topic: "Completed repair", nextSteps: "", state: "done" as const, stateReason: "The requested repair and verification are complete." };
+    return { topic: "Completed repair", nextSteps: "", state: "idle" as const, stateReason: "The requested repair and verification are complete." };
   },
 });
 try {
@@ -24,9 +24,13 @@ try {
   row = { ...row, secondsSinceLastMessage: 4000 };
   await monitor.poll();
   await waitFor(() => attempts === 2, 1000, "retry after needs-you becomes idle");
-  await waitFor(() => state.listSessionState().length === 0, 1000, "evidence-based completion");
+  await waitFor(() => state.listSessionState()[0]?.generatedTopic === "Completed repair", 1000, "completed task receives an updated title");
+  assert.equal(state.listSessionState()[0]?.state, "idle", "reported completion stays visible until explicitly marked done");
+  assert.deepEqual(state.requestEnrichment([{ id: row.id, lastMessageAt: row.lastMessageAt }]), [row.id]);
+  assert.equal(state.appendEnrichment(row.id, { state: "done", stateReason: "Complete", nextSteps: "" }, row.lastMessageAt), false, "even a fresh eligible assessment cannot mark work done");
+  state.markThreadsDone([row.id]);
   await monitor.poll();
-  assert.equal(state.listSessionState().length, 0, "poll does not reopen reconciled completion");
+  assert.equal(state.listSessionState().length, 0, "poll preserves explicit done");
 
   const unresolved = fakeScanRow({ id: "unresolved", secondsSinceLastMessage: 4000 });
   state.recordObservation(unresolved);
@@ -58,7 +62,7 @@ try {
   state.markThreadsDone([fresh.id]);
   assert.equal(state.listSessionState().length, 0, "an active child cannot undo an explicit owner done choice");
   state.finishAgentRun(active.id, { status: AgentRunStatus.Completed, resultTail: "Complete", error: null });
-  console.log("ok - failed enrichment recovers while idle, completion persists, unresolved decisions survive");
+  console.log("ok - failed enrichment recovers while idle, explicit done persists, unresolved decisions survive");
 } finally {
   monitor.stop();
   state.close();

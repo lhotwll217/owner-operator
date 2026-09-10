@@ -12,7 +12,7 @@ state.recordObservation(row);
 state.appendEnrichment(row.id, { topic: "Thread cleanup", nextSteps: "Review the cleanup" }, row.lastMessageAt);
 const monitor = new SessionMonitor(state, {
   scan: async () => [row],
-  enrich: async () => ({ topic: "Thread cleanup", state: "done", stateReason: "The requested cleanup completed without an outstanding question.", nextSteps: "" }),
+  enrich: async () => ({ topic: "Thread cleanup", state: "idle", stateReason: "The requested cleanup completed without an outstanding question.", nextSteps: "" }),
 });
 const gateway = await startGateway({
   authToken: "test-token", state, monitor, port: 0,
@@ -32,9 +32,13 @@ try {
   assert.equal(state.listCurrentSessionState()[0]?.nextSteps, "Review the cleanup");
   const accepted = await post({ reconcile: [{ id: row.id, lastMessageAt: row.lastMessageAt }] });
   assert.deepEqual(await accepted.json(), { ok: true, queuedIds: [row.id] });
-  await waitFor(() => state.listSessionState().length === 0, 1000, "existing monitor recovery");
+  await waitFor(() => state.listSessionState()[0]?.nextSteps === "", 1000, "existing monitor recovery");
   const projection = await fetch(`${endpoint}/session-state`, { headers: { authorization: "Bearer test-token" } });
-  assert.deepEqual(await projection.json(), [], "recovered completion leaves the widget projection");
+  const rows = await projection.json();
+  assert.equal(rows.length, 1, "recovered completion remains in the widget until explicitly closed");
+  assert.equal(rows[0].state, "idle");
+  assert.equal(rows[0].nextSteps, "");
+  state.markThreadsDone([row.id]);
   assert.deepEqual(await (await post({ reconcile: [{ id: row.id, lastMessageAt: row.lastMessageAt }] })).json(), { ok: true, queuedIds: [] });
   console.log("ok - guarded Gateway recovery uses the existing monitor and preserves done");
 } finally {

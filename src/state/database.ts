@@ -574,7 +574,7 @@ export class ThreadDb {
       // the root ineligible, while a newer message makes the sample stale. The watermark
       // rejects an already-enriched message and any out-of-order duplicate.
       if (
-        !current || current.state === "done" || this.hasActiveChild(threadId) ||
+        !current || details.state === "done" || current.state === "done" || this.hasActiveChild(threadId) ||
         (details.state !== undefined && current.state === "working") || current.lastMessageAt !== throughMessageAt ||
         (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
       ) {

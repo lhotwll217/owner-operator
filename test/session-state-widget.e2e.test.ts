@@ -32,10 +32,10 @@ const project = join(root, "project");
 const at = new Date(Date.now() - 2 * 3_600_000).toISOString();
 const oldAt = new Date(Date.now() - 5 * 86_400_000).toISOString();
 const cases = [
-  { id: "child", request: "Review the implementation against the spec. Report findings. Do not implement anything.", answer: "Review complete. No findings. All requested checks passed. No remaining work or owner decision.", state: "done", topic: "Completed spec review" },
+  { id: "child", request: "Review the implementation against the spec. Report findings. Do not implement anything.", answer: "Review complete. No findings. All requested checks passed. No remaining work or owner decision.", state: "idle", topic: "Completed spec review" },
   { id: "decision", request: "Build the export.", answer: "Implementation requires the retention policy. Should exports retain 30 or 90 days? The owner must choose before work can continue.", state: "needs-you", topic: "Export retention decision" },
   { id: "partial", request: "Implement and verify the export.", answer: "I have started reading the files. Implementation and verification are not complete. I have no question for the owner yet.", state: "idle", topic: "Unfinished export implementation" },
-  { id: "summarized", request: "Remove the unused import and run the typecheck.", answer: "The unused import is removed and typecheck passed. The requested task is complete with no remaining work or required owner action.", state: "done", topic: "Completed import cleanup" },
+  { id: "summarized", request: "Remove the unused import and run the typecheck.", answer: "The unused import is removed and typecheck passed. The requested task is complete with no remaining work or required owner action.", state: "idle", topic: "Completed import cleanup" },
   { id: "owner-done", request: "Investigate an optional follow-up.", answer: "I can investigate further.", state: "idle", topic: "Owner dismissed follow-up" },
 ] as const;
 function transcript(id: string, request: string, answer: string, timestamp = at, working = false) {
@@ -146,7 +146,14 @@ try {
   await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "failed idle row retries");
   const after: SessionStateRow[] = await api("/session-state");
   console.log("AFTER", JSON.stringify(after.map((r) => ({ id: r.id, title: r.topic, state: r.state, next: r.nextSteps }))));
-  assert.deepEqual(after.map((r) => r.id).sort(), ["decision", "parent", "partial"]);
+  assert.deepEqual(after.map((r) => r.id).sort(), ["child", "decision", "parent", "partial", "summarized"], "enrichment never removes a row automatically");
+  for (const id of ["child", "summarized"]) {
+    assert.equal(after.find((r) => r.id === id)?.state, "idle");
+    assert.equal(after.find((r) => r.id === id)?.nextSteps, "");
+    assert.ok(after.find((r) => r.id === id)?.generatedTopic);
+  }
+  await api("/done", { ids: ["child", "summarized"] });
+  assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "parent", "partial"], "only explicit Done removes completed work");
   assert.equal(after.find((r) => r.id === "decision")?.state, "needs-you");
   assert.ok(after.find((r) => r.id === "decision")?.nextSteps);
   assert.equal(after.find((r) => r.id === "partial")?.state, "idle");
@@ -160,7 +167,7 @@ try {
   await api("/poll", {});
   assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "parent", "partial"]);
   assert.equal(attempts.length, count, "restart does not re-enrich unchanged evidence or reopen done work");
-  console.log(`PASS isolated daemon HTTP widget contract; ${live ? "live Luna medium" : "deterministic model seam"}; idle retry, delegated child, stale-summary recovery, owner decision, window, done, restart`);
+  console.log(`PASS isolated daemon HTTP widget contract; ${live ? "live Luna medium" : "deterministic model seam"}; idle retry, delegated child, stale-summary recovery, owner decision, window, explicit done only, restart`);
 } finally {
   await daemon?.close();
   rmSync(root, { recursive: true, force: true });
