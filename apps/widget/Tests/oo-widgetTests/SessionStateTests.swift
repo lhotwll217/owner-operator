@@ -96,6 +96,22 @@ struct SessionStateTests {
         return try JSONDecoder().decode([SessionStateRow].self, from: data)
     }
 
+    @Test func oldAttentionWarningIsPresentationOnly() throws {
+        let now = try #require(parseISODate("2026-01-04T00:00:00.000Z"));
+        let input = try rows([
+            row(id: "old", state: "needs-you", nextSteps: "Choose a policy"),
+            row(id: "recent", state: "needs-you", lastMessageAt: "2026-01-01T00:00:01.000Z"),
+            row(id: "working", state: "working"),
+            row(id: "idle", state: "idle"),
+            row(id: "invalid", state: "needs-you", lastMessageAt: "unknown"),
+            row(id: "future", state: "needs-you", lastMessageAt: "2026-01-05T00:00:00.000Z"),
+        ])
+        #expect(input.map { $0.hasOldAttention(at: now) } == [true, false, false, false, false, false])
+        #expect(input[0].state == .needsYou)
+        #expect(input[0].nextSteps == "Choose a policy")
+        #expect(input[0].title == "topic")
+    }
+
     private func agentStateFixture() throws -> AgentStateView {
         let payload = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

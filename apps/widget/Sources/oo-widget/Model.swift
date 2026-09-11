@@ -216,6 +216,11 @@ struct SessionStateRow: Decodable, Identifiable {
         return topic
     }
 
+    func hasOldAttention(at now: Date = Date()) -> Bool {
+        guard state == .needsYou, let lastMessage = parseISODate(lastMessageAt) else { return false }
+        return now.timeIntervalSince(lastMessage) >= 3 * 24 * 60 * 60
+    }
+
     /// The title is owner-pinned (generated titles keep landing underneath but don't show).
     var isRenamed: Bool {
         if let pending = pendingTitle { return !pending.isEmpty }

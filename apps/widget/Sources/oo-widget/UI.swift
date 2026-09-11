@@ -389,6 +389,12 @@ struct RowView: View {
                     title
                     titleAffordance
                     Spacer(minLength: 6)
+                    if row.hasOldAttention() {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow).font(.system(size: 10))
+                            .accessibilityLabel("Old needs-you status")
+                            .help("No messages for at least 3 days. This needs-you status may be stale.")
+                    }
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
