@@ -8,23 +8,17 @@ read_when:
 
 # Widget
 
-A floating macOS panel that shows both session triage and delegated-agent state. Sessions needing
-attention stay first; delegated failures and interruptions stay separate from thread state.
+A floating macOS panel that shows session triage. Sessions needing attention stay first.
 Triage happens in place: see each session's state and summary, rename a thread, or mark it done
 without opening its harness.
 
-The widget is a pure Gateway client: it renders `/session-state` and `/agent-state`; it never spawns
-a process or reads the `agent_runs` ledger directly. `/agent-state` is derived by the Gateway with
-the browser-safe core run-view contract, so status vocabulary, bounded details, retry/resume
-availability and relationships, and attention-first ordering match the terminal without Swift
-lifecycle logic. The literal agent-state
-rail stays hidden when only calm terminal history remains; opening the panel shows bounded recent
-history after attention and active runs.
+The widget is a pure Gateway client. It renders `/session-state` and never spawns
+a process or reads the `agent_runs` ledger directly.
 
 SSE frames remain invalidations rather than state. An agent-run invalidation refetches the complete
-Gateway projections with an in-flight/dirty rule, and each replacement SSE connection refetches
-again. Disconnect clears the rendered snapshots; restart and reconnect therefore reconstruct from
-the durable ledger without preserving stale running indicators.
+session projection with an in-flight/dirty rule, and each replacement SSE connection refetches
+again. Disconnect clears the rendered snapshot. Restart and reconnect reconstruct the thread list
+from the Gateway.
 
 An OO-delegated child's transcript can also become a session-state row. If both child and parent
 are visible, `parentThreadId` lets the widget render the child beneath the parent. State projects
