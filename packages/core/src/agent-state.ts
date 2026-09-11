@@ -43,9 +43,7 @@ export interface ParentAgentStateView {
     running: number;
     attention: number;
   };
-  /** Literal footer copy, or null when the surface should stay calm. */
-  footer: string | null;
-  /** Picker order: attention, active, then recent terminal runs; bounded to latest 20 by default. */
+  /** Run order: attention, active, then recent terminal runs; bounded to latest 20 by default. */
   runs: AgentRunView[];
 }
 
@@ -197,14 +195,8 @@ export function deriveParentAgentState(
   const queued = runs.filter(({ status }) => status === AgentRunStatus.Pending).length;
   const running = runs.filter(({ status }) => status === AgentRunStatus.Running).length;
   const attention = runs.filter((run) => categoryFor(run, retryRunIds) === "attention").length;
-  const footerParts = [
-    queued ? `◦ ${queued} queued` : "",
-    running ? `● ${running} running` : "",
-    attention ? `! ${attention} attention` : "",
-  ].filter(Boolean);
   return {
     counts: { queued, running, attention },
-    footer: footerParts.length ? `${footerParts.join(" · ")}    /agent-state` : null,
     runs: visible.map((run) => deriveRunView(
       run,
       now,

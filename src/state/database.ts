@@ -572,10 +572,16 @@ export class ThreadDb {
       // An ordinary transcript-state flap may happen while the model runs; if the sampled
       // message is unchanged, that belief can still land. An active delegated child makes
       // the root ineligible, while a newer message makes the sample stale. The watermark
-      // rejects an already-enriched message and any out-of-order duplicate.
+      // rejects an already-enriched message and any out-of-order duplicate. Transcript
+      // evidence owns every transition into or out of working: a working affirmation lands
+      // only overlay fields on a working row, and any other model state is rejected there,
+      // just as a working claim can never activate a settled row. ThreadDetails omits
+      // `done`, but this comparison stays fail-closed against hostile input anyway.
+      const assessedState = details.state as ThreadState | undefined;
       if (
-        !current || details.state === "done" || current.state === "done" || this.hasActiveChild(threadId) ||
-        (details.state !== undefined && current.state === "working") || current.lastMessageAt !== throughMessageAt ||
+        !current || assessedState === "done" || current.state === "done" || this.hasActiveChild(threadId) ||
+        (current.state === "working" ? assessedState !== undefined && assessedState !== "working" : assessedState === "working") ||
+        current.lastMessageAt !== throughMessageAt ||
         (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
       ) {
         this.db.exec("COMMIT");
@@ -686,7 +692,7 @@ export class ThreadDb {
     const ids = this.db.prepare(
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
-       WHERE detail.state IN ('needs-you', 'idle') AND t.last_message_at IS NOT NULL
+       WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
          AND NOT ${HAS_ACTIVE_CHILD_SQL}
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at)
        ORDER BY t.last_message_at DESC`,
@@ -702,7 +708,7 @@ export class ThreadDb {
   requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
     const reset = this.db.prepare(`UPDATE threads AS t SET enriched_through_message_at = NULL
       WHERE t.id = ? AND t.last_message_at = ? AND NOT ${HAS_ACTIVE_CHILD_SQL}
-        AND (SELECT state FROM thread_details WHERE thread_id = t.id ORDER BY version DESC LIMIT 1) IN ('idle', 'needs-you')`);
+        AND (SELECT state FROM thread_details WHERE thread_id = t.id ORDER BY version DESC LIMIT 1) IN ('idle', 'needs-you', 'working')`);
     return requests.flatMap(({ id, lastMessageAt }) => Number(reset.run(id, lastMessageAt).changes) ? [id] : []);
   }
 

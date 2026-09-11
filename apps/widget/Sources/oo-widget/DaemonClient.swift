@@ -1,5 +1,5 @@
 // The widget's seam to the daemon — a THIN CLIENT (OpenClaw gateway pattern): it discovers the
-// live port, GETs the session and agent-state projections, and subscribes to the SSE /events stream
+// live port, GETs the session projection, and subscribes to the SSE /events stream
 // so changes land instantly. The poll is the heartbeat (covers SSE gaps + offline→online); the SSE
 // frame is just a "refetch now" nudge, so the GET path stays the single source of shape.
 
@@ -31,7 +31,6 @@ final class DaemonClient: ObservableObject {
     @Published var online = false
     @Published var setupRequired = false
     @Published var port = defaultPort
-    @Published var agentState = AgentStateView.empty
 
     nonisolated static let defaultPort = 47711
 
@@ -136,11 +135,6 @@ final class DaemonClient: ObservableObject {
             clearDisconnectedState()
             return
         }
-        do {
-            agentState = try decode(AgentStateView.self, from: await fetchData("/agent-state", discovery))
-        } catch {
-            agentState = .empty
-        }
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
@@ -151,11 +145,10 @@ final class DaemonClient: ObservableObject {
         online = false
         setupRequired = false
         lastRows = []
-        agentState = .empty
         rebuild()
     }
 
-    /// SSE carries invalidations only. Relevant events reconcile both durable widget snapshots.
+    /// Agent-run events also invalidate the session projection's parent state.
     func receive(_ event: WidgetGatewayEvent) async {
         switch event.kind {
         case .stateChanged, .agentRunChanged:

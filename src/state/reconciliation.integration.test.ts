@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { State } from "./state";
 import { SessionMonitor } from "../session-monitor/monitor";
 import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
-import { AgentRunHarness, AgentRunStatus, DomainEventKind, type DomainEvent } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus, DomainEventKind, type DomainEvent, type ThreadDetails } from "@owner-operator/core";
 
 const { dir, cleanup } = tempOoHome("oo-reconcile-state");
 const state = new State(join(dir, "state.db"), { now: () => "2026-06-09T12:00:00.000Z" });
@@ -27,7 +27,7 @@ try {
   await waitFor(() => state.listSessionState()[0]?.generatedTopic === "Completed repair", 1000, "completed task receives an updated title");
   assert.equal(state.listSessionState()[0]?.state, "idle", "reported completion stays visible until explicitly marked done");
   assert.deepEqual(state.requestEnrichment([{ id: row.id, lastMessageAt: row.lastMessageAt }]), [row.id]);
-  assert.equal(state.appendEnrichment(row.id, { state: "done", stateReason: "Complete", nextSteps: "" }, row.lastMessageAt), false, "even a fresh eligible assessment cannot mark work done");
+  assert.equal(state.appendEnrichment(row.id, { state: "done", stateReason: "Complete", nextSteps: "" } as unknown as ThreadDetails, row.lastMessageAt), false, "even a fresh eligible assessment cannot mark work done");
   state.markThreadsDone([row.id]);
   await monitor.poll();
   assert.equal(state.listSessionState().length, 0, "poll preserves explicit done");
@@ -62,6 +62,23 @@ try {
   state.markThreadsDone([fresh.id]);
   assert.equal(state.listSessionState().length, 0, "an active child cannot undo an explicit owner done choice");
   state.finishAgentRun(active.id, { status: AgentRunStatus.Completed, resultTail: "Complete", error: null });
+
+  const worker = fakeScanRow({ id: "worker", working: true, lastRole: "user", lastMessageAt: "2026-06-09T11:55:00.000Z", secondsSinceLastMessage: 300, secondsSinceActivity: 300 });
+  state.recordObservation(worker);
+  assert.equal(state.listCurrentSessionState().find((r) => r.id === "worker")?.state, "working", "active work is visible under the configured window");
+  assert.ok(state.listEnrichmentCandidates().some((r) => r.id === "worker"), "a working row is eligible for its first summary");
+  assert.equal(state.appendEnrichment("worker", { state: "idle", stateReason: "Settled.", nextSteps: "" }, worker.lastMessageAt), false, "a model assessment cannot settle working rows");
+  assert.equal(state.appendEnrichment("worker", { state: "needs-you", stateReason: "Question.", nextSteps: "Choose" }, worker.lastMessageAt), false, "a model assessment cannot raise working rows to needs-you");
+  assert.equal(state.appendEnrichment("worker", { state: "working", stateReason: "Implementing the export.", nextSteps: "", topic: "Export implementation", priority: 3 }, worker.lastMessageAt), true, "a working affirmation lands the title and current-activity summary");
+  const summarizedWorker = state.listCurrentSessionState().find((r) => r.id === "worker");
+  assert.equal(summarizedWorker?.state, "working", "summarization preserves the working lifecycle state");
+  assert.equal(summarizedWorker?.generatedTopic, "Export implementation");
+  assert.equal(summarizedWorker?.nextSteps, null, "a working row projects no owner instruction");
+  assert.deepEqual(state.requestEnrichment([{ id: "worker", lastMessageAt: worker.lastMessageAt }]), ["worker"], "POST /poll recovery accepts working rows");
+  const settled = fakeScanRow({ id: "settled", lastMessageAt: "2026-06-09T11:50:00.000Z", secondsSinceLastMessage: 4000, secondsSinceActivity: 4000 });
+  state.recordObservation(settled);
+  assert.equal(state.listCurrentSessionState().find((r) => r.id === "settled")?.state, "idle");
+  assert.equal(state.appendEnrichment("settled", { state: "working", stateReason: "Active.", nextSteps: "" }, settled.lastMessageAt), false, "a model assessment cannot activate a settled row");
   console.log("ok - failed enrichment recovers while idle, explicit done persists, unresolved decisions survive");
 } finally {
   monitor.stop();

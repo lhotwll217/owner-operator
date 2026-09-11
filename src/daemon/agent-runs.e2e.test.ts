@@ -208,7 +208,6 @@ try {
     edit: `child-edit-${launched.id}.txt`,
   }, "the launched child executes and edits inside the inherited selected worktree");
   const runningView = await gateway.agentState();
-  assert.equal(runningView.footer, "● 1 running    /agent-state");
   assert.deepEqual(
     runningView.runs.map((run) => [run.id, run.status.glyph, run.status.text, run.category]),
     [[launched.id, "●", "running", "active"]],
@@ -270,7 +269,6 @@ try {
     "a terminal child restores the root's transcript-derived state through Gateway",
   );
   const restartedView = await gateway2.agentState();
-  assert.equal(restartedView.footer, "! 1 attention    /agent-state");
   assert.equal(restartedView.runs[0]?.status.text, "attention");
   assert.equal(restartedView.runs[0]?.canRetry, true, "restart reconstructs the durable retryable outcome");
 

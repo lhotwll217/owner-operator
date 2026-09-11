@@ -97,17 +97,24 @@ const liveEnrich = live ? (await import("../src/agent/enrichment")).enrichThread
 async function enrich(candidate: EnrichmentCandidate): Promise<ThreadDetails> {
   attempts.push(candidate.id);
   if (candidate.id === "partial" && failOnce) { failOnce = false; throw new Error("controlled transient outage"); }
-  const c = cases.find((item) => item.id === candidate.id);
-  assert.ok(c, `unexpected reconciliation outside the visible test set: ${candidate.id}`);
   const { sampleTranscript } = await import("../src/session-monitor/scan");
   const sample = await sampleTranscript(candidate.id, candidate.source);
-  if (candidate.id === "child" || candidate.id === "summarized") {
-    assert.ok(sample.includes("Exit code 0"), "reconciliation receives execution evidence, not just the assistant's completion claim");
+  if (candidate.id === "parent") {
+    assert.ok(sample.includes("Use the replacement agent."), "working summary sees the first owner message");
+    assert.ok(sample.includes("Continue with the replacement"), "working summary sees the latest owner message");
   }
   if (liveEnrich) {
     const result = await liveEnrich(sample);
     console.log("MODEL", candidate.id, JSON.stringify(result));
     return result;
+  }
+  if (candidate.id === "parent") {
+    return { topic: "Replacement agent run", state: "working", stateReason: "The replacement agent is implementing the task.", nextSteps: "", priority: 3 };
+  }
+  const c = cases.find((item) => item.id === candidate.id);
+  assert.ok(c, `unexpected reconciliation outside the visible test set: ${candidate.id}`);
+  if (candidate.id === "child" || candidate.id === "summarized") {
+    assert.ok(sample.includes("Exit code 0"), "reconciliation receives execution evidence, not just the assistant's completion claim");
   }
   return { topic: c.topic, state: c.state, stateReason: c.answer, nextSteps: c.state === "needs-you" ? "Choose 30 or 90 days of retention" : "", priority: 2 };
 }
@@ -138,6 +145,16 @@ try {
   assert.ok(before.some((r) => r.id === "child" && r.parentThreadId === "parent" && !r.generatedTopic), "stale delegated child is actually in the widget response before recovery");
   assert.equal(before.find((r) => r.id === "parent")?.nextSteps, null, "working parent suppresses obsolete owner instructions");
   enabled = true;
+  const parentAt = new Date().toISOString();
+  const parentFile = join(process.env.OO_HOME!, "sessions", "parent.jsonl");
+  writeFileSync(parentFile, [
+    { type: "session", version: 3, id: "parent", timestamp: at, cwd: project },
+    { type: "custom", customType: "oo-provenance", timestamp: at, data: { surface: "chat", origin: "owner", callerCwd: project, callerRepo: "demo", ppid: 1 } },
+    { type: "message", timestamp: at, message: { role: "user", content: "Use the replacement agent." } },
+    { type: "message", timestamp: at, message: { role: "assistant", content: [{ type: "text", text: "The replacement is working." }], stopReason: "toolUse" } },
+    { type: "message", timestamp: parentAt, message: { role: "user", content: "Continue with the replacement and report progress." } },
+    { type: "message", timestamp: parentAt, message: { role: "assistant", content: [{ type: "text", text: "Continuing with the replacement; implementation is underway." }], stopReason: "toolUse" } },
+  ].map((record) => JSON.stringify(record)).join("\n") + "\n");
   const recovery = await api("/poll", { reconcile: [{ id: "summarized", lastMessageAt: at }, { id: "outside-window", lastMessageAt: oldAt }, { id: "owner-done", lastMessageAt: at }] });
   assert.deepEqual(recovery.queuedIds, ["summarized"], "recovery touches only eligible visible rows");
   await waitFor(() => errors.some((e) => e.includes("controlled transient outage")), live ? 180_000 : 10_000, "first failed idle reconciliation");
@@ -159,6 +176,11 @@ try {
   assert.equal(after.find((r) => r.id === "partial")?.state, "idle");
   assert.equal(after.find((r) => r.id === "partial")?.nextSteps, "");
   assert.ok(after.find((r) => r.id === "partial")?.generatedTopic);
+  assert.equal(after.find((r) => r.id === "parent")?.state, "working", "working summary preserves the working lifecycle state");
+  assert.equal(after.find((r) => r.id === "parent")?.nextSteps, null, "working rows project no owner instruction");
+  assert.ok(after.find((r) => r.id === "parent")?.generatedTopic, "working rows receive a concise title without waiting to become idle");
+  if (!live) assert.equal(after.find((r) => r.id === "parent")?.generatedTopic, "Replacement agent run", "the working summary replaces the stale title");
+  assert.ok(attempts.includes("parent"), "visible working rows reconcile through the same worker");
   assert.equal(attempts.filter((id) => id === "partial").length, 2);
   assert.ok(!attempts.includes("outside-window"));
   const count = attempts.length;
@@ -166,8 +188,9 @@ try {
   daemon = await boot();
   await api("/poll", {});
   assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "parent", "partial"]);
+  assert.ok((await api("/session-state") as SessionStateRow[]).find((r) => r.id === "parent")?.generatedTopic, "working summary persists across restart");
   assert.equal(attempts.length, count, "restart does not re-enrich unchanged evidence or reopen done work");
-  console.log(`PASS isolated daemon HTTP widget contract; ${live ? "live Luna medium" : "deterministic model seam"}; idle retry, delegated child, stale-summary recovery, owner decision, window, explicit done only, restart`);
+  console.log(`PASS isolated daemon HTTP widget contract; ${live ? "live Luna medium" : "deterministic model seam"}; idle retry, delegated child, working summary, stale-summary recovery, owner decision, window, explicit done only, restart`);
 } finally {
   await daemon?.close();
   rmSync(root, { recursive: true, force: true });

@@ -32,7 +32,7 @@ prompt.
 The pinned `pi-tool-display` extension owns compact OpenCode-style calls and results for Pi's
 built-ins and Owner Operator's custom tools. Pi's expansion key (`Ctrl+O` by default) reveals the
 raw result; Owner Operator does not add a second folding or replay layer. The native user-message
-box is disabled, while the Owner Operator theme, marker, `/agent-state`, and delegated-run
+box is disabled, while the Owner Operator theme, marker, and delegated-run
 launch/completion lifecycle rows remain separate product presentation.
 
 ## Sessions and provenance

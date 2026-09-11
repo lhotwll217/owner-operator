@@ -71,10 +71,13 @@ clients refetch SQLite-backed truth.
 Enrichment sends only bounded transcript samples to the model, read through
 application-owned scan/search modules. Claude, Codex, and Pi samples include bounded tool
 evidence through the privacy-aware session-search helper; other formats retain the scan sample.
-Enrichment is eligible when the row is visible under the configured window and its state is `needs-you` or `idle`, no delegated child is
+Enrichment is eligible when the row is visible under the configured window and its state is `needs-you`, `idle`, or `working`, no delegated child is
 pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
 first discovery, failed calls followed by inactivity, a new message, and daemon restart. Enrichment
 classifies owner attention as `needs-you` or `idle` and updates the title and progress reason.
+A `working` assessment lands only a concise title and current-activity description: transcript
+evidence owns every transition into or out of `working`, so the boundary rejects any other
+model state on a working row and any `working` claim on a settled row.
 Completed work remains idle until an explicit Done action removes it. Both the model parser and
 state boundary reject model-driven `done`. A successful assessment holds for the same message through later polls.
 Owner done choices and newer messages reject outdated model results. Active delegated children

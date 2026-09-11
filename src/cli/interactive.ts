@@ -44,7 +44,7 @@ import {
   resolveInteractiveRuntimeTarget,
   resolveOwnerOperatorTaskCwd,
 } from "../agent/worktree-runtime";
-import { agentStateExtension } from "../agent-runs/agent-state-extension";
+import { createInteractiveAgentRunDeliveryExtension } from "../agent-runs/agent-run-delivery-extension";
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
@@ -120,7 +120,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
         },
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },
-        { name: "owner-operator-agent-state", factory: agentStateExtension },
+        { name: "owner-operator-agent-run-delivery", factory: createInteractiveAgentRunDeliveryExtension() },
         { name: "owner-operator-worktree-runtime-rebind", factory: worktreeRuntimeRebindExtension },
         {
           name: "owner-operator-onboarding",

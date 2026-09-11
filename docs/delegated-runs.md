@@ -46,7 +46,7 @@ Run ownership, transcript observation, and widget visibility are separate:
 
 | Work | `agent_runs` ledger | `/session-state` | Widget |
 |---|---|---|---|
-| Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Always represented in Agent state; also appears as a normal session row when present in session state |
+| Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Normal session row when present in session state, nested beneath its visible parent |
 | Harness-native sub-agent | Never | Harness-dependent: it may be folded into its parent, excluded as automated work, or admitted as an ordinary session | Mirrors session state; it has no OO lineage |
 | Any agent launches a separate supported coding CLI | Only if the launch went through `delegate_agent` | Its transcript may be discovered and admitted normally | An ordinary row, without OO lineage |
 | Owner-origin Owner Operator conversation | Not a child run; its id may be recorded as a run's parent | Admitted from the product-owned transcript store as an ordinary root | Ordinary root with observed delegated children nested beneath it |
@@ -102,11 +102,10 @@ Client behavior follows the same invalidation/refetch contract:
 - **Interactive TUI:** each open parent thread lists its complete fleet by `parentThreadId` before
   opening one Gateway subscription, then lists again after attachment to close the snapshot gap.
   Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
-  invalidations with an in-flight/dirty refetch rule. Its shared view drives the literal
-  `Agent state` footer and the `/agent-state` picker. State—not this client adapter—projects the
-  parent as working while a delegated child is pending or running.
+  invalidations with an in-flight/dirty refetch rule and delivers terminal completions into the
+  parent conversation. State projects the parent as working while a delegated child is pending or running.
 - **Headless chat:** opening or resuming a parent thread starts the same `ParentRunSession` and Pi
-  completion adapter without the footer or picker. Initial completion delivery is unbatched and
+  completion adapter. Initial completion delivery is unbatched and
   awaited before the explicit prompt, and shutdown drains current delivery before closing the
   subscription, so a short-lived process cannot strand a retained terminal row.
 - **Widget:** its live delegated-run client behavior is owned by [Widget](widget.md).
@@ -115,15 +114,15 @@ Client behavior follows the same invalidation/refetch contract:
   outlive the tool call, parent conversation, and UI process.
 
 The reusable status categories, bounded detail, ordering, controls, and completion envelope live
-in the dependency-free `@owner-operator/core/agent-state` export. Gateway subscriptions, Pi UI,
-and terminal styling are adapters over that contract.
+in the dependency-free `@owner-operator/core/agent-state` export. The Gateway `/agent-state`
+resource retains the run projection. Pi completion delivery uses the shared completion envelope.
 
 ## Execution
 
 - **Background by default.** `delegate_agent` records the durable `pending` row and returns
   immediately; the parent session is never frozen. The result is carried by the ledger, not the
   parent tool call, and completion arrives through the parent subscription. The Operator does not
-  poll after delegation; `/agent-state` owns liveness. Status reads remain only for explicit
+  poll after delegation. Status reads remain only for explicit
   owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
   `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
 - **Retry and resume re-enter the ordinary lifecycle.** The
@@ -339,14 +338,8 @@ remains the canonical child provenance.
 In the terminal, `pi-tool-display` owns the compact `delegate_agent`/`manage_agent_run` call and
 result components, with raw results available through Pi's ordinary expansion. A successful
 delegation also persists one neutral launch line derived from the run row; the existing completion
-message persists the other inline lifecycle moment. The parent-scoped live view is separate: the
-footer shows queued, running, and attention
-counts only while one exists and clears whenever the Gateway connection is unavailable;
-`/agent-state` orders attention before active and recent terminal runs, then shows bounded task,
-harness, model and known effort, glyph-plus-text status, elapsed time, activity, exact retry/resume
-relationships, and only currently valid controls. Retry is available only for unsuccessful runs;
-resume is available only for completed runs and collects the required new task before mutation.
-Cancellation confirms before mutation.
+message persists the other inline lifecycle moment. Owner-directed inspection and lifecycle
+control remain available through `manage_agent_run` and the Gateway.
 
 Terminal completion behavior is defined at four linked seams: the browser-safe
 [completion envelope](../packages/core/src/agent-state.ts), parent-scoped

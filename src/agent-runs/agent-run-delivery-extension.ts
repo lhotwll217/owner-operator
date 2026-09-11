@@ -1,5 +1,4 @@
 import type { GatewayApi } from "@owner-operator/core";
-import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -22,33 +21,23 @@ interface AgentRunDeliveryRegistrationOptions {
   resolveGateway?: () => Promise<GatewayApi>;
   successBatchDelayMs?: number;
   retryDelayMs?: number;
-  onView?: (view: ParentAgentStateView, ctx: ExtensionContext) => void;
   onUnavailable?: (error: unknown, ctx: ExtensionContext) => void;
-  onDisconnected?: (ctx: ExtensionContext) => void;
-  onStopped?: (ctx: ExtensionContext) => void;
-}
-
-export interface AgentRunDeliveryRegistration {
-  readonly session: ParentRunSession | undefined;
 }
 
 /** Shared Pi lifecycle for parent-scoped completion delivery on every conversation surface. */
 export function registerAgentRunDelivery(
   pi: ExtensionAPI,
   options: AgentRunDeliveryRegistrationOptions = {},
-): AgentRunDeliveryRegistration {
+): void {
   const getGateway = options.resolveGateway ?? resolveBackend;
   pi.registerMessageRenderer(AGENT_RUN_COMPLETION_MESSAGE_TYPE, renderAgentRunCompletionMessage);
   let session: ParentRunSession | undefined;
-  let unsubscribeView: (() => void) | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
 
   const stopSession = (): void => {
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = undefined;
-    unsubscribeView?.();
-    unsubscribeView = undefined;
     session?.stop();
     session = undefined;
   };
@@ -61,34 +50,21 @@ export function registerAgentRunDelivery(
     const start = async (): Promise<void> => {
       if (ownGeneration !== generation) return;
       let candidate: ParentRunSession | undefined;
-      let unsubscribe: (() => void) | undefined;
       try {
         const gateway = await getGateway();
         if (ownGeneration !== generation) return;
         candidate = new ParentRunSession(ctx.sessionManager.getSessionId(), gatewayParentRunAdapter(gateway), {
           completionAdapter: new PiParentCompletionAdapter(pi, ctx.sessionManager),
-          onDisconnected: () => {
-            if (ownGeneration === generation) options.onDisconnected?.(ctx);
-          },
           ...(options.successBatchDelayMs === undefined ? {} : { successBatchDelayMs: options.successBatchDelayMs }),
         });
-        if (options.onView) {
-          unsubscribe = candidate.subscribe((view) => {
-            if (ownGeneration !== generation) return;
-            options.onView?.(view, ctx);
-          });
-        }
         await candidate.start();
         await candidate.settled();
         if (ownGeneration !== generation) {
-          unsubscribe?.();
           candidate.stop();
           return;
         }
         session = candidate;
-        unsubscribeView = unsubscribe;
       } catch (error) {
-        unsubscribe?.();
         candidate?.stop();
         if (ownGeneration !== generation) return;
         stopSession();
@@ -103,15 +79,24 @@ export function registerAgentRunDelivery(
     await start();
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async () => {
     generation += 1;
     await session?.settled();
     stopSession();
-    options.onStopped?.(ctx);
   });
+}
 
-  return {
-    get session() { return session; },
+export function createInteractiveAgentRunDeliveryExtension(
+  options: AgentRunDeliveryRegistrationOptions = {},
+): ExtensionFactory {
+  return (pi) => {
+    registerAgentRunDelivery(pi, {
+      retryDelayMs: 1_000,
+      onUnavailable: (error, ctx) => {
+        ctx.ui.notify(`Agent completion delivery unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+      },
+      ...options,
+    });
   };
 }
 

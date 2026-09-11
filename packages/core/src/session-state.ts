@@ -14,7 +14,10 @@ export interface ThreadDetails {
   summary?: string;    // short card summary, when the model has written one
   nextSteps?: string;  // the concrete next action
   priority?: number;   // 5 (loudest) … 1
-  state?: Exclude<ThreadState, "working">;
+  // The model may affirm `working` to land a title and current-activity summary on an
+  // actively progressing session. It can never close (`done`): transitions into and out
+  // of `working` belong to transcript evidence and are enforced in appendModelDetailsIfFresh.
+  state?: Exclude<ThreadState, "done">;
   stateReason?: string;
 }
 

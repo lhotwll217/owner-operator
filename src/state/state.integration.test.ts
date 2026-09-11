@@ -102,7 +102,7 @@ try {
     !state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),
     "quiet rows outside the active window leave the client projection",
   );
-  assert.deepEqual(state.listEnrichmentCandidates().map((item) => item.id), ["thread-1"]);
+  assert.deepEqual(state.listEnrichmentCandidates().map((item) => item.id), ["thread-1", "oo-root"], "visible working rows are eligible for a title and current-activity summary");
   assert.equal(events.at(-1)?.kind, DomainEventKind.ThreadChanged, "post-commit event published");
 
   state.appendEnrichment(
@@ -115,6 +115,16 @@ try {
     path: "/worktrees/owner-operator/ticket-07",
     gitCommonDir: "/repositories/owner-operator/.git",
   });
+  assert.equal(
+    state.appendEnrichment(
+      "oo-root",
+      { topic: "Monitor the OO root", state: "working", stateReason: "Monitoring the OO root session.", nextSteps: "" },
+      "2026-07-09T09:57:00.000Z",
+    ),
+    true,
+    "a working affirmation lands the overlay without changing the working state",
+  );
+  assert.equal(state.listSessionState().find((item) => item.id === "oo-root")?.state, "working");
   const gatewayFixture = JSON.parse(readFileSync(
     new URL("../../apps/widget/Tests/Fixtures/session-state.gateway.json", import.meta.url),
     "utf8",

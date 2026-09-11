@@ -57,11 +57,10 @@ const view = deriveParentAgentState(fleet, {
   isResumeEnvironmentEligible: (run) => run.id === "completed-new",
 });
 assert.deepEqual(view.counts, { queued: 1, running: 1, attention: 2 });
-assert.equal(view.footer, "◦ 1 queued · ● 1 running · ! 2 attention    /agent-state");
 assert.deepEqual(
   view.runs.map(({ id }) => id),
   ["failed", "lost-no-child", "running", "queued", "completed-new", "cancelled"],
-  "picker order is attention, active, then recent terminal; each group is newest first",
+  "run order is attention, active, then recent terminal; each group is newest first",
 );
 
 const running = view.runs.find(({ id }) => id === "running")!;
@@ -116,7 +115,7 @@ const idle = deriveParentAgentState([
   run("done", AgentRunStatus.Completed),
   run("owner-cancelled", AgentRunStatus.Cancelled),
 ], { now });
-assert.equal(idle.footer, null, "footer hides when no run is active or awaiting attention");
+assert.deepEqual(idle.counts, { queued: 0, running: 0, attention: 0 });
 
 const retriedInterrupted = deriveParentAgentState([
   run("interrupted-run", AgentRunStatus.Interrupted, { childSessionId: "retried-child" }),
@@ -185,7 +184,7 @@ const retriedOnlyFailure = deriveParentAgentState([
     retryOfRunId: "only-failure",
   }),
 ], { now });
-assert.equal(retriedOnlyFailure.footer, null, "footer hides when the only failure has been retried");
+assert.deepEqual(retriedOnlyFailure.counts, { queued: 0, running: 0, attention: 0 });
 
 const activeChildAfterFailure = deriveParentAgentState([
   run("failed-before-other-turn", AgentRunStatus.Failed, { childSessionId: "busy-child" }),
@@ -244,7 +243,7 @@ assert.equal(
   AGENT_STATE_RECENT_LIMIT,
   "routine terminal history is bounded",
 );
-assert.equal(AGENT_STATE_RECENT_LIMIT, 20, "the picker includes the approved latest 20 terminal runs");
+assert.equal(AGENT_STATE_RECENT_LIMIT, 20, "the run view includes the approved latest 20 terminal runs");
 const lotsOfActive = Array.from({ length: AGENT_STATE_RECENT_LIMIT + 4 }, (_, index) =>
   run(`active-${index}`, AgentRunStatus.Running, {
     lastActivityAt: new Date(Date.parse(now) - index * 1_000).toISOString(),
@@ -252,15 +251,15 @@ const lotsOfActive = Array.from({ length: AGENT_STATE_RECENT_LIMIT + 4 }, (_, in
 assert.equal(
   deriveParentAgentState(lotsOfActive, { now }).runs.length,
   AGENT_STATE_RECENT_LIMIT,
-  "the entire ordered picker is bounded to the approved latest 20",
+  "the entire ordered run view is bounded to the approved latest 20",
 );
 
-const approvedFooter = deriveParentAgentState([
+const activeCounts = deriveParentAgentState([
   run("queued-one", AgentRunStatus.Pending),
   run("running-one", AgentRunStatus.Running),
   run("running-two", AgentRunStatus.Running),
 ], { now });
-assert.equal(approvedFooter.footer, "◦ 1 queued · ● 2 running    /agent-state");
+assert.deepEqual(activeCounts.counts, { queued: 1, running: 2, attention: 0 });
 
 const terminal = run("completed-new", AgentRunStatus.Completed, {
   task: "Summarize authentication findings",
