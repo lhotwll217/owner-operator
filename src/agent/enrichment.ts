@@ -1,6 +1,6 @@
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ThreadEnrichment } from "@owner-operator/core";
-import { ownerOperatorPiServices } from "./agent";
+import { ownerOperatorPiServices, type OwnerOperatorPiServices } from "./agent";
 
 const PREFERRED_MODELS: ReadonlyArray<readonly [provider: string, id: string]> = [
   ["openai-codex", "gpt-5.6-luna"],
@@ -40,8 +40,8 @@ async function resolveModel(runtime: ModelRuntime, settings: SettingsManager) {
 }
 
 /** One typed reconciliation of a bounded transcript, without tools or an agent loop. */
-export async function enrichThread(sample: string): Promise<ThreadEnrichment> {
-  const { settingsManager: settings, modelRuntime: runtime } = await ownerOperatorPiServices();
+export async function enrichThread(sample: string, services?: OwnerOperatorPiServices): Promise<ThreadEnrichment> {
+  const { settingsManager: settings, modelRuntime: runtime } = services ?? await ownerOperatorPiServices();
   const model = await resolveModel(runtime, settings);
 
   const response = await runtime.completeSimple(model, {

@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync, utimesSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
-import { AgentRunHarness, AgentRunStatus, markOnboarded, type EnrichmentCandidate, type ThreadEnrichment, type SessionStateRow } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus, type EnrichmentCandidate, type ThreadEnrichment, type SessionStateRow } from "@owner-operator/core";
 import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
 import { State } from "../src/state/state";
 import { fakeScanRow, waitFor } from "../src/gateway/test/helpers";
-import { evalRuntimeEnvironment } from "../eval/sandbox.mjs";
+import { evalSandboxPath, sanitizeEvalDiagnosticValue } from "../eval/sandbox.mjs";
+import { materializeSandboxUser, loadSandboxPiServices, closeSandboxUser } from "../eval/sandbox-user";
 
 export async function runSessionStateWidgetProof(options: {
   live?: { credentialSource: string; loadEnrichment?: () => Promise<typeof import("../src/agent/enrichment").enrichThread> };
   nativeBinary?: string;
   outputDirectory?: string;
+  root?: string;
 } = {}) {
   const originalEnvironment = { ...process.env };
   const live = Boolean(options.live);
@@ -22,33 +24,24 @@ export async function runSessionStateWidgetProof(options: {
   const { nativeBinary, outputDirectory } = options;
   if (nativeBinary && !outputDirectory) throw new Error("native proof requires an output directory");
   if (live && !credentialSource) throw new Error("live proof requires an explicit credential source directory");
-  const root = mkdtempSync(join(tmpdir(), "oo-widget-proof-"));
+  const sandbox = materializeSandboxUser({
+    profile: "deterministic-harness",
+    root: options.root ?? evalSandboxPath(`widget-proof-${randomUUID()}`),
+    ...(credentialSource ? { sourcePiAgentDir: credentialSource, modelSettings: {
+      defaultProvider: "openai-codex", defaultModel: "gpt-5.6-luna", defaultThinkingLevel: "medium",
+    } } : {}),
+  });
+  const safe = <T,>(value: T) => sanitizeEvalDiagnosticValue(value, sandbox.diagnosticRedactions);
   let daemon: RunningDaemon | undefined;
   let seed: State | undefined;
   let restoreModel = () => {};
   try {
     for (const key of Object.keys(process.env)) delete process.env[key];
-    Object.assign(process.env, evalRuntimeEnvironment(originalEnvironment));
-    process.env.HOME = join(root, "home");
-    process.env.OO_HOME = join(root, "operator");
-    process.env.TMPDIR = join(root, "tmp");
-    process.env.PI_CODING_AGENT_DIR = join(process.env.OO_HOME, "pi");
-    mkdirSync(process.env.TMPDIR, { recursive: true });
-    mkdirSync(process.env.HOME, { recursive: true });
-    mkdirSync(process.env.OO_HOME, { recursive: true });
-    writeFileSync(join(process.env.OO_HOME, "settings.json"), JSON.stringify({ activeWindow: "1d" }));
-    markOnboarded(process.env.OO_HOME, { via: "test" });
-    if (live && credentialSource) {
-      const pi = join(process.env.OO_HOME, "pi");
-      mkdirSync(pi, { recursive: true, mode: 0o700 });
-      for (const file of ["auth.json", "models-store.json"]) {
-        copyFileSync(join(credentialSource, file), join(pi, file));
-        chmodSync(join(pi, file), 0o600);
-      }
-      writeFileSync(join(process.env.OO_HOME, "blacklist.json"), JSON.stringify({ paths: [pi, credentialSource], repos: [] }));
-    }
+    Object.assign(process.env, sandbox.env);
+    writeFileSync(join(sandbox.ooHome, "settings.json"), JSON.stringify({ activeWindow: "1d" }));
+    writeFileSync(sandbox.paths.sessionSources, JSON.stringify({ disable: ["cursor", "posthog-code", "opencode", "antigravity", "grok-build"], add: [] }));
     const dbPath = join(process.env.OO_HOME, "state.db");
-    const project = join(root, "project");
+    const project = sandbox.taskCwd;
     const at = new Date(Date.now() - 2 * 3_600_000).toISOString();
     const oldAt = new Date(Date.now() - 5 * 86_400_000).toISOString();
     const cases = [
@@ -115,12 +108,14 @@ export async function runSessionStateWidgetProof(options: {
     const attempts: string[] = [];
     const errors: string[] = [];
     const liveEnrich = live ? await (options.live?.loadEnrichment ?? (async () => (await import("../src/agent/enrichment")).enrichThread))() : undefined;
+    const services = live ? await loadSandboxPiServices(sandbox) : undefined;
     let modelCalls = 0;
     if (live) {
       const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
       const complete = ModelRuntime.prototype.completeSimple;
       restoreModel = () => { ModelRuntime.prototype.completeSimple = complete; };
       ModelRuntime.prototype.completeSimple = async function (model, context, options) {
+        assert.ok(sandbox.credentialFilesUnavailable(), "copied credentials and config are gone before every inference");
         assert.equal(model.provider, "openai-codex");
         assert.equal(model.id, "gpt-5.6-luna");
         assert.equal(options?.reasoning, "medium");
@@ -140,8 +135,8 @@ export async function runSessionStateWidgetProof(options: {
         assert.ok(sample.includes("Delegated child child"), "parent summary receives the child's own evidence");
       }
       if (liveEnrich) {
-        const result = await liveEnrich(sample);
-        console.log("MODEL", candidate.id, JSON.stringify(result));
+        const result = await liveEnrich(sample, services);
+        console.log("MODEL", candidate.id, JSON.stringify(safe(result)));
         return result;
       }
       if (candidate.id === "parent") {
@@ -183,11 +178,12 @@ export async function runSessionStateWidgetProof(options: {
       } finally { db.close(); }
       if (!nativeBinary || !outputDirectory) return;
       mkdirSync(outputDirectory, { recursive: true });
-      const expected = join(outputDirectory, `${label}.json`);
-      writeFileSync(expected, JSON.stringify(rows, null, 2));
+      const expected = join(sandbox.tempDir, `${label}.json`);
+      writeFileSync(expected, JSON.stringify(rows));
+      writeFileSync(join(outputDirectory, `${label}.json`), JSON.stringify(safe(rows), null, 2));
       const result = await promisify(execFile)(nativeBinary, [expected, join(outputDirectory, label)], { env: process.env, timeout: 30_000 });
-      writeFileSync(join(outputDirectory, `${label}-native.log`), result.stdout + result.stderr);
-      console.log(result.stdout);
+      writeFileSync(join(outputDirectory, `${label}-native.log`), String(safe(result.stdout + result.stderr)));
+      console.log("CHECKPOINT", label, new Date().toISOString(), safe(result.stdout));
     }
     assert.ok(windowPreserved, "configured widget window must not widen");
     daemon = await boot();
@@ -218,7 +214,7 @@ export async function runSessionStateWidgetProof(options: {
     await api("/poll", {});
     await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "failed idle row retries");
     const after: SessionStateRow[] = await api("/session-state");
-    console.log("AFTER", JSON.stringify(after.map((r) => ({ id: r.id, title: r.topic, state: r.state, summary: r.summary }))));
+    console.log("AFTER", JSON.stringify(safe(after.map((r) => ({ id: r.id, title: r.topic, state: r.state, summary: r.summary })))));
     assert.deepEqual(after.map((r) => r.id).sort(), ["child", "decision", "first-message", "parent", "partial", "summarized"], "enrichment never removes a row automatically");
     assert.equal(after.find((r) => r.id === "first-message")?.state, "working");
     assert.ok(after.find((r) => r.id === "first-message")?.summary);
@@ -281,21 +277,15 @@ export async function runSessionStateWidgetProof(options: {
     console.log(`PASS isolated daemon HTTP widget contract; ${live ? `live Luna medium, ${modelCalls} calls` : "deterministic model seam"}; idle retry, delegated child, child-only progress, working summary, stale-summary recovery, owner decision, window, explicit done only, restart`);
   } finally {
     try {
-      rmSync(join(root, "operator", "pi"), { recursive: true, force: true });
-      seed?.close();
-      await daemon?.close();
-      assert.ok(!existsSync(join(root, "operator", "daemon.json")), "proof daemon discovery is removed");
-      if (daemon) await assert.rejects(fetch(`http://127.0.0.1:${daemon.port}/health`, { signal: AbortSignal.timeout(250) }), "proof daemon no longer responds");
-      const leases = join(root, "operator", "agent-runs", "process-leases");
-      assert.ok(!existsSync(leases) || readdirSync(leases).length === 0, "proof leaves no process leases");
+      const closed = await closeSandboxUser(sandbox, daemon?.port, async () => {
+        try { seed?.close(); } finally { await daemon?.close(); }
+      });
+      console.log("TEARDOWN", JSON.stringify(closed), new Date().toISOString());
+      assert.ok(closed.teardownVerified, `proof teardown unverified; diagnostics: ${closed.preservedDiagnostics}`);
     } finally {
       restoreModel();
-      try {
-        rmSync(root, { recursive: true, force: true });
-      } finally {
-        for (const key of Object.keys(process.env)) delete process.env[key];
-        Object.assign(process.env, originalEnvironment);
-      }
+      for (const key of Object.keys(process.env)) delete process.env[key];
+      Object.assign(process.env, originalEnvironment);
     }
   }
 }
