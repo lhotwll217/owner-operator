@@ -67,6 +67,7 @@ export interface SessionStateRow {
 
 export interface EnrichmentCandidate extends SessionStateRow {
   enrichedThroughMessageAt: string | null;
+  children: Array<{ id: string; source: string; lastMessageAt: string | null; runId: string; status: AgentRun["status"] }>;
 }
 
 export interface MarkThreadsDoneResult {
@@ -94,7 +95,7 @@ export interface GatewayApi {
   sessionState(): Promise<SessionStateRow[]>;
   markDone(ids: readonly string[]): Promise<MarkThreadsDoneResult>;
   renameThread(id: string, title: string): Promise<void>;
-  poll(options?: { reconcile?: Array<{ id: string; lastMessageAt: string }> }): Promise<void>;
+  poll(options?: { reconcile?: Array<{ id: string; lastMessageAt: string }> }): Promise<{ ok: true; queuedIds: string[] }>;
   listSchedules(): Promise<ScheduleDefinition[]>;
   createSchedule(input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;

@@ -62,7 +62,7 @@ export class State {
         : undefined,
       row,
     );
-    const changedMessage = row.lastMessageAt !== previous?.lastMessageAt;
+    const changedMessage = row.lastMessageAt > (previous?.lastMessageAt ?? "");
     const result = this.db.recordScan({
       id: row.id,
       source: row.source,
@@ -130,8 +130,13 @@ export class State {
     return queuedIds;
   }
 
-  appendEnrichment(threadId: string, details: ThreadEnrichment, throughMessageAt: string): boolean {
-    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt) !== null;
+  appendEnrichment(
+    threadId: string,
+    details: ThreadEnrichment,
+    throughMessageAt: string,
+    children: EnrichmentCandidate["children"] = [],
+  ): boolean {
+    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt, children) !== null;
     if (!applied) return false;
     const current = this.db.resolutionRow(threadId);
     if (current) {

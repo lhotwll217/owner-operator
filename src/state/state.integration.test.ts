@@ -198,15 +198,17 @@ try {
     "the rejected thread stays queued to re-enrich at the newer message",
   );
 
-  // A rewritten/truncated transcript can move last_message_at backwards. A watermark
-  // ahead of the message must not make the thread a candidate — selecting it would
-  // burn a model call on a sample the guard is certain to reject.
   state.recordObservation({ ...row("2026-07-09T10:05:00.000Z"), id: "thread-regressed" });
   assert.equal(
     state.appendEnrichment("thread-regressed", { summary: "Enriched at T2", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:05:00.000Z"),
     true,
   );
-  state.recordObservation({ ...row("2026-07-09T10:04:45.000Z"), id: "thread-regressed" });
+  const beforeRegression = state.listSessionState().find((item) => item.id === "thread-regressed");
+  const eventsBeforeRegression = events.length;
+  state.recordObservation({ ...row("2026-07-09T10:04:45.000Z"), id: "thread-regressed", working: true, topic: "Old raw topic" });
+  assert.deepEqual(state.listSessionState().find((item) => item.id === "thread-regressed"), beforeRegression,
+    "older working observations preserve newer state, timestamps, and summary");
+  assert.equal(events.length, eventsBeforeRegression, "older observations do not publish stale evidence");
   assert.ok(
     !state.listEnrichmentCandidates().some((item) => item.id === "thread-regressed"),
     "a watermark ahead of a regressed last_message_at is not a candidate",

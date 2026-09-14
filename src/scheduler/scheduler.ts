@@ -208,7 +208,7 @@ export class Scheduler {
     if (interrupted) this.logger({ event: SchedulerLogEvent.StartupInterrupted, count: interrupted });
     this.unsubscribe = this.state.bus.subscribe((event) => {
       if (event.kind === DomainEventKind.ThreadChanged) {
-        if (event.state !== "needs-you" || !event.lastMessageAt || !event.needsEnrichment) return;
+        if (event.state !== "needs-you" || !event.lastMessageAt) return;
         this.pendingNeedsYou.set(event.threadId, event.lastMessageAt);
         this.scheduleEventFlush();
         return;

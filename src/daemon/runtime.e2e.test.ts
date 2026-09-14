@@ -48,7 +48,9 @@ try {
   assert.equal(readiness.setupRequired, true, "fresh daemon reports setup required without scanning credentials");
 
   const events: GatewayEvent[] = [];
-  const unsubscribe = gateway!.subscribe((event) => events.push(event));
+  let connected = false;
+  const unsubscribe = gateway!.subscribe((event) => events.push(event), () => { connected = true; });
+  await waitFor(() => connected, 1_000, "SSE connection before mutation");
   const done = await gateway!.markDone(["abc-123"]);
   assert.equal(done.marked[0].id, "abc-123");
   await waitFor(() => events.some((event) => event.kind === GatewayEventKind.StateChanged), 1_000, "state invalidation");

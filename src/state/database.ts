@@ -46,6 +46,15 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   ELSE detail.state
 END`;
 
+const CHILD_EVIDENCE_SQL = `(SELECT json_group_array(json_object(
+  'id', id, 'source', source, 'lastMessageAt', last_message_at, 'runId', run_id, 'status', status
+)) FROM (
+  SELECT child.id, child.source, child.last_message_at, run.id AS run_id, run.status
+  FROM agent_runs run JOIN threads child ON child.id = run.child_session_id
+  WHERE run.parent_thread_id = t.id
+  ORDER BY run.created_at DESC, run.id
+))`;
+
 export function defaultDbPath(): string {
   return stateDatabasePath();
 }
@@ -72,6 +81,8 @@ export interface ThreadResolutionRow {
   lastMessageAt: string | null;
   enrichedThroughMessageAt: string | null;
   enrichedWhileWorking: boolean;
+  enrichedChildren: string;
+  childrenEvidence: string;
 }
 
 export interface DetailsRow {
@@ -316,6 +327,9 @@ export class ThreadDb {
       if (!threads.has("enriched_while_working")) {
         this.db.exec("ALTER TABLE threads ADD COLUMN enriched_while_working INTEGER NOT NULL DEFAULT 0");
       }
+      if (!threads.has("enriched_children")) {
+        this.db.exec("ALTER TABLE threads ADD COLUMN enriched_children TEXT NOT NULL DEFAULT '[]'");
+      }
       if (columns.has("next_steps") || columns.has("state_reason")) {
         this.db.exec("UPDATE threads SET enriched_through_message_at = NULL");
         if (columns.has("next_steps")) this.db.exec("ALTER TABLE thread_details DROP COLUMN next_steps");
@@ -503,6 +517,9 @@ export class ThreadDb {
 
   recordScan(observation: ThreadObservation): RecordScanResult {
     const previous = this.resolutionRow(observation.id);
+    if (previous?.lastMessageAt && (!observation.lastMessageAt || observation.lastMessageAt < previous.lastMessageAt)) {
+      return { added: false, stateChanged: null };
+    }
     const now = this.now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -576,6 +593,7 @@ export class ThreadDb {
     threadId: string,
     details: ThreadEnrichment,
     throughMessageAt: string,
+    children: EnrichmentCandidate["children"] = [],
   ): number | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -585,8 +603,9 @@ export class ThreadDb {
         !current || current.state === "done" ||
         (details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
+        JSON.stringify(children) !== current.childrenEvidence ||
         (current.enrichedThroughMessageAt ?? "") > throughMessageAt ||
-        (current.enrichedThroughMessageAt === throughMessageAt && current.enrichedWhileWorking === working)
+        (current.enrichedThroughMessageAt === throughMessageAt && current.enrichedWhileWorking === working && current.enrichedChildren === current.childrenEvidence)
       ) {
         this.db.exec("COMMIT");
         return null;
@@ -597,8 +616,8 @@ export class ThreadDb {
         topic: details.topic,
         summary: details.summary,
       }, "model");
-      this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ? WHERE id = ?")
-        .run(throughMessageAt, Number(working), threadId);
+      this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ?, enriched_children = ? WHERE id = ?")
+        .run(throughMessageAt, Number(working), current.childrenEvidence, threadId);
       this.db.exec("COMMIT");
       return edge?.version ?? 0;
     } catch (error) {
@@ -633,7 +652,8 @@ export class ThreadDb {
     const row = this.db.prepare(
       `SELECT t.id, detail.state, t.last_message_at AS lastMessageAt,
               t.enriched_through_message_at AS enrichedThroughMessageAt,
-              t.enriched_while_working AS enrichedWhileWorking
+              t.enriched_while_working AS enrichedWhileWorking,
+              t.enriched_children AS enrichedChildren, ${CHILD_EVIDENCE_SQL} AS childrenEvidence
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE t.id = ?`,
@@ -655,6 +675,7 @@ export class ThreadDb {
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
               CASE WHEN t.enriched_through_message_at = t.last_message_at
+                     AND t.enriched_children = ${CHILD_EVIDENCE_SQL}
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
                    THEN COALESCE(detail.summary, t.raw_topic, '')
                    ELSE COALESCE(t.raw_topic, '') END AS summary, detail.priority,
@@ -696,6 +717,7 @@ export class ThreadDb {
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at
+           OR t.enriched_children != ${CHILD_EVIDENCE_SQL}
            OR (t.enriched_through_message_at = t.last_message_at
              AND t.enriched_while_working != (${EFFECTIVE_THREAD_STATE_SQL} = 'working')))
        ORDER BY t.last_message_at DESC`,
@@ -704,7 +726,11 @@ export class ThreadDb {
     return ids.flatMap(({ id }) => {
       const row = rows.get(id);
       const resolution = this.resolutionRow(id);
-      return row ? [{ ...row, enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null }] : [];
+      return row ? [{
+        ...row,
+        enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null,
+        children: JSON.parse(resolution?.childrenEvidence ?? "[]") as EnrichmentCandidate["children"],
+      }] : [];
     });
   }
 

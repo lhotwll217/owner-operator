@@ -177,7 +177,7 @@ export class SessionMonitor {
         if (!candidate.lastMessageAt || !this.options.enrich) return;
         try {
           const details = await this.options.enrich(candidate);
-          if (!this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt)) {
+          if (!this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt, candidate.children)) {
             this.logger({
               event: SessionMonitorLogEvent.EnrichmentDiscarded,
               error: `stale sample discarded for ${candidate.id}`,

@@ -92,7 +92,19 @@ try {
     observedThrough: "2026-07-09T10:03:00.000Z",
   });
 
-  process.stdout.write("ok — needs-you event batching, dedupe, and active-child suppression\n");
+  const idle = { ...row("model-attention", "2026-07-09T10:04:00.000Z"), lastRole: "user", secondsSinceLastMessage: 7200, secondsSinceActivity: 7200 };
+  state.recordObservation(idle);
+  assert.equal(state.listSessionState().find((item) => item.id === idle.id)?.state, "idle");
+  const details = { topic: "Retention decision", summary: "Choose the retention period.", priority: 2, attention: "needs-you" as const };
+  assert.ok(state.appendEnrichment(idle.id, details, idle.lastMessageAt));
+  await waitFor(() => contexts.length === 4, 1_000, "model attention triggers needs-you schedule");
+  state.renameThread(idle.id, "Pinned decision");
+  state.requestEnrichment([{ id: idle.id, lastMessageAt: idle.lastMessageAt }]);
+  assert.ok(state.appendEnrichment(idle.id, details, idle.lastMessageAt));
+  state.recordObservation(idle);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 4, "rename, resummary, and scan do not duplicate a handled message");
+  process.stdout.write("ok — needs-you event batching, model attention, dedupe, and active-child suppression\n");
 } finally {
   await scheduler.stop();
   state.close();

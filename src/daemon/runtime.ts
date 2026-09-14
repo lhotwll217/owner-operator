@@ -10,7 +10,7 @@ import {
 } from "@owner-operator/core";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
-import { sampleTranscript } from "../session-monitor/scan";
+import { sampleEnrichment } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
@@ -68,7 +68,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
       : { enrich: options.monitor?.enrich ?? (async (candidate) =>
-          (await import("../agent/enrichment")).enrichThread(await sampleTranscript(candidate.id, candidate.source))) }),
+          (await import("../agent/enrichment")).enrichThread(await sampleEnrichment(candidate))) }),
   });
   modules.sessionMonitor = true;
   const scheduler = new Scheduler(state, {

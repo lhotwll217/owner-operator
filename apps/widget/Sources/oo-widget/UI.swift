@@ -258,13 +258,6 @@ struct GroupView: View {
     }
 }
 
-/// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
-/// grey next-step, then origin (±diff · app). Keep every word.
-/// Rename via the pencil that appears on hover (or double-click the title) — your title is
-/// preferred over the AI's (which keeps titling underneath); submit it empty (or use the
-/// context menu) to show AI titles again. STABILITY RULE: hover/edit state may only swap
-/// what's drawn inside space that is always reserved — never insert or remove layout — so
-/// text never re-wraps and neighbors never move.
 struct RowView: View {
     let row: SessionStateRow
     let onDone: () -> Void
@@ -297,8 +290,8 @@ struct RowView: View {
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
-                if let next = row.summary, !next.isEmpty {
-                    Text("→ \(next)")
+                if let summary = row.summary, !summary.isEmpty {
+                    Text("→ \(summary)")
                         .foregroundStyle(.secondary).font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)
                 }
