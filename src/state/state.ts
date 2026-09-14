@@ -17,7 +17,7 @@ import {
   type ScanRow,
   type EnrichmentCandidate,
   type ScheduleTriggerContext,
-  type ThreadDetails,
+  type ThreadEnrichment,
   type Blacklist,
   type MarkThreadsDoneResult,
   type RegisteredWorktree,
@@ -54,7 +54,7 @@ export class State {
     if (isBlacklisted(this.blacklist(), { cwd: row.project, repo: row.repo })) return;
     const previous = this.db.resolutionRow(row.id);
     const state = !row.working && previous?.lastMessageAt === row.lastMessageAt &&
-      previous.enrichedThroughMessageAt === row.lastMessageAt && previous.stateReason
+      previous.enrichedThroughMessageAt === row.lastMessageAt && !previous.enrichedWhileWorking && previous.state !== "working"
       ? previous.state
       : resolveState(
       previous?.lastMessageAt
@@ -86,7 +86,7 @@ export class State {
         state,
         lastMessageAt: row.lastMessageAt,
         needsEnrichment:
-          (state === "needs-you" || state === "idle") && row.lastMessageAt !== previous?.enrichedThroughMessageAt,
+          state !== "done" && row.lastMessageAt !== previous?.enrichedThroughMessageAt,
       });
     }
   }
@@ -130,7 +130,7 @@ export class State {
     return queuedIds;
   }
 
-  appendEnrichment(threadId: string, details: ThreadDetails, throughMessageAt: string): boolean {
+  appendEnrichment(threadId: string, details: ThreadEnrichment, throughMessageAt: string): boolean {
     const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt) !== null;
     if (!applied) return false;
     const current = this.db.resolutionRow(threadId);

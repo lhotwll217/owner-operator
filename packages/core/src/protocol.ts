@@ -52,10 +52,8 @@ export interface SessionStateRow {
   generatedTopic: string;
   ownerTitle: string | null;
   summary: string | null;
-  nextSteps: string | null;
   priority: number | null;
   state: ThreadState;
-  stateReason: string | null;
   stateSince: string;
   lastActive: string;
   lastActiveAt: string | null;

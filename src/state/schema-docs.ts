@@ -24,6 +24,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "raw_topic", description: "Transcript-derived display fallback." },
       { name: "owner_title", description: "Owner-pinned title; NULL means generated title wins." },
       { name: "enriched_through_message_at", description: "Latest message timestamp incorporated into model enrichment." },
+      { name: "enriched_while_working", description: "Whether enrichment landed during deterministic working status. A change in working status makes the same message eligible again." },
     ],
   },
   {
@@ -35,11 +36,9 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "created_at", description: "ISO time this belief became current (also stateSince)." },
       { name: "written_by", description: "poll | model | owner." },
       { name: "state", description: "needs-you | working | idle | done." },
-      { name: "state_reason", description: "Optional explanation for the current state." },
       { name: "priority", description: "Model-assigned owner attention, 1-5." },
       { name: "topic", description: "Generated title; the widget/CLI row title unless owner_title overrides." },
-      { name: "summary", description: "Legacy model recap; enrichment no longer writes it and clears it as threads re-enrich." },
-      { name: "next_steps", description: "Concrete action needed from the owner; the widget's arrow line." },
+      { name: "summary", description: "Current request, progress or outcome, including an owner action when relevant." },
     ],
   },
   {

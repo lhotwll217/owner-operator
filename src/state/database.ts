@@ -21,6 +21,7 @@ import {
   type ScheduleTrigger,
   type SessionStateRow,
   type ThreadDetails,
+  type ThreadEnrichment,
   type ThreadState,
   type EnrichmentCandidate,
   type RegisteredWorktree,
@@ -61,7 +62,6 @@ export interface ThreadObservation {
   lastMessageAt?: string;
   rawTopic?: string;
   state: ThreadState;
-  stateReason?: string;
   diffAdded?: number;
   diffDeleted?: number;
 }
@@ -71,7 +71,7 @@ export interface ThreadResolutionRow {
   state: ThreadState;
   lastMessageAt: string | null;
   enrichedThroughMessageAt: string | null;
-  stateReason: string | null;
+  enrichedWhileWorking: boolean;
 }
 
 export interface DetailsRow {
@@ -80,11 +80,9 @@ export interface DetailsRow {
   createdAt: string;
   writtenBy: "poll" | "model" | "owner";
   state: ThreadState;
-  stateReason: string | null;
   priority: number | null;
   topic: string | null;
   summary: string | null;
-  nextSteps: string | null;
 }
 
 export interface RecordScanResult {
@@ -110,7 +108,8 @@ CREATE TABLE IF NOT EXISTS threads (
   diff_deleted INTEGER,
   raw_topic TEXT,
   owner_title TEXT,
-  enriched_through_message_at TEXT
+  enriched_through_message_at TEXT,
+  enriched_while_working INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS thread_details (
@@ -119,11 +118,9 @@ CREATE TABLE IF NOT EXISTS thread_details (
   created_at TEXT NOT NULL,
   written_by TEXT NOT NULL CHECK (written_by IN ('poll', 'model', 'owner')),
   state TEXT NOT NULL CHECK (state IN ('needs-you', 'working', 'idle', 'done')),
-  state_reason TEXT,
   priority INTEGER,
   topic TEXT,
   summary TEXT,
-  next_steps TEXT,
   PRIMARY KEY (thread_id, version)
 );
 
@@ -290,11 +287,9 @@ function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
 
 type DetailsPatch = Partial<{
   state: ThreadState;
-  stateReason: string | null;
   priority: number | null;
   topic: string | null;
   summary: string | null;
-  nextSteps: string | null;
 }>;
 
 export class ThreadDb {
@@ -309,7 +304,28 @@ export class ThreadDb {
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec(SCHEMA);
+    this.migrateSessionSummaries();
     this.migrateAgentRunEffort();
+  }
+
+  private migrateSessionSummaries(): void {
+    const columns = new Set(this.db.prepare("PRAGMA table_info(thread_details)").all().map((row) => row.name));
+    const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => row.name));
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (!threads.has("enriched_while_working")) {
+        this.db.exec("ALTER TABLE threads ADD COLUMN enriched_while_working INTEGER NOT NULL DEFAULT 0");
+      }
+      if (columns.has("next_steps") || columns.has("state_reason")) {
+        this.db.exec("UPDATE threads SET enriched_through_message_at = NULL");
+        if (columns.has("next_steps")) this.db.exec("ALTER TABLE thread_details DROP COLUMN next_steps");
+        if (columns.has("state_reason")) this.db.exec("ALTER TABLE thread_details DROP COLUMN state_reason");
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   /** Additive migration for issue #104. Existing rows deliberately retain NULL effort. */
@@ -463,28 +479,24 @@ export class ThreadDb {
     const latest = this.latestDetails(threadId);
     const merged = {
       state: patch.state ?? latest?.state ?? "idle",
-      stateReason: "stateReason" in patch
-        ? patch.stateReason ?? null
-        : patch.state !== undefined && patch.state !== latest?.state ? null : latest?.stateReason ?? null,
       priority: "priority" in patch ? patch.priority ?? null : latest?.priority ?? null,
       topic: "topic" in patch ? patch.topic ?? null : latest?.topic ?? null,
       summary: "summary" in patch ? patch.summary ?? null : latest?.summary ?? null,
-      nextSteps: "nextSteps" in patch ? patch.nextSteps ?? null : latest?.nextSteps ?? null,
     };
     if (
-      latest && latest.state === merged.state && latest.stateReason === merged.stateReason &&
+      latest && latest.state === merged.state &&
       latest.priority === merged.priority && latest.topic === merged.topic &&
-      latest.summary === merged.summary && latest.nextSteps === merged.nextSteps
+      latest.summary === merged.summary
     ) return null;
     const version = (latest?.version ?? 0) + 1;
     this.db.prepare(
       `INSERT INTO thread_details (
-         thread_id, version, created_at, written_by, state, state_reason,
-         priority, topic, summary, next_steps
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         thread_id, version, created_at, written_by, state,
+         priority, topic, summary
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      threadId, version, this.now(), writtenBy, merged.state, merged.stateReason,
-      merged.priority, merged.topic, merged.summary, merged.nextSteps,
+      threadId, version, this.now(), writtenBy, merged.state,
+      merged.priority, merged.topic, merged.summary,
     );
     return { version, from: latest?.state ?? null, to: merged.state };
   }
@@ -523,7 +535,7 @@ export class ThreadDb {
       );
       const edge = this.appendDetailsInTx(
         observation.id,
-        { state: observation.state, ...(observation.stateReason !== undefined ? { stateReason: observation.stateReason } : {}) },
+        { state: observation.state },
         "poll",
       );
       this.db.exec("COMMIT");
@@ -547,7 +559,6 @@ export class ThreadDb {
         priority: details.priority ?? null,
         topic: details.topic ?? null,
         summary: details.summary ?? null,
-        nextSteps: details.nextSteps ?? null,
       }, "model");
       if (throughMessageAt !== undefined) {
         this.db.prepare("UPDATE threads SET enriched_through_message_at = ? WHERE id = ?")
@@ -563,39 +574,31 @@ export class ThreadDb {
 
   appendModelDetailsIfFresh(
     threadId: string,
-    details: ThreadDetails,
+    details: ThreadEnrichment,
     throughMessageAt: string,
   ): number | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      // An ordinary transcript-state flap may happen while the model runs; if the sampled
-      // message is unchanged, that belief can still land. An active delegated child makes
-      // the root ineligible, while a newer message makes the sample stale. The watermark
-      // rejects an already-enriched message and any out-of-order duplicate. Transcript
-      // evidence owns every transition into or out of working: a working affirmation lands
-      // only overlay fields on a working row, and any other model state is rejected there,
-      // just as a working claim can never activate a settled row. ThreadDetails omits
-      // `done`, but this comparison stays fail-closed against hostile input anyway.
-      const assessedState = details.state as ThreadState | undefined;
+      const working = current?.state === "working" || this.hasActiveChild(threadId);
       if (
-        !current || assessedState === "done" || current.state === "done" || this.hasActiveChild(threadId) ||
-        (current.state === "working" ? assessedState !== undefined && assessedState !== "working" : assessedState === "working") ||
+        !current || current.state === "done" ||
+        (details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
-        (current.enrichedThroughMessageAt ?? "") >= throughMessageAt
+        (current.enrichedThroughMessageAt ?? "") > throughMessageAt ||
+        (current.enrichedThroughMessageAt === throughMessageAt && current.enrichedWhileWorking === working)
       ) {
         this.db.exec("COMMIT");
         return null;
       }
       const edge = this.appendDetailsInTx(threadId, {
-        ...(details.state !== undefined ? { state: details.state, stateReason: details.stateReason } : {}),
-        priority: details.priority ?? null,
-        topic: details.topic ?? null,
-        summary: details.summary ?? null,
-        nextSteps: details.nextSteps ?? null,
+        ...(!working ? { state: details.attention } : {}),
+        priority: details.priority,
+        topic: details.topic,
+        summary: details.summary,
       }, "model");
-      this.db.prepare("UPDATE threads SET enriched_through_message_at = ? WHERE id = ?")
-        .run(throughMessageAt, threadId);
+      this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ? WHERE id = ?")
+        .run(throughMessageAt, Number(working), threadId);
       this.db.exec("COMMIT");
       return edge?.version ?? 0;
     } catch (error) {
@@ -607,34 +610,35 @@ export class ThreadDb {
   latestDetails(threadId: string): DetailsRow | undefined {
     return this.db.prepare(
       `SELECT thread_id AS threadId, version, created_at AS createdAt,
-              written_by AS writtenBy, state, state_reason AS stateReason,
-              priority, topic, summary, next_steps AS nextSteps
+              written_by AS writtenBy, state,
+              priority, topic, summary
        FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1`,
     ).get(threadId) as unknown as DetailsRow | undefined;
   }
 
   latestDetailsMap(): Map<string, ThreadDetails> {
     const rows = this.db.prepare(
-      `SELECT thread_id AS threadId, priority, topic, summary, next_steps AS nextSteps
+      `SELECT thread_id AS threadId, priority, topic, summary
        FROM thread_details detail
        WHERE version = (SELECT MAX(version) FROM thread_details WHERE thread_id = detail.thread_id)`,
     ).all() as unknown as Array<DetailsRow>;
     return new Map(rows.map((row) => [row.threadId, {
       ...(row.topic != null ? { topic: row.topic } : {}),
       ...(row.summary != null ? { summary: row.summary } : {}),
-      ...(row.nextSteps != null ? { nextSteps: row.nextSteps } : {}),
       ...(row.priority != null ? { priority: row.priority } : {}),
     }]));
   }
 
   resolutionRow(threadId: string): ThreadResolutionRow | undefined {
-    return this.db.prepare(
-      `SELECT t.id, detail.state, detail.state_reason AS stateReason, t.last_message_at AS lastMessageAt,
-              t.enriched_through_message_at AS enrichedThroughMessageAt
+    const row = this.db.prepare(
+      `SELECT t.id, detail.state, t.last_message_at AS lastMessageAt,
+              t.enriched_through_message_at AS enrichedThroughMessageAt,
+              t.enriched_while_working AS enrichedWhileWorking
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE t.id = ?`,
     ).get(threadId) as unknown as ThreadResolutionRow | undefined;
+    return row ? { ...row, enrichedWhileWorking: Boolean(row.enrichedWhileWorking) } : undefined;
   }
 
   listSessionState(options: { activeSince?: string } = {}): SessionStateRow[] {
@@ -650,13 +654,11 @@ export class ThreadDb {
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
-              detail.summary,
-              CASE WHEN ${HAS_ACTIVE_CHILD_SQL} OR detail.state = 'working'
-                     OR t.enriched_through_message_at IS NOT t.last_message_at THEN NULL
-                   ELSE detail.next_steps END AS nextSteps, detail.priority,
+              CASE WHEN t.enriched_through_message_at = t.last_message_at
+                     AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
+                   THEN COALESCE(detail.summary, t.raw_topic, '')
+                   ELSE COALESCE(t.raw_topic, '') END AS summary, detail.priority,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
-              CASE WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'delegated child is active'
-                   ELSE detail.state_reason END AS stateReason,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
               t.created_at AS createdAt, t.last_message_at AS lastMessageAt,
@@ -693,8 +695,9 @@ export class ThreadDb {
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
-         AND NOT ${HAS_ACTIVE_CHILD_SQL}
-         AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at)
+         AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at
+           OR (t.enriched_through_message_at = t.last_message_at
+             AND t.enriched_while_working != (${EFFECTIVE_THREAD_STATE_SQL} = 'working')))
        ORDER BY t.last_message_at DESC`,
     ).all() as Array<{ id: string }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));
@@ -707,7 +710,7 @@ export class ThreadDb {
 
   requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
     const reset = this.db.prepare(`UPDATE threads AS t SET enriched_through_message_at = NULL
-      WHERE t.id = ? AND t.last_message_at = ? AND NOT ${HAS_ACTIVE_CHILD_SQL}
+      WHERE t.id = ? AND t.last_message_at = ?
         AND (SELECT state FROM thread_details WHERE thread_id = t.id ORDER BY version DESC LIMIT 1) IN ('idle', 'needs-you', 'working')`);
     return requests.flatMap(({ id, lastMessageAt }) => Number(reset.run(id, lastMessageAt).changes) ? [id] : []);
   }

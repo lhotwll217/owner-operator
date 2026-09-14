@@ -126,10 +126,6 @@ struct CompactBar: View {
     private var fresh: [SessionStateRow] { client.freshNeedsYou() }
 }
 
-/// One thread as `mark Project → next step`: the tool's logo (when bundled), the project
-/// tinted light blue, an arrow (the session state's `→ next step` pattern), then the next step in
-/// full. `Text` (not AttributedString) so the mark rides inline. Shared by the calm line and
-/// the ticker.
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
 
 private func lineText(_ r: SessionStateRow) -> Text {
@@ -138,7 +134,7 @@ private func lineText(_ r: SessionStateRow) -> Text {
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
-    out.append(AttributedString(r.nextSteps ?? r.title, attributes: step))
+    out.append(AttributedString(r.summary ?? r.title, attributes: step))
     guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
 }
@@ -301,7 +297,7 @@ struct RowView: View {
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
-                if let next = row.nextSteps, !next.isEmpty {
+                if let next = row.summary, !next.isEmpty {
                     Text("→ \(next)")
                         .foregroundStyle(.secondary).font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)

@@ -47,6 +47,11 @@ try {
   assert.ok(!state.listSessionState().some((row) => row.id === "old"), "old history is not ingested behind the widget filter");
   assert.ok(!rows.some((row) => row.id === "guardian"), "explicit guardian provenance is not independent owner work");
   assert.equal(state.listEnrichmentCandidates().length, 55, "visible idle rows remain eligible for their first successful enrichment");
+  transcript(join(home, ".claude", "projects", "demo", "first-message.jsonl"), [
+    { type: "user", entrypoint: "cli", sessionId: "first-message", cwd: project, timestamp: at, message: { content: "Implement the export" } },
+  ]);
+  const firstMessageRows = await monitor.poll();
+  assert.ok(firstMessageRows.some((row) => row.id === "first-message" && row.topic && row.summary), "a one-off CLI session is visible from its first message");
   console.log("ok - configured scan window preserved; all 55 current rows eligible for updates");
 } finally {
   monitor.stop();

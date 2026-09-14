@@ -145,7 +145,7 @@ for (const s of SESSIONS) {
     stamp = at(t.offsetMin);
     db.appendModelDetails(
       s.id,
-      { priority: t.priority, topic: t.topic, summary: t.summary, nextSteps: t.nextSteps },
+      { priority: t.priority, topic: t.topic, summary: t.summary },
       at(t.throughOffsetMin ?? lastMsg),
     );
   }

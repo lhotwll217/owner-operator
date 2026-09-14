@@ -94,9 +94,9 @@ export const SESSIONS = [
     slug: "-home-dev-projects-aurora-weather",
     state: "needs-you",
     detailsHistory: [
-      { offsetMin: 200, priority: 2, topic: "Flaky forecast cache test", summary: "Investigating an intermittently failing cache test.", nextSteps: "Reproduce the flake locally." },
-      { offsetMin: 120, priority: 3, topic: "Flaky forecast cache test", summary: "Flake reproduced; CI failed twice more on unrelated PRs.", nextSteps: "Pick a deflaking strategy." },
-      { offsetMin: 10, priority: 4, topic: "Flaky forecast cache test", summary: "Fix ready with FakeClock; PR #42 opened.", nextSteps: "Review and merge PR #42." },
+      { offsetMin: 200, priority: 2, topic: "Flaky forecast cache test", summary: "Investigating an intermittently failing cache test." },
+      { offsetMin: 120, priority: 3, topic: "Flaky forecast cache test", summary: "Flake reproduced; CI failed twice more on unrelated PRs." },
+      { offsetMin: 10, priority: 4, topic: "Flaky forecast cache test", summary: "Fix ready with FakeClock; PR #42 opened." },
     ],
     messages: [
       claudeMsg("user", "our forecast cache test keeps failing intermittently in CI, can you look into test_forecast_cache_expiry?", 240),
@@ -119,8 +119,8 @@ export const SESSIONS = [
     slug: "-home-dev-projects-aurora-weather",
     state: "working",
     detailsHistory: [
-      { offsetMin: 90, priority: 3, topic: "Add --units flag", summary: "Adding metric/imperial output units to the CLI.", nextSteps: "Wire the flag through the renderers." },
-      { offsetMin: 5, priority: 3, topic: "Add --units flag", summary: "Imperial conversion crashed on gust data; normalizing at the API boundary.", nextSteps: "Agent is mid-refactor of normalize_observation()." },
+      { offsetMin: 90, priority: 3, topic: "Add --units flag", summary: "Adding metric/imperial output units to the CLI." },
+      { offsetMin: 5, priority: 3, topic: "Add --units flag", summary: "Imperial conversion crashed on gust data; normalizing at the API boundary." },
     ],
     messages: [
       claudeMsg("user", "add a --units flag, metric or imperial, defaulting to metric", 100),
@@ -137,8 +137,8 @@ export const SESSIONS = [
     slug: "-home-dev-projects-lumen-notes",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 7 * 24 * 60, priority: 2, topic: "Storage migration to IndexedDB", summary: "Planning the move off localStorage for large notebooks.", nextSteps: "Choose Dexie vs raw IndexedDB." },
-      { offsetMin: 6 * 24 * 60, priority: 2, topic: "Storage migration to IndexedDB", summary: "Agent recommended Dexie 4; awaiting the owner's call.", nextSteps: "Owner to decide Dexie 4 vs raw IDB." },
+      { offsetMin: 7 * 24 * 60, priority: 2, topic: "Storage migration to IndexedDB", summary: "Planning the move off localStorage for large notebooks." },
+      { offsetMin: 6 * 24 * 60, priority: 2, topic: "Storage migration to IndexedDB", summary: "Agent recommended Dexie 4; awaiting the owner's call." },
     ],
     messages: [
       claudeMsg("user", "localStorage is choking on big notebooks, we should move to IndexedDB. dexie or raw?", 7 * 24 * 60),
@@ -153,8 +153,8 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/quasar-api",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 27 * 60, priority: 4, topic: "Spurious 429s from the rate limiter", summary: "Clients report 429s far below their quota.", nextSteps: "Find why buckets exhaust early." },
-      { offsetMin: 26 * 60, priority: 1, topic: "Spurious 429s from the rate limiter", summary: "Root cause fixed: refill interval unit bug in RateLimiter.refill().", nextSteps: "Ship it in the next deploy." },
+      { offsetMin: 27 * 60, priority: 4, topic: "Spurious 429s from the rate limiter", summary: "Clients report 429s far below their quota." },
+      { offsetMin: 26 * 60, priority: 1, topic: "Spurious 429s from the rate limiter", summary: "Root cause fixed: refill interval unit bug in RateLimiter.refill()." },
     ],
     messages: [
       codexMsg("user", "clients are getting 429 too many requests way below their quota, dig into the rate limiter", 27 * 60),
@@ -177,7 +177,6 @@ export const SESSIONS = [
         priority: 4,
         topic: "Payments migration rollout",
         summary: "Blue rollout is ready after the initial migration checks.",
-        nextSteps: "Approve the blue rollout.",
       },
     ],
     messages: [
@@ -195,7 +194,7 @@ export const SESSIONS = [
     slug: "-home-dev-projects-nova-events",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 320, priority: 2, topic: "Event backbone decision", summary: "Kafka is the initial recommendation.", nextSteps: "Run the production-shape soak test." },
+      { offsetMin: 320, priority: 2, topic: "Event backbone decision", summary: "Kafka is the initial recommendation." },
     ],
     messages: [
       claudeMsg("user", "pick an event backbone for the fanout service", 340),
@@ -209,7 +208,7 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/nova-events",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 45, priority: 4, topic: "Event backbone decision", summary: "Soak test reversed the queue recommendation to NATS JetStream.", nextSteps: "Approve the NATS JetStream implementation plan." },
+      { offsetMin: 45, priority: 4, topic: "Event backbone decision", summary: "Soak test reversed the queue recommendation to NATS JetStream." },
     ],
     messages: [
       codexMsg("user", "run the production-shape soak test before we commit to the earlier queue choice", 70),
@@ -223,7 +222,7 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/cipher-auth",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 35, priority: 4, topic: "Signing-key rotation", summary: "Key rotation fix is ready for review.", nextSteps: "Review PR #90." },
+      { offsetMin: 35, priority: 4, topic: "Signing-key rotation", summary: "Key rotation fix is ready for review." },
     ],
     messages: [
       codexMsg("user", "audit the signing-key rotation incident and prepare the actual fix", 60),
@@ -238,7 +237,7 @@ export const SESSIONS = [
     slug: "-home-dev-projects-atlas-web",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 110, priority: 1, topic: "Release summary", summary: "Helper produced an unverified outline only.", nextSteps: "Do not use until evidence is checked." },
+      { offsetMin: 110, priority: 1, topic: "Release summary", summary: "Helper produced an unverified outline only." },
     ],
     messages: [
       claudeMsg("user", "sketch an outline for the release summary", 120),
@@ -252,7 +251,7 @@ export const SESSIONS = [
     cwd: "/home/dev/projects/atlas-web",
     state: "idle",
     detailsHistory: [
-      { offsetMin: 45, priority: 3, topic: "Release summary", summary: "Verified release report is complete.", nextSteps: "Approve the Codex report for publication." },
+      { offsetMin: 45, priority: 3, topic: "Release summary", summary: "Verified release report is complete." },
     ],
     messages: [
       codexMsg("user", "produce the evidence-backed release report", 60),

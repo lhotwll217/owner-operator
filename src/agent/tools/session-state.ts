@@ -89,7 +89,7 @@ const cleanIndexes = (indexes: readonly number[] | undefined): number[] =>
 const cleanQueries = (queries: readonly string[] | undefined): string[] =>
   unique((queries ?? []).map((value) => value.trim()).filter(Boolean));
 const haystack = (thread: CurrentSessionStateRow): string =>
-  [thread.id, thread.repo, thread.app, thread.topic, thread.summary, thread.nextSteps]
+  [thread.id, thread.repo, thread.app, thread.topic, thread.summary]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();

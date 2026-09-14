@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { KNOWN_SESSION_SOURCES, markOnboarded, saveSessionRoots } from "@owner-operator/core";
+import { KNOWN_SESSION_SOURCES, markOnboarded, saveSessionRoots, type ThreadEnrichment } from "@owner-operator/core";
 import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { State } from "../state/state";
 import { SessionMonitor } from "./monitor";
@@ -9,8 +9,8 @@ import { SessionMonitor } from "./monitor";
 const { dir, cleanup } = tempOoHome("oo-session-monitor");
 const state = new State(join(dir, "state.db"));
 
-let finishEnrichment!: (details: { topic: string; nextSteps: string }) => void;
-const enrichment = new Promise<{ topic: string; nextSteps: string }>((resolve) => { finishEnrichment = resolve; });
+let finishEnrichment!: (details: ThreadEnrichment) => void;
+const enrichment = new Promise<ThreadEnrichment>((resolve) => { finishEnrichment = resolve; });
 const monitor = new SessionMonitor(state, {
   scan: async () => [fakeScanRow()],
   enrich: async () => await enrichment,
@@ -19,11 +19,11 @@ const monitor = new SessionMonitor(state, {
 try {
   const rows = await monitor.poll();
   assert.equal(rows[0].state, "needs-you", "scan is reconciled through state");
-  assert.equal(rows[0].summary, null, "poll hot path does not await model enrichment");
+  assert.equal(rows[0].summary, fakeScanRow().topic, "first-message fallback appears without awaiting the model");
 
-  finishEnrichment({ topic: "Daemon foundation", nextSteps: "Review the state seam" });
+  finishEnrichment({ topic: "Daemon foundation", summary: "Review the state seam", priority: 2, attention: "needs-you" as const });
   await waitFor(
-    () => state.listSessionState()[0]?.nextSteps === "Review the state seam",
+    () => state.listSessionState()[0]?.summary === "Review the state seam",
     1_000,
     "asynchronous enrichment",
   );
@@ -70,7 +70,7 @@ try {
     scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:05:00.000Z" })],
     enrich: async () => {
       gatedEnrichmentCalls += 1;
-      return { topic: "should not run", nextSteps: "should not run" };
+      return { topic: "should not run", summary: "should not run", priority: 2, attention: "needs-you" as const };
     },
     canEnrich: () => false,
   });

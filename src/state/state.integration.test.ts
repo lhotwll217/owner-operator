@@ -82,7 +82,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "generated-review-topic",
-      { topic: "Review the current code changes for billing" },
+      { topic: "Review the current code changes for billing", summary: "Reviewing billing changes.", priority: 2, attention: "idle" },
       "2026-07-09T09:58:30.000Z",
     ),
     true,
@@ -107,7 +107,7 @@ try {
 
   state.appendEnrichment(
     "thread-1",
-    { topic: "Daemon foundation", nextSteps: "Implement the state seam", priority: 4 },
+    { topic: "Daemon foundation", priority: 4, summary: "Implement the state seam", attention: "needs-you" as const },
     "2026-07-09T09:59:00.000Z",
   );
   state.registerAndSelectWorktree("thread-1", {
@@ -118,7 +118,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "oo-root",
-      { topic: "Monitor the OO root", state: "working", stateReason: "Monitoring the OO root session.", nextSteps: "" },
+      { topic: "Monitor the OO root", attention: "idle", summary: "Monitoring the OO root session.", priority: 2 },
       "2026-07-09T09:57:00.000Z",
     ),
     true,
@@ -145,13 +145,13 @@ try {
   assert.equal(
     state.appendEnrichment(
       "thread-1",
-      { topic: "Stale title", nextSteps: "Stale action", priority: 1 },
+      { topic: "Stale title", priority: 1, summary: "Stale action", attention: "needs-you" as const },
       "2026-07-09T09:59:00.000Z",
     ),
     false,
     "an enrichment for an older message cannot overwrite the current handoff",
   );
-  assert.equal(state.listSessionState()[0].nextSteps, null, "a newer message invalidates the previous owner action");
+  assert.equal(state.listSessionState()[0].summary, "Design the daemon", "a newer message shows the transcript fallback");
 
   assert.deepEqual(state.markThreadsDone(["thread-1", "missing"]).missingIds, ["missing"]);
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "done leaves the active projection");
@@ -171,15 +171,15 @@ try {
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap" });
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap", working: true });
   assert.equal(
-    state.appendEnrichment("thread-flap", { nextSteps: "Ship the fix" }, "2026-07-09T10:03:00.000Z"),
+    state.appendEnrichment("thread-flap", { summary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
     true,
     "a completed enrichment lands after a state-only needs-you→working flap",
   );
   const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
   assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
-  assert.equal(flapped?.nextSteps, null, "a working session does not project an obsolete owner instruction");
+  assert.equal(flapped?.summary, "Ship the fix", "a working session projects the new summary without changing state");
   assert.equal(
-    state.appendEnrichment("thread-flap", { nextSteps: "Duplicate" }, "2026-07-09T10:03:00.000Z"),
+    state.appendEnrichment("thread-flap", { summary: "Duplicate", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
     false,
     "re-enriching an already-enriched message is rejected by the watermark",
   );
@@ -189,7 +189,7 @@ try {
   state.recordObservation({ ...row("2026-07-09T10:04:00.000Z"), id: "thread-stale" });
   state.recordObservation({ ...row("2026-07-09T10:04:30.000Z"), id: "thread-stale" });
   assert.equal(
-    state.appendEnrichment("thread-stale", { nextSteps: "Stale action" }, "2026-07-09T10:04:00.000Z"),
+    state.appendEnrichment("thread-stale", { summary: "Stale action", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:04:00.000Z"),
     false,
     "an enrichment sampled before a newer message is rejected as stale",
   );
@@ -203,7 +203,7 @@ try {
   // burn a model call on a sample the guard is certain to reject.
   state.recordObservation({ ...row("2026-07-09T10:05:00.000Z"), id: "thread-regressed" });
   assert.equal(
-    state.appendEnrichment("thread-regressed", { nextSteps: "Enriched at T2" }, "2026-07-09T10:05:00.000Z"),
+    state.appendEnrichment("thread-regressed", { summary: "Enriched at T2", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:05:00.000Z"),
     true,
   );
   state.recordObservation({ ...row("2026-07-09T10:04:45.000Z"), id: "thread-regressed" });

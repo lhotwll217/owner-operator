@@ -70,10 +70,8 @@ struct SessionStateRow: Decodable, Identifiable {
     let generatedTopic: String?
     let ownerTitle: String?
     let summary: String?
-    let nextSteps: String?
     let priority: Int?
     let state: ThreadState
-    let stateReason: String?
     let lastActive: String
     let lastActiveAt: String
     let createdAt: String
@@ -88,8 +86,8 @@ struct SessionStateRow: Decodable, Identifiable {
     var nestingDepth: Int = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, nextSteps, priority
-        case state, stateReason, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
+        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, priority
+        case state, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
         case diffAdded, diffDeleted, parentThreadId
     }
 
@@ -104,11 +102,9 @@ struct SessionStateRow: Decodable, Identifiable {
         generatedTopic = try? c.decode(String.self, forKey: .generatedTopic)
         ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
         summary = try? c.decode(String.self, forKey: .summary)
-        nextSteps = try? c.decode(String.self, forKey: .nextSteps)
         priority = try? c.decode(Int.self, forKey: .priority)
         let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
         state = ThreadState(rawValue: raw) ?? .idle
-        stateReason = try? c.decode(String.self, forKey: .stateReason)
         lastActive = (try? c.decode(String.self, forKey: .lastActive)) ?? ""
         lastActiveAt = (try? c.decode(String.self, forKey: .lastActiveAt)) ?? ""
         createdAt = (try? c.decode(String.self, forKey: .createdAt)) ?? ""

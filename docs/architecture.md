@@ -71,18 +71,19 @@ clients refetch SQLite-backed truth.
 Enrichment sends only bounded transcript samples to the model, read through
 application-owned scan/search modules. Claude, Codex, and Pi samples include bounded tool
 evidence through the privacy-aware session-search helper; other formats retain the scan sample.
-Enrichment is eligible when the row is visible under the configured window and its state is `needs-you`, `idle`, or `working`, no delegated child is
-pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
-first discovery, failed calls followed by inactivity, a new message, and daemon restart. Enrichment
-classifies owner attention as `needs-you` or `idle` and updates the title and progress reason.
-A `working` assessment lands only a concise title and current-activity description: transcript
-evidence owns every transition into or out of `working`, so the boundary rejects any other
-model state on a working row and any `working` claim on a settled row.
-Completed work remains idle until an explicit Done action removes it. Both the model parser and
-state boundary reject model-driven `done`. A successful assessment holds for the same message through later polls.
-Owner done choices and newer messages reject outdated model results. Active delegated children
-suppress obsolete owner instructions in the projection. The
-monitor never awaits the model in its scan hot path.
+Every visible `needs-you`, `idle`, or `working` row is eligible for enrichment, including parents
+with active delegated children. `ThreadEnrichment` separates required presentation fields
+`topic`, `summary`, and `priority` from an `idle` or `needs-you` attention assessment.
+State applies attention only to settled rows. Working status remains deterministic and does
+not require model agreement. Completed work stays visible until an explicit Done action.
+
+The message watermark and whether enrichment landed during working status determine freshness.
+A newer message or a change in working status queues another assessment. Failed calls leave
+the row eligible for retry. Owner Done and newer messages reject stale results; regressed
+transcript timestamps cannot overwrite a newer watermark. Unchanged settled assessments survive
+polling and restart. Titles preserve owner renames. Until a current summary arrives, the
+projection uses the transcript topic as its summary fallback. The monitor never awaits the
+model in its scan hot path.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation
 cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use

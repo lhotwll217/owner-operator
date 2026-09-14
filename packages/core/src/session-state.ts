@@ -1,31 +1,20 @@
-// Owner Operator — session-state data model.
-//
-// Session state is LIVE: its membership is the monitor's active view, minus threads whose status
-// has been marked `done` — so new threads you start show up on the next tick. The model's details
-// are an ENRICHMENT overlay (title · priority · nextStep) joined by id. New threads still
-// appear (raw digest topic + live status) until the model has written details for them. Pure +
-// UI-independent.
-
-import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus, type ThreadState } from "./status";
+import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus } from "./status";
 
 /** The model-authored detail fields we cache and join onto a thread by id (the enrichment). */
 export interface ThreadDetails {
-  topic?: string;      // a nicer title than the raw scan topic
-  summary?: string;    // short card summary, when the model has written one
-  nextSteps?: string;  // the concrete next action
-  priority?: number;   // 5 (loudest) … 1
-  // The model may affirm `working` to land a title and current-activity summary on an
-  // actively progressing session. It can never close (`done`): transitions into and out
-  // of `working` belong to transcript evidence and are enforced in appendModelDetailsIfFresh.
-  state?: Exclude<ThreadState, "done">;
-  stateReason?: string;
+  topic?: string;
+  summary?: string;
+  priority?: number;
+}
+
+export interface ThreadEnrichment extends Required<ThreadDetails> {
+  attention: "idle" | "needs-you";
 }
 
 /** One live thread plus its optional cached model details. */
 export interface SessionStateThread extends ThreadStatus {
   generatedTopic?: string;
   summary?: string;
-  nextSteps?: string;
   priority?: number;
   /** False once status is `done`; done rows leave the active view. */
   active: boolean;
@@ -40,7 +29,7 @@ export function displayTitle(t: SessionStateThread): string {
 
 /**
  * Session state = current threads, each enriched by the cached model
- * details (title/priority/nextStep) joined by id. New threads appear as the poll sees them.
+ * details joined by id. New threads appear as the poll sees them.
  */
 export function toSessionStateThreads(
   threads: readonly ThreadStatus[],
@@ -53,7 +42,6 @@ export function toSessionStateThreads(
       ...t,
       generatedTopic: d?.topic,
       summary: d?.summary,
-      nextSteps: d?.nextSteps,
       priority: d?.priority,
       active,
     };

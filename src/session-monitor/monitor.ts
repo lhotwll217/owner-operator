@@ -5,7 +5,7 @@ import {
   isOnboarded,
   type ScanRow,
   type SessionStateRow,
-  type ThreadDetails,
+  type ThreadEnrichment,
   type EnrichmentCandidate,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
@@ -17,7 +17,7 @@ export interface SessionMonitorOptions {
   intervalMs?: number;
   debounceMs?: number;
   scan?: (since: string, limit: number) => Promise<ScanRow[]>;
-  enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadDetails>;
+  enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadEnrichment>;
   canEnrich?: () => boolean;
   logger?: (record: SessionMonitorLogRecord) => void;
 }

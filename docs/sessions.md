@@ -45,12 +45,13 @@ without the old per-source count cap. Widget visibility retains the existing win
 including outstanding owner attention and active delegated children. Reconciliation selects
 only visible working, idle, or needs-you rows. It does not queue quiet history outside the widget window.
 Codex guardian source metadata identifies approval machinery rather than independent owner work.
-Other launch-mode admission rules are unchanged by this repair.
+CLI sessions enter monitoring from their first real message, including one-off sessions.
+Explicit automated transports and product-origin exclusions still apply.
 
 The authenticated `POST /poll` accepts an optional `reconcile` array of up to 100
 `{id, lastMessageAt}` pairs. It resets enrichment eligibility only for matching visible unresolved working, idle, or
-needs-you rows without active delegated children, then runs the normal monitor. The response's
-`queuedIds` identifies accepted rows. A timestamp mismatch, done choice, or active work is skipped.
+needs-you rows, including parents with active delegated children, then runs the normal monitor.
+The response's `queuedIds` identifies accepted rows. A timestamp mismatch or Done choice is skipped.
 This route rechecks already summarized visible rows after a reconciliation change without another worker.
 
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
