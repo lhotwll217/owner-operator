@@ -17,6 +17,7 @@ export async function runSessionStateWidgetProof(options: {
   nativeBinary?: string;
   outputDirectory?: string;
   root?: string;
+  enrich?: (candidate: EnrichmentCandidate, sample: string) => Promise<ThreadEnrichment>;
 } = {}) {
   const originalEnvironment = { ...process.env };
   const live = Boolean(options.live);
@@ -139,6 +140,7 @@ export async function runSessionStateWidgetProof(options: {
         console.log("MODEL", candidate.id, JSON.stringify(safe(result)));
         return result;
       }
+      if (options.enrich) return options.enrich(candidate, sample);
       if (candidate.id === "parent") {
         return { topic: "Replacement agent run", attention: "idle", priority: 3, summary: sample.includes("CSV escaping verified")
           ? "Child review verified CSV escaping; implementation continues."
