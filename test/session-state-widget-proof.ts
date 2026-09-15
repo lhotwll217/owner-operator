@@ -122,7 +122,9 @@ export async function runSessionStateWidgetProof(options: {
         assert.equal(options?.reasoning, "medium");
         console.log("MODEL_IDENTITY", model.provider, model.id, options?.reasoning);
         modelCalls++;
-        return complete.call(this, model, context, options);
+        const response = await complete.call(this, model, context, options);
+        console.log("MODEL_RESPONSE", safe(response.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")));
+        return response;
       };
     }
     async function enrich(candidate: EnrichmentCandidate): Promise<ThreadEnrichment> {
@@ -170,6 +172,13 @@ export async function runSessionStateWidgetProof(options: {
       return response.json();
     }
     async function nativeProof(label: string, rows: SessionStateRow[]) {
+      for (const id of ["child", "summarized", "partial"]) {
+        const row = rows.find((item) => item.id === id);
+        assert.equal(row?.state, "idle", `${label}: ${id} must be idle without an unresolved owner action`);
+        assert.ok(row?.summary && row.generatedTopic, `${label}: ${id} has current presentation`);
+      }
+      assert.equal(rows.find((row) => row.id === "decision")?.state, "needs-you", `${label}: the retention choice remains an owner decision`);
+      assert.deepEqual(daemon!.state.listNeedsYouMessageVersions().map(({ threadId }) => threadId), ["decision"], `${label}: settled reviews and active parents cannot become needs-you scheduler inputs`);
       assert.equal((await api("/ready")).ready, true, "proof daemon must remain ready on the tested source tree");
       const db = new DatabaseSync(dbPath, { readOnly: true });
       try {
@@ -249,11 +258,6 @@ export async function runSessionStateWidgetProof(options: {
     const settled: SessionStateRow[] = await api("/session-state");
     assert.equal(settled.find((r) => r.id === "first-message")?.state, "idle");
     await nativeProof("direct-idle", settled);
-    for (const id of ["child", "summarized"]) {
-      assert.equal(after.find((r) => r.id === id)?.state, "idle");
-      assert.ok(after.find((r) => r.id === id)?.summary);
-      assert.ok(after.find((r) => r.id === id)?.generatedTopic);
-    }
     await api("/done", { ids: ["child", "summarized"] });
     assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "first-message", "parent", "partial"], "only explicit Done removes completed work");
     assert.equal(after.find((r) => r.id === "decision")?.state, "needs-you");

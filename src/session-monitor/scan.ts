@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ScanActiveTranscriptsResult } from "./scan-active-transcripts.mjs";
-import type { EnrichmentCandidate } from "@owner-operator/core";
+import { AgentRunStatus, type EnrichmentCandidate } from "@owner-operator/core";
 
 const execFileAsync = promisify(execFile);
 const scanScript = fileURLToPath(new URL("./scan-active-transcripts.mjs", import.meta.url));
@@ -36,15 +36,30 @@ export async function sampleTranscript(threadId: string, source: string, maxChar
 
 export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<string> {
   const samples = [await sampleTranscript(candidate.id, candidate.source)];
-  let remaining = 24_000;
-  for (const [index, child] of candidate.children.entries()) {
-    if (remaining < 1_000) {
-      samples.push(`${candidate.children.length - index} child transcripts omitted by the context limit.`);
-      break;
-    }
-    const sample = `Delegated child ${child.id}, run ${child.runId}, status ${child.status}\n${await sampleTranscript(child.id, child.source, Math.min(8_000, remaining - 300))}`;
+  if (!candidate.children.length) return samples[0];
+  const active = candidate.children.filter((child) => child.status === AgentRunStatus.Pending || child.status === AgentRunStatus.Running);
+  const terminal = candidate.children.filter((child) => child.status !== AgentRunStatus.Pending && child.status !== AgentRunStatus.Running);
+  const header = (child: EnrichmentCandidate["children"][number]) => `\n\nDelegated child ${child.id}, run ${child.runId}, status ${child.status}\n`;
+  const coverage = "\n\nChild transcript excerpts are bounded, not complete verification of the children's work.";
+  let remaining = 24_000 - coverage.length - 200;
+  const activeHeaders = active.reduce((sum, child) => sum + header(child).length, 0);
+  const activeBudget = Math.min(8_000, Math.floor((remaining - activeHeaders) / Math.max(1, active.length)));
+  if (activeBudget < 1_000) throw new Error("active child evidence exceeds the bounded context; parent summary remains eligible");
+  for (const child of active) {
+    const sample = header(child) + await sampleTranscript(child.id, child.source, activeBudget);
     samples.push(sample);
     remaining -= sample.length;
   }
-  return samples.join("\n\n");
+  let includedTerminal = 0;
+  for (const child of terminal) {
+    const budget = Math.min(8_000, remaining - header(child).length);
+    if (budget < 1_000) break;
+    const sample = header(child) + await sampleTranscript(child.id, child.source, budget);
+    samples.push(sample);
+    remaining -= sample.length;
+    includedTerminal++;
+  }
+  samples.push(coverage);
+  if (includedTerminal < terminal.length) samples.push(`\n${terminal.length - includedTerminal} terminal child transcripts omitted by the context limit; their work is not assessed here.`);
+  return samples.join("");
 }

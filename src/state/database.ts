@@ -52,7 +52,8 @@ const CHILD_EVIDENCE_SQL = `(SELECT json_group_array(json_object(
   SELECT child.id, child.source, child.last_message_at, run.id AS run_id, run.status
   FROM agent_runs run JOIN threads child ON child.id = run.child_session_id
   WHERE run.parent_thread_id = t.id
-  ORDER BY run.created_at DESC, run.id
+  ORDER BY run.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}') DESC,
+    run.created_at DESC, run.id
 ))`;
 
 export function defaultDbPath(): string {

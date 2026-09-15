@@ -14,6 +14,7 @@ import {
 import { waitFor } from "../gateway/test/helpers";
 import { State } from "../state/state";
 import { Scheduler } from "./scheduler";
+import { parseDetails } from "../agent/enrichment";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-scheduler-events-"));
 const state = new State(join(dir, "state.db"));
@@ -95,6 +96,13 @@ try {
   const idle = { ...row("model-attention", "2026-07-09T10:04:00.000Z"), lastRole: "user", secondsSinceLastMessage: 7200, secondsSinceActivity: 7200 };
   state.recordObservation(idle);
   assert.equal(state.listSessionState().find((item) => item.id === idle.id)?.state, "idle");
+  const noAction = parseDetails(JSON.stringify({ topic: "CSV escaping review", summary: "The agent reports completion but CSV verification evidence is missing. No owner action.", priority: 2, ownerAction: null, attention: "needs-you" }));
+  assert.ok(state.appendEnrichment(idle.id, noAction, idle.lastMessageAt));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(contexts.length, 3, "verification uncertainty without a human action cannot trigger a schedule");
+  assert.equal(state.listScheduleRuns(job.id).length, 3);
+  idle.lastMessageAt = "2026-07-09T10:05:00.000Z";
+  state.recordObservation(idle);
   const details = { topic: "Retention decision", summary: "Choose the retention period.", priority: 2, attention: "needs-you" as const };
   assert.ok(state.appendEnrichment(idle.id, details, idle.lastMessageAt));
   await waitFor(() => contexts.length === 4, 1_000, "model attention triggers needs-you schedule");
