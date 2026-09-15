@@ -5,9 +5,15 @@
 //     --threads <n>           enrich only the n loudest candidates (fast iteration)
 //     --no-enrich             observe and persist only; skip model enrichment
 //     --sample-only           run the transcript sampler but no model call (free iteration)
+//     --daemon-enrich         let the daemon's own enrichment queue run, and watch the rows
 //     --ask <file>            JSON [{id, question}] the production `oo` answers afterwards
 //     --native <binary>       LiveSummaryProof build; renders these rows in the real widget
 //     --active-window <w>     owner visibility window (default 36h, the owner's setting)
+//
+// `--daemon-enrich` is the mode that compares two code versions. It calls nothing this file
+// owns: the daemon installs its own enrichment composition and drains its own serial queue,
+// so each checkout of this harness measures that checkout's pipeline. The explicit loop below
+// is a diagnostic for one version at a time.
 //
 // What runs is production code: the sandbox-user primitive owns isolation, `startDaemon`
 // owns the daemon, `scanTranscripts` owns observation, and enrichment is the exact
@@ -23,6 +29,7 @@ import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { closeSandboxUser, materializeSandboxUser } from "../sandbox-user.ts";
 import { evalSandboxPath } from "../sandbox.mjs";
 import { buildReplayHome } from "./build-replay-home.mjs";
@@ -58,11 +65,27 @@ const liveOoHome = join(homedir(), ".owner-operator");
 
 // The evaluated agent must not be able to read the capture, the expected answers, or the
 // owner's live stores; the sandbox blacklist is what denies them.
+// Both arms answer on the same model at the same reasoning level, pinned here rather than
+// inherited, so a settings change between runs cannot masquerade as a code difference.
+const MODEL = { defaultProvider: "openai-codex", defaultModel: "gpt-6-astra", defaultThinkingLevel: "high" as const };
+const armRoot = resolve(join(import.meta.dirname, "..", ".."));
+const otherCheckouts = [join(homedir(), "Development", "owner-operator"), "/opt/homebrew/lib/node_modules"];
+
 const sandbox = materializeSandboxUser({
   profile: "cli-driving",
   root,
   sourcePiAgentDir: join(liveOoHome, "pi"),
-  protectedOwnerPaths: [liveOoHome, capture, outRoot, join(homedir(), ".claude"), join(homedir(), ".codex")],
+  modelSettings: MODEL,
+  // Name the owner's stores and this evaluation's own material, not the whole Owner Operator
+  // home: a checkout under that home is where an arm's skills and search helper live, and an
+  // arm that cannot read its own helper cannot answer from a transcript at all.
+  // Blacklisting the other product checkouts is equally wrong — it would purge every replayed
+  // thread whose work happened inside one. The trace records foreign-helper calls instead.
+  protectedOwnerPaths: [
+    capture, outRoot, join(liveOoHome, "workspace"),
+    join(liveOoHome, "sessions"), join(liveOoHome, "pi"), join(liveOoHome, "state.db"),
+    join(homedir(), ".claude"), join(homedir(), ".codex"),
+  ],
 });
 const previousEnvironment = { ...process.env };
 for (const key of Object.keys(process.env)) delete process.env[key];
@@ -77,11 +100,29 @@ try {
   const replay = buildReplayHome({ capture, root, activeWindow });
   write("replay.json", replay);
 
+  // Which code answered. An arm is only comparable if its product code, its agent skills, and
+  // its search helper all resolve inside the same checkout as this file.
+  const coreEntry = fileURLToPath(await import.meta.resolve("@owner-operator/core"));
+  write("provenance.json", {
+    armRoot,
+    head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: armRoot, encoding: "utf8" }).trim(),
+    uncommitted: execFileSync("git", ["status", "--porcelain"], { cwd: armRoot, encoding: "utf8" })
+      .trim().split("\n").filter(Boolean),
+    ooBinary: join(armRoot, "src", "cli", "oo.ts"),
+    searchHelper: join(armRoot, "src", "agent", "skills", "session-search", "scripts", "session-search.mjs"),
+    core: coreEntry,
+    coreInsideArm: coreEntry.startsWith(armRoot + "/"),
+    model: MODEL,
+    capture,
+    activeWindow,
+    node: process.version,
+  });
+
   daemon = await startDaemon({
     port: 0,
     watch: false,
     // Enrichment is driven explicitly below so each call's latency and failure is recorded.
-    enableEnrichment: false,
+    enableEnrichment: has("daemon-enrich"),
     monitor: { intervalMs: 60 * 60 * 1_000, logger: (record) => { monitorLog.push(record); } },
     scheduler: { tickMs: 60 * 60 * 1_000 },
     agentRuns: {
@@ -101,11 +142,53 @@ try {
   const observed = daemon.state.listCurrentSessionState();
   write("observed.json", { observeMs, rows: observed.length, sessions: observed });
 
-  // ---- enrichment -------------------------------------------------------------------
-  const candidates = daemon.state.listEnrichmentCandidates();
+  // ---- enrichment, as the daemon runs it ----------------------------------------------
+  // What the owner waits for is a row changing on screen, so the measurement watches the
+  // projection while the daemon's queue works: one entry per visible change, timed from the
+  // poll that queued the work.
+  if (has("daemon-enrich")) {
+    const timeline: Array<Record<string, unknown>> = [];
+    const seen = new Map<string, string>();
+    const snapshot = (): void => {
+      for (const row of daemon!.state.listCurrentSessionState()) {
+        const shape = JSON.stringify([row.state, row.generatedTopic, row.ownerTitle, row.summary, row.topic]);
+        if (seen.get(row.id) === shape) continue;
+        seen.set(row.id, shape);
+        timeline.push({
+          atMs: Date.now() - observeStart, id: row.id, source: row.source, state: row.state,
+          generatedTopic: row.generatedTopic, ownerTitle: row.ownerTitle,
+          summary: row.summary, shownTitle: row.topic,
+          ...("summaryPending" in row ? { summaryPending: (row as { summaryPending?: boolean }).summaryPending } : {}),
+        });
+      }
+    };
+    snapshot();
+    const deadline = Date.now() + Number(flag("enrich-timeout-s", "900")) * 1_000;
+    let quietSince = Date.now();
+    while (Date.now() < deadline) {
+      await new Promise((settle) => setTimeout(settle, 250));
+      const before = timeline.length;
+      snapshot();
+      const remaining = daemon.state.listEnrichmentCandidates().length;
+      if (timeline.length !== before) quietSince = Date.now();
+      // The queue is finished when nothing is eligible, or when nothing has moved for long
+      // enough that the remaining candidates are the ones this version cannot enrich.
+      if (remaining === 0 || Date.now() - quietSince > 30_000) break;
+    }
+    write("timeline.json", {
+      observedAt: new Date(observeStart).toISOString(),
+      watchedMs: Date.now() - observeStart,
+      rows: observed.length,
+      remainingCandidates: daemon.state.listEnrichmentCandidates().map((row) => row.id),
+      timeline,
+    });
+  }
+
+  // ---- enrichment, driven one call at a time ------------------------------------------
+  const candidates = has("daemon-enrich") ? [] : daemon.state.listEnrichmentCandidates();
   const selected = threadLimit > 0 ? candidates.slice(0, threadLimit) : candidates;
   const attempts: Array<Record<string, unknown>> = [];
-  if (!has("no-enrich")) {
+  if (!has("no-enrich") && !has("daemon-enrich")) {
     for (const candidate of selected) {
       const started = Date.now();
       const attempt: Record<string, unknown> = {
@@ -206,8 +289,9 @@ try {
       const trace = join(out, `${id}.trace.ndjson`);
       const started = Date.now();
       const result = spawnSync(process.execPath, [
-        "--import", "tsx", join(import.meta.dirname, "..", "..", "src", "cli", "oo.ts"), question,
+        "--import", "tsx", join(armRoot, "src", "cli", "oo.ts"), question,
       ], {
+        cwd: armRoot,
         encoding: "utf8",
         timeout: 10 * 60 * 1_000,
         env: { ...process.env, OO_TRACE: trace, OO_EVAL_READ_ONLY: "1" },
@@ -220,6 +304,12 @@ try {
         answer: result.stdout?.trim() ?? "",
         error: result.status === 0 ? undefined : (result.stderr || `exit ${result.status}`).slice(0, 2_000),
         toolCalls: events.filter((event) => event.event === "tool_call").map((event) => event.tool),
+        // Every product checkout on this machine ships the same helper under a different path,
+        // so a bash call naming one of the others answered from that version, not this arm's.
+        foreignCheckoutCalls: events
+          .filter((event) => event.event === "tool_call" && event.tool === "bash")
+          .map((event) => String((event.args as { command?: string })?.command ?? ""))
+          .filter((command) => otherCheckouts.some((path) => command.includes(path))),
         turns: events.filter((event) => event.event === "turn").length,
         tokens: events.filter((event) => event.event === "turn")
           .reduce((sum, event) => sum + Number((event.usage as { totalTokens?: number })?.totalTokens ?? 0), 0),

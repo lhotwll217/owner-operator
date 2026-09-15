@@ -94,7 +94,22 @@ try {
   assert.equal(rowOf(lifecycle.id).topic, "My export work", "an owner-pinned title outlives every generated one");
   assert.equal(rowOf(lifecycle.id).generatedTopic, "Something else entirely", "the generated title keeps landing underneath");
 
-  console.log("ok - typed summaries, first message, working updates, pinned title, stale guard, direct idle, active child, explicit Done, title lifecycle, retained recap");
+  // ---- queue order --------------------------------------------------------------------
+  // Enrichment runs one thread at a time, so the row still showing prompt text waits behind
+  // whatever is in front of it. Newer work goes first, except that a row with no title yet
+  // goes before any refresh: that row is the one the owner cannot read.
+  const untitled = fakeScanRow({ id: "untitled", topic: "could you look at the thing from yesterday", lastMessageAt: "2026-06-09T11:00:00.000Z", secondsSinceLastMessage: 4000 });
+  const titledOlder = fakeScanRow({ id: "titled-older", lastMessageAt: "2026-06-09T11:30:00.000Z", secondsSinceLastMessage: 4000 });
+  const titledNewer = fakeScanRow({ id: "titled-newer", lastMessageAt: "2026-06-09T11:45:00.000Z", secondsSinceLastMessage: 4000 });
+  for (const row of [untitled, titledOlder, titledNewer]) state.recordObservation(row);
+  for (const row of [titledOlder, titledNewer]) {
+    assert.equal(state.appendEnrichment(row.id, { topic: "Export work", summary: "Exporting.", priority: 3, attention: "idle" }, row.lastMessageAt), true);
+    state.recordObservation({ ...row, lastMessageAt: `${row.lastMessageAt.slice(0, 19)}.500Z` });
+  }
+  const queue = state.listEnrichmentCandidates().map((row) => row.id).filter((id) => id.startsWith("titled") || id === "untitled");
+  assert.deepEqual(queue, ["untitled", "titled-newer", "titled-older"], "a row with no title yet is generated before any refresh");
+
+  console.log("ok - typed summaries, first message, working updates, pinned title, stale guard, direct idle, active child, explicit Done, title lifecycle, retained recap, queue order");
 } finally {
   state.close();
   cleanup();

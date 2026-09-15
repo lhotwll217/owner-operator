@@ -727,7 +727,10 @@ export class ThreadDb {
            OR t.enriched_children != ${CHILD_EVIDENCE_SQL}
            OR (t.enriched_through_message_at = t.last_message_at
              AND t.enriched_while_working != (${EFFECTIVE_THREAD_STATE_SQL} = 'working')))
-       ORDER BY t.last_message_at DESC`,
+       -- The queue runs one thread at a time, so its order is what the owner waits on. A row
+       -- with no title yet is showing raw prompt text, so it goes before rows that are only
+       -- refreshing a title they already have; within each group, newest work first.
+       ORDER BY (COALESCE(t.owner_title, detail.topic) IS NOT NULL) ASC, t.last_message_at DESC`,
     ).all() as Array<{ id: string }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));
     return ids.flatMap(({ id }) => {

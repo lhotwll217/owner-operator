@@ -1,27 +1,96 @@
 // Capture a frozen slice of real Owner Operator state and its transcripts for local replay.
 //
 //   node eval/replay/capture-session-slice.mjs --out <dir> [--window 7d] [--oo-home <dir>]
+//   node eval/replay/capture-session-slice.mjs --verify <dir>
 //
 // The live state database is opened read-only and the live transcripts are copied, never
 // written. Rows are copied verbatim: bad summaries, missing history, and stale enrichment
 // watermarks are the point of the capture, so nothing here repairs or regenerates them.
 //
+// Every session is authorized by the privacy-aware session-search helper before its bytes are
+// copied: the helper applies the configured sources and the owner's blacklist, and the path it
+// resolves must be the path this capture reads. The helper answers with bounded views, never a
+// whole transcript, and a replay needs the whole file to reproduce the scan — so the helper
+// decides access and the copy supplies fidelity. `--verify` re-runs that authorization, and the
+// credential scan, against an existing capture without rebuilding it.
+//
 // Output layout under --out:
 //   state.db                     schema-current copy of the selected rows
 //   transcripts/<store>/...      transcript files, relative layout preserved per store
 //   stores.json                  { store key -> transcript format } for the replay home
-//   manifest.json                provenance: counts, span, source mix, coverage
+//   manifest.json                provenance: counts, span, source mix, coverage, authorization,
+//                                and what a credential scan of the copied bytes found
 //
 // The slice is anchored, not stamped: manifest.anchor is the newest message in the slice, and
 // build-replay-home.mjs shifts every timestamp by (run start - anchor) so relative timing —
 // and therefore working/idle/needs-you classification — reproduces on every run.
 
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isBlacklisted, loadBlacklist, loadMonitoredTranscriptStores } from "@owner-operator/core";
 import { ThreadDb } from "../../src/state/database.ts";
+
+const SEARCH_HELPER = fileURLToPath(new URL("../../src/agent/skills/session-search/scripts/session-search.mjs", import.meta.url));
+const INSTALL_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+/** Ask the approved helper whether this session may be read, and which file it resolves to. */
+function authorizeSession(id, home) {
+  try {
+    const header = execFileSync(process.execPath, [SEARCH_HELPER, "--skim", id, "--max-chars", "500"], {
+      encoding: "utf8", maxBuffer: 1024 * 1024,
+      env: { ...process.env, OO_HOME: home, OO_INSTALL_ROOT: INSTALL_ROOT },
+    }).split("\n", 1)[0];
+    const path = /\spath=(.+)$/.exec(header)?.[1];
+    return path && header.startsWith(`skim id=${id} `)
+      ? { authorized: true, path }
+      : { authorized: false, reason: "the helper resolved a different session" };
+  } catch (error) {
+    const message = String(error.stderr || error.message).split("\n", 1)[0];
+    return { authorized: false, reason: message.slice(0, 200) };
+  }
+}
+
+// Credential-shaped material in a capture is reported, never inferred: a transcript holds
+// whatever the owner's own work put in it, and a capture is a second copy of that.
+const CREDENTIAL_PATTERNS = [
+  ["openai or anthropic key", /\b(?:sk-|sk-ant-)[A-Za-z0-9_-]{20,}/g],
+  ["github token", /\bgh[pousr]_[A-Za-z0-9]{30,}/g],
+  ["aws access key", /\bAKIA[0-9A-Z]{16}\b/g],
+  ["google api key", /\bAIza[0-9A-Za-z_-]{30,}/g],
+  ["slack token", /\bxox[abprs]-[0-9A-Za-z-]{10,}/g],
+  ["private key block", /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g],
+  ["json web token", /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
+  ["bearer authorization", /\b[Aa]uthorization["'\s:]+Bearer\s+[A-Za-z0-9._-]{20,}/g],
+];
+
+/** What credential-shaped strings the copied bytes contain, by pattern and file. Values stay out. */
+function scanCredentials(root) {
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (!path.endsWith(".db")) files.push(path);
+    }
+  };
+  walk(root);
+  const findings = {};
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    for (const [name, pattern] of CREDENTIAL_PATTERNS) {
+      const found = text.match(pattern);
+      if (!found) continue;
+      const entry = findings[name] ??= { matches: 0, files: [] };
+      entry.matches += found.length;
+      entry.files.push(basename(file));
+    }
+  }
+  return { filesScanned: files.length, findings };
+}
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
@@ -31,6 +100,56 @@ const flag = (name, fallback) => {
 };
 
 const ooHome = resolve(flag("oo-home", process.env.OO_HOME ?? join(homedir(), ".owner-operator")));
+
+// Verification re-asks the same questions of an existing capture: does the approved helper
+// still authorize every session in it, does it resolve each one to the file that was copied,
+// and what credential-shaped material do those bytes hold?
+const verifyDir = flag("verify", "");
+if (verifyDir) {
+  const captureDir = resolve(verifyDir);
+  const manifest = JSON.parse(readFileSync(join(captureDir, "manifest.json"), "utf8"));
+  const copied = [];
+  const walkCopies = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walkCopies(path);
+      else if (path.endsWith(".jsonl") || path.endsWith(".ndjson")) copied.push(path);
+    }
+  };
+  walkCopies(join(captureDir, "transcripts"));
+  const captureDb = new DatabaseSync(join(captureDir, "state.db"), { readOnly: true });
+  const byFile = new Map(captureDb.prepare("SELECT id, transcript_path FROM threads WHERE transcript_path IS NOT NULL")
+    .all().map((row) => [basename(row.transcript_path), row.id]));
+  captureDb.close();
+  const unauthorized = [];
+  const mismatched = [];
+  let authorized = 0;
+  for (const file of copied) {
+    const id = byFile.get(basename(file));
+    if (!id) { unauthorized.push({ file: basename(file), reason: "no thread row names this file" }); continue; }
+    const decision = authorizeSession(id, ooHome);
+    if (!decision.authorized) { unauthorized.push({ id, reason: decision.reason }); continue; }
+    if (basename(decision.path) !== basename(file)) {
+      mismatched.push({ id, helper: basename(decision.path), captured: basename(file) });
+      continue;
+    }
+    authorized += 1;
+  }
+  const verification = {
+    verifiedAt: new Date().toISOString(),
+    capture: captureDir,
+    capturedAt: manifest.capturedAt,
+    transcripts: copied.length,
+    authorizedBySearchHelper: authorized,
+    unauthorized,
+    resolvedToADifferentFile: mismatched,
+    credentialScan: scanCredentials(captureDir),
+  };
+  writeFileSync(join(captureDir, "verification.json"), `${JSON.stringify(verification, null, 2)}\n`);
+  console.log(JSON.stringify(verification, null, 2));
+  process.exit(unauthorized.length || mismatched.length ? 1 : 0);
+}
+
 const out = resolve(flag("out", "") || (() => { throw new Error("--out is required"); })());
 const window = flag("window", "7d");
 const windowDays = /^(\d+)d$/.exec(window)?.[1];
@@ -87,10 +206,18 @@ mkdirSync(join(out, "transcripts"), { recursive: true });
 const usedStores = new Map();
 const copied = [];
 const unavailable = [];
+const unauthorized = [];
 for (const row of kept) {
   const path = row.transcript_path ? resolve(row.transcript_path) : null;
   const store = path && stores.find((candidate) => path.startsWith(candidate.root + sep));
   if (!path || !store) { unavailable.push({ id: row.id, reason: path ? "outside-configured-store" : "no-transcript-path" }); continue; }
+  // The helper decides access; a session it refuses, or resolves elsewhere, is left behind.
+  const decision = authorizeSession(row.id, ooHome);
+  if (!decision.authorized || resolve(decision.path) !== path) {
+    unauthorized.push({ id: row.id, reason: decision.reason ?? "the helper resolved a different file" });
+    selected.delete(row.id);
+    continue;
+  }
   const key = storeKey(store);
   usedStores.set(key, store.format);
   const destination = join(out, "transcripts", key, relative(store.root, path));
@@ -119,6 +246,7 @@ const insert = (table, rows) => {
   return rows.length;
 };
 
+const authorizedRows = kept.filter((row) => selected.has(row.id));
 const ids = [...selected];
 const placeholders = ids.map(() => "?").join(",");
 const details = all(`SELECT * FROM thread_details WHERE thread_id IN (${placeholders})`, ...ids);
@@ -131,7 +259,7 @@ const worktreeIds = new Set(selections.map((row) => row.worktree_id));
 const worktrees = all("SELECT * FROM worktrees").filter((row) => worktreeIds.has(row.id));
 
 target.exec("BEGIN IMMEDIATE");
-insert("threads", kept);
+insert("threads", authorizedRows);
 insert("thread_details", details);
 insert("worktrees", worktrees);
 insert("thread_worktrees", selections);
@@ -158,7 +286,7 @@ const tally = (rows, pick) => rows.reduce((counts, row) => {
   counts[key] = (counts[key] ?? 0) + 1;
   return counts;
 }, {});
-const times = kept.map((row) => row.last_message_at).filter(Boolean).sort();
+const times = authorizedRows.map((row) => row.last_message_at).filter(Boolean).sort();
 const anchor = times.at(-1);
 
 const manifest = {
@@ -167,20 +295,20 @@ const manifest = {
   window,
   anchor,
   earliestMessageAt: times[0],
-  threads: kept.length,
+  threads: authorizedRows.length,
   detailVersions: details.length,
   maxDetailVersion: Math.max(0, ...details.map((row) => row.version)),
   transcriptsCopied: copied.length,
   transcriptBytes: copied.reduce((sum, file) => sum + file.bytes, 0),
-  bySource: tally(kept, (row) => row.source),
-  byApp: tally(kept, (row) => row.app),
+  bySource: tally(authorizedRows, (row) => row.source),
+  byApp: tally(authorizedRows, (row) => row.app),
   byState: tally([...current.values()], (row) => row.state),
-  byRepo: tally(kept, (row) => row.repo),
+  byRepo: tally(authorizedRows, (row) => row.repo),
   coverage: {
-    ownerTitles: kept.filter((row) => row.owner_title).length,
-    neverEnriched: kept.filter((row) => !row.enriched_through_message_at).length,
-    staleEnrichment: kept.filter((row) => row.enriched_through_message_at && row.enriched_through_message_at < row.last_message_at).length,
-    freshEnrichment: kept.filter((row) => row.enriched_through_message_at === row.last_message_at).length,
+    ownerTitles: authorizedRows.filter((row) => row.owner_title).length,
+    neverEnriched: authorizedRows.filter((row) => !row.enriched_through_message_at).length,
+    staleEnrichment: authorizedRows.filter((row) => row.enriched_through_message_at && row.enriched_through_message_at < row.last_message_at).length,
+    freshEnrichment: authorizedRows.filter((row) => row.enriched_through_message_at === row.last_message_at).length,
     latestWithSummary: [...current.values()].filter((row) => row.summary).length,
     latestWithTopic: [...current.values()].filter((row) => row.topic).length,
     revisedThreads: [...current.values()].filter((row) => row.version > 1).length,
@@ -190,6 +318,9 @@ const manifest = {
     worktrees: worktrees.length,
   },
   unavailableHistory: unavailable,
+  authorizedBySearchHelper: copied.length,
+  unauthorizedBySearchHelper: unauthorized,
+  credentialScan: scanCredentials(out),
   blacklistedThreadsExcluded: excluded.length,
   foreignKeyViolations: violations.length,
   stores: Object.fromEntries(usedStores),
