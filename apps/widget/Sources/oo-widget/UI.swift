@@ -134,7 +134,7 @@ private func lineText(_ r: SessionStateRow) -> Text {
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
-    out.append(AttributedString(r.summary ?? r.title, attributes: step))
+    out.append(AttributedString(r.displayRecap ?? r.title, attributes: step))
     guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
 }
@@ -265,6 +265,7 @@ struct RowView: View {
     @State private var hovering = false
     @State private var rowHovering = false
     @State private var editing = false
+    @State private var recapExpanded = false
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
 
@@ -280,6 +281,7 @@ struct RowView: View {
                     }
                     title
                     titleAffordance
+                    recapDisclosure
                     Spacer(minLength: 6)
                     if row.hasOldAttention() {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -290,10 +292,11 @@ struct RowView: View {
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
-                if let summary = row.summary, !summary.isEmpty {
-                    Text("→ \(summary)")
+                if let recap = shownRecap {
+                    Text("→ \(recap)\(row.summaryPending ? " ·" : "")")
                         .foregroundStyle(.secondary).font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)
+                        .help(row.summaryPending ? "This recap is being refreshed for newer activity." : "")
                 }
                 HStack(spacing: 6) {
                     if row.diffAdded != nil || row.diffDeleted != nil {
@@ -311,6 +314,28 @@ struct RowView: View {
             if row.isRenamed {
                 Button("Use AI title") { onRename("") }
             }
+        }
+    }
+
+    /// The recap this row shows, if any. A working row shows its title and working glyph while
+    /// the task is still moving; a delegated child keeps its recap folded away until the owner
+    /// opens it, so a parent's list of children stays scannable.
+    private var shownRecap: String? {
+        guard !row.recapStartsCollapsed || recapExpanded else { return nil }
+        return row.displayRecap
+    }
+
+    /// The child row's fixed-width recap toggle. It holds its slot so opening a recap never
+    /// reflows the title beside it.
+    @ViewBuilder private var recapDisclosure: some View {
+        if row.recapStartsCollapsed, row.displayRecap != nil {
+            Button { recapExpanded.toggle() } label: {
+                Image(systemName: recapExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 10)
+            .help(recapExpanded ? "Hide this delegated run's recap" : "Show this delegated run's recap")
         }
     }
 

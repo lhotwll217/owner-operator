@@ -51,7 +51,12 @@ try {
     { type: "user", entrypoint: "cli", sessionId: "first-message", cwd: project, timestamp: at, message: { content: "Implement the export" } },
   ]);
   const firstMessageRows = await monitor.poll();
-  assert.ok(firstMessageRows.some((row) => row.id === "first-message" && row.topic && row.summary), "a one-off CLI session is visible from its first message");
+  const firstMessage = firstMessageRows.find((row) => row.id === "first-message");
+  assert.ok(firstMessage?.topic, "a one-off CLI session is visible, with a title, from its first message");
+  assert.ok(
+    state.listEnrichmentCandidates().some((row) => row.id === "first-message"),
+    "its title and recap are generated from that first message rather than left as prompt text",
+  );
   console.log("ok - configured scan window preserved; all 55 current rows eligible for updates");
 } finally {
   monitor.stop();

@@ -70,6 +70,8 @@ struct SessionStateRow: Decodable, Identifiable {
     let generatedTopic: String?
     let ownerTitle: String?
     let summary: String?
+    /// The recap has not caught up with the latest activity yet; the last one still shows.
+    let summaryPending: Bool
     let priority: Int?
     let state: ThreadState
     let lastActive: String
@@ -86,7 +88,7 @@ struct SessionStateRow: Decodable, Identifiable {
     var nestingDepth: Int = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, priority
+        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, summaryPending, priority
         case state, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
         case diffAdded, diffDeleted, parentThreadId
     }
@@ -102,6 +104,7 @@ struct SessionStateRow: Decodable, Identifiable {
         generatedTopic = try? c.decode(String.self, forKey: .generatedTopic)
         ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
         summary = try? c.decode(String.self, forKey: .summary)
+        summaryPending = (try? c.decode(Bool.self, forKey: .summaryPending)) ?? false
         priority = try? c.decode(Int.self, forKey: .priority)
         let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
         state = ThreadState(rawValue: raw) ?? .idle
@@ -122,6 +125,18 @@ struct SessionStateRow: Decodable, Identifiable {
         }
         return topic
     }
+
+    /// The recap a widget surface shows. A working row shows its title and working glyph while
+    /// the task is still moving; the recap it would carry is still generated and stored for
+    /// Owner Operator to read.
+    var displayRecap: String? {
+        guard state != .working, let recap = summary, !recap.isEmpty else { return nil }
+        return recap
+    }
+
+    /// A delegated child's recap stays folded until the owner opens it, so a parent's children
+    /// read as a list of runs rather than a wall of nested prose.
+    var recapStartsCollapsed: Bool { nestingDepth > 0 }
 
     func hasOldAttention(at now: Date = Date()) -> Bool {
         guard state == .needsYou, let lastMessage = parseISODate(lastMessageAt) else { return false }

@@ -611,10 +611,15 @@ export class ThreadDb {
         this.db.exec("COMMIT");
         return null;
       }
+      // The title identifies the work, so it holds still while the work stays the same thing:
+      // a reworded title for the same task makes the owner re-read a row they already know.
+      // Enrichment repeats the current title verbatim unless the task's identity changed
+      // categorically, and a different string is what marks that change.
+      const currentTitle = this.latestDetails(threadId)?.topic ?? null;
       const edge = this.appendDetailsInTx(threadId, {
         ...(!working ? { state: details.attention } : {}),
         priority: details.priority,
-        topic: details.topic,
+        topic: details.topic || currentTitle,
         summary: details.summary,
       }, "model");
       this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ?, enriched_children = ? WHERE id = ?")
@@ -675,11 +680,11 @@ export class ThreadDb {
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
+              detail.summary AS summary,
               CASE WHEN t.enriched_through_message_at = t.last_message_at
                      AND t.enriched_children = ${CHILD_EVIDENCE_SQL}
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
-                   THEN COALESCE(detail.summary, t.raw_topic, '')
-                   ELSE COALESCE(t.raw_topic, '') END AS summary, detail.priority,
+                   THEN 0 ELSE 1 END AS summaryPending, detail.priority,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
@@ -708,6 +713,7 @@ export class ThreadDb {
       .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
       .map((row) => ({
         ...row,
+        summaryPending: Boolean(row.summaryPending),
         lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
       }));
   }

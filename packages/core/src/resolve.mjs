@@ -18,12 +18,17 @@ export const IDLE_AFTER_SECONDS = 30 * 60;
  * "stopped", so it wins. Then quiet too long → `idle` — by MESSAGE time, never file
  * activity: GUI apps append housekeeping events (mode/meta lines) that keep the file's
  * mtime forever fresh, which made 8-hour-old threads read "2m ago" and never idle.
- * Otherwise: assistant spoke last and yielded → `needs-you`; user spoke last → `working`.
+ * Otherwise: user spoke last → `working`; an assistant turn that yielded → `idle`.
+ *
+ * `needs-you` is never derived here. It states that the OWNER has an unresolved action, and a
+ * transcript scan sees only that a turn ended — not whether anything was asked of the owner.
+ * Enrichment reads the conversation and promotes a thread to `needs-you` when the evidence
+ * shows an actual owner action; a yielded turn alone leaves the thread quietly idle.
  */
 export function deriveState(row) {
   if (row.working) return "working";
   if (row.secondsSinceLastMessage >= IDLE_AFTER_SECONDS) return "idle";
-  return row.lastRole === "assistant" ? "needs-you" : "working";
+  return row.lastRole === "assistant" ? "idle" : "working";
 }
 
 /**

@@ -62,6 +62,7 @@ struct SessionStateTests {
         generatedTopic: String? = nil,
         ownerTitle: String? = nil,
         summary: String? = nil,
+        summaryPending: Bool = false,
         priority: Int? = nil,
         parentThreadId: String? = nil,
         lastMessageAt: String = "2026-01-01T00:00:00.000Z",
@@ -77,6 +78,7 @@ struct SessionStateTests {
         if let generatedTopic { d["generatedTopic"] = generatedTopic }
         if let ownerTitle { d["ownerTitle"] = ownerTitle }
         if let summary { d["summary"] = summary }
+        d["summaryPending"] = summaryPending
         if let priority { d["priority"] = priority }
         if let parentThreadId { d["parentThreadId"] = parentThreadId }
         if let diffAdded { d["diffAdded"] = diffAdded }
@@ -299,17 +301,55 @@ struct SessionStateTests {
         #expect(r.priority == 4)
     }
 
-    @Test func summariesRenderInEveryVisibleState() throws {
+    /// A settled row carries its recap; a working row carries its title and working glyph while
+    /// the task is still moving. The recap a working row would show is still generated and
+    /// stored — Owner Operator reads it even though the panel does not print it.
+    @Test func settledRowsShowRecapsAndWorkingRowsShowTitles() throws {
         let input = try rows([
-            row(id: "working", state: "working", summary: "Writing export tests."),
+            row(id: "working", state: "working", topic: "Export test run", summary: "Writing export tests."),
             row(id: "idle", state: "idle", summary: "Export tests passed."),
             row(id: "decision", state: "needs-you", summary: "Choose the retention policy."),
         ])
         let rendered = renderText(rows: input, port: 47711)
-        #expect(rendered.contains("Writing export tests."))
+        #expect(!rendered.contains("Writing export tests."))
+        #expect(rendered.contains("Export test run"))
+        #expect(input[0].summary == "Writing export tests.")
+        #expect(input[0].displayRecap == nil)
         #expect(rendered.contains("Export tests passed."))
         #expect(rendered.contains("Choose the retention policy."))
         #expect(input.map(\.state) == [.working, .idle, .needsYou])
+    }
+
+    /// The last recap stays on screen while its replacement is generated, marked as pending
+    /// rather than blanked or replaced by the opening prompt.
+    @Test func pendingRecapKeepsTheLastOneWithAMark() throws {
+        let input = try rows([row(id: "t", state: "idle", summary: "Export tests passed.", summaryPending: true)])
+        let rendered = renderText(rows: input, port: 47711)
+        #expect(input[0].summaryPending)
+        #expect(rendered.contains("Export tests passed. ·"))
+    }
+
+    /// A delegated child renders under its parent with its recap folded away; the parent's own
+    /// recap is open. The child's evidence is present either way.
+    @Test func childRecapsStartCollapsed() throws {
+        let input = try rows([
+            row(id: "parent", state: "idle", summary: "Delegated the export work."),
+            row(id: "child", state: "idle", summary: "Export implemented and tested.", parentThreadId: "parent"),
+        ])
+        let rendered = buildSessionState(rows: input).groups[0].rows
+        let parent = try #require(rendered.first { $0.id == "parent" })
+        let child = try #require(rendered.first { $0.id == "child" })
+        #expect(child.nestingDepth > 0)
+        #expect(child.recapStartsCollapsed)
+        #expect(!parent.recapStartsCollapsed)
+        #expect(child.displayRecap == "Export implemented and tested.")
+    }
+
+    /// A row with no generated recap yet shows its title alone rather than prompt text.
+    @Test func rowWithoutARecapShowsOnlyItsTitle() throws {
+        let input = try rows([row(id: "t", state: "idle", topic: "please have a look at the export thing")])
+        #expect(input[0].displayRecap == nil)
+        #expect(input[0].title == "please have a look at the export thing")
     }
 
     @Test func titleFallsBackToTopic() throws {

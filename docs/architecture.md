@@ -76,15 +76,17 @@ Every visible `needs-you`, `idle`, or `working` row is eligible for enrichment, 
 with active delegated children. `ThreadEnrichment` separates required presentation fields
 `topic`, `summary`, and `priority` from an `idle` or `needs-you` attention assessment.
 State applies attention only to settled rows. Working status remains deterministic and does
-not require model agreement. Completed work stays visible until an explicit Done action.
+not require model agreement, while `needs-you` comes only from that assessment: a scan sees a
+turn end, not whether anything was asked of the owner. Completed work stays visible until an explicit Done action.
 
 The message watermark, sampled child evidence, and whether enrichment landed during working status determine freshness.
 A newer message or a change in working status queues another assessment. Failed calls leave
 the row eligible for retry. Owner Done and newer messages reject stale results; regressed
 transcript timestamps cannot overwrite a newer watermark. Unchanged settled assessments survive
-polling and restart. Titles preserve owner renames. Until a current summary arrives, the
-projection uses the transcript topic as its summary fallback. The monitor never awaits the
-model in its scan hot path.
+polling and restart. Titles preserve owner renames, and a generated title holds still until the
+work changes categorically. The projection keeps the last generated summary while a newer one is
+pending and reports that with `summaryPending`; a row with no summary yet shows its title alone.
+The monitor never awaits the model in its scan hot path.
 Observed child transcripts and run statuses accompany the parent sample within a bounded context.
 Child message or run-status changes refresh the parent summary and reject an in-flight older result.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation

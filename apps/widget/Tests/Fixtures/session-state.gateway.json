@@ -9,6 +9,7 @@
     "generatedTopic": "Daemon foundation",
     "ownerTitle": null,
     "summary": "Implement the state seam",
+    "summaryPending": false,
     "priority": 4,
     "state": "needs-you",
     "stateSince": "2026-07-09T10:00:00.000Z",

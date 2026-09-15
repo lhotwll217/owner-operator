@@ -88,7 +88,11 @@ try {
     true,
   );
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(state.listSessionState()[0].state, "needs-you");
+  assert.equal(
+    state.listSessionState().find((item) => item.id === "thread-1")?.state,
+    "idle",
+    "a yielded assistant turn stays quiet until evidence shows an owner action",
+  );
   assert.ok(
     !state.listSessionState().some((item) => item.id === "legacy-plugin-noise"),
     "legacy injected topics remain durable but do not surface in current state",
@@ -151,7 +155,9 @@ try {
     false,
     "an enrichment for an older message cannot overwrite the current handoff",
   );
-  assert.equal(state.listSessionState()[0].summary, "Design the daemon", "a newer message shows the transcript fallback");
+  const refreshing = state.listSessionState().find((item) => item.id === "thread-1");
+  assert.equal(refreshing?.summary, "Implement the state seam", "a newer message keeps the last recap while its replacement is pending");
+  assert.equal(refreshing?.summaryPending, true, "the projection says the recap is behind the latest activity");
 
   assert.deepEqual(state.markThreadsDone(["thread-1", "missing"]).missingIds, ["missing"]);
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "done leaves the active projection");
@@ -164,7 +170,7 @@ try {
   state.recordObservation(row("2026-07-09T10:01:00.000Z"));
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "same message cannot resurrect owner-set done");
   state.recordObservation(row("2026-07-09T10:02:00.000Z"));
-  assert.equal(state.listSessionState()[0].state, "needs-you", "new transcript activity reopens done");
+  assert.equal(state.listSessionState().find((item) => item.id === "thread-1")?.state, "idle", "new transcript activity reopens done");
 
   // State-only flap: the thread leaves needs-you while the model runs but the sampled
   // message is unchanged — the enrichment still lands.
@@ -228,6 +234,15 @@ try {
     nextRunAt: null,
   };
   state.saveSchedule(needsYouSchedule);
+  // A needs-you schedule fires on an evidenced owner action, which enrichment is what supplies.
+  assert.equal(
+    state.appendEnrichment(
+      "thread-1",
+      { topic: "Daemon foundation", priority: 4, summary: "Confirm the retention policy.", attention: "needs-you" as const },
+      "2026-07-09T10:02:00.000Z",
+    ),
+    true,
+  );
   assert.ok(state.claimNeedsYouScheduleRun(needsYouSchedule, [
     { threadId: "thread-1", lastMessageAt: "2026-07-09T10:02:00.000Z" },
   ]));

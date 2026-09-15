@@ -121,6 +121,7 @@ const startOnce = () => startDaemon({
       repo: "issue-131",
       app: "Owner Operator",
       topic: "Delegate ticket 02",
+      lastMessageAt: new Date().toISOString(),
     })],
     intervalMs: 60_000,
   },
@@ -149,7 +150,7 @@ try {
   );
   assert.equal(
     (await gateway.sessionState()).find(({ id }) => id === "operator-thread")?.state,
-    "needs-you",
+    "idle",
     "the root starts from transcript-derived state",
   );
 
@@ -265,7 +266,7 @@ try {
   assert.equal(afterRestart.cwd, selectedWorktree, "restart preserves the originally recorded child cwd");
   assert.equal(
     (await gateway2.sessionState()).find(({ id }) => id === "operator-thread")?.state,
-    "needs-you",
+    "idle",
     "a terminal child restores the root's transcript-derived state through Gateway",
   );
   const restartedView = await gateway2.agentState();

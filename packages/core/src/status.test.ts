@@ -8,7 +8,7 @@ import {
   type ThreadStatus,
 } from "./status";
 
-assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60, working: false }), "needs-you");
+assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60, working: false }), "idle");
 assert.equal(deriveState({ lastRole: "user", secondsSinceLastMessage: 60, working: false }), "working");
 assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: 60, working: true }), "working");
 assert.equal(deriveState({ lastRole: "assistant", secondsSinceLastMessage: IDLE_AFTER_SECONDS, working: false }), "idle");

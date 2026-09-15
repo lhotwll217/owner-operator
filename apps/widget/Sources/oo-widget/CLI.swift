@@ -35,7 +35,7 @@ func renderText(rows: [SessionStateRow], port: Int) -> String {
             let age = sgr(90, shortAge(r.lastActive))
             let indent = String(repeating: "  ", count: r.nestingDepth)
             lines.append("  \(indent)\(glyphColored(r.state)) \(badge)\(r.title)  \(age)")
-            if let summary = r.summary, !summary.isEmpty { lines.append(sgr(90, "      \(indent)→ \(summary)")) }
+            if let recap = r.displayRecap { lines.append(sgr(90, "      \(indent)→ \(recap)\(r.summaryPending ? " ·" : "")")) }
         }
     }
     lines.append("")

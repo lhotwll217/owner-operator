@@ -228,7 +228,7 @@ writeFileSync(
 );
 
 // pi session: format v3 JSONL — a {type:"session"} header (id + cwd) then {type:"message"}
-// entries wrapping AgentMessages. Assistant stopReason "stop" = yielded → needs-you.
+// entries wrapping AgentMessages. Assistant stopReason "stop" = yielded → not working.
 const piId = "01980000-1111-2222-3333-444444444444";
 const piCwd = join(home, "dev", "pi-app");
 mkdirSync(piCwd, { recursive: true });
@@ -310,7 +310,7 @@ try {
   const fresh = run();
   assert.equal(fresh.count, 12, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode, Antigravity, and Grok Build sessions");
   const claude = byId(fresh, sid)!;
-  assert.equal(claude.state, "needs-you", "assistant yielded → needs-you");
+  assert.equal(claude.state, "idle", "assistant yielded → quiet, not an owner obligation");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
   assert.equal(claude.diffAdded, undefined, "no repo at the claude cwd → no delta");
 
@@ -323,7 +323,7 @@ try {
   const cursor = byId(fresh, cid)!;
   assert.equal(cursor.ui, "Cursor");
   assert.equal(cursor.repo, "demo-app-x", "dash-slug reconstructed against the real filesystem");
-  assert.equal(cursor.state, "needs-you", "assistant yielded (no trailing tool_use) → needs-you");
+  assert.equal(cursor.state, "idle", "assistant yielded (no trailing tool_use) → quiet");
   assert.ok(cursor.topic.includes("tighten the retry loop") && !cursor.topic.includes("<user_query>"), "topic clean of wrapper tags");
   assert.deepEqual([cursor.diffAdded, cursor.diffDeleted], [3, 1], "working-tree delta vs HEAD");
   assert.equal(byId(fresh, "abababab-cccc-dddd-eeee-ffffffffffff"), undefined, "Cursor sub-task transcript folds into its core session, not its own thread");
@@ -340,12 +340,12 @@ try {
 
   // The PostHog Code finder: ACP log → thread. taskRunId is the id, cwd → repo, first prompt
   // is the topic, agent_message chunks coalesce to one assistant turn, agent_thought_chunk is
-  // dropped, and the completed prompt (stopReason result) → not working → needs-you.
+  // dropped, and the completed prompt (stopReason result) → not working.
   const ph = byId(fresh, phId)!;
   assert.equal(ph.ui, "PostHog Code", "posthog-code source → PostHog Code app");
   assert.equal(ph.repo, "ph-demo", "repo is the cwd leaf");
   assert.ok(ph.topic.includes("wire up google ads"), "topic from the first session/prompt");
-  assert.equal(ph.state, "needs-you", "completed turn, assistant last → needs-you");
+  assert.equal(ph.state, "idle", "completed turn, assistant last → quiet");
   assert.equal(ph.working, false, "stopReason result present → turn not in progress");
   assert.deepEqual(ph.firstMessages.map((m) => m.role), ["user", "assistant"], "one user turn + coalesced assistant turn");
   assert.equal(
@@ -367,21 +367,21 @@ try {
   // (Regression guard: before gui-hosts, sdk-ts ⇒ automated silently dropped every Conductor thread.)
   const conductor = byId(fresh, condId)!;
   assert.equal(conductor.ui, "Conductor", "Conductor workspace → Conductor app");
-  assert.equal(conductor.state, "needs-you", "assistant yielded → needs-you");
+  assert.equal(conductor.state, "idle", "assistant yielded → quiet");
   assert.ok(conductor.topic.includes("fix the active-thread filter"), "topic from the first user turn");
 
   // The pi finder: header cwd → repo, blocks-or-string content, stopReason "stop" = yielded.
   const pi = byId(fresh, piId)!;
   assert.equal(pi.ui, "Pi", "pi source → Pi app");
   assert.equal(pi.repo, "pi-app", "repo from the session header cwd");
-  assert.equal(pi.state, "needs-you", "assistant yielded (stopReason stop) → needs-you");
+  assert.equal(pi.state, "idle", "assistant yielded (stopReason stop) → quiet");
   assert.ok(pi.topic.includes("retry backoff"), "topic from the first user turn");
 
   // The opencode finder: info record → thread; message + part files join into turns.
   const oc = byId(fresh, ocId)!;
   assert.equal(oc.ui, "OpenCode", "opencode source → OpenCode app");
   assert.equal(oc.repo, "oc-app", "repo from the info record's directory");
-  assert.equal(oc.state, "needs-you", "assistant time.completed present → yielded");
+  assert.equal(oc.state, "idle", "assistant time.completed present → yielded");
   assert.equal(oc.working, false, "completed assistant turn → not working");
   assert.deepEqual(oc.firstMessages.map((m) => m.role), ["user", "assistant"], "parts join into turns");
   assert.ok(oc.firstMessages[0].text.includes("refactor the job queue"), "user text from its part file");
@@ -389,7 +389,7 @@ try {
   // The Antigravity finder: brain transcript steps → turns; the history index is filtered out.
   const ag = byId(fresh, agId)!;
   assert.equal(ag.ui, "Antigravity", "antigravity source → Antigravity app");
-  assert.equal(ag.state, "needs-you", "last step DONE → not working");
+  assert.equal(ag.state, "idle", "last step DONE → not working");
   assert.ok(ag.topic.includes("slow dashboard query"), "topic from the USER_INPUT step");
   assert.ok(!fresh.threads.some((t) => t.topic.includes("history index")), "history.jsonl is not a session");
 
@@ -397,7 +397,7 @@ try {
   const grok = byId(fresh, grokId)!;
   assert.equal(grok.ui, "Grok Build", "grok-build source → Grok Build app");
   assert.equal(grok.repo, "grok-app", "cwd from the records");
-  assert.equal(grok.state, "needs-you", "assistant replied last → needs-you");
+  assert.equal(grok.state, "idle", "assistant replied last → quiet");
 
   // The inverse: a headless SDK worker in a plain cwd (no GUI host) stays hidden by default,
   // and only --all audits it. Exempting GUI hosts must not resurface real workers.
@@ -414,7 +414,7 @@ try {
   );
 
   // Durable owner state is deliberately absent here; the State seam owns done-hold and reopening.
-  assert.equal(byId(run("--thread", sid), sid)?.state, "needs-you", "scanner reports transcript-derived state");
+  assert.equal(byId(run("--thread", sid), sid)?.state, "idle", "scanner reports transcript-derived state");
 
   // ---- privacy blacklist: ABSOLUTE — both layers, no flag bypasses --------------------
   const privateRoot = join(home, "Documents", "Personal");

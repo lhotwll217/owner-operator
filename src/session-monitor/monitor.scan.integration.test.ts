@@ -93,7 +93,7 @@ try {
   const t = current.find((row) => row.id === sid)!;
   assert.equal(t.id, sid, "thread id parsed from the session file on disk");
   assert.equal(t.app, "Claude CLI", "runScan maps the scan's `ui` field to `app`");
-  assert.equal(t.state, "needs-you", "assistant yielded (end_turn) → needs-you");
+  assert.equal(t.state, "idle", "assistant yielded (end_turn) → quiet until enrichment finds an owner action");
   assert.ok(t.topic.includes("tighten the poll loop"), "topic carried from the first user turn");
   assert.equal(
     stored.rows[0]?.transcript_path,

@@ -13,6 +13,7 @@ const row = (id: string, repo: string, topic: string, state: CurrentSessionState
   generatedTopic: topic,
   ownerTitle: null,
   summary: null,
+  summaryPending: false,
   priority: null,
   state,
   stateSince: "2026-07-10T00:00:00.000Z",

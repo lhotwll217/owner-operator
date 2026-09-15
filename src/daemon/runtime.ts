@@ -68,7 +68,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
       : { enrich: options.monitor?.enrich ?? (async (candidate) =>
-          (await import("../agent/enrichment")).enrichThread(await sampleEnrichment(candidate))) }),
+          (await import("../agent/enrichment")).enrichThread(await sampleEnrichment(candidate), {
+            currentTitle: candidate.generatedTopic,
+          })) }),
   });
   modules.sessionMonitor = true;
   const scheduler = new Scheduler(state, {

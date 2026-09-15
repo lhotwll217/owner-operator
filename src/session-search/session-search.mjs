@@ -113,11 +113,31 @@ const directRead = browse || scopedQuery;
 if (candidates && browse) fail("--candidates is only valid with --query");
 // Discovery should not retrieve the prompt currently asking the question. Direct reads
 // preserve an explicit known-ID request regardless of which session supplied that ID.
+const stemsByStableId = new Map();
 if (directRead) {
   for (const { root } of sources) {
     for (const file of walk(root)) {
       if (fileBlacklisted(file)) excludePatterns.push(`^${escapeRegex(file)}$`);
+      const stem = path.basename(file, ".jsonl");
+      const stable = stableSessionId(stem);
+      if (stable !== stem) stemsByStableId.set(stable, stem);
     }
+  }
+}
+
+// Pi writes `<timestamp>_<stable-id>.jsonl` (pi-coding-agent `SessionManager`), so the
+// primitive's filename-derived id carries that prefix while Owner Operator's database,
+// widget, and deep links carry the stable id alone. Translate on the way in and back on
+// the way out, so one id works across the database and every search mode.
+let rewrittenStem = null;
+if (directRead) {
+  const flag = hasSkim ? "--skim" : "--session";
+  const at = passthrough.indexOf(flag);
+  const requested = passthrough[at + 1];
+  const stem = stemsByStableId.get(requested);
+  if (stem) {
+    passthrough[at + 1] = stem;
+    rewrittenStem = { stem, stableId: requested };
   }
 }
 
@@ -147,7 +167,9 @@ try {
       ...typeArgs,
       ...excludeArgs,
     ]);
-    process.stdout.write(result.stdout);
+    process.stdout.write(rewrittenStem
+      ? result.stdout.replaceAll(`id=${rewrittenStem.stem}`, `id=${rewrittenStem.stableId}`)
+      : result.stdout);
     process.stderr.write(result.stderr);
     process.exitCode = result.status ?? 1;
   } else {
@@ -169,6 +191,7 @@ try {
       process.exitCode = result.status ?? 1;
     } else {
       const output = JSON.parse(result.stdout);
+      if (output.session) output.session = stableSessionId(output.session);
       const allowed = [];
       let blacklistedDropped = 0;
       const entries = candidates ? output.candidates ?? [] : output.matches ?? [];
@@ -177,12 +200,13 @@ try {
           blacklistedDropped += 1;
           continue;
         }
+        const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(entry.path) };
         if (candidates) {
           let repo = null;
           try { repo = resolveRepo(searchCwdFromFile(entry.path)); } catch { /* best effort label */ }
-          allowed.push({ ...entry, repo, ...sourceIdentity(entry.path) });
+          allowed.push({ ...identified, repo });
         } else {
-          allowed.push({ ...entry, ...sourceIdentity(entry.path) });
+          allowed.push(identified);
         }
       }
       if (candidates) {
@@ -307,6 +331,13 @@ function walk(root) {
     else if (entry.isFile() && target.endsWith(".jsonl")) files.push(target);
   }
   return files;
+}
+
+/** The id Owner Operator's database and deep links carry, given a transcript filename stem. */
+function stableSessionId(stem) {
+  return /^\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem)
+    ? stem.slice(stem.indexOf("_") + 1)
+    : stem;
 }
 
 function escapeRegex(value) {

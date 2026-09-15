@@ -11,15 +11,19 @@ const state = new State(join(dir, "state.db"));
 
 let finishEnrichment!: (details: ThreadEnrichment) => void;
 const enrichment = new Promise<ThreadEnrichment>((resolve) => { finishEnrichment = resolve; });
+// A scan sees a yielded turn, never an owner obligation, so the reconciled row is idle until
+// enrichment reads the conversation.
+const scanned = fakeScanRow({ lastMessageAt: new Date().toISOString() });
 const monitor = new SessionMonitor(state, {
-  scan: async () => [fakeScanRow()],
+  scan: async () => [scanned],
   enrich: async () => await enrichment,
 });
 
 try {
   const rows = await monitor.poll();
-  assert.equal(rows[0].state, "needs-you", "scan is reconciled through state");
-  assert.equal(rows[0].summary, fakeScanRow().topic, "first-message fallback appears without awaiting the model");
+  assert.equal(rows[0].state, "idle", "scan is reconciled through state");
+  assert.equal(rows[0].topic, scanned.topic, "a title shows from the first observation");
+  assert.equal(rows[0].summary, null, "no recap is invented before one is generated");
 
   finishEnrichment({ topic: "Daemon foundation", summary: "Review the state seam", priority: 2, attention: "needs-you" as const });
   await waitFor(
@@ -92,7 +96,7 @@ try {
 
   const enrichmentErrors: string[] = [];
   const failingEnrichmentMonitor = new SessionMonitor(state, {
-    scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:06:00.000Z" })],
+    scan: async () => [fakeScanRow({ lastMessageAt: new Date().toISOString() })],
     enrich: async () => { throw new Error("temporary enrichment failure"); },
     logger: (record) => {
       if (String(record.event) === "enrichment-failed") enrichmentErrors.push(record.error);

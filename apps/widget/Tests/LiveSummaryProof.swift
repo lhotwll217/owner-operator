@@ -26,10 +26,16 @@ struct LiveSummaryProof {
         precondition(rows.count == expected.count, "Native client must receive every visible row")
         for want in expected {
             guard let row = rows.first(where: { $0.id == want.id }) else { fatalError("Missing native row \(want.id)") }
-            precondition(row.summary == want.summary && !(row.summary ?? "").isEmpty, "Native summary differs for \(want.id)")
+            precondition(row.summary == want.summary, "Native summary differs for \(want.id)")
             precondition(row.title == want.title && row.state == want.state, "Native presentation or lifecycle differs for \(want.id)")
             if row.parentThreadId != nil { precondition(row.nestingDepth > 0, "Child must render nested") }
-            print("NATIVE \(row.id) \(row.state.rawValue) \(row.title) | \(row.summary!)")
+            precondition(!row.title.isEmpty, "Every row carries a title while it is on screen")
+            if row.state == .working {
+                precondition(row.displayRecap == nil, "A working row shows its title and glyph, not its recap, for \(want.id)")
+            } else {
+                precondition(row.displayRecap == row.summary, "A settled row shows its retained recap for \(want.id)")
+            }
+            print("NATIVE \(row.id) \(row.state.rawValue) pending=\(row.summaryPending) \(row.title) | \(row.displayRecap ?? "(recap held back)")")
         }
         func capture(_ suffix: String) throws {
             window.setContentSize(host.fittingSize)
@@ -58,6 +64,7 @@ struct LiveSummaryProof {
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))
             try capture("-expanded-bottom")
         }
+        precondition(rows.contains { $0.displayRecap?.isEmpty == false }, "The panel must carry generated recaps, not titles alone")
         print("PASS native Gateway delivery and WidgetRoot rendering, \(rows.count) rows")
         window.orderOut(nil)
     }
