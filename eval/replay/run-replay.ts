@@ -1,0 +1,253 @@
+// Replay a captured slice of real session state through the production pipeline.
+//
+//   node --import tsx eval/replay/run-replay.ts --capture <dir> --out <dir> [options]
+//     --label <name>          artifact subdirectory name (default: the current git HEAD)
+//     --threads <n>           enrich only the n loudest candidates (fast iteration)
+//     --no-enrich             observe and persist only; skip model enrichment
+//     --sample-only           run the transcript sampler but no model call (free iteration)
+//     --ask <file>            JSON [{id, question}] the production `oo` answers afterwards
+//     --native <binary>       LiveSummaryProof build; renders these rows in the real widget
+//     --active-window <w>     owner visibility window (default 36h, the owner's setting)
+//
+// What runs is production code: the sandbox-user primitive owns isolation, `startDaemon`
+// owns the daemon, `scanTranscripts` owns observation, and enrichment is the exact
+// composition runtime.ts installs (`sampleEnrichment` then `enrichThread`). This file only
+// sequences those calls and records what they produced.
+//
+// Isolation comes from the eval sandbox user: its own HOME, OO_HOME, state database, copied
+// transcript roots, ephemeral loopback daemon, and verified teardown. The owner's live state
+// is read during capture and never during replay.
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { closeSandboxUser, materializeSandboxUser } from "../sandbox-user.ts";
+import { evalSandboxPath } from "../sandbox.mjs";
+import { buildReplayHome } from "./build-replay-home.mjs";
+import { startDaemon } from "../../src/daemon/runtime.ts";
+import { sampleEnrichment } from "../../src/session-monitor/scan.ts";
+import { enrichThread } from "../../src/agent/enrichment.ts";
+import type { SessionMonitorLogRecord } from "../../src/session-monitor/monitor.ts";
+
+const args = process.argv.slice(2);
+const flag = (name: string, fallback: string): string => {
+  const index = args.indexOf(`--${name}`);
+  const value = index === -1 ? undefined : args[index + 1];
+  return value && !value.startsWith("--") ? value : fallback;
+};
+const has = (name: string): boolean => args.includes(`--${name}`);
+
+const capture = resolve(flag("capture", "") || (() => { throw new Error("--capture is required"); })());
+const outRoot = resolve(flag("out", "") || (() => { throw new Error("--out is required"); })());
+const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
+const label = flag("label", head);
+const threadLimit = Number(flag("threads", "0"));
+const activeWindow = flag("active-window", "36h");
+
+const out = join(outRoot, label);
+mkdirSync(out, { recursive: true });
+const write = (name: string, value: unknown): void => {
+  writeFileSync(join(out, name), `${typeof value === "string" ? value : JSON.stringify(value, null, 2)}\n`);
+};
+
+const runId = `replay-${label.replace(/[^A-Za-z0-9._-]/g, "-")}-${Date.now()}`;
+const root = evalSandboxPath(runId);
+const liveOoHome = join(homedir(), ".owner-operator");
+
+// The evaluated agent must not be able to read the capture, the expected answers, or the
+// owner's live stores; the sandbox blacklist is what denies them.
+const sandbox = materializeSandboxUser({
+  profile: "cli-driving",
+  root,
+  sourcePiAgentDir: join(liveOoHome, "pi"),
+  protectedOwnerPaths: [liveOoHome, capture, outRoot, join(homedir(), ".claude"), join(homedir(), ".codex")],
+});
+const previousEnvironment = { ...process.env };
+for (const key of Object.keys(process.env)) delete process.env[key];
+Object.assign(process.env, sandbox.env);
+
+const monitorLog: SessionMonitorLogRecord[] = [];
+let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
+let askDaemon: ReturnType<typeof spawn> | undefined;
+let askPort = 0;
+let failure: unknown;
+try {
+  const replay = buildReplayHome({ capture, root, activeWindow });
+  write("replay.json", replay);
+
+  daemon = await startDaemon({
+    port: 0,
+    watch: false,
+    // Enrichment is driven explicitly below so each call's latency and failure is recorded.
+    enableEnrichment: false,
+    monitor: { intervalMs: 60 * 60 * 1_000, logger: (record) => { monitorLog.push(record); } },
+    scheduler: { tickMs: 60 * 60 * 1_000 },
+    agentRuns: {
+      maxConcurrent: 0,
+      tickMs: 60 * 60 * 1_000,
+      launcher: Object.assign(
+        async () => { throw new Error("replay cannot launch a delegated child"); },
+        { reapOrphans: async () => undefined },
+      ),
+    },
+  });
+
+  // ---- observation ------------------------------------------------------------------
+  const observeStart = Date.now();
+  await daemon.monitor.poll();
+  const observeMs = Date.now() - observeStart;
+  const observed = daemon.state.listCurrentSessionState();
+  write("observed.json", { observeMs, rows: observed.length, sessions: observed });
+
+  // ---- enrichment -------------------------------------------------------------------
+  const candidates = daemon.state.listEnrichmentCandidates();
+  const selected = threadLimit > 0 ? candidates.slice(0, threadLimit) : candidates;
+  const attempts: Array<Record<string, unknown>> = [];
+  if (!has("no-enrich")) {
+    for (const candidate of selected) {
+      const started = Date.now();
+      const attempt: Record<string, unknown> = {
+        id: candidate.id, source: candidate.source, state: candidate.state,
+        children: candidate.children.length, lastMessageAt: candidate.lastMessageAt,
+      };
+      try {
+        const sample = await sampleEnrichment(candidate);
+        attempt.sampleChars = sample.length;
+        attempt.sampleMs = Date.now() - started;
+        if (has("sample-only")) { attempts.push(attempt); continue; }
+        const modelStart = Date.now();
+        attempt.currentTitle = candidate.generatedTopic;
+        const details = await enrichThread(sample, { currentTitle: candidate.generatedTopic });
+        attempt.modelMs = Date.now() - modelStart;
+        attempt.details = details;
+        attempt.applied = daemon.state.appendEnrichment(
+          candidate.id, details, candidate.lastMessageAt!, candidate.children,
+        );
+      } catch (error) {
+        attempt.error = error instanceof Error ? error.message : String(error);
+      }
+      attempt.totalMs = Date.now() - started;
+      attempts.push(attempt);
+      process.stderr.write(`${attempts.length}/${selected.length} ${candidate.id} ${attempt.error ? `FAILED ${attempt.error}` : "ok"}\n`);
+    }
+  }
+  write("enrichment.json", {
+    candidates: candidates.length,
+    attempted: attempts.length,
+    applied: attempts.filter((attempt) => attempt.applied).length,
+    failed: attempts.filter((attempt) => attempt.error).length,
+    totalMs: attempts.reduce((sum, attempt) => sum + Number(attempt.totalMs ?? 0), 0),
+    attempts,
+  });
+
+  // ---- what a client would see ------------------------------------------------------
+  const response = await fetch(`http://127.0.0.1:${daemon.port}/session-state`, {
+    headers: { authorization: `Bearer ${JSON.parse(execFileSync("cat", [join(sandbox.ooHome, "daemon.json")], { encoding: "utf8" })).authToken}` },
+  });
+  write("session-state.gateway.json", await response.json());
+  write("monitor-log.json", monitorLog);
+  write("daemon.json", { port: daemon.port, ooHome: sandbox.ooHome });
+
+  // ---- what the widget draws -----------------------------------------------------------
+  // The native client connects to this daemon and renders the replayed rows, so the title,
+  // recap, and working rules are checked in the real view rather than in a snapshot of it.
+  const nativeBinary = flag("native", "");
+  if (nativeBinary) {
+    const ready = await fetch(`http://127.0.0.1:${daemon.port}/ready`, {
+      headers: { authorization: `Bearer ${JSON.parse(readFileSync(join(sandbox.ooHome, "daemon.json"), "utf8")).authToken}` },
+    });
+    write("ready.json", await ready.json());
+    const expected = join(out, "native-expected.json");
+    writeFileSync(expected, `${JSON.stringify(daemon.state.listCurrentSessionState())}\n`);
+    // The daemon serving this proof lives in this process, so the native client is awaited
+    // rather than run synchronously: a blocked event loop cannot answer its requests.
+    const proof = await promisify(execFile)(resolve(nativeBinary), [expected, join(out, "native")], {
+      encoding: "utf8", timeout: 5 * 60 * 1_000, env: { ...process.env },
+    }).catch((error: { stdout?: string; stderr?: string; message: string }) => {
+      write("native.log", `${error.stdout ?? ""}${error.stderr ?? ""}${error.message}`);
+      throw new Error(`the native widget proof failed: ${(error.stderr || error.message).slice(-2_000)}`);
+    });
+    write("native.log", `${proof.stdout}${proof.stderr}`);
+  }
+
+  // ---- what the owner gets when they ask ----------------------------------------------
+  // The production `oo` binary answers against this replayed state, so the answers and the
+  // tools it reached for are the ones the owner would get from the same question today.
+  const askFile = flag("ask", "");
+  if (askFile) {
+    const questions = JSON.parse(readFileSync(resolve(askFile), "utf8")) as Array<{ id: string; question: string }>;
+    const answers: Array<Record<string, unknown>> = [];
+    // `oo` connects to the daemon it can verify and supervise, so the replayed state moves
+    // into the eval harness's own daemon process before the questions start. It is model-free:
+    // the answers must come from the state this run already produced.
+    await daemon.close();
+    daemon = undefined;
+    askDaemon = spawn(process.execPath, ["--import", "tsx", join(import.meta.dirname, "..", "providers", "eval-daemon.mjs")], {
+      cwd: join(import.meta.dirname, "..", ".."),
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const discovery = join(sandbox.ooHome, "daemon.json");
+    for (let attempt = 0; attempt < 200 && !askPort; attempt += 1) {
+      await new Promise((settle) => setTimeout(settle, 100));
+      if (askDaemon.exitCode !== null) throw new Error("the replay question daemon exited before it was ready");
+      try {
+        const info = JSON.parse(readFileSync(discovery, "utf8")) as { port: number; pid: number; authToken: string };
+        const ready = await fetch(`http://127.0.0.1:${info.port}/ready`, {
+          headers: { authorization: `Bearer ${info.authToken}` }, signal: AbortSignal.timeout(500),
+        });
+        if (ready.ok && (await ready.json()).ready && info.pid === askDaemon.pid) askPort = info.port;
+      } catch { /* still starting */ }
+    }
+    if (!askPort) throw new Error("the replay question daemon did not become ready");
+    for (const { id, question } of questions) {
+      const trace = join(out, `${id}.trace.ndjson`);
+      const started = Date.now();
+      const result = spawnSync(process.execPath, [
+        "--import", "tsx", join(import.meta.dirname, "..", "..", "src", "cli", "oo.ts"), question,
+      ], {
+        encoding: "utf8",
+        timeout: 10 * 60 * 1_000,
+        env: { ...process.env, OO_TRACE: trace, OO_EVAL_READ_ONLY: "1" },
+      });
+      const events = existsSync(trace)
+        ? readFileSync(trace, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
+        : [];
+      answers.push({
+        id, question, ms: Date.now() - started,
+        answer: result.stdout?.trim() ?? "",
+        error: result.status === 0 ? undefined : (result.stderr || `exit ${result.status}`).slice(0, 2_000),
+        toolCalls: events.filter((event) => event.event === "tool_call").map((event) => event.tool),
+        turns: events.filter((event) => event.event === "turn").length,
+        tokens: events.filter((event) => event.event === "turn")
+          .reduce((sum, event) => sum + Number((event.usage as { totalTokens?: number })?.totalTokens ?? 0), 0),
+        cost: events.filter((event) => event.event === "turn")
+          .reduce((sum, event) => sum + Number((event.usage as { cost?: { total?: number } })?.cost?.total ?? 0), 0),
+      });
+      process.stderr.write(`asked ${id} (${answers.at(-1)!.ms}ms)\n`);
+    }
+    write("answers.json", answers);
+  }
+} catch (error) {
+  failure = error;
+  write("failure.json", { error: error instanceof Error ? `${error.message}\n${error.stack}` : String(error) });
+} finally {
+  const closed = await closeSandboxUser(sandbox, daemon?.port ?? askPort, async () => {
+    await daemon?.close();
+    if (askDaemon && askDaemon.exitCode === null) {
+      askDaemon.kill("SIGTERM");
+      await new Promise((settle) => askDaemon!.once("exit", settle));
+    }
+  }, { kind: "replay", label });
+  write("teardown.json", closed);
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, previousEnvironment);
+  if (!closed.teardownVerified) process.exitCode = 2;
+  if (failure) process.exitCode = 1;
+  else process.stderr.write(`replay artifacts: ${out}\n`);
+}
+
+// Teardown runs first and reports itself; the replay's own failure is the exit reason.
+if (failure) throw failure;
