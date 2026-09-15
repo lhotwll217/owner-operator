@@ -31,6 +31,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 | `packages/core` | Shared enums, types, pure state rules, wire contract, dependency-light filesystem config readers; browser-safe presentation/protocol contracts use dedicated subpath exports | SQLite, network, timers, processes, model calls |
 | `src/state` | SQLite schema, transactions, projections, post-commit events, read-only query docs | Polling, HTTP, model calls |
 | `src/session-monitor` | Transcript scan/watch and its private async enrichment worker | HTTP, scheduling |
+| `src/session-search` | Privacy-aware transcript search and its pinned search primitive, shared by the monitor and agent skill | State writes, model calls |
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/agent-runs` | Delegated-run executor, ACP launcher over `acpx`, and client-side parent-fleet reconciliation adapters | SQLite access outside `State`, HTTP |
 | `src/worktrees` | Argv-safe Git worktree inspection/creation and create/list/select orchestration | SQLite writes, runtime cwd binding, cleanup |
@@ -69,11 +70,23 @@ domain events to four typed SSE invalidations—state, schedule, schedule-run, o
 clients refetch SQLite-backed truth.
 
 Enrichment sends only bounded transcript samples to the model, read through
-application-owned scan/search modules.
-Enrichment is eligible when the transcript-derived state is `needs-you`, no delegated child is
-pending or running, and `last_message_at` differs from `enriched_through_message_at`. This catches
-first discovery, a new assistant message without a state transition, and daemon restart. The
-monitor never awaits the model in its scan hot path.
+application-owned scan/search modules. Claude, Codex, and Pi samples include bounded tool
+evidence through the privacy-aware session-search helper; other formats retain the scan sample.
+Every visible `needs-you`, `idle`, or `working` row is eligible for enrichment, including parents
+with active delegated children. `ThreadEnrichment` separates required presentation fields
+`topic`, `summary`, and `priority` from an `idle` or `needs-you` attention assessment.
+State applies attention only to settled rows. Working status remains deterministic and does
+not require model agreement. Completed work stays visible until an explicit Done action.
+
+The message watermark, sampled child evidence, and whether enrichment landed during working status determine freshness.
+A newer message or a change in working status queues another assessment. Failed calls leave
+the row eligible for retry. Owner Done and newer messages reject stale results; regressed
+transcript timestamps cannot overwrite a newer watermark. Unchanged settled assessments survive
+polling and restart. Titles preserve owner renames. Until a current summary arrives, the
+projection uses the transcript topic as its summary fallback. The monitor never awaits the
+model in its scan hot path.
+Observed child transcripts and run statuses accompany the parent sample within a bounded context.
+Child message or run-status changes refresh the parent summary and reject an in-flight older result.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation
 cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use

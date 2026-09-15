@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const vendorDir = path.join(
-  here, "..", "src", "agent", "skills", "session-search", "vendor", "session-grep",
+  here, "..", "src", "session-search", "vendor", "session-grep",
 );
 const upstreamFile = path.join(vendorDir, "UPSTREAM.md");
 const SKILL_DIR = "skills/session-grep"; // where the primitive lives in the upstream repo

@@ -140,12 +140,8 @@ export async function createSandboxUser(options: SandboxUserOptions) {
         );
       }
       if (!productionServices) {
-        const credentials = await loadCredentialsIntoMemory(materialized.paths.piAuth);
-        productionServices = await ownerOperatorPiServices(materialized.ooHome, credentials);
-        // ModelRuntime has loaded auth/model data, but SettingsManager is reloaded while the
-        // production resource loader initializes. Remove credential-bearing model sources now;
-        // retain the blacklisted settings file only until that reload completes.
-        materialized.removeCredentialFiles({ keepSettings: true });
+        // Keep blacklisted settings only for the production resource loader's reload.
+        productionServices = await loadSandboxPiServices(materialized, { keepSettings: true });
       }
       const surface = input.surface ?? "chat";
       const sessionManager = createOoSession(ooProvenance(surface, input.callerSessionId));
@@ -177,48 +173,49 @@ export async function createSandboxUser(options: SandboxUserOptions) {
     async close(diagnostic: Record<string, unknown> = {}): Promise<SandboxCloseResult> {
       if (closed) throw new Error("sandbox user is already closed");
       closed = true;
-      let closeError: unknown;
-      for (const created of sessions.reverse()) {
-        try {
-          await shutdownSessionExtensions(created.session);
-          created.session.dispose();
-        } catch (error) {
-          closeError ??= error;
-        }
-      }
-      const port = daemon!.port;
       try {
-        await daemon!.close();
-      } catch (error) {
-        closeError ??= error;
+        return await closeSandboxUser(materialized, daemon!.port, async () => {
+          let closeError: unknown;
+          for (const created of sessions.reverse()) {
+            try {
+              await shutdownSessionExtensions(created.session);
+              created.session.dispose();
+            } catch (error) {
+              closeError ??= error;
+            }
+          }
+          try {
+            await daemon!.close();
+          } catch (error) {
+            closeError ??= error;
+          }
+          if (closeError) throw closeError;
+        }, diagnostic);
+      } finally {
+        restoreProcessEnvironment(previousEnvironment);
       }
-      const daemonStopped = !existsSync(join(materialized.ooHome, "daemon.json"))
-        && !await portResponds(port);
-      const remaining = leaseCount(materialized.ooHome);
-      const teardownVerified = !closeError && daemonStopped && remaining === 0;
-      const preservedDiagnostics = materialized.finalize({
-        teardownVerified,
-        diagnostic: {
-          kind: teardownVerified ? "sandbox-user-closed" : "sandbox-user-teardown-unverified",
-          daemonStopped,
-          leasesRemaining: remaining,
-          ...(closeError ? { error: errorMessage(closeError) } : {}),
-          ...diagnostic,
-        },
-      });
-      restoreProcessEnvironment(previousEnvironment);
-      return { daemonStopped, leasesRemaining: remaining, teardownVerified, preservedDiagnostics };
     },
   };
 }
 
-function materializeSandboxUser(options: SandboxUserOptions) {
-  const protectedOwnerPaths = options.protectedOwnerPaths ?? [];
+export function materializeSandboxUser(options: SandboxUserOptions) {
   const sandbox = evalSandboxUserPaths(options.root);
   const unexpected = existsSync(sandbox.root)
     ? readdirSync(sandbox.root).filter((name) => name !== "task" && name !== "tmp")
     : [];
   if (unexpected.length) throw new Error(`eval sandbox user root is not pristine: ${unexpected.join(", ")}`);
+  try {
+    return materializeSandboxFiles(options);
+  } catch (error) {
+    const redactions = [sandbox.root, ...(options.sourcePiAgentDir ? [options.sourcePiAgentDir] : []), ...(options.protectedOwnerPaths ?? [])];
+    finalizeSandboxFiles(sandbox.root, [], redactions, false, failureDiagnostic("sandbox-user-setup", error));
+    throw error;
+  }
+}
+
+function materializeSandboxFiles(options: SandboxUserOptions) {
+  const protectedOwnerPaths = options.protectedOwnerPaths ?? [];
+  const sandbox = evalSandboxUserPaths(options.root);
   mkdirSync(sandbox.taskCwd, { recursive: true });
   mkdirSync(sandbox.tempDir, { recursive: true });
   const paths = options.sourcePiAgentDir
@@ -285,8 +282,9 @@ function materializeSandboxUser(options: SandboxUserOptions) {
     paths,
     diagnosticRedactions,
     removeCredentialFiles({ keepSettings = false }: { keepSettings?: boolean } = {}): void {
-      for (const file of [paths.piAuth, paths.piModels, piModelsStore]) rmSync(file, { force: true });
-      if (!keepSettings) rmSync(paths.piSettings, { force: true });
+      for (const file of secretFiles) {
+        if (!keepSettings || file !== paths.piSettings) rmSync(file, { force: true });
+      }
     },
     credentialFilesUnavailable(): boolean {
       return secretFiles.every((file) => !existsSync(file));
@@ -295,19 +293,57 @@ function materializeSandboxUser(options: SandboxUserOptions) {
       teardownVerified: boolean;
       diagnostic?: Record<string, unknown>;
     }): string | null {
-      for (const file of secretFiles) rmSync(file, { force: true });
-      if (teardownVerified) {
-        rmSync(sandbox.root, { recursive: true, force: true });
-        return null;
-      }
-      const safeDiagnostic = sanitizeEvalDiagnosticValue(diagnostic, diagnosticRedactions);
-      rmSync(sandbox.root, { recursive: true, force: true });
-      const preserved = `${sandbox.root}/diagnostics`;
-      mkdirSync(preserved, { recursive: true });
-      writeFileSync(`${preserved}/diagnostic.json`, `${JSON.stringify(safeDiagnostic, null, 2)}\n`);
-      return preserved;
+      return finalizeSandboxFiles(sandbox.root, secretFiles, diagnosticRedactions, teardownVerified, diagnostic);
     },
   };
+}
+
+function finalizeSandboxFiles(
+  root: string, secretFiles: string[], redactions: string[],
+  teardownVerified: boolean, diagnostic: Record<string, unknown>,
+): string | null {
+  for (const file of secretFiles) rmSync(file, { force: true });
+  rmSync(root, { recursive: true, force: true });
+  if (teardownVerified) return null;
+  const preserved = join(root, "diagnostics");
+  mkdirSync(preserved, { recursive: true });
+  writeFileSync(join(preserved, "diagnostic.json"), `${JSON.stringify(sanitizeEvalDiagnosticValue(diagnostic, redactions), null, 2)}\n`);
+  return preserved;
+}
+
+type MaterializedSandbox = ReturnType<typeof materializeSandboxUser>;
+
+export async function loadSandboxPiServices(
+  sandbox: MaterializedSandbox, options: { keepSettings?: boolean } = {},
+): Promise<OwnerOperatorPiServices> {
+  let loaded = false;
+  try {
+    const credentials = await loadCredentialsIntoMemory(sandbox.paths.piAuth);
+    const services = await ownerOperatorPiServices(sandbox.ooHome, credentials);
+    loaded = true;
+    return services;
+  } finally {
+    sandbox.removeCredentialFiles(loaded ? options : {});
+  }
+}
+
+export async function closeSandboxUser(
+  sandbox: MaterializedSandbox, port: number | undefined,
+  close: () => Promise<void>, diagnostic: Record<string, unknown> = {},
+): Promise<SandboxCloseResult> {
+  sandbox.removeCredentialFiles();
+  let closeError: unknown;
+  try { await close(); } catch (error) { closeError = error; }
+  const daemonStopped = !existsSync(join(sandbox.ooHome, "daemon.json")) && (port === undefined || !await portResponds(port));
+  const remaining = leaseCount(sandbox.ooHome);
+  const teardownVerified = !closeError && daemonStopped && remaining === 0;
+  const preservedDiagnostics = sandbox.finalize({ teardownVerified, diagnostic: {
+    ...diagnostic,
+    kind: teardownVerified ? "sandbox-user-closed" : "sandbox-user-teardown-unverified",
+    daemonStopped, leasesRemaining: remaining,
+    ...(closeError ? { error: errorMessage(closeError) } : {}),
+  } });
+  return { daemonStopped, leasesRemaining: remaining, teardownVerified, preservedDiagnostics };
 }
 
 function daemonOptions(profile: SandboxUserProfile): Parameters<typeof startDaemon>[0] {

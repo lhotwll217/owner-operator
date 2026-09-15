@@ -14,7 +14,7 @@
 //   node scan-active-transcripts.mjs [--since 24h|7d|today|2026-06-04] [--sample 4] [--thread <id>]
 //      --since default = owner's settings.json `activeWindow` (rolling "1d" if unset)
 //                               [--limit 40] [--all] [--json] [--truncate 280]
-//   --limit N        caps external and product-owned candidate slices independently
+//   --limit N        caps external and product-owned slices; 0 returns every candidate
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
@@ -553,30 +553,12 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
 
   const userTurns = convo.filter((m) => m.role === "user");
   const topicMsg = userTurns[0] || convo[0];
-  // Worker vs interactive by LAUNCH MODE, not message count (battle-tested: AgentWrapper/
-  // agent-orchestrator keys off `codex exec` / `claude --headless|-p` / sdk). A session is a
-  // single-turn worker — hidden unless --all — when:
-  //   • no real (non-boilerplate) user turn survived — e.g. a Codex direct/worker preamble; or
-  //   • it ran via the SDK (sdk-ts / sdk-cli); or
-  //   • it's a single-turn `cli` session — `claude -p` and Task subagents are
-  //     indistinguishable from a brand-new terminal session at one turn, so treat <2 turns as
-  //     a single-turn worker (a real terminal session surfaces on its 2nd turn).
-  // Interactive entrypoints (codex, claude-desktop, …) show as soon as they have one real turn.
-  //
-  // EXCEPT when an interactive GUI HOST owns the session: Conductor and Superset drive the agent
-  // over the SDK, PostHog Code over ACP — the transport is headless but the owner opened the
-  // session deliberately, so the rules above would WRONGLY hide it (every Conductor thread was
-  // hidden this way until now). A host short-circuits to interactive; `surfaceEmpty` hosts
-  // (PostHog Code cloud tasks, no turns yet) surface even empty. The host list lives in
-  // @owner-operator/core (gui-hosts) — a new GUI is one entry there, never a per-source patch here.
-  const cliLike = entrypoint === "cli" || (entrypoint == null && source === "claude");
   const host = sessionHostFor({ format: source, cwd: project, entrypoint, originator, sourceHint: srcHint }, sessionHosts);
   const interactiveHost = host?.overridesAutomation ? host : null;
   let automated = interactiveHost
     ? (interactiveHost.surfaceEmpty ? false : userTurns.length === 0)
-    : userTurns.length === 0 ||
-      host?.automatedTransport ||
-      (cliLike && userTurns.length < 2);
+    : userTurns.length === 0 || host?.automatedTransport;
+  if (source === "codex" && srcHint?.subagent?.other === "guardian") automated = true;
   if (namespace === "owner-operator" && ooProvenance) {
     if (ooProvenance.surface === "schedule" || ooProvenance.origin === "agent" || ooProvenance.origin === "scheduler") {
       automated = true;
@@ -656,7 +638,7 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
     secondsSinceActivity: Math.max(0, Math.round((Date.now() - lastActivityTs) / 1000)),
     working,                                           // a turn is in progress (reasoning/tools)
     automated,
-    _subagent: cursorSubagent,                         // a Cursor sub-task; loses dedup to its parent
+    _subagent: cursorSubagent || (source === "claude" && file.includes("/subagents/")),
     link: guiLink(source, sessionId, project),
     file,
     firstMessages,          // earliest messages in the thread (array)
@@ -696,12 +678,13 @@ threads = resolveCandidates(threads, [], { includeDone: true });
 if (threadArg) {
   // Single-thread drill-in: match by full or prefix id (or file basename); keep it even
   // if it's an automated single-turn worker, and don't apply the limit.
-  threads = threads.filter((t) => t.id === threadArg || t.id.startsWith(threadArg) || basename(t.file).startsWith(threadArg));
+  const exact = threads.filter((t) => t.id === threadArg);
+  threads = exact.length ? exact : threads.filter((t) => t.id.startsWith(threadArg) || basename(t.file).startsWith(threadArg));
 } else if (!includeAll) {
   threads = threads.filter((t) => !t.automated);
 }
 threads.sort((a, b) => b._sort - a._sort);
-if (!threadArg) {
+if (!threadArg && limit > 0) {
   const external = threads.filter((thread) => thread.namespace !== "owner-operator").slice(0, limit);
   const product = threads.filter((thread) => thread.namespace === "owner-operator").slice(0, limit);
   threads = [...external, ...product].sort((a, b) => b._sort - a._sort);

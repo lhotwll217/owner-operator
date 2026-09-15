@@ -72,7 +72,7 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     ([adapter](https://github.com/MasuRii/pi-tool-display/blob/91cef7580078371f8dc49a8607222807ad6a424d/tool-display-api-consumer.js#L1-L36)).
 - **[session-grep](https://github.com/lhotwll217/session-grep)** — the search primitive we vendor
   ([#20](https://github.com/lhotwll217/owner-operator/issues/20)).
-  - Borrowed: the house vendoring model — the skill wrapper owns local policy (sources, blacklist),
+  - Borrowed: the house vendoring model — the shared wrapper owns local policy (sources, blacklist),
     and its private `vendor/` receives the
     [pinned upstream primitive](https://github.com/lhotwll217/session-grep/blob/f786ca24440e72f93c63e7aded30a67170f9d41c/skills/session-grep/session-grep.mjs#L1-L5)
     untouched.

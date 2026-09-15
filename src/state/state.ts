@@ -3,8 +3,8 @@ import {
   DomainEventKind,
   ScheduleRunStatus,
   isBlacklisted,
-  loadActiveWindow,
   loadBlacklist,
+  loadActiveWindow,
   parseWindowMs,
   resolveState,
   type AgentRun,
@@ -17,7 +17,7 @@ import {
   type ScanRow,
   type EnrichmentCandidate,
   type ScheduleTriggerContext,
-  type ThreadDetails,
+  type ThreadEnrichment,
   type Blacklist,
   type MarkThreadsDoneResult,
   type RegisteredWorktree,
@@ -53,13 +53,16 @@ export class State {
   recordObservation(row: ScanRow): void {
     if (isBlacklisted(this.blacklist(), { cwd: row.project, repo: row.repo })) return;
     const previous = this.db.resolutionRow(row.id);
-    const state = resolveState(
+    const state = !row.working && previous?.lastMessageAt === row.lastMessageAt &&
+      previous.enrichedThroughMessageAt === row.lastMessageAt && !previous.enrichedWhileWorking && previous.state !== "working"
+      ? previous.state
+      : resolveState(
       previous?.lastMessageAt
         ? { state: previous.state, lastMessageAt: previous.lastMessageAt }
         : undefined,
       row,
     );
-    const changedMessage = row.lastMessageAt !== previous?.lastMessageAt;
+    const changedMessage = row.lastMessageAt > (previous?.lastMessageAt ?? "");
     const result = this.db.recordScan({
       id: row.id,
       source: row.source,
@@ -83,7 +86,7 @@ export class State {
         state,
         lastMessageAt: row.lastMessageAt,
         needsEnrichment:
-          state === "needs-you" && row.lastMessageAt !== previous?.enrichedThroughMessageAt,
+          state !== "done" && row.lastMessageAt !== previous?.enrichedThroughMessageAt,
       });
     }
   }
@@ -107,11 +110,33 @@ export class State {
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
-    return this.db.listEnrichmentCandidates();
+    const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
+    return this.db.listEnrichmentCandidates().filter((row) => visible.has(row.id));
   }
 
-  appendEnrichment(threadId: string, details: ThreadDetails, throughMessageAt: string): boolean {
-    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt) !== null;
+  requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
+    const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
+    const queuedIds = this.db.requestEnrichment(requests.filter((row) => visible.has(row.id)));
+    for (const threadId of queuedIds) {
+      const current = this.db.resolutionRow(threadId)!;
+      this.publish({
+        kind: DomainEventKind.ThreadChanged,
+        threadId,
+        state: current.state,
+        lastMessageAt: current.lastMessageAt,
+        needsEnrichment: true,
+      });
+    }
+    return queuedIds;
+  }
+
+  appendEnrichment(
+    threadId: string,
+    details: ThreadEnrichment,
+    throughMessageAt: string,
+    children: EnrichmentCandidate["children"] = [],
+  ): boolean {
+    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt, children) !== null;
     if (!applied) return false;
     const current = this.db.resolutionRow(threadId);
     if (current) {

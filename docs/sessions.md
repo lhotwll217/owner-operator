@@ -38,7 +38,21 @@ ordinary monitor and session-state pipeline as `Owner Operator` roots. Schedule,
 and agent-origin sessions remain automated. Their task repository and directory come from the
 latest valid `oo-provenance` entry because the Pi header cwd is stable lookup identity, not task
 context. This product store never authorizes or reports access to standalone Pi history, and its
-bounded scan slice cannot displace the external-session slice.
+scan cannot displace external sessions.
+
+The monitor respects the configured active window and updates all candidates in that window
+without the old per-source count cap. Widget visibility retains the existing window rules,
+including outstanding owner attention and active delegated children. Reconciliation selects
+only visible working, idle, or needs-you rows. It does not queue quiet history outside the widget window.
+Codex guardian source metadata identifies approval machinery rather than independent owner work.
+CLI sessions enter monitoring from their first real message, including one-off sessions.
+Explicit automated transports and product-origin exclusions still apply.
+
+The authenticated `POST /poll` accepts an optional `reconcile` array of up to 100
+`{id, lastMessageAt}` pairs. It resets enrichment eligibility only for matching visible unresolved working, idle, or
+needs-you rows, including parents with active delegated children, then runs the normal monitor.
+The response's `queuedIds` identifies accepted rows. A timestamp mismatch or Done choice is skipped.
+This route rechecks already summarized visible rows after a reconciliation change without another worker.
 
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
 ignore. Host detection supplies attribution only and does not grant transcript access. The marker

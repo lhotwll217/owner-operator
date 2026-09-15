@@ -2,7 +2,7 @@
 
 This directory is a vendored copy of the `skills/session-grep/` folder from the
 standalone [session-grep](https://github.com/lhotwll217/session-grep) repo — the pure,
-eval-tuned grep primitive. Owner Operator's agent-facing [`session-search`](../../SKILL.md)
+eval-tuned grep primitive. Owner Operator's agent-facing [`session-search`](../../../agent/skills/session-search/SKILL.md)
 skill wraps it to inject its
 own session sources and enforce the privacy blacklist.
 
@@ -12,7 +12,7 @@ own session sources and enforce the privacy blacklist.
 ## Rules
 
 - Do not edit the vendored copy directly. Primitive behavior belongs upstream; Owner
-  Operator policy belongs in the skill's [`scripts/session-search.mjs`](../../scripts/session-search.mjs) wrapper.
+  Operator policy belongs in the shared [`session-search.mjs`](../../session-search.mjs) wrapper.
 - The wrapper depends only on the stable seam: `--sources-file` / `SESSION_GREP_SOURCES_FILE`
   (typed roots), `--target-root`, `--target-type` / `--source`, `--exclude-session` (canonical
   session ID), `--exclude-re` (path blacklist), `--candidates`, scoped `--query` + `--session`,

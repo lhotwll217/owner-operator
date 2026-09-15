@@ -45,9 +45,6 @@ writeFileSync(
 );
 chmodSync(slowGit, 0o755);
 process.env.PATH = `${binDir}:${realPath ?? ""}`;
-// A real interactive terminal session has ≥2 user turns. The scan hides a single-turn bare
-// `claude` session as an indistinguishable `claude -p` single-turn worker (launch-mode rule in
-// scan-active-transcripts.mjs), so a one-turn fixture would never surface.
 writeFileSync(
   sessionFile,
   msg("user", "tighten the poll loop", at(20)) +

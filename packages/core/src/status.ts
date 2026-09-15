@@ -20,8 +20,8 @@ export {
 /**
  * Lifecycle state of a thread — lo-fi and distinct from `priority` (priority = how loud;
  * state = what's happening). Mirrors the bounded vocabulary agent-deck polls for.
- * `done` is OPERATOR-set (`/done` / mark_thread_done) — transcripts can't observe
- * "resolved" — and holds until a newer message wakes the thread (see resolve.mjs).
+ * `done` comes from an explicit Done action and holds until a newer message wakes
+ * the thread (see resolve.mjs).
  */
 export type ThreadState = "needs-you" | "working" | "idle" | "done";
 

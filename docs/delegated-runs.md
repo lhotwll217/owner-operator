@@ -331,7 +331,8 @@ its ordinary scan path, the observed thread joins to its `agent_runs` row by ide
 (`child_session_id`), so the session-state projection exposes `parentThreadId`. This is an
 identity join, never inference from transcript-file growth. When the monitored OO parent is also
 visible, the widget nests the child beneath that exact root. While any child is pending or running,
-State projects the root as `working` and excludes it from needs-you enrichment and schedule inputs.
+State projects the root as `working` and excludes it from needs-you schedule inputs.
+Summary enrichment continues during child work without changing the parent's working status.
 Once all children are terminal, the transcript-derived root state applies again. The ledger record
 remains the canonical child provenance.
 

@@ -39,6 +39,9 @@ for (const file of architectureRuntime) {
   const path = relative(projectRoot, file);
   assert.ok(!retiredArchitecture.test(source), `${path}: retired snapshot/fallback architecture`);
   assert.ok(!/(?:\.agents|\.claude)\/skills/.test(source), `${path}: application runtime must not load code from a skills directory`);
+  if (path.startsWith("src/session-monitor/")) {
+    assert.ok(!/agent\/skills\//.test(source), `${path}: transcript monitoring must not load agent skill internals`);
+  }
   if (!path.startsWith("src/state/")) {
     assert.ok(!/from\s+["']node:sqlite["']/.test(source), `${path}: SQLite access belongs to src/state`);
   }

@@ -5,7 +5,7 @@ import {
   isOnboarded,
   type ScanRow,
   type SessionStateRow,
-  type ThreadDetails,
+  type ThreadEnrichment,
   type EnrichmentCandidate,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
@@ -17,7 +17,7 @@ export interface SessionMonitorOptions {
   intervalMs?: number;
   debounceMs?: number;
   scan?: (since: string, limit: number) => Promise<ScanRow[]>;
-  enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadDetails>;
+  enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadEnrichment>;
   canEnrich?: () => boolean;
   logger?: (record: SessionMonitorLogRecord) => void;
 }
@@ -58,7 +58,7 @@ async function scanTranscripts(since: string, limit: number): Promise<ScanRow[]>
   }));
 }
 
-/** Session ingestion plus its private, asynchronous needs-you enrichment worker. */
+/** Session ingestion and asynchronous reconciliation through State. */
 export class SessionMonitor {
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
@@ -81,7 +81,7 @@ export class SessionMonitor {
       this.armWatchers();
       const rows = await (this.options.scan ?? scanTranscripts)(
         this.options.since ?? loadActiveWindow(),
-        this.options.limit ?? 50,
+        this.options.limit ?? 0,
       );
       this.state.recordPoll(rows);
       this.current = this.state.listCurrentSessionState();
@@ -177,7 +177,7 @@ export class SessionMonitor {
         if (!candidate.lastMessageAt || !this.options.enrich) return;
         try {
           const details = await this.options.enrich(candidate);
-          if (!this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt)) {
+          if (!this.state.appendEnrichment(candidate.id, details, candidate.lastMessageAt, candidate.children)) {
             this.logger({
               event: SessionMonitorLogEvent.EnrichmentDiscarded,
               error: `stale sample discarded for ${candidate.id}`,

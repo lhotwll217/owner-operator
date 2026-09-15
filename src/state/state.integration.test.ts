@@ -82,7 +82,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "generated-review-topic",
-      { topic: "Review the current code changes for billing" },
+      { topic: "Review the current code changes for billing", summary: "Reviewing billing changes.", priority: 2, attention: "idle" },
       "2026-07-09T09:58:30.000Z",
     ),
     true,
@@ -102,12 +102,12 @@ try {
     !state.listCurrentSessionState().some((item) => item.id === "thread-old-working"),
     "quiet rows outside the active window leave the client projection",
   );
-  assert.deepEqual(state.listEnrichmentCandidates().map((item) => item.id), ["thread-1"]);
+  assert.deepEqual(state.listEnrichmentCandidates().map((item) => item.id), ["thread-1", "oo-root"], "visible working rows are eligible for a title and current-activity summary");
   assert.equal(events.at(-1)?.kind, DomainEventKind.ThreadChanged, "post-commit event published");
 
   state.appendEnrichment(
     "thread-1",
-    { topic: "Daemon foundation", nextSteps: "Implement the state seam", priority: 4 },
+    { topic: "Daemon foundation", priority: 4, summary: "Implement the state seam", attention: "needs-you" as const },
     "2026-07-09T09:59:00.000Z",
   );
   state.registerAndSelectWorktree("thread-1", {
@@ -115,6 +115,16 @@ try {
     path: "/worktrees/owner-operator/ticket-07",
     gitCommonDir: "/repositories/owner-operator/.git",
   });
+  assert.equal(
+    state.appendEnrichment(
+      "oo-root",
+      { topic: "Monitor the OO root", attention: "idle", summary: "Monitoring the OO root session.", priority: 2 },
+      "2026-07-09T09:57:00.000Z",
+    ),
+    true,
+    "a working affirmation lands the overlay without changing the working state",
+  );
+  assert.equal(state.listSessionState().find((item) => item.id === "oo-root")?.state, "working");
   const gatewayFixture = JSON.parse(readFileSync(
     new URL("../../apps/widget/Tests/Fixtures/session-state.gateway.json", import.meta.url),
     "utf8",
@@ -135,13 +145,13 @@ try {
   assert.equal(
     state.appendEnrichment(
       "thread-1",
-      { topic: "Stale title", nextSteps: "Stale action", priority: 1 },
+      { topic: "Stale title", priority: 1, summary: "Stale action", attention: "needs-you" as const },
       "2026-07-09T09:59:00.000Z",
     ),
     false,
     "an enrichment for an older message cannot overwrite the current handoff",
   );
-  assert.equal(state.listSessionState()[0].nextSteps, "Implement the state seam");
+  assert.equal(state.listSessionState()[0].summary, "Design the daemon", "a newer message shows the transcript fallback");
 
   assert.deepEqual(state.markThreadsDone(["thread-1", "missing"]).missingIds, ["missing"]);
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "done leaves the active projection");
@@ -161,15 +171,15 @@ try {
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap" });
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap", working: true });
   assert.equal(
-    state.appendEnrichment("thread-flap", { nextSteps: "Ship the fix" }, "2026-07-09T10:03:00.000Z"),
+    state.appendEnrichment("thread-flap", { summary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
     true,
     "a completed enrichment lands after a state-only needs-you→working flap",
   );
   const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
   assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
-  assert.equal(flapped?.nextSteps, "Ship the fix");
+  assert.equal(flapped?.summary, "Ship the fix", "a working session projects the new summary without changing state");
   assert.equal(
-    state.appendEnrichment("thread-flap", { nextSteps: "Duplicate" }, "2026-07-09T10:03:00.000Z"),
+    state.appendEnrichment("thread-flap", { summary: "Duplicate", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
     false,
     "re-enriching an already-enriched message is rejected by the watermark",
   );
@@ -179,7 +189,7 @@ try {
   state.recordObservation({ ...row("2026-07-09T10:04:00.000Z"), id: "thread-stale" });
   state.recordObservation({ ...row("2026-07-09T10:04:30.000Z"), id: "thread-stale" });
   assert.equal(
-    state.appendEnrichment("thread-stale", { nextSteps: "Stale action" }, "2026-07-09T10:04:00.000Z"),
+    state.appendEnrichment("thread-stale", { summary: "Stale action", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:04:00.000Z"),
     false,
     "an enrichment sampled before a newer message is rejected as stale",
   );
@@ -188,15 +198,17 @@ try {
     "the rejected thread stays queued to re-enrich at the newer message",
   );
 
-  // A rewritten/truncated transcript can move last_message_at backwards. A watermark
-  // ahead of the message must not make the thread a candidate — selecting it would
-  // burn a model call on a sample the guard is certain to reject.
   state.recordObservation({ ...row("2026-07-09T10:05:00.000Z"), id: "thread-regressed" });
   assert.equal(
-    state.appendEnrichment("thread-regressed", { nextSteps: "Enriched at T2" }, "2026-07-09T10:05:00.000Z"),
+    state.appendEnrichment("thread-regressed", { summary: "Enriched at T2", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:05:00.000Z"),
     true,
   );
-  state.recordObservation({ ...row("2026-07-09T10:04:45.000Z"), id: "thread-regressed" });
+  const beforeRegression = state.listSessionState().find((item) => item.id === "thread-regressed");
+  const eventsBeforeRegression = events.length;
+  state.recordObservation({ ...row("2026-07-09T10:04:45.000Z"), id: "thread-regressed", working: true, topic: "Old raw topic" });
+  assert.deepEqual(state.listSessionState().find((item) => item.id === "thread-regressed"), beforeRegression,
+    "older working observations preserve newer state, timestamps, and summary");
+  assert.equal(events.length, eventsBeforeRegression, "older observations do not publish stale evidence");
   assert.ok(
     !state.listEnrichmentCandidates().some((item) => item.id === "thread-regressed"),
     "a watermark ahead of a regressed last_message_at is not a candidate",

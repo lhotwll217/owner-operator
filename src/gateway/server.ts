@@ -133,7 +133,19 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(readiness.ready ? 200 : 503, readiness);
       }
       if (route === "GET /session-state") return respond(200, options.state.listCurrentSessionState());
-      if (route === "POST /poll") { await options.monitor.poll(); return respond(200, { ok: true }); }
+      if (route === "POST /poll") {
+        const body = await readBody(request) as { reconcile?: unknown } | null;
+        if (body === null || typeof body !== "object" || Array.isArray(body)) return respond(400, { error: "poll body must be an object" });
+        const reconcile = body.reconcile ?? [];
+        if (!Array.isArray(reconcile) || reconcile.length > 100 || !reconcile.every((item) =>
+          item && typeof item.id === "string" && item.id.trim() &&
+          typeof item.lastMessageAt === "string" && Number.isFinite(Date.parse(item.lastMessageAt)))) {
+          return respond(400, { error: "reconcile must contain at most 100 id and lastMessageAt pairs" });
+        }
+        const queuedIds = options.state.requestEnrichment(reconcile);
+        await options.monitor.poll();
+        return respond(200, { ok: true, queuedIds });
+      }
 
       if (route === "POST /done") {
         const body = await readBody(request) as { ids?: unknown };

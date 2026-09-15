@@ -92,17 +92,17 @@ try {
     "a pending child makes its exact parent effectively working",
   );
   assert.ok(
-    !state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
-    "a pending child's parent is not enriched as an owner handoff",
+    state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
+    "a pending child's parent is eligible for a summary",
   );
   assert.equal(
     state.appendEnrichment(
       "operator-thread",
-      { topic: "Stale handoff", nextSteps: "Interrupt delegated work" },
+      { topic: "Stale handoff", summary: "Interrupt delegated work", priority: 2, attention: "needs-you" as const },
       "2026-07-17T10:05:00.000Z",
     ),
-    false,
-    "an enrichment sampled before delegation cannot land while the child is active",
+    true,
+    "a summary can land while the child is active",
   );
   assert.ok(
     !state.listNeedsYouMessageVersions().some(({ threadId }) => threadId === "operator-thread"),

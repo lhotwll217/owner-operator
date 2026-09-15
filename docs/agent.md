@@ -58,11 +58,11 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
   the same session and all cwd-bound services after Pi reports the agent run fully settled.
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
-- `session-search` is such a skill: Pi's native `bash` invokes its policy wrapper, which executes
+- `session-search` uses Pi's native `bash` to invoke the shared policy wrapper, which executes
   the pinned upstream `session-grep` CLI. The wrapper owns local source mapping, blacklist
   policy, and caller exclusion; caller identity comes from provenance, and the caller-visible
   behavior is in [cli.md](cli.md). Search internals live with the vendored primitive under
-  `src/agent/skills/session-search/vendor/`.
+  `src/session-search/vendor/`.
 - `.claude/skills` contains development-agent instructions and is never loaded by the product agent.
 
 ## Permissions

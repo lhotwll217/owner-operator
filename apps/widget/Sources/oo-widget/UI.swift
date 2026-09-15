@@ -126,10 +126,6 @@ struct CompactBar: View {
     private var fresh: [SessionStateRow] { client.freshNeedsYou() }
 }
 
-/// One thread as `mark Project → next step`: the tool's logo (when bundled), the project
-/// tinted light blue, an arrow (the session state's `→ next step` pattern), then the next step in
-/// full. `Text` (not AttributedString) so the mark rides inline. Shared by the calm line and
-/// the ticker.
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
 
 private func lineText(_ r: SessionStateRow) -> Text {
@@ -138,7 +134,7 @@ private func lineText(_ r: SessionStateRow) -> Text {
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
-    out.append(AttributedString(r.nextSteps ?? r.title, attributes: step))
+    out.append(AttributedString(r.summary ?? r.title, attributes: step))
     guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
 }
@@ -262,13 +258,6 @@ struct GroupView: View {
     }
 }
 
-/// One thread: glyph · P-badge · title (wraps, never truncates) · recency · a done check, then the
-/// grey next-step, then origin (±diff · app). Keep every word.
-/// Rename via the pencil that appears on hover (or double-click the title) — your title is
-/// preferred over the AI's (which keeps titling underneath); submit it empty (or use the
-/// context menu) to show AI titles again. STABILITY RULE: hover/edit state may only swap
-/// what's drawn inside space that is always reserved — never insert or remove layout — so
-/// text never re-wraps and neighbors never move.
 struct RowView: View {
     let row: SessionStateRow
     let onDone: () -> Void
@@ -292,11 +281,17 @@ struct RowView: View {
                     title
                     titleAffordance
                     Spacer(minLength: 6)
+                    if row.hasOldAttention() {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow).font(.system(size: 10))
+                            .accessibilityLabel("Old needs-you status")
+                            .help("No messages for at least 3 days. This needs-you status may be stale.")
+                    }
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
-                if let next = row.nextSteps, !next.isEmpty {
-                    Text("→ \(next)")
+                if let summary = row.summary, !summary.isEmpty {
+                    Text("→ \(summary)")
                         .foregroundStyle(.secondary).font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)
                 }
