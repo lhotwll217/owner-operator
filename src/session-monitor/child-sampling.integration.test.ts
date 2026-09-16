@@ -34,8 +34,8 @@ try {
   }
   const candidate = state.listEnrichmentCandidates().find(({ id }) => id === "parent")!;
   assert.ok(candidate.children.slice(0, 2).every((child) => child.status === "running" || child.status === "pending"), "State prioritizes active child versions before terminal history");
-  const sample = await sampleEnrichment(candidate);
-  console.log(JSON.stringify({ chars: sample.length, headers: (sample.match(/Delegated child /g) ?? []).length, olderActivePresent: sample.includes("older-running CURRENT_WORK_SENTINEL") }));
+  const { sample, bookmark } = await sampleEnrichment(candidate);
+  console.log(JSON.stringify({ chars: sample.length, headers: (sample.match(/Delegated child /g) ?? []).length, olderActivePresent: sample.includes("older-running CURRENT_WORK_SENTINEL"), bookmark }));
   assert.match(sample, /older-running CURRENT_WORK_SENTINEL/, "older active work survives newer terminal siblings");
   assert.match(sample, /older-pending CURRENT_WORK_SENTINEL/, "multiple active children share the bounded context");
   assert.ok(sample.indexOf("Delegated child older-running") < sample.indexOf("Delegated child completed"));

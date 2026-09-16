@@ -12,9 +12,9 @@ A floating macOS panel that shows session triage. Sessions needing attention sta
 Triage happens in place: see each session's state and summary, rename a thread, or mark it done
 without opening its harness.
 
-Every row shows a title from the moment its work is visible. A working row shows that title and
-its working glyph while the task is still moving; a settled row shows its recap, marked when a
-refresh is pending. A delegated child's recap stays folded until the owner opens it.
+Every row shows a title from the moment its work is visible, and its latest status summary,
+marked when a refresh is pending — including a working row, which is where the owner reads what
+is happening right now. A delegated child's status summary stays folded until the owner opens it.
 
 The widget is a pure Gateway client. It renders `/session-state` and never spawns
 a process or reads the `agent_runs` ledger directly.

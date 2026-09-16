@@ -44,6 +44,9 @@ async function resolveModel(runtime: ModelRuntime, settings: SettingsManager) {
 export interface EnrichmentOptions {
   /** The title this thread already shows. Enrichment keeps it unless the work changed. */
   currentTitle?: string | null;
+  /** The status summary this thread already shows. Enrichment keeps it unless the situation
+   * changed, so a reassessment of the same work writes no new revision. */
+  currentStatusSummary?: string | null;
   services?: OwnerOperatorPiServices;
 }
 
@@ -52,6 +55,7 @@ export async function enrichThread(sample: string, options: EnrichmentOptions = 
   const { settingsManager: settings, modelRuntime: runtime } = options.services ?? await ownerOperatorPiServices();
   const model = await resolveModel(runtime, settings);
   const currentTitle = options.currentTitle?.trim();
+  const currentStatusSummary = options.currentStatusSummary?.trim();
 
   const response = await runtime.completeSimple(model, {
     systemPrompt: [
@@ -60,7 +64,11 @@ export async function enrichThread(sample: string, options: EnrichmentOptions = 
       currentTitle
         ? `topic is this session's title. Its current title is ${JSON.stringify(currentTitle)}. Repeat that title verbatim while it still identifies this work. Write a new noun phrase of up to eight words only when the task itself became a categorically different piece of work, so the owner would look for it under a different name.`
         : "topic is a noun phrase of up to eight words that tells this session apart from the owner's other work. Name the specific task, not the tool or the opening request's wording.",
-      "summary describes where the task stands now in one to three sentences: the current objective and the latest progress or outcome. Include an unresolved owner action when relevant. Distinguish reported completion from verified results and note insufficient evidence.",
+      "summary is this session's status summary: where the task stands now, in one to three terse sentences. Write it telegram style. Separate what is still in progress from what stopped unresolved, and distinguish reported completion from verified results.",
+      "Name the concrete things whose state changed — pull request numbers, issues, files, commands, services — and what became of each. A later reader uses those names to tell what is already settled.",
+      ...(currentStatusSummary
+        ? [`This session's current status summary is ${JSON.stringify(currentStatusSummary)}. Repeat it verbatim when your understanding of the task is the same. Further tool calls, retries, or restatements of settled work are not a change.`]
+        : []),
       "ownerAction is null unless the transcript identifies a current unresolved action for the human owner to take. Otherwise state that specific human action as a string and include it in summary. An owner's request for the agent to review, test, or implement is work for the agent. Missing verification evidence belongs in summary and leaves ownerAction null unless an actual human decision or human review is required. Respect later corrections and replacement work over obsolete questions. The application owns working and done status.",
       "For an automated test or approval assessment, evaluate its actual task and result. Generated role-play decisions are not decisions for the owner.",
       "priority is an integer from 1 to 5 for owner urgency.",

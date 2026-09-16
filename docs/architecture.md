@@ -84,8 +84,11 @@ A newer message or a change in working status queues another assessment. Failed 
 the row eligible for retry. Owner Done and newer messages reject stale results; regressed
 transcript timestamps cannot overwrite a newer watermark. Unchanged settled assessments survive
 polling and restart. Titles preserve owner renames, and a generated title holds still until the
-work changes categorically. The projection keeps the last generated summary while a newer one is
-pending and reports that with `summaryPending`; a row with no summary yet shows its title alone.
+work changes categorically. The projection keeps the last generated status summary while a newer
+one is pending and reports that with `summaryPending`; a row with no status summary yet shows its
+title alone. A revision is written when the meaning changes and records the session position it
+was written from, so a reader can return to that point; a reassessment that lands on the same
+understanding advances the clock alone. Working sessions are reassessed about every four minutes.
 The monitor never awaits the model in its scan hot path.
 Observed child transcripts and run statuses accompany the parent sample within a bounded context.
 Child message or run-status changes refresh the parent summary and reject an in-flight older result.

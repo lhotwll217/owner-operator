@@ -301,37 +301,35 @@ struct SessionStateTests {
         #expect(r.priority == 4)
     }
 
-    /// A settled row carries its recap; a working row carries its title and working glyph while
-    /// the task is still moving. The recap a working row would show is still generated and
-    /// stored — Owner Operator reads it even though the panel does not print it.
-    @Test func settledRowsShowRecapsAndWorkingRowsShowTitles() throws {
+    /// Every visible row shows its latest status summary, including a working one: the owner
+    /// reads that row to see what is happening right now.
+    @Test func everyVisibleRowShowsItsStatusSummary() throws {
         let input = try rows([
             row(id: "working", state: "working", topic: "Export test run", summary: "Writing export tests."),
             row(id: "idle", state: "idle", summary: "Export tests passed."),
             row(id: "decision", state: "needs-you", summary: "Choose the retention policy."),
         ])
         let rendered = renderText(rows: input, port: 47711)
-        #expect(!rendered.contains("Writing export tests."))
+        #expect(rendered.contains("Writing export tests."))
         #expect(rendered.contains("Export test run"))
-        #expect(input[0].summary == "Writing export tests.")
-        #expect(input[0].displayRecap == nil)
+        #expect(input[0].displayStatusSummary == "Writing export tests.")
         #expect(rendered.contains("Export tests passed."))
         #expect(rendered.contains("Choose the retention policy."))
         #expect(input.map(\.state) == [.working, .idle, .needsYou])
     }
 
-    /// The last recap stays on screen while its replacement is generated, marked as pending
-    /// rather than blanked or replaced by the opening prompt.
-    @Test func pendingRecapKeepsTheLastOneWithAMark() throws {
+    /// The last status summary stays on screen while its replacement is generated, marked as
+    /// pending rather than blanked or replaced by the opening prompt.
+    @Test func pendingStatusSummaryKeepsTheLastOneWithAMark() throws {
         let input = try rows([row(id: "t", state: "idle", summary: "Export tests passed.", summaryPending: true)])
         let rendered = renderText(rows: input, port: 47711)
         #expect(input[0].summaryPending)
         #expect(rendered.contains("Export tests passed. ·"))
     }
 
-    /// A delegated child renders under its parent with its recap folded away; the parent's own
-    /// recap is open. The child's evidence is present either way.
-    @Test func childRecapsStartCollapsed() throws {
+    /// A delegated child renders under its parent with its status summary folded away; the
+    /// parent's own is open. The child's evidence is present either way.
+    @Test func childStatusSummariesStartCollapsed() throws {
         let input = try rows([
             row(id: "parent", state: "idle", summary: "Delegated the export work."),
             row(id: "child", state: "idle", summary: "Export implemented and tested.", parentThreadId: "parent"),
@@ -340,15 +338,15 @@ struct SessionStateTests {
         let parent = try #require(rendered.first { $0.id == "parent" })
         let child = try #require(rendered.first { $0.id == "child" })
         #expect(child.nestingDepth > 0)
-        #expect(child.recapStartsCollapsed)
-        #expect(!parent.recapStartsCollapsed)
-        #expect(child.displayRecap == "Export implemented and tested.")
+        #expect(child.statusSummaryStartsCollapsed)
+        #expect(!parent.statusSummaryStartsCollapsed)
+        #expect(child.displayStatusSummary == "Export implemented and tested.")
     }
 
-    /// A row with no generated recap yet shows its title alone rather than prompt text.
-    @Test func rowWithoutARecapShowsOnlyItsTitle() throws {
+    /// A row with no generated status summary yet shows its title alone rather than prompt text.
+    @Test func rowWithoutAStatusSummaryShowsOnlyItsTitle() throws {
         let input = try rows([row(id: "t", state: "idle", topic: "please have a look at the export thing")])
-        #expect(input[0].displayRecap == nil)
+        #expect(input[0].displayStatusSummary == nil)
         #expect(input[0].title == "please have a look at the export thing")
     }
 

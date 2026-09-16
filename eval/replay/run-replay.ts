@@ -315,13 +315,17 @@ try {
         children: candidate.children.length, lastMessageAt: candidate.lastMessageAt,
       };
       try {
-        const sample = await sampleEnrichment(candidate);
+        const { sample, bookmark } = await sampleEnrichment(candidate);
         attempt.sampleChars = sample.length;
         attempt.sampleMs = Date.now() - started;
+        attempt.bookmark = bookmark;
         if (has("sample-only")) { attempts.push(attempt); continue; }
         const modelStart = Date.now();
         attempt.currentTitle = candidate.generatedTopic;
-        const details = await enrichThread(sample, { currentTitle: candidate.generatedTopic });
+        const details = await enrichThread(sample, {
+          currentTitle: candidate.generatedTopic,
+          currentStatusSummary: candidate.summary,
+        });
         attempt.modelMs = Date.now() - modelStart;
         attempt.details = details;
         attempt.applied = daemon.state.appendEnrichment(

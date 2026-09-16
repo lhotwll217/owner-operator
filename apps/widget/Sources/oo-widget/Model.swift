@@ -70,7 +70,7 @@ struct SessionStateRow: Decodable, Identifiable {
     let generatedTopic: String?
     let ownerTitle: String?
     let summary: String?
-    /// The recap has not caught up with the latest activity yet; the last one still shows.
+    /// The status summary has not caught up with the latest activity yet; the last one still shows.
     let summaryPending: Bool
     let priority: Int?
     let state: ThreadState
@@ -126,17 +126,16 @@ struct SessionStateRow: Decodable, Identifiable {
         return topic
     }
 
-    /// The recap a widget surface shows. A working row shows its title and working glyph while
-    /// the task is still moving; the recap it would carry is still generated and stored for
-    /// Owner Operator to read.
-    var displayRecap: String? {
-        guard state != .working, let recap = summary, !recap.isEmpty else { return nil }
-        return recap
+    /// The status summary a widget surface shows. Every visible row carries one, including a
+    /// working row: that is where the owner reads what is happening right now.
+    var displayStatusSummary: String? {
+        guard let statusSummary = summary, !statusSummary.isEmpty else { return nil }
+        return statusSummary
     }
 
-    /// A delegated child's recap stays folded until the owner opens it, so a parent's children
-    /// read as a list of runs rather than a wall of nested prose.
-    var recapStartsCollapsed: Bool { nestingDepth > 0 }
+    /// A delegated child's status summary stays folded until the owner opens it, so a parent's
+    /// children read as a list of runs rather than a wall of nested prose.
+    var statusSummaryStartsCollapsed: Bool { nestingDepth > 0 }
 
     func hasOldAttention(at now: Date = Date()) -> Bool {
         guard state == .needsYou, let lastMessage = parseISODate(lastMessageAt) else { return false }

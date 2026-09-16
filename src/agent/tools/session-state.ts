@@ -99,9 +99,11 @@ export const getCurrentSessionStateTool = defineTool({
   label: "Get current session state",
   description:
     "Read the owner's current session state — the exact rows their widget shows: row " +
-    "number, id, repo, topic, state, priority, summary. State is authoritative: for " +
+    "number, id, repo, topic, state, priority, status summary. State is authoritative: for " +
     "'what needs me?' use state=needs-you; priority or summary wording does not override state. " +
-    "Rows are summary indexes, not transcript evidence; use their ids with session-search for " +
+    "Read the other rows' status summaries before reporting an obligation: a later session often " +
+    "records that the same pull request, issue, or decision was already settled. " +
+    "Rows are status indexes, not transcript evidence; use their ids with session-search for " +
     "exact changes, reasons, proof, or artifact details. When stable ids are already known, pass " +
     "ids to return only those widget rows.",
   parameters: CurrentSessionStateParams,

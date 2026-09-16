@@ -131,20 +131,20 @@ export async function runSessionStateWidgetProof(options: {
       attempts.push(candidate.id);
       if (candidate.id === "partial" && failOnce) { failOnce = false; throw new Error("controlled transient outage"); }
       const { sampleEnrichment } = await import("../src/session-monitor/scan");
-      const sample = await sampleEnrichment(candidate);
+      const { sample, bookmark } = await sampleEnrichment(candidate);
       if (candidate.id === "parent") {
         assert.ok(sample.includes("Use the replacement agent."), "working summary sees the first owner message");
         assert.ok(sample.includes("Continue with the replacement"), "working summary sees the latest owner message");
         assert.ok(sample.includes("Delegated child child"), "parent summary receives the child's own evidence");
       }
       if (liveEnrich) {
-        const result = await liveEnrich(sample, services);
+        const result = await liveEnrich(sample, { services, currentTitle: candidate.generatedTopic, currentStatusSummary: candidate.summary });
         console.log("MODEL", candidate.id, JSON.stringify(safe(result)));
         return result;
       }
-      if (options.enrich) return options.enrich(candidate, sample);
+      if (options.enrich) return { ...(await options.enrich(candidate, sample)), ...(bookmark ? { bookmark } : {}) };
       if (candidate.id === "parent") {
-        return { topic: "Replacement agent run", attention: "idle", priority: 3, summary: sample.includes("CSV escaping verified")
+        return { topic: "Replacement agent run", attention: "idle", priority: 3, ...(bookmark ? { bookmark } : {}), summary: sample.includes("CSV escaping verified")
           ? "Child review verified CSV escaping; implementation continues."
           : "Child review passed; the replacement agent is implementing the task." };
       }
@@ -153,7 +153,7 @@ export async function runSessionStateWidgetProof(options: {
       if (candidate.id === "child" || candidate.id === "summarized") {
         assert.ok(sample.includes("Exit code 0"), "reconciliation receives execution evidence, not just the assistant's completion claim");
       }
-      return { topic: c.topic, attention: c.state, priority: 2, summary: c.answer || (sample.includes("CSV writer implemented") ? "CSV writer implemented; tests are next." : "Implementing invoice CSV export.") };
+      return { topic: c.topic, attention: c.state, priority: 2, ...(bookmark ? { bookmark } : {}), summary: c.answer || (sample.includes("CSV writer implemented") ? "CSV writer implemented; tests are next." : "Implementing invoice CSV export.") };
     }
     async function boot() {
       return startDaemon({ port: 0, watch: false, dbPath,

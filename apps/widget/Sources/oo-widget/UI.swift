@@ -134,7 +134,7 @@ private func lineText(_ r: SessionStateRow) -> Text {
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
-    out.append(AttributedString(r.displayRecap ?? r.title, attributes: step))
+    out.append(AttributedString(r.displayStatusSummary ?? r.title, attributes: step))
     guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
 }
@@ -265,7 +265,7 @@ struct RowView: View {
     @State private var hovering = false
     @State private var rowHovering = false
     @State private var editing = false
-    @State private var recapExpanded = false
+    @State private var statusSummaryExpanded = false
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
 
@@ -281,7 +281,7 @@ struct RowView: View {
                     }
                     title
                     titleAffordance
-                    recapDisclosure
+                    statusSummaryDisclosure
                     Spacer(minLength: 6)
                     if row.hasOldAttention() {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -292,11 +292,11 @@ struct RowView: View {
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
-                if let recap = shownRecap {
-                    Text("→ \(recap)\(row.summaryPending ? " ·" : "")")
+                if let statusSummary = shownStatusSummary {
+                    Text("→ \(statusSummary)\(row.summaryPending ? " ·" : "")")
                         .foregroundStyle(.secondary).font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)
-                        .help(row.summaryPending ? "This recap is being refreshed for newer activity." : "")
+                        .help(row.summaryPending ? "This status summary is being refreshed for newer activity." : "")
                 }
                 HStack(spacing: 6) {
                     if row.diffAdded != nil || row.diffDeleted != nil {
@@ -317,25 +317,24 @@ struct RowView: View {
         }
     }
 
-    /// The recap this row shows, if any. A working row shows its title and working glyph while
-    /// the task is still moving; a delegated child keeps its recap folded away until the owner
-    /// opens it, so a parent's list of children stays scannable.
-    private var shownRecap: String? {
-        guard !row.recapStartsCollapsed || recapExpanded else { return nil }
-        return row.displayRecap
+    /// The status summary this row shows, if any. A delegated child keeps its own folded away
+    /// until the owner opens it, so a parent's list of children stays scannable.
+    private var shownStatusSummary: String? {
+        guard !row.statusSummaryStartsCollapsed || statusSummaryExpanded else { return nil }
+        return row.displayStatusSummary
     }
 
-    /// The child row's fixed-width recap toggle. It holds its slot so opening a recap never
+    /// The child row's fixed-width toggle. It holds its slot so opening a status summary never
     /// reflows the title beside it.
-    @ViewBuilder private var recapDisclosure: some View {
-        if row.recapStartsCollapsed, row.displayRecap != nil {
-            Button { recapExpanded.toggle() } label: {
-                Image(systemName: recapExpanded ? "chevron.down" : "chevron.right")
+    @ViewBuilder private var statusSummaryDisclosure: some View {
+        if row.statusSummaryStartsCollapsed, row.displayStatusSummary != nil {
+            Button { statusSummaryExpanded.toggle() } label: {
+                Image(systemName: statusSummaryExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9)).foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .frame(width: 10)
-            .help(recapExpanded ? "Hide this delegated run's recap" : "Show this delegated run's recap")
+            .help(statusSummaryExpanded ? "Hide this delegated run's status summary" : "Show this delegated run's status summary")
         }
     }
 

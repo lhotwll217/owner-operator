@@ -30,12 +30,8 @@ struct LiveSummaryProof {
             precondition(row.title == want.title && row.state == want.state, "Native presentation or lifecycle differs for \(want.id)")
             if row.parentThreadId != nil { precondition(row.nestingDepth > 0, "Child must render nested") }
             precondition(!row.title.isEmpty, "Every row carries a title while it is on screen")
-            if row.state == .working {
-                precondition(row.displayRecap == nil, "A working row shows its title and glyph, not its recap, for \(want.id)")
-            } else {
-                precondition(row.displayRecap == row.summary, "A settled row shows its retained recap for \(want.id)")
-            }
-            print("NATIVE \(row.id) \(row.state.rawValue) pending=\(row.summaryPending) \(row.title) | \(row.displayRecap ?? "(recap held back)")")
+            precondition(row.displayStatusSummary == row.summary, "Every visible row shows its status summary, for \(want.id)")
+            print("NATIVE \(row.id) \(row.state.rawValue) pending=\(row.summaryPending) \(row.title) | \(row.displayStatusSummary ?? "(none yet)")")
         }
         func capture(_ suffix: String) throws {
             window.setContentSize(host.fittingSize)
@@ -64,7 +60,7 @@ struct LiveSummaryProof {
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))
             try capture("-expanded-bottom")
         }
-        precondition(rows.contains { $0.displayRecap?.isEmpty == false }, "The panel must carry generated recaps, not titles alone")
+        precondition(rows.contains { $0.displayStatusSummary?.isEmpty == false }, "The panel must carry generated status summaries, not titles alone")
         print("PASS native Gateway delivery and WidgetRoot rendering, \(rows.count) rows")
         window.orderOut(nil)
     }

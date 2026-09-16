@@ -20,11 +20,7 @@ export async function runTranscriptScan(args: readonly string[]): Promise<ScanAc
 /** Bounded transcript context passed across the monitor → model-completion seam. */
 export async function sampleTranscript(threadId: string, source: string, maxChars = 24_000): Promise<string> {
   if (["claude", "codex", "pi"].includes(source)) {
-    const searchScript = fileURLToPath(new URL("../session-search/session-search.mjs", import.meta.url));
-    const { stdout } = await execFileAsync(process.execPath, [
-      searchScript, "--skim", threadId, "--include-tools", "--max-chars", String(maxChars),
-    ], { encoding: "utf8", maxBuffer: 128 * 1024 });
-    if (!stdout.startsWith(`skim id=${threadId} `)) throw new Error(`missing authorized evidence for ${threadId}`);
+    const { stdout } = await skim(threadId, maxChars);
     return stdout.slice(0, maxChars);
   }
   const sample = await runTranscriptScan([
@@ -34,9 +30,36 @@ export async function sampleTranscript(threadId: string, source: string, maxChar
   return JSON.stringify(sample).slice(0, maxChars);
 }
 
-export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<string> {
+/**
+ * One privacy-aware read of a session, and the position it reached. The helper reports the
+ * message count of the view it returned; the last index of that view is the position a status
+ * summary written from it can be returned to with `--session <id> --at <index> --include-tools`.
+ */
+async function skim(threadId: string, maxChars: number): Promise<{ stdout: string; position: number | null }> {
+  const searchScript = fileURLToPath(new URL("../session-search/session-search.mjs", import.meta.url));
+  const { stdout } = await execFileAsync(process.execPath, [
+    searchScript, "--skim", threadId, "--include-tools", "--max-chars", String(maxChars),
+  ], { encoding: "utf8", maxBuffer: 128 * 1024 });
+  if (!stdout.startsWith(`skim id=${threadId} `)) throw new Error(`missing authorized evidence for ${threadId}`);
+  const messages = Number(/\smessages=(\d+)\s/.exec(stdout)?.[1]);
+  return { stdout, position: Number.isInteger(messages) && messages > 0 ? messages - 1 : null };
+}
+
+export interface EnrichmentSample {
+  sample: string;
+  /** Where this evidence ends, for the revision it produces. Absent when the source has no
+   * addressable position. */
+  bookmark?: { index: number; messageAt: string };
+}
+
+export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<EnrichmentSample> {
+  const bookmark = await (async () => {
+    if (!["claude", "codex", "pi"].includes(candidate.source) || !candidate.lastMessageAt) return undefined;
+    const { position } = await skim(candidate.id, 500);
+    return position === null ? undefined : { index: position, messageAt: candidate.lastMessageAt };
+  })();
   const samples = [await sampleTranscript(candidate.id, candidate.source)];
-  if (!candidate.children.length) return samples[0];
+  if (!candidate.children.length) return { sample: samples[0], ...(bookmark ? { bookmark } : {}) };
   const active = candidate.children.filter((child) => child.status === AgentRunStatus.Pending || child.status === AgentRunStatus.Running);
   const terminal = candidate.children.filter((child) => child.status !== AgentRunStatus.Pending && child.status !== AgentRunStatus.Running);
   const header = (child: EnrichmentCandidate["children"][number]) => `\n\nDelegated child ${child.id}, run ${child.runId}, status ${child.status}\n`;
@@ -61,5 +84,5 @@ export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<
   }
   samples.push(coverage);
   if (includedTerminal < terminal.length) samples.push(`\n${terminal.length - includedTerminal} terminal child transcripts omitted by the context limit; their work is not assessed here.`);
-  return samples.join("");
+  return { sample: samples.join(""), ...(bookmark ? { bookmark } : {}) };
 }

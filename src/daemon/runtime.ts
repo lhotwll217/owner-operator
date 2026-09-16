@@ -67,10 +67,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     }),
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
-      : { enrich: options.monitor?.enrich ?? (async (candidate) =>
-          (await import("../agent/enrichment")).enrichThread(await sampleEnrichment(candidate), {
+      : { enrich: options.monitor?.enrich ?? (async (candidate) => {
+          const { sample, bookmark } = await sampleEnrichment(candidate);
+          const assessment = await (await import("../agent/enrichment")).enrichThread(sample, {
             currentTitle: candidate.generatedTopic,
-          })) }),
+            currentStatusSummary: candidate.summary,
+          });
+          return { ...assessment, ...(bookmark ? { bookmark } : {}) };
+        }) }),
   });
   modules.sessionMonitor = true;
   const scheduler = new Scheduler(state, {

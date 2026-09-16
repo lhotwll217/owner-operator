@@ -24,13 +24,14 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "raw_topic", description: "Transcript-derived display fallback." },
       { name: "owner_title", description: "Owner-pinned title; NULL means generated title wins." },
       { name: "enriched_through_message_at", description: "Latest message timestamp incorporated into model enrichment." },
+      { name: "last_enriched_at", description: "When an assessment last landed, whether or not it changed anything. Working sessions are reassessed on a cadence from this." },
       { name: "enriched_while_working", description: "Whether enrichment landed during deterministic working status. A change in working status makes the same message eligible again." },
       { name: "enriched_children", description: "Observed child identities, message versions, and run statuses included in the summary. Child progress makes the parent eligible again." },
     ],
   },
   {
     name: "thread_details",
-    description: "Append-only dense belief ledger. MAX(version) is current; ORDER BY version is one thread's audit trail.",
+    description: "Append-only status ledger. MAX(version) is current; written_by='model' rows are the status-summary revisions, each with the session position it was written from.",
     columns: [
       { name: "thread_id", description: "References threads.id." },
       { name: "version", description: "Per-thread monotonic version; part of the primary key." },
@@ -39,7 +40,9 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "state", description: "needs-you | working | idle | done. needs-you states an unresolved owner action found in the conversation; scans alone produce working or idle." },
       { name: "priority", description: "Model-assigned owner attention, 1-5." },
       { name: "topic", description: "Generated title; the widget/CLI row title unless owner_title overrides. It holds still through ordinary progress, so a changed value marks a categorical change in what the session is working on." },
-      { name: "summary", description: "Current request, progress or outcome, including an owner action when relevant." },
+      { name: "summary", description: "Status summary: where the task stands now, including an owner action when relevant. A revision exists because the meaning changed; ORDER BY version reads how the work developed." },
+      { name: "bookmark_index", description: "Message index this revision was written from. Return to it with session-search --session ID --at INDEX --include-tools." },
+      { name: "bookmark_message_at", description: "Message time at that index." },
     ],
   },
   {
