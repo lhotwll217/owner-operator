@@ -32,6 +32,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isBlacklisted, loadBlacklist, loadMonitoredTranscriptStores } from "@owner-operator/core";
+import { scanCredentials } from "./credentials.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
 
 const SEARCH_HELPER = fileURLToPath(new URL("../../src/agent/skills/session-search/scripts/session-search.mjs", import.meta.url));
@@ -54,21 +55,10 @@ function authorizeSession(id, home) {
   }
 }
 
-// Credential-shaped material in a capture is reported, never inferred: a transcript holds
-// whatever the owner's own work put in it, and a capture is a second copy of that.
-const CREDENTIAL_PATTERNS = [
-  ["openai or anthropic key", /\b(?:sk-|sk-ant-)[A-Za-z0-9_-]{20,}/g],
-  ["github token", /\bgh[pousr]_[A-Za-z0-9]{30,}/g],
-  ["aws access key", /\bAKIA[0-9A-Z]{16}\b/g],
-  ["google api key", /\bAIza[0-9A-Za-z_-]{30,}/g],
-  ["slack token", /\bxox[abprs]-[0-9A-Za-z-]{10,}/g],
-  ["private key block", /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g],
-  ["json web token", /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
-  ["bearer authorization", /\b[Aa]uthorization["'\s:]+Bearer\s+[A-Za-z0-9._-]{20,}/g],
-];
-
-/** What credential-shaped strings the copied bytes contain, by pattern and file. Values stay out. */
-function scanCredentials(root) {
+// Credential material in a capture is reported, never inferred, using the same patterns the
+// sanitizer removes with.
+/** What credential-shaped values the copied bytes still contain, by pattern and file. */
+function scanCapturedCredentials(root) {
   const files = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -80,12 +70,10 @@ function scanCredentials(root) {
   walk(root);
   const findings = {};
   for (const file of files) {
-    const text = readFileSync(file, "utf8");
-    for (const [name, pattern] of CREDENTIAL_PATTERNS) {
-      const found = text.match(pattern);
-      if (!found) continue;
+    const counts = scanCredentials(readFileSync(file, "utf8"));
+    for (const [name, matches] of Object.entries(counts)) {
       const entry = findings[name] ??= { matches: 0, files: [] };
-      entry.matches += found.length;
+      entry.matches += matches;
       entry.files.push(basename(file));
     }
   }
@@ -143,7 +131,7 @@ if (verifyDir) {
     authorizedBySearchHelper: authorized,
     unauthorized,
     resolvedToADifferentFile: mismatched,
-    credentialScan: scanCredentials(captureDir),
+    credentialScan: scanCapturedCredentials(captureDir),
   };
   writeFileSync(join(captureDir, "verification.json"), `${JSON.stringify(verification, null, 2)}\n`);
   console.log(JSON.stringify(verification, null, 2));
@@ -320,7 +308,7 @@ const manifest = {
   unavailableHistory: unavailable,
   authorizedBySearchHelper: copied.length,
   unauthorizedBySearchHelper: unauthorized,
-  credentialScan: scanCredentials(out),
+  credentialScan: scanCapturedCredentials(out),
   blacklistedThreadsExcluded: excluded.length,
   foreignKeyViolations: violations.length,
   stores: Object.fromEntries(usedStores),
