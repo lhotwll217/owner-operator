@@ -184,11 +184,15 @@ try {
   const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
   assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
   assert.equal(flapped?.summary, "Ship the fix", "a working session projects the new summary without changing state");
+  // A repeat assessment of the same evidence lands and advances the reassessment clock; the
+  // revision is what holds still, because the understanding did not change.
+  const flapVersion = state.latestDetails("thread-flap")!.version;
   assert.equal(
-    state.appendEnrichment("thread-flap", { summary: "Duplicate", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
-    false,
-    "re-enriching an already-enriched message is rejected by the watermark",
+    state.appendEnrichment("thread-flap", { summary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
+    true,
+    "re-assessing an already-assessed message is accepted",
   );
+  assert.equal(state.latestDetails("thread-flap")!.version, flapVersion, "and writes no new revision");
 
   // Message advanced while the model ran: the sample is stale and must be rejected, not
   // written over the current handoff. The thread stays a candidate for the next poll.

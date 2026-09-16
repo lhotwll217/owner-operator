@@ -6,6 +6,12 @@
 //     --no-enrich             observe and persist only; skip model enrichment
 //     --sample-only           run the transcript sampler but no model call (free iteration)
 //     --daemon-enrich         let the daemon's own enrichment queue run, and watch the rows
+//     --restore-runs          put the capture's own pending/running delegated runs back after
+//                             daemon startup recovery marks them interrupted
+//     --active-child <runId>  additionally reconstruct one captured run as still running
+//     --successive <n>        replay each selected transcript at n growing positions, so the
+//                             pipeline writes real history instead of one final assessment
+//     --successive-threads <id,…>  which sessions grow (default: the visible rows with turns)
 //     --ask <file>            JSON [{id, question}] the production `oo` answers afterwards
 //     --native <binary>       LiveSummaryProof build; renders these rows in the real widget
 //     --active-window <w>     owner visibility window (default 36h, the owner's setting)
@@ -24,15 +30,17 @@
 // transcript roots, ephemeral loopback daemon, and verified teardown. The owner's live state
 // is read during capture and never during replay.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeSandboxUser, materializeSandboxUser } from "../sandbox-user.ts";
 import { evalSandboxPath } from "../sandbox.mjs";
 import { buildReplayHome } from "./build-replay-home.mjs";
+import { prefixAt, shiftTo } from "./transcript-positions.mjs";
 import { startDaemon } from "../../src/daemon/runtime.ts";
 import { sampleEnrichment } from "../../src/session-monitor/scan.ts";
 import { enrichThread } from "../../src/agent/enrichment.ts";
@@ -135,12 +143,132 @@ try {
     },
   });
 
+  // ---- delegated runs the capture recorded as live ------------------------------------
+  // A restarted daemon cannot own the children of the daemon before it, so startup marks every
+  // running run interrupted. That recovery is correct in production and wrong for a replay: the
+  // capture recorded a parent whose child was running, and that parent's working signal is part
+  // of the evidence. Restoring the captured status separates the two, and each restored run is
+  // named in the artifact so a reader can tell a captured state from a reconstructed one.
+  const restoreRuns = has("restore-runs") || Boolean(flag("active-child", ""));
+  if (restoreRuns) {
+    const captured = new DatabaseSync(join(capture, "state.db"), { readOnly: true });
+    const live = (captured.prepare(
+      "SELECT id, status, parent_thread_id AS parent, child_session_id AS child FROM agent_runs WHERE status IN ('pending', 'running')",
+    ).all() as unknown as Array<{ id: string; status: string; parent: string | null; child: string | null }>);
+    const reconstructId = flag("active-child", "");
+    const reconstruct = reconstructId
+      ? (captured.prepare(
+          "SELECT id, status, parent_thread_id AS parent, child_session_id AS child FROM agent_runs WHERE id = ?",
+        ).get(reconstructId) as unknown as { id: string; status: string; parent: string | null; child: string | null } | undefined)
+      : undefined;
+    captured.close();
+
+    const replayDb = new DatabaseSync(join(sandbox.ooHome, "state.db"));
+    const restore = replayDb.prepare(
+      "UPDATE agent_runs SET status = 'running', finished_at = NULL, error = NULL, last_activity_at = ? WHERE id = ?",
+    );
+    const now = new Date().toISOString();
+    for (const run of [...live, ...(reconstruct ? [reconstruct] : [])]) restore.run(now, run.id);
+    replayDb.close();
+    write("runs.json", {
+      capturedLive: live.map((run) => ({ ...run, provenance: "captured as live" })),
+      reconstructed: reconstruct ? [{ ...reconstruct, capturedStatus: reconstruct.status, provenance: "reconstructed as running" }] : [],
+    });
+  }
+
   // ---- observation ------------------------------------------------------------------
   const observeStart = Date.now();
   await daemon.monitor.poll();
   const observeMs = Date.now() - observeStart;
   const observed = daemon.state.listCurrentSessionState();
   write("observed.json", { observeMs, rows: observed.length, sessions: observed });
+
+  // A poll queues work; the owner waits for the queue. Both the timeline and the successive
+  // positions below measure from the poll that queued it until nothing is eligible.
+  const drainQueue = async (since: number, onChange: () => boolean): Promise<number> => {
+    const deadline = Date.now() + Number(flag("enrich-timeout-s", "900")) * 1_000;
+    let quietSince = Date.now();
+    while (Date.now() < deadline) {
+      await new Promise((settle) => setTimeout(settle, 250));
+      if (onChange()) quietSince = Date.now();
+      // Finished when nothing is eligible, or when nothing has moved for long enough that the
+      // remaining candidates are the ones this version cannot serve.
+      if (daemon!.state.listEnrichmentCandidates().length === 0 || Date.now() - quietSince > 30_000) break;
+    }
+    return Date.now() - since;
+  };
+
+  // ---- successive positions ------------------------------------------------------------
+  // Each step shows the daemon one captured conversation as it stood earlier, then lets its own
+  // queue assess it. Repeating that writes the status-summary history the acceptance needs from
+  // real transcript positions, rather than waiting for a future capture to contain one.
+  const positions = Number(flag("successive", "0"));
+  if (positions > 1) {
+    const sandboxFiles = new Map<string, string>();
+    const walkTranscripts = (base: string): void => {
+      for (const entry of readdirSync(base, { withFileTypes: true, recursive: true })) {
+        const path = join(entry.parentPath ?? base, entry.name);
+        if (entry.isFile() && (path.endsWith(".jsonl") || path.endsWith(".ndjson"))) sandboxFiles.set(basename(path), path);
+      }
+    };
+    walkTranscripts(join(sandbox.ooHome, "sessions"));
+    walkTranscripts(join(root, "transcripts"));
+
+    const replayDb = new DatabaseSync(join(sandbox.ooHome, "state.db"), { readOnly: true });
+    const pathOf = new Map((replayDb.prepare("SELECT id, transcript_path AS path FROM threads WHERE transcript_path IS NOT NULL")
+      .all() as unknown as Array<{ id: string; path: string }>).map((row) => [row.id, basename(row.path)] as const));
+    replayDb.close();
+
+    const requested = flag("successive-threads", "").split(",").map((value) => value.trim()).filter(Boolean);
+    const selected = (requested.length
+      ? requested
+      : observed.slice(0, Number(flag("successive-limit", "4"))).map((row) => row.id))
+      .flatMap((id) => {
+        const file = pathOf.get(id) && sandboxFiles.get(pathOf.get(id)!);
+        if (!file) return [];
+        const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+        return [{ id, file, lines }];
+      });
+
+    const steps: Array<Record<string, unknown>> = [];
+    for (let position = 1; position <= positions; position += 1) {
+      for (const { file, lines } of selected) {
+        const prefix = prefixAt(lines, position, positions);
+        const stamp = new Date();
+        writeFileSync(file, `${shiftTo(prefix, stamp.getTime()).join("\n")}\n`);
+        utimesSync(file, stamp, stamp);
+      }
+      const started = Date.now();
+      await daemon.monitor.poll();
+      const drainedMs = await drainQueue(started, () => false);
+      const ledger = new DatabaseSync(join(sandbox.ooHome, "state.db"), { readOnly: true });
+      const columns = (ledger.prepare("PRAGMA table_info(thread_details)").all() as unknown as Array<{ name: string }>)
+        .map((column) => column.name);
+      const rows = daemon.state.listCurrentSessionState();
+      steps.push({
+        position, positions, drainedMs,
+        sessions: selected.map(({ id, lines }) => {
+          const row = rows.find((candidate) => candidate.id === id);
+          const revisions = ledger.prepare(
+            `SELECT ${columns.join(", ")} FROM thread_details WHERE thread_id = ? ORDER BY version`,
+          ).all(id);
+          return {
+            id,
+            linesShown: prefixAt(lines, position, positions).length,
+            row: row && {
+              state: row.state, shownTitle: row.topic, generatedTopic: row.generatedTopic,
+              summary: row.summary, parentThreadId: row.parentThreadId,
+              ...("summaryPending" in row ? { summaryPending: (row as { summaryPending?: boolean }).summaryPending } : {}),
+            },
+            revisions,
+          };
+        }),
+      });
+      ledger.close();
+      process.stderr.write(`position ${position}/${positions} drained in ${(drainedMs / 1_000).toFixed(1)}s\n`);
+    }
+    write("successive.json", { positions, threads: selected.map(({ id }) => id), steps });
+  }
 
   // ---- enrichment, as the daemon runs it ----------------------------------------------
   // What the owner waits for is a row changing on screen, so the measurement watches the
@@ -149,7 +277,8 @@ try {
   if (has("daemon-enrich")) {
     const timeline: Array<Record<string, unknown>> = [];
     const seen = new Map<string, string>();
-    const snapshot = (): void => {
+    const snapshot = (): boolean => {
+      const before = timeline.length;
       for (const row of daemon!.state.listCurrentSessionState()) {
         const shape = JSON.stringify([row.state, row.generatedTopic, row.ownerTitle, row.summary, row.topic]);
         if (seen.get(row.id) === shape) continue;
@@ -161,20 +290,10 @@ try {
           ...("summaryPending" in row ? { summaryPending: (row as { summaryPending?: boolean }).summaryPending } : {}),
         });
       }
+      return timeline.length !== before;
     };
     snapshot();
-    const deadline = Date.now() + Number(flag("enrich-timeout-s", "900")) * 1_000;
-    let quietSince = Date.now();
-    while (Date.now() < deadline) {
-      await new Promise((settle) => setTimeout(settle, 250));
-      const before = timeline.length;
-      snapshot();
-      const remaining = daemon.state.listEnrichmentCandidates().length;
-      if (timeline.length !== before) quietSince = Date.now();
-      // The queue is finished when nothing is eligible, or when nothing has moved for long
-      // enough that the remaining candidates are the ones this version cannot enrich.
-      if (remaining === 0 || Date.now() - quietSince > 30_000) break;
-    }
+    await drainQueue(observeStart, snapshot);
     write("timeline.json", {
       observedAt: new Date(observeStart).toISOString(),
       watchedMs: Date.now() - observeStart,

@@ -130,6 +130,11 @@ export class State {
     return queuedIds;
   }
 
+  /** The current revision of a thread's status, including the position it was written from. */
+  latestDetails(threadId: string) {
+    return this.db.latestDetails(threadId);
+  }
+
   appendEnrichment(
     threadId: string,
     details: ThreadEnrichment,

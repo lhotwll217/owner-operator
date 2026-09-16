@@ -9,6 +9,13 @@ export interface ThreadDetails {
 
 export interface ThreadEnrichment extends Required<ThreadDetails> {
   attention: "idle" | "needs-you";
+  /**
+   * Where the evidence for this assessment ended: the message index a tool-inclusive read
+   * reached, and that message's time. The composition that samples the transcript fills it in;
+   * the model does not choose it. A revision keeps it so a later reader can return to the point
+   * the account was written from.
+   */
+  bookmark?: { index: number; messageAt: string };
 }
 
 /** One live thread plus its optional cached model details. */
