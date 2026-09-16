@@ -101,8 +101,9 @@ export const getCurrentSessionStateTool = defineTool({
     "Read the owner's current session state — the exact rows their widget shows: row " +
     "number, id, repo, topic, state, priority, status summary. State is authoritative: for " +
     "'what needs me?' use state=needs-you; priority or summary wording does not override state. " +
-    "Read the other rows' status summaries before reporting an obligation: a later session often " +
-    "records that the same pull request, issue, or decision was already settled. " +
+    "An obligation naming an artifact — a pull request, issue, file, or command — is only current " +
+    "if nothing since settled it: search that artifact across sessions before reporting it, " +
+    "because the session that settled it is usually a different one. " +
     "Rows are status indexes, not transcript evidence; use their ids with session-search for " +
     "exact changes, reasons, proof, or artifact details. When stable ids are already known, pass " +
     "ids to return only those widget rows.",
