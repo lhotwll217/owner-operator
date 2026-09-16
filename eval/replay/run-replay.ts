@@ -188,12 +188,17 @@ try {
   const drainQueue = async (since: number, onChange: () => boolean): Promise<number> => {
     const deadline = Date.now() + Number(flag("enrich-timeout-s", "900")) * 1_000;
     let quietSince = Date.now();
+    let remaining = Number.POSITIVE_INFINITY;
     while (Date.now() < deadline) {
       await new Promise((settle) => setTimeout(settle, 250));
-      if (onChange()) quietSince = Date.now();
+      const eligible = daemon!.state.listEnrichmentCandidates().length;
+      // A long queue is still working even when the rows on screen have not changed yet, so
+      // progress counts as the queue shrinking or a row changing.
+      if (onChange() || eligible < remaining) quietSince = Date.now();
+      remaining = eligible;
       // Finished when nothing is eligible, or when nothing has moved for long enough that the
       // remaining candidates are the ones this version cannot serve.
-      if (daemon!.state.listEnrichmentCandidates().length === 0 || Date.now() - quietSince > 30_000) break;
+      if (eligible === 0 || Date.now() - quietSince > 30_000) break;
     }
     return Date.now() - since;
   };
@@ -265,6 +270,27 @@ try {
         }),
       });
       ledger.close();
+
+      // A bookmark is only useful if it leads back to the evidence. Resolve the newest one
+      // through the same privacy-aware helper OO would use, and record what it lands on.
+      const step = steps.at(-1)!;
+      for (const session of step.sessions as Array<{ id: string; revisions: Array<Record<string, unknown>>; bookmarkRead?: unknown }>) {
+        const newest = [...session.revisions].reverse().find((revision) => revision.bookmark_index !== null && revision.written_by === "model");
+        if (!newest) continue;
+        try {
+          const read = execFileSync(process.execPath, [
+            join(armRoot, "src", "agent", "skills", "session-search", "scripts", "session-search.mjs"),
+            "--session", session.id, "--at", String(newest.bookmark_index), "--include-tools", "--before", "0", "--after", "0", "--max-chars", "1200",
+          ], { encoding: "utf8", env: { ...process.env, OO_INSTALL_ROOT: armRoot } });
+          session.bookmarkRead = {
+            index: newest.bookmark_index,
+            header: read.split("\n", 1)[0],
+            landedOn: read.split("\n").slice(1).join(" ").trim().slice(0, 160),
+          };
+        } catch (error) {
+          session.bookmarkRead = { index: newest.bookmark_index, error: String((error as { stderr?: string }).stderr ?? error).slice(0, 200) };
+        }
+      }
       process.stderr.write(`position ${position}/${positions} drained in ${(drainedMs / 1_000).toFixed(1)}s\n`);
     }
     write("successive.json", { positions, threads: selected.map(({ id }) => id), steps });
