@@ -37,19 +37,42 @@ try {
   mkdirSync(watchedRoot, { recursive: true });
   saveSessionRoots(dir, [{ source: "claude", root: watchedRoot }]);
   let watcherScanCalls = 0;
+  const scannedFiles: string[][] = [];
   const watcherMonitor = new SessionMonitor(state, {
     debounceMs: 10,
-    scan: async () => {
+    scan: async (_since, _limit, files = []) => {
       watcherScanCalls += 1;
+      scannedFiles.push([...files]);
       return [];
     },
   });
   watcherMonitor.watch();
   markOnboarded(dir, { via: "test" });
   await watcherMonitor.poll();
-  writeFileSync(join(watchedRoot, "new-session.jsonl"), "{}\n");
+  const changed = join(watchedRoot, "new-session.jsonl");
+  writeFileSync(changed, "{}\n");
   await waitFor(() => watcherScanCalls > 1, 1_000, "watcher to arm after onboarding");
+  assert.deepEqual(scannedFiles[0], [], "the first poll scans every store");
+  assert.deepEqual(scannedFiles[1], [changed], "a watched change scans only the file that changed");
   watcherMonitor.stop();
+
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const parallel = new SessionMonitor(state, {
+    scan: async () => Array.from({ length: 6 }, (_, i) => fakeScanRow({ id: `parallel-${i}`, lastMessageAt: new Date().toISOString() })),
+    enrich: async () => {
+      inFlight++;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight--;
+      return { topic: "Parallel", summary: "Enriched.", priority: 3, attention: "idle" as const };
+    },
+    enrichConcurrency: 4,
+  });
+  await parallel.poll();
+  await waitFor(() => state.listSessionState().filter((row) => row.id.startsWith("parallel-") && row.summary === "Enriched.").length === 6, 1_000, "parallel enrichment");
+  parallel.stop();
+  assert.equal(peakInFlight, 4, "enrichment runs several threads at once, bounded by enrichConcurrency");
 
   const productRoot = join(dir, "sessions");
   mkdirSync(productRoot, { recursive: true });

@@ -65,7 +65,8 @@ node --import tsx eval/replay/sanitize-capture.mjs --capture <capture> --artifac
 node --import tsx eval/replay/capture-session-slice.mjs --verify <capture>
 node --import tsx eval/replay/run-replay.ts --capture <capture> --out <artifacts> --label <name> \
   [--daemon-enrich] [--restore-runs] [--active-child <runId>] [--successive N [--successive-threads a,b]] \
-  [--no-enrich] [--sample-only] [--threads N] [--native <LiveSummaryProof binary>] [--ask <questions.json>]
+  [--no-enrich] [--sample-only] [--threads N] [--native <LiveSummaryProof binary>] [--ask <questions.json>] \
+  [--assert-summary-shape]
 node --import tsx eval/replay/title-lifecycle-probe.ts --capture <capture> --out <artifacts>
 ```
 
@@ -79,7 +80,9 @@ two code versions comparable; `--restore-runs` puts back the delegated runs the 
 live, which daemon startup recovery would otherwise mark interrupted. `--successive N` replays each
 selected conversation at N growing positions, so status-summary history comes from real transcript
 positions rather than from whatever the capture inherited. `--no-enrich` reproduces the captured
-state untouched. The title probe observes each conversation twice — early and whole — to measure
+state untouched. `--assert-summary-shape` rejects generated summaries over two sentences; in
+daemon-enrichment mode it also requires every queued assessment to drain and every displayed
+summary to satisfy that shape. The title probe observes each conversation twice — early and whole — to measure
 how fast a distinguishing title arrives and whether it then holds still.
 
 ## PR comparison contract

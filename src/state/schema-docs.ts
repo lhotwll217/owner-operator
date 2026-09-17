@@ -26,6 +26,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "enriched_through_message_at", description: "Latest message timestamp incorporated into model enrichment." },
       { name: "last_enriched_at", description: "When an assessment last landed, whether or not it changed anything. Working sessions are reassessed on a cadence from this." },
       { name: "enriched_while_working", description: "Whether enrichment landed during deterministic working status. A change in working status makes the same message eligible again." },
+      { name: "enrichment_contract", description: "Version of the enrichment contract that last assessed this thread. Older versions remain eligible for one refresh." },
       { name: "enriched_children", description: "Observed child identities, message versions, and run statuses included in the summary. Child progress makes the parent eligible again." },
     ],
   },

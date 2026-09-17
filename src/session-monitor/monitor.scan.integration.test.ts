@@ -118,6 +118,10 @@ try {
     "the OO root receives an ordinary append-only detail version",
   );
 
+  const { runTranscriptScan } = await import("./scan");
+  const scoped = await runTranscriptScan(["--since", "7d", "--limit", "0", "--sample", "0"], [sessionFile]);
+  assert.deepEqual(scoped.threads.map((thread) => thread.id), [sid], "a file-scoped scan parses the changed transcript only");
+
   process.stdout.write("ok — monitor real scan path: scan-active-transcripts → current state\n");
 } finally {
   cleanup();

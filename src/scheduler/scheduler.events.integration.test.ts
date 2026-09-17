@@ -45,9 +45,9 @@ try {
   });
   scheduler.start();
 
-  const owed = (summary: string) => parseDetails(JSON.stringify({
+  const owed = (summary: string) => parseDetails({
     topic: "Retention decision", summary, priority: 2, ownerAction: "Choose the retention period",
-  }));
+  });
 
   // A scan alone never says the owner owes anything, so nothing fires until enrichment finds
   // the owner action in the conversation. Both findings land in one tick and batch into one run.
@@ -108,7 +108,7 @@ try {
   const idle = { ...row("model-attention", "2026-07-09T10:04:00.000Z"), lastRole: "user", secondsSinceLastMessage: 7200, secondsSinceActivity: 7200 };
   state.recordObservation(idle);
   assert.equal(state.listSessionState().find((item) => item.id === idle.id)?.state, "idle");
-  const noAction = parseDetails(JSON.stringify({ topic: "CSV escaping review", summary: "The agent reports completion but CSV verification evidence is missing. No owner action.", priority: 2, ownerAction: null, attention: "needs-you" }));
+  const noAction = parseDetails({ topic: "CSV escaping review", summary: "The agent reports completion but CSV verification evidence is missing. No owner action.", priority: 2, ownerAction: null, attention: "needs-you" });
   assert.ok(state.appendEnrichment(idle.id, noAction, idle.lastMessageAt));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(contexts.length, 3, "verification uncertainty without a human action cannot trigger a schedule");

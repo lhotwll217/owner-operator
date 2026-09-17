@@ -18,7 +18,7 @@ try {
   seed.close();
 
   const legacy = new DatabaseSync(path);
-  legacy.exec("ALTER TABLE thread_details ADD COLUMN next_steps TEXT; ALTER TABLE thread_details ADD COLUMN state_reason TEXT; ALTER TABLE threads DROP COLUMN enriched_while_working");
+  legacy.exec("ALTER TABLE thread_details ADD COLUMN next_steps TEXT; ALTER TABLE thread_details ADD COLUMN state_reason TEXT; ALTER TABLE threads DROP COLUMN enriched_while_working; ALTER TABLE threads DROP COLUMN enrichment_contract");
   legacy.exec("UPDATE thread_details SET next_steps = 'Obsolete review instruction', state_reason = 'Legacy state explanation'");
   const history = legacy.prepare("SELECT thread_id, version, created_at, written_by, state, priority, topic, summary FROM thread_details ORDER BY thread_id, version").all();
   legacy.close();
@@ -32,6 +32,7 @@ try {
   assert.deepEqual(check.prepare("SELECT thread_id, version, created_at, written_by, state, priority, topic, summary FROM thread_details ORDER BY thread_id, version").all(), history, "migration preserves retained history exactly");
   const columns = check.prepare("PRAGMA table_info(thread_details)").all().map(({ name }) => name);
   assert.ok(!columns.includes("next_steps") && !columns.includes("state_reason"));
+  assert.ok(check.prepare("PRAGMA table_info(threads)").all().some(({ name }) => name === "enrichment_contract"));
   check.close();
 
   const reopened = new State(path, options);

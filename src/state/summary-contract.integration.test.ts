@@ -10,13 +10,13 @@ const state = new State(join(dir, "state.db"), { now: () => "2026-06-09T12:00:00
 try {
   const presentation = { topic: "Export implementation", summary: "Implementing the requested export.", priority: 3, attention: "idle" };
   const response = { ...presentation, ownerAction: null };
-  assert.deepEqual(parseDetails(JSON.stringify(response)), presentation);
+  assert.deepEqual(parseDetails(response), presentation);
   for (const field of ["topic", "summary", "priority"]) {
-    assert.throws(() => parseDetails(JSON.stringify({ ...response, [field]: undefined })), new RegExp(field));
+    assert.throws(() => parseDetails({ ...response, [field]: undefined }), new RegExp(field));
   }
   const worker = fakeScanRow({ id: "first-message", working: true, lastRole: "user" });
   state.recordObservation(worker);
-  const details = parseDetails(JSON.stringify(response));
+  const details = parseDetails(response);
   assert.equal(state.appendEnrichment(worker.id, details, worker.lastMessageAt), true);
   assert.equal(state.listSessionState()[0].state, "working");
   assert.equal(state.listSessionState()[0].summary, presentation.summary);
@@ -95,8 +95,8 @@ try {
   assert.equal(rowOf(lifecycle.id).generatedTopic, "Something else entirely", "the generated title keeps landing underneath");
 
   // ---- queue order --------------------------------------------------------------------
-  // Enrichment runs one thread at a time, so the row still showing prompt text waits behind
-  // whatever is in front of it. Newer work goes first, except that a row with no title yet
+  // Enrichment takes candidates in this order, so the row still showing prompt text waits
+  // behind whatever is in front of it. Newer work goes first, except that a row with no title yet
   // goes before any refresh: that row is the one the owner cannot read.
   const untitled = fakeScanRow({ id: "untitled", topic: "could you look at the thing from yesterday", lastMessageAt: "2026-06-09T11:00:00.000Z", secondsSinceLastMessage: 4000 });
   const titledOlder = fakeScanRow({ id: "titled-older", lastMessageAt: "2026-06-09T11:30:00.000Z", secondsSinceLastMessage: 4000 });

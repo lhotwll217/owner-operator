@@ -6,12 +6,14 @@ import { AgentRunStatus, type EnrichmentCandidate } from "@owner-operator/core";
 
 const execFileAsync = promisify(execFile);
 const scanScript = fileURLToPath(new URL("./scan-active-transcripts.mjs", import.meta.url));
+const searchScript = fileURLToPath(new URL("../session-search/session-search.mjs", import.meta.url));
 
-/** Run the synchronous transcript engine outside the daemon event loop. */
-export async function runTranscriptScan(args: readonly string[]): Promise<ScanActiveTranscriptsResult> {
+/** Run the synchronous transcript engine outside the daemon event loop. With `files`, the
+ * engine parses only those transcripts and the sibling files sharing their session ids. */
+export async function runTranscriptScan(args: readonly string[], files: readonly string[] = []): Promise<ScanActiveTranscriptsResult> {
   const { stdout } = await execFileAsync(
     process.execPath,
-    [scanScript, ...args, "--json"],
+    [scanScript, ...args, ...files.flatMap((file) => ["--file", file]), "--json"],
     { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   return JSON.parse(stdout) as ScanActiveTranscriptsResult;
@@ -36,13 +38,65 @@ export async function sampleTranscript(threadId: string, source: string, maxChar
  * summary written from it can be returned to with `--session <id> --at <index> --include-tools`.
  */
 async function skim(threadId: string, maxChars: number): Promise<{ stdout: string; position: number | null }> {
-  const searchScript = fileURLToPath(new URL("../session-search/session-search.mjs", import.meta.url));
   const { stdout } = await execFileAsync(process.execPath, [
     searchScript, "--skim", threadId, "--include-tools", "--max-chars", String(maxChars),
   ], { encoding: "utf8", maxBuffer: 128 * 1024 });
   if (!stdout.startsWith(`skim id=${threadId} `)) throw new Error(`missing authorized evidence for ${threadId}`);
   const messages = Number(/\smessages=(\d+)\s/.exec(stdout)?.[1]);
   return { stdout, position: Number.isInteger(messages) && messages > 0 ? messages - 1 : null };
+}
+
+interface RelatedEvidenceCandidate {
+  id: string;
+  source: string;
+  index: number;
+  timestamp?: string;
+  match: unknown;
+}
+
+export function relatedOwnerActionQuery(ownerAction: string, primaryEvidence: string): string {
+  const referencedNumbers = new Set([...ownerAction.matchAll(/#(\d+)/g)].map((match) => match[1]));
+  return [...primaryEvidence.matchAll(/https?:\/\/github\.com\/[^\s)"']+\/(?:pull|issues)\/(\d+)/g)]
+    .find((match) => referencedNumbers.has(match[1]))?.[0]
+    .replace(/^https?:\/\/github\.com\//, "") ?? ownerAction;
+}
+
+/** Search other authorized sessions for evidence that may have settled a provisional owner
+ * action. The enrichment model receives bounded matches and must keep ambiguous actions. */
+export async function sampleRelatedOwnerAction(
+  ownerAction: string,
+  threadId: string,
+  primaryEvidence = "",
+  maxChars = 12_000,
+): Promise<string | null> {
+  const query = relatedOwnerActionQuery(ownerAction, primaryEvidence);
+  const { stdout } = await execFileAsync(process.execPath, [
+    searchScript,
+    "--query", query,
+    "--any",
+    "--candidates",
+    "--include-tools",
+    "--json",
+    "--limit", "8",
+    "--max-chars", "4000",
+  ], { encoding: "utf8", maxBuffer: 128 * 1024 });
+  const result = JSON.parse(stdout) as {
+    query: string;
+    wordHits?: Record<string, number>;
+    candidates?: RelatedEvidenceCandidate[];
+  };
+  const candidates = (result.candidates ?? [])
+    .filter((match) => match.id !== threadId)
+    .slice(0, 5);
+  if (!candidates.length) return null;
+  const perSessionChars = Math.max(1_000, Math.floor((maxChars - 4_000) / candidates.length));
+  const related = await Promise.all(candidates.map(async ({ id, source, index, timestamp, match }) => {
+    const { stdout: sample } = await execFileAsync(process.execPath, [
+      searchScript, "--skim", id, "--include-tools", "--max-chars", String(perSessionChars),
+    ], { encoding: "utf8", maxBuffer: 128 * 1024 });
+    return { id, source, index, ...(timestamp ? { timestamp } : {}), match, sample };
+  }));
+  return JSON.stringify({ query: result.query, wordHits: result.wordHits, candidates: related });
 }
 
 export interface EnrichmentSample {

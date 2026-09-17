@@ -10,7 +10,7 @@ import {
 } from "@owner-operator/core";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
-import { sampleEnrichment } from "../session-monitor/scan";
+import { sampleEnrichment, sampleRelatedOwnerAction } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
@@ -69,9 +69,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       ? { enrich: undefined }
       : { enrich: options.monitor?.enrich ?? (async (candidate) => {
           const { sample, bookmark } = await sampleEnrichment(candidate);
-          const assessment = await (await import("../agent/enrichment")).enrichThread(sample, {
+          const { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } = await import("../agent/enrichment");
+          const assessment = await enrichThread(sample, {
             currentTitle: candidate.generatedTopic,
-            currentStatusSummary: candidate.summary,
+            statusSummaries: state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
+            resolveOwnerAction: (ownerAction, primaryEvidence) =>
+              sampleRelatedOwnerAction(ownerAction, candidate.id, primaryEvidence),
           });
           return { ...assessment, ...(bookmark ? { bookmark } : {}) };
         }) }),

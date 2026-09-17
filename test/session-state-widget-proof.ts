@@ -123,7 +123,7 @@ export async function runSessionStateWidgetProof(options: {
         console.log("MODEL_IDENTITY", model.provider, model.id, options?.reasoning);
         modelCalls++;
         const response = await complete.call(this, model, context, options);
-        console.log("MODEL_RESPONSE", safe(response.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")));
+        console.log("MODEL_RESPONSE", safe(JSON.stringify(response.content.find((block) => block.type === "toolCall")?.arguments ?? null)));
         return response;
       };
     }
@@ -138,7 +138,11 @@ export async function runSessionStateWidgetProof(options: {
         assert.ok(sample.includes("Delegated child child"), "parent summary receives the child's own evidence");
       }
       if (liveEnrich) {
-        const result = await liveEnrich(sample, { services, currentTitle: candidate.generatedTopic, currentStatusSummary: candidate.summary });
+        const result = await liveEnrich(sample, {
+          services,
+          currentTitle: candidate.generatedTopic,
+          statusSummaries: daemon!.state.statusSummaryHistory(candidate.id, 3),
+        });
         console.log("MODEL", candidate.id, JSON.stringify(safe(result)));
         return result;
       }

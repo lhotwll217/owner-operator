@@ -88,7 +88,16 @@ export interface ThreadResolutionRow {
   enrichedThroughMessageAt: string | null;
   enrichedWhileWorking: boolean;
   enrichedChildren: string;
+  enrichmentContract: number;
   childrenEvidence: string;
+}
+
+export interface StatusSummaryRevision {
+  version: number;
+  createdAt: string;
+  summary: string;
+  /** Message index this revision was written from, under a tool-inclusive read. */
+  bookmarkIndex: number | null;
 }
 
 export interface DetailsRow {
@@ -130,6 +139,7 @@ CREATE TABLE IF NOT EXISTS threads (
   owner_title TEXT,
   enriched_through_message_at TEXT,
   enriched_while_working INTEGER NOT NULL DEFAULT 0,
+  enrichment_contract INTEGER NOT NULL DEFAULT 0,
   last_enriched_at TEXT
 );
 
@@ -254,6 +264,8 @@ CREATE TABLE IF NOT EXISTS thread_worktrees (
 );
 `;
 
+const CURRENT_ENRICHMENT_CONTRACT = 1;
+
 const WORKTREE_COLUMNS = `
   id, repository, path, git_common_dir AS gitCommonDir,
   created_by_thread_id AS createdByThreadId, created_at AS createdAt`;
@@ -346,6 +358,9 @@ export class ThreadDb {
       // Added columns, so every existing revision and its history survive the upgrade.
       if (!threads.has("last_enriched_at")) {
         this.db.exec("ALTER TABLE threads ADD COLUMN last_enriched_at TEXT");
+      }
+      if (!threads.has("enrichment_contract")) {
+        this.db.exec("ALTER TABLE threads ADD COLUMN enrichment_contract INTEGER NOT NULL DEFAULT 0");
       }
       if (!columns.has("bookmark_index")) {
         this.db.exec("ALTER TABLE thread_details ADD COLUMN bookmark_index INTEGER");
@@ -603,8 +618,8 @@ export class ThreadDb {
         summary: details.summary ?? null,
       }, "model");
       if (throughMessageAt !== undefined) {
-        this.db.prepare("UPDATE threads SET enriched_through_message_at = ? WHERE id = ?")
-          .run(throughMessageAt, threadId);
+        this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enrichment_contract = ? WHERE id = ?")
+          .run(throughMessageAt, CURRENT_ENRICHMENT_CONTRACT, threadId);
       }
       this.db.exec("COMMIT");
       return edge?.version ?? null;
@@ -652,8 +667,15 @@ export class ThreadDb {
       }, "model");
       this.db.prepare(
         `UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ?,
-           enriched_children = ?, last_enriched_at = ? WHERE id = ?`,
-      ).run(throughMessageAt, Number(working), current.childrenEvidence, this.now(), threadId);
+           enriched_children = ?, enrichment_contract = ?, last_enriched_at = ? WHERE id = ?`,
+      ).run(
+        throughMessageAt,
+        Number(working),
+        current.childrenEvidence,
+        CURRENT_ENRICHMENT_CONTRACT,
+        this.now(),
+        threadId,
+      );
       this.db.exec("COMMIT");
       return edge?.version ?? 0;
     } catch (error) {
@@ -669,6 +691,15 @@ export class ThreadDb {
               bookmark_index AS bookmarkIndex, bookmark_message_at AS bookmarkMessageAt
        FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1`,
     ).get(threadId) as unknown as DetailsRow | undefined;
+  }
+
+  /** Model-written status-summary revisions, newest first. */
+  statusSummaryHistory(threadId: string, limit: number): StatusSummaryRevision[] {
+    return this.db.prepare(
+      `SELECT version, created_at AS createdAt, summary, bookmark_index AS bookmarkIndex
+       FROM thread_details WHERE thread_id = ? AND written_by = 'model' AND summary IS NOT NULL
+       ORDER BY version DESC LIMIT ?`,
+    ).all(threadId, limit) as unknown as StatusSummaryRevision[];
   }
 
   latestDetailsMap(): Map<string, ThreadDetails> {
@@ -689,7 +720,9 @@ export class ThreadDb {
       `SELECT t.id, detail.state, t.last_message_at AS lastMessageAt,
               t.enriched_through_message_at AS enrichedThroughMessageAt,
               t.enriched_while_working AS enrichedWhileWorking,
-              t.enriched_children AS enrichedChildren, ${CHILD_EVIDENCE_SQL} AS childrenEvidence
+              t.enriched_children AS enrichedChildren,
+              t.enrichment_contract AS enrichmentContract,
+              ${CHILD_EVIDENCE_SQL} AS childrenEvidence
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE t.id = ?`,
@@ -714,6 +747,7 @@ export class ThreadDb {
               CASE WHEN t.enriched_through_message_at = t.last_message_at
                      AND t.enriched_children = ${CHILD_EVIDENCE_SQL}
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
+                     AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
                    THEN 0 ELSE 1 END AS summaryPending, detail.priority,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
@@ -755,6 +789,7 @@ export class ThreadDb {
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at
+           OR t.enrichment_contract != ${CURRENT_ENRICHMENT_CONTRACT}
            OR t.enriched_children != ${CHILD_EVIDENCE_SQL}
            OR (t.enriched_through_message_at = t.last_message_at
              AND t.enriched_while_working != (${EFFECTIVE_THREAD_STATE_SQL} = 'working'))
@@ -762,7 +797,7 @@ export class ThreadDb {
            -- working session is reassessed on a cadence instead of waiting for the turn to end.
            OR (${EFFECTIVE_THREAD_STATE_SQL} = 'working'
              AND (t.last_enriched_at IS NULL OR t.last_enriched_at <= ?)))
-       -- The queue runs one thread at a time, so its order is what the owner waits on. A row
+       -- Enrichment takes candidates in this order, so it is what the owner waits on. A row
        -- with no title yet is showing raw prompt text, so it goes before rows that are only
        -- refreshing a title they already have; within each group, newest work first.
        ORDER BY (COALESCE(t.owner_title, detail.topic) IS NOT NULL) ASC, t.last_message_at DESC`,

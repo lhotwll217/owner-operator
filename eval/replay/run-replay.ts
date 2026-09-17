@@ -14,10 +14,12 @@
 //     --successive-threads <id,…>  which sessions grow (default: the visible rows with turns)
 //     --ask <file>            JSON [{id, question}] the production `oo` answers afterwards
 //     --native <binary>       LiveSummaryProof build; renders these rows in the real widget
+//     --assert-summary-shape  fail after proofs if a displayed or newly written summary has
+//                             more than two sentences, or enrichment did not drain
 //     --active-window <w>     owner visibility window (default 36h, the owner's setting)
 //
 // `--daemon-enrich` is the mode that compares two code versions. It calls nothing this file
-// owns: the daemon installs its own enrichment composition and drains its own serial queue,
+// owns: the daemon installs its own enrichment composition and drains its own candidates,
 // so each checkout of this harness measures that checkout's pipeline. The explicit loop below
 // is a diagnostic for one version at a time.
 //
@@ -30,7 +32,7 @@
 // transcript roots, ephemeral loopback daemon, and verified teardown. The owner's live state
 // is read during capture and never during replay.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
@@ -42,8 +44,9 @@ import { evalSandboxPath } from "../sandbox.mjs";
 import { buildReplayHome } from "./build-replay-home.mjs";
 import { prefixAt, shiftTo } from "./transcript-positions.mjs";
 import { startDaemon } from "../../src/daemon/runtime.ts";
-import { sampleEnrichment } from "../../src/session-monitor/scan.ts";
-import { enrichThread } from "../../src/agent/enrichment.ts";
+import { sampleEnrichment, sampleRelatedOwnerAction } from "../../src/session-monitor/scan.ts";
+import { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } from "../../src/agent/enrichment.ts";
+import { statusSummaryShape } from "../../src/agent/status-summary.ts";
 import type { SessionMonitorLogRecord } from "../../src/session-monitor/monitor.ts";
 
 const args = process.argv.slice(2);
@@ -75,7 +78,7 @@ const liveOoHome = join(homedir(), ".owner-operator");
 // owner's live stores; the sandbox blacklist is what denies them.
 // Both arms answer on the same model at the same reasoning level, pinned here rather than
 // inherited, so a settings change between runs cannot masquerade as a code difference.
-const MODEL = { defaultProvider: "openai-codex", defaultModel: "gpt-6-astra", defaultThinkingLevel: "high" as const };
+const MODEL = { defaultProvider: "openai-codex", defaultModel: "gpt-5.6-sol", defaultThinkingLevel: "low" as const };
 const armRoot = resolve(join(import.meta.dirname, "..", ".."));
 const otherCheckouts = [join(homedir(), "Development", "owner-operator"), "/opt/homebrew/lib/node_modules"];
 
@@ -142,6 +145,14 @@ try {
       ),
     },
   });
+
+  const initialLedger = new DatabaseSync(join(sandbox.ooHome, "state.db"), { readOnly: true });
+  const initialVersions = new Map(
+    (initialLedger.prepare("SELECT thread_id AS id, MAX(version) AS version FROM thread_details GROUP BY thread_id")
+      .all() as unknown as Array<{ id: string; version: number }>)
+      .map(({ id, version }) => [id, version] as const),
+  );
+  initialLedger.close();
 
   // ---- delegated runs the capture recorded as live ------------------------------------
   // A restarted daemon cannot own the children of the daemon before it, so startup marks every
@@ -328,6 +339,7 @@ try {
       timeline,
     });
   }
+  const remainingCandidates = daemon.state.listEnrichmentCandidates().map((row) => row.id);
 
   // ---- enrichment, driven one call at a time ------------------------------------------
   const candidates = has("daemon-enrich") ? [] : daemon.state.listEnrichmentCandidates();
@@ -350,7 +362,9 @@ try {
         attempt.currentTitle = candidate.generatedTopic;
         const details = await enrichThread(sample, {
           currentTitle: candidate.generatedTopic,
-          currentStatusSummary: candidate.summary,
+          statusSummaries: daemon.state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
+          resolveOwnerAction: (ownerAction, primaryEvidence) =>
+            sampleRelatedOwnerAction(ownerAction, candidate.id, primaryEvidence),
         });
         attempt.modelMs = Date.now() - modelStart;
         attempt.details = details;
@@ -378,9 +392,40 @@ try {
   const response = await fetch(`http://127.0.0.1:${daemon.port}/session-state`, {
     headers: { authorization: `Bearer ${JSON.parse(execFileSync("cat", [join(sandbox.ooHome, "daemon.json")], { encoding: "utf8" })).authToken}` },
   });
-  write("session-state.gateway.json", await response.json());
+  const gatewayRows = await response.json() as Array<{ id: string; summary?: string | null }>;
+  write("session-state.gateway.json", gatewayRows);
   write("monitor-log.json", monitorLog);
   write("daemon.json", { port: daemon.port, ooHome: sandbox.ooHome });
+
+  const finalLedger = new DatabaseSync(join(sandbox.ooHome, "state.db"), { readOnly: true });
+  const generatedRevisions = (finalLedger.prepare(
+    "SELECT thread_id AS id, version, summary FROM thread_details WHERE written_by = 'model' AND summary IS NOT NULL ORDER BY thread_id, version",
+  ).all() as unknown as Array<{ id: string; version: number; summary: string }>)
+    .filter(({ id, version }) => version > (initialVersions.get(id) ?? 0));
+  finalLedger.close();
+  const displayed = gatewayRows.flatMap(({ id, summary }) => summary ? [{ id, summary }] : []);
+  const inspect = (kind: "displayed" | "revision", row: { id: string; summary: string; version?: number }) => ({
+    kind,
+    id: row.id,
+    ...(row.version === undefined ? {} : { version: row.version }),
+    ...statusSummaryShape(row.summary),
+    summary: row.summary,
+  });
+  const summaryShape = [
+    ...displayed.map((row) => inspect("displayed", row)),
+    ...generatedRevisions.map((row) => inspect("revision", row)),
+  ];
+  const summaryShapeViolations = summaryShape.filter(({ sentences }) => sentences > 2);
+  const assertedSummaryShapeViolations = summaryShapeViolations.filter(({ kind }) =>
+    has("daemon-enrich") || kind === "revision");
+  write("summary-shape.json", {
+    displayed: displayed.length,
+    generatedRevisions: generatedRevisions.length,
+    maxWords: Math.max(0, ...summaryShape.map(({ words }) => words)),
+    violations: summaryShapeViolations,
+    assertedViolations: assertedSummaryShapeViolations,
+    rows: summaryShape,
+  });
 
   // ---- what the widget draws -----------------------------------------------------------
   // The native client connects to this daemon and renders the replayed rows, so the title,
@@ -421,6 +466,9 @@ try {
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // An undrained pipe blocks the daemon once its logging fills the buffer; the log is evidence anyway.
+    askDaemon.stdout!.pipe(createWriteStream(join(out, "ask-daemon.stdout.log")));
+    askDaemon.stderr!.pipe(createWriteStream(join(out, "ask-daemon.stderr.log")));
     const discovery = join(sandbox.ooHome, "daemon.json");
     for (let attempt = 0; attempt < 200 && !askPort; attempt += 1) {
       await new Promise((settle) => setTimeout(settle, 100));
@@ -468,6 +516,14 @@ try {
       process.stderr.write(`asked ${id} (${answers.at(-1)!.ms}ms)\n`);
     }
     write("answers.json", answers);
+  }
+  if (has("assert-summary-shape")) {
+    if (assertedSummaryShapeViolations.length) {
+      throw new Error(`${assertedSummaryShapeViolations.length} status summaries exceed the two-sentence contract`);
+    }
+    if (has("daemon-enrich") && remainingCandidates.length) {
+      throw new Error(`enrichment did not drain: ${remainingCandidates.join(", ")}`);
+    }
   }
 } catch (error) {
   failure = error;
