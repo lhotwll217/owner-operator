@@ -22,7 +22,7 @@ assert.equal(holdsDone({ id: "a", state: "idle" as const, lastMessageAt: AT }, c
 
 // --- resolveState: done-hold wins, otherwise the scan-derived state ---
 assert.equal(resolveState(doneAt(AT), cand()), "done", "held done resolves done");
-assert.equal(resolveState(doneAt(AT), cand({ lastMessageAt: NEWER })), "needs-you", "woken thread resolves from scan facts");
+assert.equal(resolveState(doneAt(AT), cand({ lastMessageAt: NEWER })), "idle", "woken thread resolves from scan facts");
 assert.equal(resolveState(undefined, cand({ lastRole: "user" })), "working", "no persisted state → derived state");
 
 // --- isActiveState: done leaves active surfaces, everything else stays ---
@@ -41,7 +41,12 @@ const audited = resolveCandidates(rows, persisted, { includeDone: true });
 assert.deepEqual(audited.map((t) => [t.id, t.state]), [["a", "done"], ["b", "working"]], "includeDone keeps + annotates");
 
 assert.deepEqual(resolveCandidates(rows, null).map((t) => t.id), ["a", "b"], "no store yet → all candidates pass");
-assert.equal(resolveCandidates([cand({ lastMessageAt: NEWER })], persisted)[0].state, "needs-you", "newer message wakes through the bulk join");
+assert.equal(resolveCandidates([cand({ lastMessageAt: NEWER })], persisted)[0].state, "idle", "newer message wakes through the bulk join");
+
+// A yielded assistant turn is not an owner obligation: only evidence of a requested owner
+// action promotes a thread to needs-you, and that evidence comes from enrichment.
+assert.equal(resolveState(undefined, cand({ secondsSinceLastMessage: 5 })), "idle", "a just-yielded turn is quiet, not needs-you");
+assert.ok(!resolveCandidates(rows, null).some((t) => t.state === "needs-you"), "no scan fact derives needs-you");
 assert.equal((rows[0] as { state?: string }).state, undefined, "pure — inputs untouched");
 
 process.stdout.write("ok — canonical resolver passed\n");

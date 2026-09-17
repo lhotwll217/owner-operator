@@ -14,7 +14,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SEARCH = join(here, "..", "src/agent/skills/session-search/scripts/session-search.mjs");
 const SESSION_ID = "01a06c11-58bd-7938-a429-ef77a510bd7e";
 const OTHER_SESSION_ID = "01a06c11-58bd-7938-a429-ef77a510bd7f";
-const OTHER_TRANSCRIPT_ID = `2026-09-04T10-58-51-293Z_${OTHER_SESSION_ID}`;
 const NEEDLE = "ZZCURRENTOWNEROPERATORSESSIONZZ";
 
 const home = mkdtempSync(join(tmpdir(), "oo-current-session-home-"));
@@ -64,14 +63,14 @@ try {
       }),
     )),
     Array.from({ length: 2 }, () => [{
-      id: OTHER_TRANSCRIPT_ID,
+      id: OTHER_SESSION_ID,
       namespace: "owner-operator",
       source: "pi",
       app: "Owner Operator",
     }]),
-    "both modes exclude only the current transcript and retain another timestamp-prefixed OO match",
+    "both modes exclude only the current transcript and report the other match under the stable id the database and widget carry",
   );
-  process.stdout.write("ok — both modes exclude the current timestamp-prefixed OO session and retain another\n");
+  process.stdout.write("ok — both modes exclude the current timestamp-prefixed OO session, retain another, and report stable ids\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
   rmSync(ooHome, { recursive: true, force: true });

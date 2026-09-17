@@ -95,12 +95,12 @@ export async function runSessionStateWidgetProof(options: {
       seed.recordObservation(fakeScanRow({ id, project, source: "codex", lastMessageAt: timestamp, createdAt: timestamp, secondsSinceLastMessage: 7200 }));
     }
     for (const id of ["parent", "summarized"]) {
-      assert.ok(seed.appendEnrichment(id, { topic: "Stale review instruction", summary: "Review and confirm the task", priority: 2, attention: "needs-you" as const }, at));
+      assert.ok(seed.appendEnrichment(id, { topic: "Stale review instruction", statusSummary: "Review and confirm the task", priority: 2, attention: "needs-you" as const }, at));
     }
     seed.markThreadsDone(["owner-done"]);
     const run = seed.createAgentRun({ harness: AgentRunHarness.Codex, task: "Review the implementation", cwd: project, parentThreadId: "parent", childSessionId: "child", depth: 1, timeoutSeconds: 60 });
     seed.finishAgentRun(run.id, { status: AgentRunStatus.Completed, resultTail: "Review complete. No findings.", error: null });
-    console.log("BEFORE", JSON.stringify(seed.listCurrentSessionState().map((r) => ({ id: r.id, title: r.topic, state: r.state, summary: r.summary }))));
+    console.log("BEFORE", JSON.stringify(seed.listCurrentSessionState().map((r) => ({ id: r.id, title: r.topic, state: r.state, statusSummary: r.statusSummary }))));
     const windowPreserved = !seed.listCurrentSessionState().some((r) => r.id === "outside-window");
     seed.close();
     seed = undefined;
@@ -123,7 +123,7 @@ export async function runSessionStateWidgetProof(options: {
         console.log("MODEL_IDENTITY", model.provider, model.id, options?.reasoning);
         modelCalls++;
         const response = await complete.call(this, model, context, options);
-        console.log("MODEL_RESPONSE", safe(response.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")));
+        console.log("MODEL_RESPONSE", safe(JSON.stringify(response.content.find((block) => block.type === "toolCall")?.arguments ?? null)));
         return response;
       };
     }
@@ -131,20 +131,24 @@ export async function runSessionStateWidgetProof(options: {
       attempts.push(candidate.id);
       if (candidate.id === "partial" && failOnce) { failOnce = false; throw new Error("controlled transient outage"); }
       const { sampleEnrichment } = await import("../src/session-monitor/scan");
-      const sample = await sampleEnrichment(candidate);
+      const { sample, bookmark } = await sampleEnrichment(candidate);
       if (candidate.id === "parent") {
         assert.ok(sample.includes("Use the replacement agent."), "working summary sees the first owner message");
         assert.ok(sample.includes("Continue with the replacement"), "working summary sees the latest owner message");
         assert.ok(sample.includes("Delegated child child"), "parent summary receives the child's own evidence");
       }
       if (liveEnrich) {
-        const result = await liveEnrich(sample, services);
+        const result = await liveEnrich(sample, {
+          services,
+          currentTitle: candidate.generatedTopic,
+          statusSummaries: daemon!.state.statusSummaryHistory(candidate.id, 3),
+        });
         console.log("MODEL", candidate.id, JSON.stringify(safe(result)));
         return result;
       }
-      if (options.enrich) return options.enrich(candidate, sample);
+      if (options.enrich) return { ...(await options.enrich(candidate, sample)), ...(bookmark ? { bookmark } : {}) };
       if (candidate.id === "parent") {
-        return { topic: "Replacement agent run", attention: "idle", priority: 3, summary: sample.includes("CSV escaping verified")
+        return { topic: "Replacement agent run", attention: "idle", priority: 3, ...(bookmark ? { bookmark } : {}), statusSummary: sample.includes("CSV escaping verified")
           ? "Child review verified CSV escaping; implementation continues."
           : "Child review passed; the replacement agent is implementing the task." };
       }
@@ -153,7 +157,7 @@ export async function runSessionStateWidgetProof(options: {
       if (candidate.id === "child" || candidate.id === "summarized") {
         assert.ok(sample.includes("Exit code 0"), "reconciliation receives execution evidence, not just the assistant's completion claim");
       }
-      return { topic: c.topic, attention: c.state, priority: 2, summary: c.answer || (sample.includes("CSV writer implemented") ? "CSV writer implemented; tests are next." : "Implementing invoice CSV export.") };
+      return { topic: c.topic, attention: c.state, priority: 2, ...(bookmark ? { bookmark } : {}), statusSummary: c.answer || (sample.includes("CSV writer implemented") ? "CSV writer implemented; tests are next." : "Implementing invoice CSV export.") };
     }
     async function boot() {
       return startDaemon({ port: 0, watch: false, dbPath,
@@ -175,7 +179,7 @@ export async function runSessionStateWidgetProof(options: {
       for (const id of ["child", "summarized", "partial"]) {
         const row = rows.find((item) => item.id === id);
         assert.equal(row?.state, "idle", `${label}: ${id} must be idle without an unresolved owner action`);
-        assert.ok(row?.summary && row.generatedTopic, `${label}: ${id} has current presentation`);
+        assert.ok(row?.statusSummary && row.generatedTopic, `${label}: ${id} has current presentation`);
       }
       assert.equal(rows.find((row) => row.id === "decision")?.state, "needs-you", `${label}: the retention choice remains an owner decision`);
       assert.deepEqual(daemon!.state.listNeedsYouMessageVersions().map(({ threadId }) => threadId), ["decision"], `${label}: settled reviews and active parents cannot become needs-you scheduler inputs`);
@@ -183,8 +187,8 @@ export async function runSessionStateWidgetProof(options: {
       const db = new DatabaseSync(dbPath, { readOnly: true });
       try {
         for (const row of rows) {
-          const stored = db.prepare("SELECT summary FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1").get(row.id);
-          assert.equal(stored?.summary, row.summary, `database summary reaches Gateway for ${row.id}`);
+          const stored = db.prepare("SELECT status_summary AS statusSummary FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1").get(row.id);
+          assert.equal(stored?.statusSummary, row.statusSummary, `database status summary reaches Gateway for ${row.id}`);
         }
       } finally { db.close(); }
       if (!nativeBinary || !outputDirectory) return;
@@ -206,7 +210,7 @@ export async function runSessionStateWidgetProof(options: {
     assert.equal(before.find((r) => r.id === "partial")?.app, "Owner Operator", "real OO transcript adapter participates in recovery");
     assert.equal(before.find((r) => r.id === "decision")?.source, "claude", "real Claude transcript adapter participates in recovery");
     assert.ok(before.some((r) => r.id === "child" && r.parentThreadId === "parent" && !r.generatedTopic), "stale delegated child is actually in the widget response before recovery");
-    assert.ok(before.find((r) => r.id === "parent")?.summary, "working parent has a transcript fallback before enrichment");
+    assert.ok(before.find((r) => r.id === "parent")?.statusSummary, "working parent has a transcript fallback before enrichment");
     enabled = true;
     const parentAt = new Date().toISOString();
     const parentFile = join(process.env.OO_HOME!, "sessions", "parent.jsonl");
@@ -225,10 +229,10 @@ export async function runSessionStateWidgetProof(options: {
     await api("/poll", {});
     await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "failed idle row retries");
     const after: SessionStateRow[] = await api("/session-state");
-    console.log("AFTER", JSON.stringify(safe(after.map((r) => ({ id: r.id, title: r.topic, state: r.state, summary: r.summary })))));
+    console.log("AFTER", JSON.stringify(safe(after.map((r) => ({ id: r.id, title: r.topic, state: r.state, statusSummary: r.statusSummary })))));
     assert.deepEqual(after.map((r) => r.id).sort(), ["child", "decision", "first-message", "parent", "partial", "summarized"], "enrichment never removes a row automatically");
     assert.equal(after.find((r) => r.id === "first-message")?.state, "working");
-    assert.ok(after.find((r) => r.id === "first-message")?.summary);
+    assert.ok(after.find((r) => r.id === "first-message")?.statusSummary);
     await nativeProof("first-message", after);
     daemon.state.renameThread("first-message", "Pinned invoice export");
     const updateAt = new Date().toISOString();
@@ -238,7 +242,7 @@ export async function runSessionStateWidgetProof(options: {
     const updated: SessionStateRow[] = await api("/session-state");
     assert.equal(updated.find((r) => r.id === "first-message")?.state, "working");
     assert.equal(updated.find((r) => r.id === "first-message")?.topic, "Pinned invoice export");
-    assert.notEqual(updated.find((r) => r.id === "first-message")?.summary, after.find((r) => r.id === "first-message")?.summary);
+    assert.notEqual(updated.find((r) => r.id === "first-message")?.statusSummary, after.find((r) => r.id === "first-message")?.statusSummary);
     await nativeProof("working-update", updated);
     const childAt = new Date(Date.now() + 1_000).toISOString();
     transcript("child", "Review CSV escaping in the export.", "CSV escaping verified for embedded commas, quotes, and newlines. All checks passed. No findings or owner decision.", childAt);
@@ -248,8 +252,8 @@ export async function runSessionStateWidgetProof(options: {
     const updatedParent = childUpdated.find((r) => r.id === "parent")!;
     assert.equal(updatedParent.lastMessageAt, parentAt, "the parent transcript has not advanced");
     assert.equal(updatedParent.state, "working");
-    assert.notEqual(updatedParent.summary, updated.find((r) => r.id === "parent")?.summary);
-    assert.match(updatedParent.summary!, /escap|comma|quot|newline/i, "the parent summary reflects child-only evidence");
+    assert.notEqual(updatedParent.statusSummary, updated.find((r) => r.id === "parent")?.statusSummary);
+    assert.match(updatedParent.statusSummary!, /escap|comma|quot|newline/i, "the parent summary reflects child-only evidence");
     await nativeProof("child-progress", childUpdated);
     transcript("first-message", "Implement CSV export for invoices.", "CSV writer implemented; I am writing its tests next.", updateAt, false);
     daemon.state.finishAgentRun(activeChild.id, { status: AgentRunStatus.Completed, resultTail: "Export implemented", error: null });
@@ -261,12 +265,12 @@ export async function runSessionStateWidgetProof(options: {
     await api("/done", { ids: ["child", "summarized"] });
     assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "first-message", "parent", "partial"], "only explicit Done removes completed work");
     assert.equal(after.find((r) => r.id === "decision")?.state, "needs-you");
-    assert.ok(after.find((r) => r.id === "decision")?.summary);
+    assert.ok(after.find((r) => r.id === "decision")?.statusSummary);
     assert.equal(after.find((r) => r.id === "partial")?.state, "idle");
-    assert.ok(after.find((r) => r.id === "partial")?.summary);
+    assert.ok(after.find((r) => r.id === "partial")?.statusSummary);
     assert.ok(after.find((r) => r.id === "partial")?.generatedTopic);
     assert.equal(after.find((r) => r.id === "parent")?.state, "working", "working summary preserves the working lifecycle state");
-    assert.ok(after.find((r) => r.id === "parent")?.summary, "working rows project their current summary");
+    assert.ok(after.find((r) => r.id === "parent")?.statusSummary, "working rows project their current summary");
     assert.ok(after.find((r) => r.id === "parent")?.generatedTopic, "working rows receive a concise title without waiting to become idle");
     if (!live) assert.equal(after.find((r) => r.id === "parent")?.generatedTopic, "Replacement agent run", "the working summary replaces the stale title");
     assert.ok(attempts.includes("parent"), "visible working rows reconcile through the same worker");

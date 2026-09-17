@@ -61,7 +61,8 @@ struct SessionStateTests {
         topic: String = "topic",
         generatedTopic: String? = nil,
         ownerTitle: String? = nil,
-        summary: String? = nil,
+        statusSummary: String? = nil,
+        statusSummaryPending: Bool = false,
         priority: Int? = nil,
         parentThreadId: String? = nil,
         lastMessageAt: String = "2026-01-01T00:00:00.000Z",
@@ -76,7 +77,8 @@ struct SessionStateTests {
         if let project { d["project"] = project }
         if let generatedTopic { d["generatedTopic"] = generatedTopic }
         if let ownerTitle { d["ownerTitle"] = ownerTitle }
-        if let summary { d["summary"] = summary }
+        if let statusSummary { d["statusSummary"] = statusSummary }
+        d["statusSummaryPending"] = statusSummaryPending
         if let priority { d["priority"] = priority }
         if let parentThreadId { d["parentThreadId"] = parentThreadId }
         if let diffAdded { d["diffAdded"] = diffAdded }
@@ -91,7 +93,7 @@ struct SessionStateTests {
     @Test func oldAttentionWarningIsPresentationOnly() throws {
         let now = try #require(parseISODate("2026-01-04T00:00:00.000Z"));
         let input = try rows([
-            row(id: "old", state: "needs-you", summary: "Choose a policy"),
+            row(id: "old", state: "needs-you", statusSummary: "Choose a policy"),
             row(id: "recent", state: "needs-you", lastMessageAt: "2026-01-01T00:00:01.000Z"),
             row(id: "working", state: "working"),
             row(id: "idle", state: "idle"),
@@ -100,7 +102,7 @@ struct SessionStateTests {
         ])
         #expect(input.map { $0.hasOldAttention(at: now) } == [true, false, false, false, false, false])
         #expect(input[0].state == .needsYou)
-        #expect(input[0].summary == "Choose a policy")
+        #expect(input[0].statusSummary == "Choose a policy")
         #expect(input[0].title == "topic")
     }
 
@@ -118,7 +120,7 @@ struct SessionStateTests {
         let decoded = try JSONDecoder().decode([SessionStateRow].self, from: payload)
         #expect(decoded[0].id == "thread-1")
         #expect(decoded[0].title == "Daemon foundation")
-        #expect(decoded[0].summary == "Implement the state seam")
+        #expect(decoded[0].statusSummary == "Implement the state seam")
         #expect(decoded[0].priority == 4)
         #expect(decoded[0].state == .needsYou)
         #expect(decoded[0].repo == "owner-operator")
@@ -194,33 +196,24 @@ struct SessionStateTests {
         #expect(await stub.requestCount("/session-state") == 3)
     }
 
-    @Test func loudestFirstWithinGroup() throws {
+    @Test func rowsKeepTheDaemonsOrderWhateverTheirState() throws {
         let input = try rows([
             row(id: "i", state: "idle"),
-            row(id: "n", state: "needs-you"),
+            row(id: "n", state: "needs-you", lastMessageAt: "2026-01-02T00:00:00.000Z"),
             row(id: "w", state: "working"),
         ])
         let (groups, _) = buildSessionState(rows: input)
         #expect(groups.count == 1)
-        #expect(groups[0].rows.map(\.id) == ["n", "w", "i"])
+        #expect(groups[0].rows.map(\.id) == ["i", "n", "w"])
     }
 
-    @Test func recencyTiebreak() throws {
+    @Test func groupsAreAlphabetical() throws {
         let input = try rows([
-            row(id: "old", state: "needs-you", lastMessageAt: "2026-01-01T00:00:00.000Z"),
-            row(id: "new", state: "needs-you", lastMessageAt: "2026-01-02T00:00:00.000Z"),
-        ])
-        let (groups, _) = buildSessionState(rows: input)
-        #expect(groups[0].rows.map(\.id) == ["new", "old"])
-    }
-
-    @Test func groupsOrderedByLoudestRow() throws {
-        let input = try rows([
-            row(id: "a", repo: "alpha", state: "idle"),
             row(id: "b", repo: "beta", state: "needs-you"),
+            row(id: "a", repo: "alpha", state: "idle"),
         ])
         let (groups, _) = buildSessionState(rows: input)
-        #expect(groups.map(\.repo) == ["beta", "alpha"])
+        #expect(groups.map(\.repo) == ["alpha", "beta"])
     }
 
     @Test func delegatedChildrenNestImmediatelyAfterTheirParent() throws {
@@ -292,24 +285,60 @@ struct SessionStateTests {
     }
 
     @Test func enrichedRowFieldsRenderDirectly() throws {
-        let input = try rows([row(id: "t", state: "needs-you", topic: "nice title", summary: "do the thing", priority: 4)])
+        let input = try rows([row(id: "t", state: "needs-you", topic: "nice title", statusSummary: "do the thing", priority: 4)])
         let r = buildSessionState(rows: input).groups[0].rows[0]
         #expect(r.title == "nice title")
-        #expect(r.summary == "do the thing")
+        #expect(r.statusSummary == "do the thing")
         #expect(r.priority == 4)
     }
 
-    @Test func summariesRenderInEveryVisibleState() throws {
+    /// Every visible row shows its latest status summary, including a working one: the owner
+    /// reads that row to see what is happening right now.
+    @Test func everyVisibleRowShowsItsStatusSummary() throws {
         let input = try rows([
-            row(id: "working", state: "working", summary: "Writing export tests."),
-            row(id: "idle", state: "idle", summary: "Export tests passed."),
-            row(id: "decision", state: "needs-you", summary: "Choose the retention policy."),
+            row(id: "working", state: "working", topic: "Export test run", statusSummary: "Writing export tests."),
+            row(id: "idle", state: "idle", statusSummary: "Export tests passed."),
+            row(id: "decision", state: "needs-you", statusSummary: "Choose the retention policy."),
         ])
         let rendered = renderText(rows: input, port: 47711)
         #expect(rendered.contains("Writing export tests."))
+        #expect(rendered.contains("Export test run"))
+        #expect(input[0].displayStatusSummary == "Writing export tests.")
         #expect(rendered.contains("Export tests passed."))
         #expect(rendered.contains("Choose the retention policy."))
         #expect(input.map(\.state) == [.working, .idle, .needsYou])
+    }
+
+    /// The last status summary stays on screen while its replacement is generated, marked as
+    /// pending rather than blanked or replaced by the opening prompt.
+    @Test func pendingStatusSummaryKeepsTheLastOneWithAMark() throws {
+        let input = try rows([row(id: "t", state: "idle", statusSummary: "Export tests passed.", statusSummaryPending: true)])
+        let rendered = renderText(rows: input, port: 47711)
+        #expect(input[0].statusSummaryPending)
+        #expect(rendered.contains("Export tests passed. ·"))
+    }
+
+    /// A delegated child renders under its parent with its status summary folded away; the
+    /// parent's own is open. The child's evidence is present either way.
+    @Test func childStatusSummariesStartCollapsed() throws {
+        let input = try rows([
+            row(id: "parent", state: "idle", statusSummary: "Delegated the export work."),
+            row(id: "child", state: "idle", statusSummary: "Export implemented and tested.", parentThreadId: "parent"),
+        ])
+        let rendered = buildSessionState(rows: input).groups[0].rows
+        let parent = try #require(rendered.first { $0.id == "parent" })
+        let child = try #require(rendered.first { $0.id == "child" })
+        #expect(child.nestingDepth > 0)
+        #expect(child.statusSummaryStartsCollapsed)
+        #expect(!parent.statusSummaryStartsCollapsed)
+        #expect(child.displayStatusSummary == "Export implemented and tested.")
+    }
+
+    /// A row with no generated status summary yet shows its title alone rather than prompt text.
+    @Test func rowWithoutAStatusSummaryShowsOnlyItsTitle() throws {
+        let input = try rows([row(id: "t", state: "idle", topic: "please have a look at the export thing")])
+        #expect(input[0].displayStatusSummary == nil)
+        #expect(input[0].title == "please have a look at the export thing")
     }
 
     @Test func titleFallsBackToTopic() throws {

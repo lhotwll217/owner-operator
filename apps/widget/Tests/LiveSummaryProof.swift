@@ -19,17 +19,19 @@ struct LiveSummaryProof {
         while Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             let rows = client.groups.flatMap(\.rows)
-            if client.online && expected.allSatisfy({ want in rows.contains { $0.id == want.id && $0.summary == want.summary && $0.title == want.title && $0.state == want.state } }) { break }
+            if client.online && expected.allSatisfy({ want in rows.contains { $0.id == want.id && $0.statusSummary == want.statusSummary && $0.title == want.title && $0.state == want.state } }) { break }
         }
         let rows = client.groups.flatMap(\.rows)
         precondition(client.online, "Native DaemonClient must connect to the isolated Gateway")
         precondition(rows.count == expected.count, "Native client must receive every visible row")
         for want in expected {
             guard let row = rows.first(where: { $0.id == want.id }) else { fatalError("Missing native row \(want.id)") }
-            precondition(row.summary == want.summary && !(row.summary ?? "").isEmpty, "Native summary differs for \(want.id)")
+            precondition(row.statusSummary == want.statusSummary, "Native status summary differs for \(want.id)")
             precondition(row.title == want.title && row.state == want.state, "Native presentation or lifecycle differs for \(want.id)")
             if row.parentThreadId != nil { precondition(row.nestingDepth > 0, "Child must render nested") }
-            print("NATIVE \(row.id) \(row.state.rawValue) \(row.title) | \(row.summary!)")
+            precondition(!row.title.isEmpty, "Every row carries a title while it is on screen")
+            precondition(row.displayStatusSummary == row.statusSummary, "Every visible row shows its status summary, for \(want.id)")
+            print("NATIVE \(row.id) \(row.state.rawValue) pending=\(row.statusSummaryPending) \(row.title) | \(row.displayStatusSummary ?? "(none yet)")")
         }
         func capture(_ suffix: String) throws {
             window.setContentSize(host.fittingSize)
@@ -45,7 +47,7 @@ struct LiveSummaryProof {
         }
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         try capture("-expanded")
-        precondition(host.bounds.height > 100, "Actual expand button must open native summary rows")
+        precondition(host.bounds.height > 100, "Actual expand button must open native status summary rows")
         func scrollView(in view: NSView) -> NSScrollView? {
             if let scroll = view as? NSScrollView { return scroll }
             for child in view.subviews {
@@ -58,6 +60,7 @@ struct LiveSummaryProof {
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))
             try capture("-expanded-bottom")
         }
+        precondition(rows.contains { $0.displayStatusSummary?.isEmpty == false }, "The panel must carry generated status summaries, not titles alone")
         print("PASS native Gateway delivery and WidgetRoot rendering, \(rows.count) rows")
         window.orderOut(nil)
     }

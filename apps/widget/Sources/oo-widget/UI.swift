@@ -1,6 +1,6 @@
 // The widget's SwiftUI content, hosted inside the floating panel. Collapsed = a small always-on
-// bar (status dot · counts · the loudest needs-you leaf). Expanded in place = the full session state,
-// grouped by repo, loudest-first. Nothing here computes state — it renders the daemon's snapshot.
+// bar (status dot · counts · the freshest needs-you leaf). Expanded in place = the full session state,
+// grouped by repo in the daemon's order. Nothing here computes state — it renders the daemon's snapshot.
 
 import SwiftUI
 
@@ -134,7 +134,7 @@ private func lineText(_ r: SessionStateRow) -> Text {
     var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
     out.append(AttributedString("  →  ", attributes: arrow))
     var step = AttributeContainer(); step.foregroundColor = .primary
-    out.append(AttributedString(r.summary ?? r.title, attributes: step))
+    out.append(AttributedString(r.displayStatusSummary ?? r.title, attributes: step))
     guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
 }
@@ -265,21 +265,27 @@ struct RowView: View {
     @State private var hovering = false
     @State private var rowHovering = false
     @State private var editing = false
+    @State private var statusSummaryExpanded = false
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
+
+    /// A delegated child is a line under its parent, not a peer: smaller type, the state dot,
+    /// and no priority, diff, or app badge of its own.
+    private var isChild: Bool { row.nestingDepth > 0 }
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             Text(row.state.glyph)
-                .foregroundStyle(row.state.color).font(.system(size: 12))
+                .foregroundStyle(row.state.color).font(.system(size: isChild ? 9 : 12))
                 .frame(width: 12, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    if let p = row.priority {
+                    if let p = row.priority, !isChild {
                         Text("P\(p)").foregroundStyle(priorityColor(p)).font(.system(size: 10, weight: .bold))
                     }
                     title
                     titleAffordance
+                    statusSummaryDisclosure
                     Spacer(minLength: 6)
                     if row.hasOldAttention() {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -290,19 +296,20 @@ struct RowView: View {
                     Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
                     doneCheck
                 }
-                if let summary = row.summary, !summary.isEmpty {
-                    Text("→ \(summary)")
-                        .foregroundStyle(.secondary).font(.system(size: 11))
+                if let statusSummary = shownStatusSummary {
+                    Text("→ \(statusSummary)\(row.statusSummaryPending ? " ·" : "")")
+                        .foregroundStyle(.secondary).font(.system(size: isChild ? 10 : 11))
                         .fixedSize(horizontal: false, vertical: true)
+                        .help(row.statusSummaryPending ? "This status summary is being refreshed for newer activity." : "")
                 }
-                HStack(spacing: 6) {
+                if !isChild { HStack(spacing: 6) {
                     if row.diffAdded != nil || row.diffDeleted != nil {
                         Text("+\(row.diffAdded ?? 0)").foregroundStyle(.green).font(.system(size: 10))
                         Text("-\(row.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
                     }
                     Spacer()
                     AppBadge(app: row.app)
-                }
+                } }
             }
         }
         .onHover { rowHovering = $0 }
@@ -311,6 +318,27 @@ struct RowView: View {
             if row.isRenamed {
                 Button("Use AI title") { onRename("") }
             }
+        }
+    }
+
+    /// The status summary this row shows, if any. A delegated child keeps its own folded away
+    /// until the owner opens it, so a parent's list of children stays scannable.
+    private var shownStatusSummary: String? {
+        guard !row.statusSummaryStartsCollapsed || statusSummaryExpanded else { return nil }
+        return row.displayStatusSummary
+    }
+
+    /// The child row's fixed-width toggle. It holds its slot so opening a status summary never
+    /// reflows the title beside it.
+    @ViewBuilder private var statusSummaryDisclosure: some View {
+        if row.statusSummaryStartsCollapsed, row.displayStatusSummary != nil {
+            Button { statusSummaryExpanded.toggle() } label: {
+                Image(systemName: statusSummaryExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 10)
+            .help(statusSummaryExpanded ? "Hide this delegated run's status summary" : "Show this delegated run's status summary")
         }
     }
 
@@ -327,7 +355,7 @@ struct RowView: View {
                 .onSubmit { editing = false; commit() }
                 .onExitCommand { editing = false }
         } else {
-            Text(row.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+            Text(row.title).font(.system(size: isChild ? 11 : 12)).fixedSize(horizontal: false, vertical: true)
                 .onTapGesture(count: 2) { startEditing() }
         }
     }

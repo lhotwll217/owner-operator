@@ -12,6 +12,6 @@ const cases = [
 for (const test of cases) {
   const result = await enrichThread(test.sample);
   assert.equal(result.attention, test.state, `${test.name}: ${JSON.stringify(result)}`);
-  assert.ok(result.topic && result.summary, test.name);
+  assert.ok(result.topic && result.statusSummary, test.name);
   console.log(JSON.stringify({ name: test.name, result }));
 }

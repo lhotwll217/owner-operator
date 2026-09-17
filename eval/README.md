@@ -51,6 +51,45 @@ also pins the subject's `defaultThinkingLevel`, recorded as `reasoning_level`). 
 is a cheap pinned model at minimal reasoning (`openai-codex/gpt-5.4`; override with
 `EVAL_GRADER_MODEL=provider/model` — it is not a subject). No API keys.
 
+## Replay: the owner's own sessions
+
+The seeded fixture is synthetic by design. `replay/` answers a different question — how the
+pipeline behaves on the owner's real activity — by capturing a frozen slice of live state and
+transcripts once, then running observation, enrichment, the Gateway, the native widget, and
+`oo`'s own answers against copies of it. The capture stays outside the repository; keep it in a
+workstream folder, never in a commit.
+
+```sh
+node --import tsx eval/replay/capture-session-slice.mjs --out <capture> --window 7d
+node --import tsx eval/replay/sanitize-capture.mjs --capture <capture> --artifacts <artifacts>
+node --import tsx eval/replay/capture-session-slice.mjs --verify <capture>
+node --import tsx eval/replay/run-replay.ts --capture <capture> --out <artifacts> --label <name> \
+  [--daemon-enrich] [--restore-runs] [--active-child <runId>] [--successive N [--successive-threads a,b]] \
+  [--no-enrich] [--sample-only] [--threads N] [--native <LiveSummaryProof binary>] [--ask <questions.json>] \
+  [--assert-summary-shape]
+node --import tsx eval/replay/title-lifecycle-probe.ts --capture <capture> --out <artifacts>
+node --import tsx eval/lifecycle-probe.ts --out <artifacts> [--native <LiveSummaryProof binary>]
+```
+
+Sanitize before reuse: a capture holds whatever the owner's transcripts hold. Redaction keeps every
+byte position, so the same capture still replays; `--verify` re-checks helper authorization and
+re-scans.
+
+Each run builds its own sandbox user, rebases the captured clock onto now, and verifies teardown.
+`--daemon-enrich` lets each checkout's own queue and composition do the work, which is what makes
+two code versions comparable; `--restore-runs` puts back the delegated runs the capture recorded as
+live, which daemon startup recovery would otherwise mark interrupted. `--successive N` replays each
+selected conversation at N growing positions, so status-summary history comes from real transcript
+positions rather than from whatever the capture inherited. `--no-enrich` reproduces the captured
+state untouched. `--assert-summary-shape` rejects generated summaries over two sentences; in
+daemon-enrichment mode it also requires every queued assessment to drain and every displayed
+summary to satisfy that shape. The title probe observes each conversation twice — early and whole — to measure
+how fast a distinguishing title arrives and whether it then holds still. `lifecycle-probe.ts`
+runs a real daemon with the watcher armed and the production enrichment against synthetic
+transcripts, stepping one session through birth, turn end, delegating a child, the child
+completing, and a follow-up to the child; each step records the rows, the milliseconds each
+change took to land, and with `--native` a widget frame.
+
 ## PR comparison contract
 
 The base branch carries earlier full-suite entries in `eval_stat_log.json` — one compact
@@ -88,6 +127,12 @@ separately when suites differ.
 | `results/logs/<run>/global_results.json` | ignored valid full/behavioral comparison detail: metadata, pass rates, distributions, and per-case results |
 | `eval_stat_log.json` | committed newest-first compact single-subject summaries of valid full runs; commit/branch resolve to the PR state via --backfill-git |
 | `hypotheses/` | campaign-specific claims and expected trajectory changes |
+| `replay/capture-session-slice.mjs` | one read-only capture of real state + transcripts, with a provenance manifest; `--verify` re-checks an existing one |
+| `replay/credentials.mjs`, `replay/sanitize-capture.mjs` | find credential values in a capture and replace each with a same-length placeholder |
+| `replay/transcript-positions.mjs` | cut one captured conversation at a position and land it on the current clock |
+| `replay/build-replay-home.mjs` | materializes one replay home from a capture, rebased onto the current clock |
+| `replay/run-replay.ts` | observation, enrichment, Gateway, optional native widget proof, optional `oo` answers |
+| `replay/title-lifecycle-probe.ts` | early-vs-whole conversation passes: title arrival delay and title stability |
 
 ## Mapping to promptfoo
 

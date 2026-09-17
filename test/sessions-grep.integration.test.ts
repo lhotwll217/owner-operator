@@ -85,8 +85,10 @@ try {
     text = `I already reported the ${NEEDLE} thread`,
     callerCwd?: string,
   ) =>
+    // Pi (and therefore Owner Operator) names a transcript `<timestamp>_<stable-id>.jsonl`,
+    // while every index, widget row, and deep link carries the stable id alone.
     writeFileSync(
-      join(ownerOperatorDir, `${id}.jsonl`),
+      join(ownerOperatorDir, `2026-06-30T10-00-00-000Z_${id}.jsonl`),
       JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-06-30T10:00:00.000Z", cwd: join(home, "dev", "normal-repo") }) + "\n" +
         (callerCwd
           ? JSON.stringify({
@@ -103,15 +105,15 @@ try {
           : "") +
         JSON.stringify({ type: "message", id: "m1", parentId: null, timestamp: "2026-06-30T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text }] } }) + "\n",
     );
-  const ownerOperatorId = "owneropr-1111-2222-3333-444444444444";
-  const otherOwnerOperatorId = "ooother-1111-2222-3333-444444444444";
-  const privateOwnerOperatorId = "ooprivat-1111-2222-3333-444444444444";
+  const ownerOperatorId = "0a0a0a0a-1111-2222-3333-444444444444";
+  const otherOwnerOperatorId = "0b0b0b0b-1111-2222-3333-444444444444";
+  const privateOwnerOperatorId = "0c0c0c0c-1111-2222-3333-444444444444";
   writeOwnerOperatorSession(ownerOperatorId, `I already reported the ${NEEDLE} thread and ${CALLER_CHAIN_NEEDLE}`);
   writeOwnerOperatorSession(otherOwnerOperatorId);
   writeOwnerOperatorSession(privateOwnerOperatorId, `private ${NEEDLE}`, join(privateRoot, "OO"));
 
   // Standalone Pi is an external coding store even though OO uses the same transcript format.
-  const externalPiId = "external-1111-2222-3333-444444444444";
+  const externalPiId = "0d0d0d0d-1111-2222-3333-444444444444";
   const externalPiDir = join(home, ".pi", "agent", "sessions");
   mkdirSync(externalPiDir, { recursive: true });
   writeFileSync(

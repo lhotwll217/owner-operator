@@ -74,19 +74,40 @@ application-owned scan/search modules. Claude, Codex, and Pi samples include bou
 evidence through the privacy-aware session-search helper; other formats retain the scan sample.
 Every visible `needs-you`, `idle`, or `working` row is eligible for enrichment, including parents
 with active delegated children. `ThreadEnrichment` separates required presentation fields
-`topic`, `summary`, and `priority` from an `idle` or `needs-you` attention assessment.
+`topic`, `statusSummary`, and `priority` from an `idle` or `needs-you` attention assessment.
 State applies attention only to settled rows. Working status remains deterministic and does
-not require model agreement. Completed work stays visible until an explicit Done action.
+not require model agreement, while `needs-you` comes only from that assessment: a scan sees a
+turn end, not whether anything was asked of the owner. Completed work stays visible until an explicit Done action.
+The model records its assessment through one strict-schema tool call: the status summary carries
+a character limit in the schema, the prompt carries the alignment examples, and `null` keeps the
+current title or status summary unchanged. The model also reads the thread's last three recorded
+status-summary revisions with their positions, so a new revision continues that account. A
+provisional owner action triggers one bounded privacy-aware search across other authorized
+sessions before the assessment lands, so later evidence can clear an already-settled obligation.
+Enrichment runs several threads at once, bounded by `enrichConcurrency` (default 10). A poll
+that lands while a pass is running gets its own pass afterwards, so a turn ending or a child
+starting is reassessed within one model call rather than at the next tick.
 
-The message watermark, sampled child evidence, and whether enrichment landed during working status determine freshness.
+The monitor scans every store once at start. From then on the transcript watcher names the file
+that changed and the scan parses only that transcript and the files sharing its session id; the
+interval tick only reassesses working sessions on their cadence. Without an armed watcher the
+interval falls back to a full scan.
+
+The message watermark, sampled child evidence, enrichment-contract version, and whether
+enrichment landed during working status determine freshness.
 A newer message or a change in working status queues another assessment. Failed calls leave
 the row eligible for retry. Owner Done and newer messages reject stale results; regressed
 transcript timestamps cannot overwrite a newer watermark. Unchanged settled assessments survive
-polling and restart. Titles preserve owner renames. Until a current summary arrives, the
-projection uses the transcript topic as its summary fallback. The monitor never awaits the
-model in its scan hot path.
+polling and restart. A contract change makes an older assessment eligible for one refresh. Titles
+preserve owner renames, and a generated title holds still until the
+work changes categorically. The projection keeps the last generated status summary while a newer
+one is pending and reports that with `statusSummaryPending`; a row with no status summary yet shows its
+title alone. A revision is written when the meaning changes and records the session position it
+was written from, so a reader can return to that point; a reassessment that lands on the same
+understanding advances the clock alone. Working sessions are reassessed about every four minutes.
+The monitor never awaits the model in its scan hot path.
 Observed child transcripts and run statuses accompany the parent sample within a bounded context.
-Child message or run-status changes refresh the parent summary and reject an in-flight older result.
+Child message or run-status changes refresh the parent status summary and reject an in-flight older result.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation
 cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use

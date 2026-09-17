@@ -11,19 +11,23 @@ const state = new State(join(dir, "state.db"));
 
 let finishEnrichment!: (details: ThreadEnrichment) => void;
 const enrichment = new Promise<ThreadEnrichment>((resolve) => { finishEnrichment = resolve; });
+// A scan sees a yielded turn, never an owner obligation, so the reconciled row is idle until
+// enrichment reads the conversation.
+const scanned = fakeScanRow({ lastMessageAt: new Date().toISOString() });
 const monitor = new SessionMonitor(state, {
-  scan: async () => [fakeScanRow()],
+  scan: async () => [scanned],
   enrich: async () => await enrichment,
 });
 
 try {
   const rows = await monitor.poll();
-  assert.equal(rows[0].state, "needs-you", "scan is reconciled through state");
-  assert.equal(rows[0].summary, fakeScanRow().topic, "first-message fallback appears without awaiting the model");
+  assert.equal(rows[0].state, "idle", "scan is reconciled through state");
+  assert.equal(rows[0].topic, scanned.topic, "a title shows from the first observation");
+  assert.equal(rows[0].statusSummary, null, "no recap is invented before one is generated");
 
-  finishEnrichment({ topic: "Daemon foundation", summary: "Review the state seam", priority: 2, attention: "needs-you" as const });
+  finishEnrichment({ topic: "Daemon foundation", statusSummary: "Review the state seam", priority: 2, attention: "needs-you" as const });
   await waitFor(
-    () => state.listSessionState()[0]?.summary === "Review the state seam",
+    () => state.listSessionState()[0]?.statusSummary === "Review the state seam",
     1_000,
     "asynchronous enrichment",
   );
@@ -33,19 +37,60 @@ try {
   mkdirSync(watchedRoot, { recursive: true });
   saveSessionRoots(dir, [{ source: "claude", root: watchedRoot }]);
   let watcherScanCalls = 0;
+  const scannedFiles: string[][] = [];
   const watcherMonitor = new SessionMonitor(state, {
     debounceMs: 10,
-    scan: async () => {
+    scan: async (_since, _limit, files = []) => {
       watcherScanCalls += 1;
+      scannedFiles.push([...files]);
       return [];
     },
   });
   watcherMonitor.watch();
   markOnboarded(dir, { via: "test" });
   await watcherMonitor.poll();
-  writeFileSync(join(watchedRoot, "new-session.jsonl"), "{}\n");
+  const changed = join(watchedRoot, "new-session.jsonl");
+  writeFileSync(changed, "{}\n");
   await waitFor(() => watcherScanCalls > 1, 1_000, "watcher to arm after onboarding");
+  assert.deepEqual(scannedFiles[0], [], "the first poll scans every store");
+  assert.deepEqual(scannedFiles[1], [changed], "a watched change scans only the file that changed");
   watcherMonitor.stop();
+
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const parallel = new SessionMonitor(state, {
+    scan: async () => Array.from({ length: 6 }, (_, i) => fakeScanRow({ id: `parallel-${i}`, lastMessageAt: new Date().toISOString() })),
+    enrich: async () => {
+      inFlight++;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight--;
+      return { topic: "Parallel", statusSummary: "Enriched.", priority: 3, attention: "idle" as const };
+    },
+    enrichConcurrency: 4,
+  });
+  await parallel.poll();
+  await waitFor(() => state.listSessionState().filter((row) => row.id.startsWith("parallel-") && row.statusSummary === "Enriched.").length === 6, 1_000, "parallel enrichment");
+  parallel.stop();
+  assert.equal(peakInFlight, 4, "enrichment runs several threads at once, bounded by enrichConcurrency");
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let midDrainRows = [fakeScanRow({ id: "mid-drain-a", lastMessageAt: new Date().toISOString() })];
+  const midDrain = new SessionMonitor(state, {
+    scan: async () => midDrainRows,
+    enrich: async (candidate) => {
+      if (candidate.id === "mid-drain-a") await gate;
+      return { topic: "Mid drain", statusSummary: "Enriched.", priority: 3, attention: "idle" as const };
+    },
+  });
+  await midDrain.poll();
+  midDrainRows = [...midDrainRows, fakeScanRow({ id: "mid-drain-b", lastMessageAt: new Date().toISOString() })];
+  await midDrain.poll();
+  release();
+  await waitFor(() => state.listSessionState().find((row) => row.id === "mid-drain-b")?.statusSummary === "Enriched.", 1_000,
+    "a poll that lands mid-drain gets its own enrichment pass without waiting for the next tick");
+  midDrain.stop();
 
   const productRoot = join(dir, "sessions");
   mkdirSync(productRoot, { recursive: true });
@@ -70,7 +115,7 @@ try {
     scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:05:00.000Z" })],
     enrich: async () => {
       gatedEnrichmentCalls += 1;
-      return { topic: "should not run", summary: "should not run", priority: 2, attention: "needs-you" as const };
+      return { topic: "should not run", statusSummary: "should not run", priority: 2, attention: "needs-you" as const };
     },
     canEnrich: () => false,
   });
@@ -92,7 +137,7 @@ try {
 
   const enrichmentErrors: string[] = [];
   const failingEnrichmentMonitor = new SessionMonitor(state, {
-    scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:06:00.000Z" })],
+    scan: async () => [fakeScanRow({ lastMessageAt: new Date().toISOString() })],
     enrich: async () => { throw new Error("temporary enrichment failure"); },
     logger: (record) => {
       if (String(record.event) === "enrichment-failed") enrichmentErrors.push(record.error);

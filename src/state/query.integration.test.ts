@@ -33,7 +33,7 @@ try {
   assert.match(byName.get("thread_details")?.description ?? "", /append-only/i, "table description served from schema-docs, not the db file");
 
   const desc = describeTable("thread_details", dbPath);
-  assert.match(desc.description, /audit trail/i, "table description is the in-code doc");
+  assert.match(desc.description, /status-summary revisions/i, "table description is the in-code doc");
   const version = desc.columns.find((c) => c.name === "version");
   assert.ok(version?.primaryKey, "composite pk visible in columns");
   assert.match(version?.description ?? "", /monotonic/, "column description served from schema-docs");

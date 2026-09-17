@@ -34,14 +34,14 @@ try {
   }
   const candidate = state.listEnrichmentCandidates().find(({ id }) => id === "parent")!;
   assert.ok(candidate.children.slice(0, 2).every((child) => child.status === "running" || child.status === "pending"), "State prioritizes active child versions before terminal history");
-  const sample = await sampleEnrichment(candidate);
-  console.log(JSON.stringify({ chars: sample.length, headers: (sample.match(/Delegated child /g) ?? []).length, olderActivePresent: sample.includes("older-running CURRENT_WORK_SENTINEL") }));
+  const { sample, bookmark } = await sampleEnrichment(candidate);
+  console.log(JSON.stringify({ chars: sample.length, headers: (sample.match(/Delegated child /g) ?? []).length, olderActivePresent: sample.includes("older-running CURRENT_WORK_SENTINEL"), bookmark }));
   assert.match(sample, /older-running CURRENT_WORK_SENTINEL/, "older active work survives newer terminal siblings");
   assert.match(sample, /older-pending CURRENT_WORK_SENTINEL/, "multiple active children share the bounded context");
   assert.ok(sample.indexOf("Delegated child older-running") < sample.indexOf("Delegated child completed"));
   assert.ok(sample.length <= 48_000, "parent, children, headers and omission notice fit the context bound");
   assert.match(sample, /terminal child transcripts omitted.*context limit/i, "omitted evidence is explicitly identified as incomplete");
-  const details = { topic: "Active child progress", summary: "Active children continue; terminal history was omitted from the bounded sample.", priority: 3, attention: "idle" as const };
+  const details = { topic: "Active child progress", statusSummary: "Active children continue; terminal history was omitted from the bounded sample.", priority: 3, attention: "idle" as const };
   assert.ok(state.appendEnrichment(candidate.id, details, candidate.lastMessageAt!, candidate.children));
   transcript("completed-0");
   assert.ok(state.listEnrichmentCandidates().some(({ id }) => id === "parent"), "even an omitted child's new message invalidates the bounded assessment");

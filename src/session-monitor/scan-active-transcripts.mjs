@@ -18,6 +18,7 @@
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
+//   --file <path>    parses only that transcript (repeatable) plus files sharing its session id
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -54,6 +55,7 @@ const val = (name, def) => {
   return v && !v.startsWith("--") ? v : def;
 };
 const has = (name) => args.includes(`--${name}`);
+const vals = (name) => args.flatMap((arg, i) => arg === `--${name}` && args[i + 1] && !args[i + 1].startsWith("--") ? [args[i + 1]] : []);
 
 // ooHome holds the owner's config (settings, blacklist, transcript stores, session hosts).
 const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
@@ -66,6 +68,9 @@ const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10
 // Drill into ONE thread by id (prefix ok). Expands just that thread — pair with a bigger
 // --sample — without re-scanning/reprinting everything. Bypasses the automated/limit cuts.
 const threadArg = val("thread", val("id", null));
+// Changed transcript files from the watcher. Only these and the files sharing their session
+// ids are parsed; every other candidate is listed but left unread.
+const changedFiles = new Set(vals("file"));
 const limit = parseInt(val("limit", "40"), 10);
 const truncate = parseInt(val("truncate", "280"), 10);
 const includeAll = has("all");
@@ -648,7 +653,17 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
   };
 }
 
-let threads = candidates.map(parseSession).filter(Boolean);
+let threads;
+if (changedFiles.size) {
+  const changed = candidates.filter((c) => changedFiles.has(c.file)).map(parseSession).filter(Boolean);
+  const ids = changed.map((t) => t.id);
+  const siblings = candidates
+    .filter((c) => !changedFiles.has(c.file) && ids.some((id) => c.file.includes(id)))
+    .map(parseSession).filter(Boolean);
+  threads = [...changed, ...siblings];
+} else {
+  threads = candidates.map(parseSession).filter(Boolean);
+}
 // Blacklist, second layer: cwd + resolved repo name — catches Codex/Cursor sessions and
 // worktrees of a blacklisted repo living elsewhere. Applies before --thread/--all/limit:
 // no flag reaches a blacklisted thread.

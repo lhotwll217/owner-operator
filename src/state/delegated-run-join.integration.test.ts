@@ -53,7 +53,7 @@ try {
   });
   assert.equal(
     state.listCurrentSessionState().find(({ id }) => id === "operator-thread")?.state,
-    "needs-you",
+    "idle",
     "the root begins in its transcript-derived state",
   );
   assert.ok(
@@ -98,7 +98,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "operator-thread",
-      { topic: "Stale handoff", summary: "Interrupt delegated work", priority: 2, attention: "needs-you" as const },
+      { topic: "Stale handoff", statusSummary: "Interrupt delegated work", priority: 2, attention: "needs-you" as const },
       "2026-07-17T10:05:00.000Z",
     ),
     true,
@@ -139,12 +139,24 @@ try {
   });
   assert.equal(
     state.listCurrentSessionState().find(({ id }) => id === "operator-thread")?.state,
-    "needs-you",
+    "idle",
     "when the child is terminal the root returns to its transcript-derived state",
   );
   assert.ok(
     state.listEnrichmentCandidates().some(({ id }) => id === "operator-thread"),
     "a terminal child's parent can be enriched again",
+  );
+  // The owner action a parent inherits from finished child work is evidence enrichment reads,
+  // so the re-enrichment that follows the child's settlement is what restores the trigger.
+  const settled = state.listEnrichmentCandidates().find(({ id }) => id === "operator-thread")!;
+  assert.equal(
+    state.appendEnrichment(
+      "operator-thread",
+      { topic: "Stale handoff", statusSummary: "Confirm the delegated result", priority: 2, attention: "needs-you" as const },
+      "2026-07-17T10:05:00.000Z",
+      settled.children,
+    ),
+    true,
   );
   assert.ok(
     state.listNeedsYouMessageVersions().some(({ threadId }) => threadId === "operator-thread"),

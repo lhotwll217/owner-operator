@@ -32,6 +32,11 @@ export { type SessionStateRow } from "@owner-operator/core";
 
 const AGENT_RUN_EFFORT_SQL = AGENT_RUN_EFFORTS.map((effort) => `'${effort}'`).join(", ");
 
+/** How long a working session's assessment stands before it is made again. The owner asked for
+ * roughly four minutes: long enough not to re-read a turn constantly, short enough that a row
+ * they are watching keeps up with it. */
+const WORKING_REASSESS_MS = 4 * 60 * 1_000;
+
 /** One State-owned definition of an active delegated child. Every persisted owner-attention
  * projection embeds this predicate instead of growing a parallel run lifecycle. */
 const HAS_ACTIVE_CHILD_SQL = `EXISTS (
@@ -83,7 +88,16 @@ export interface ThreadResolutionRow {
   enrichedThroughMessageAt: string | null;
   enrichedWhileWorking: boolean;
   enrichedChildren: string;
+  enrichmentContract: number;
   childrenEvidence: string;
+}
+
+export interface StatusSummaryRevision {
+  version: number;
+  createdAt: string;
+  statusSummary: string;
+  /** Message index this revision was written from, under a tool-inclusive read. */
+  bookmarkIndex: number | null;
 }
 
 export interface DetailsRow {
@@ -94,7 +108,10 @@ export interface DetailsRow {
   state: ThreadState;
   priority: number | null;
   topic: string | null;
-  summary: string | null;
+  statusSummary: string | null;
+  /** Message index this revision was written from, under a tool-inclusive read. */
+  bookmarkIndex: number | null;
+  bookmarkMessageAt: string | null;
 }
 
 export interface RecordScanResult {
@@ -121,7 +138,9 @@ CREATE TABLE IF NOT EXISTS threads (
   raw_topic TEXT,
   owner_title TEXT,
   enriched_through_message_at TEXT,
-  enriched_while_working INTEGER NOT NULL DEFAULT 0
+  enriched_while_working INTEGER NOT NULL DEFAULT 0,
+  enrichment_contract INTEGER NOT NULL DEFAULT 0,
+  last_enriched_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS thread_details (
@@ -132,7 +151,9 @@ CREATE TABLE IF NOT EXISTS thread_details (
   state TEXT NOT NULL CHECK (state IN ('needs-you', 'working', 'idle', 'done')),
   priority INTEGER,
   topic TEXT,
-  summary TEXT,
+  status_summary TEXT,
+  bookmark_index INTEGER,
+  bookmark_message_at TEXT,
   PRIMARY KEY (thread_id, version)
 );
 
@@ -243,6 +264,8 @@ CREATE TABLE IF NOT EXISTS thread_worktrees (
 );
 `;
 
+const CURRENT_ENRICHMENT_CONTRACT = 1;
+
 const WORKTREE_COLUMNS = `
   id, repository, path, git_common_dir AS gitCommonDir,
   created_by_thread_id AS createdByThreadId, created_at AS createdAt`;
@@ -301,7 +324,8 @@ type DetailsPatch = Partial<{
   state: ThreadState;
   priority: number | null;
   topic: string | null;
-  summary: string | null;
+  statusSummary: string | null;
+  bookmark: { index: number; messageAt: string } | null;
 }>;
 
 export class ThreadDb {
@@ -330,6 +354,22 @@ export class ThreadDb {
       }
       if (!threads.has("enriched_children")) {
         this.db.exec("ALTER TABLE threads ADD COLUMN enriched_children TEXT NOT NULL DEFAULT '[]'");
+      }
+      // Added columns, so every existing revision and its history survive the upgrade.
+      if (!threads.has("last_enriched_at")) {
+        this.db.exec("ALTER TABLE threads ADD COLUMN last_enriched_at TEXT");
+      }
+      if (!threads.has("enrichment_contract")) {
+        this.db.exec("ALTER TABLE threads ADD COLUMN enrichment_contract INTEGER NOT NULL DEFAULT 0");
+      }
+      // The stored column takes the name the owner uses for it. A rename keeps every revision
+      // and its history in place; the data is untouched.
+      if (columns.has("summary") && !columns.has("status_summary")) {
+        this.db.exec("ALTER TABLE thread_details RENAME COLUMN summary TO status_summary");
+      }
+      if (!columns.has("bookmark_index")) {
+        this.db.exec("ALTER TABLE thread_details ADD COLUMN bookmark_index INTEGER");
+        this.db.exec("ALTER TABLE thread_details ADD COLUMN bookmark_message_at TEXT");
       }
       if (columns.has("next_steps") || columns.has("state_reason")) {
         this.db.exec("UPDATE threads SET enriched_through_message_at = NULL");
@@ -496,22 +536,26 @@ export class ThreadDb {
       state: patch.state ?? latest?.state ?? "idle",
       priority: "priority" in patch ? patch.priority ?? null : latest?.priority ?? null,
       topic: "topic" in patch ? patch.topic ?? null : latest?.topic ?? null,
-      summary: "summary" in patch ? patch.summary ?? null : latest?.summary ?? null,
+      statusSummary: "statusSummary" in patch ? patch.statusSummary ?? null : latest?.statusSummary ?? null,
+      bookmark: "bookmark" in patch ? patch.bookmark ?? null : null,
     };
+    // A revision is a change of meaning: the lifecycle state, the title, or the status summary.
+    // A reassessment that lands on the same understanding, even with a different urgency, keeps
+    // the existing revision and the position it was written from.
     if (
       latest && latest.state === merged.state &&
-      latest.priority === merged.priority && latest.topic === merged.topic &&
-      latest.summary === merged.summary
+      latest.topic === merged.topic && latest.statusSummary === merged.statusSummary
     ) return null;
     const version = (latest?.version ?? 0) + 1;
     this.db.prepare(
       `INSERT INTO thread_details (
          thread_id, version, created_at, written_by, state,
-         priority, topic, summary
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         priority, topic, status_summary, bookmark_index, bookmark_message_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       threadId, version, this.now(), writtenBy, merged.state,
-      merged.priority, merged.topic, merged.summary,
+      merged.priority, merged.topic, merged.statusSummary,
+      merged.bookmark?.index ?? null, merged.bookmark?.messageAt ?? null,
     );
     return { version, from: latest?.state ?? null, to: merged.state };
   }
@@ -576,11 +620,11 @@ export class ThreadDb {
       const edge = this.appendDetailsInTx(threadId, {
         priority: details.priority ?? null,
         topic: details.topic ?? null,
-        summary: details.summary ?? null,
+        statusSummary: details.statusSummary ?? null,
       }, "model");
       if (throughMessageAt !== undefined) {
-        this.db.prepare("UPDATE threads SET enriched_through_message_at = ? WHERE id = ?")
-          .run(throughMessageAt, threadId);
+        this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enrichment_contract = ? WHERE id = ?")
+          .run(throughMessageAt, CURRENT_ENRICHMENT_CONTRACT, threadId);
       }
       this.db.exec("COMMIT");
       return edge?.version ?? null;
@@ -600,25 +644,43 @@ export class ThreadDb {
     try {
       const current = this.resolutionRow(threadId);
       const working = current?.state === "working" || this.hasActiveChild(threadId);
+      // Guards that reject an assessment: the owner closed the thread, the assessment is not a
+      // lifecycle answer, or it was made against evidence that has since moved. A repeat
+      // assessment of the same evidence is accepted — it advances the reassessment clock and
+      // writes a revision only if the meaning changed.
       if (
         !current || current.state === "done" ||
         (details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
         JSON.stringify(children) !== current.childrenEvidence ||
-        (current.enrichedThroughMessageAt ?? "") > throughMessageAt ||
-        (current.enrichedThroughMessageAt === throughMessageAt && current.enrichedWhileWorking === working && current.enrichedChildren === current.childrenEvidence)
+        (current.enrichedThroughMessageAt ?? "") > throughMessageAt
       ) {
         this.db.exec("COMMIT");
         return null;
       }
+      // The title identifies the work, so it holds still while the work stays the same thing:
+      // a reworded title for the same task makes the owner re-read a row they already know.
+      // Enrichment repeats the current title verbatim unless the task's identity changed
+      // categorically, and a different string is what marks that change.
+      const currentTitle = this.latestDetails(threadId)?.topic ?? null;
       const edge = this.appendDetailsInTx(threadId, {
         ...(!working ? { state: details.attention } : {}),
         priority: details.priority,
-        topic: details.topic,
-        summary: details.summary,
+        topic: details.topic || currentTitle,
+        statusSummary: details.statusSummary,
+        bookmark: details.bookmark ?? null,
       }, "model");
-      this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ?, enriched_children = ? WHERE id = ?")
-        .run(throughMessageAt, Number(working), current.childrenEvidence, threadId);
+      this.db.prepare(
+        `UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ?,
+           enriched_children = ?, enrichment_contract = ?, last_enriched_at = ? WHERE id = ?`,
+      ).run(
+        throughMessageAt,
+        Number(working),
+        current.childrenEvidence,
+        CURRENT_ENRICHMENT_CONTRACT,
+        this.now(),
+        threadId,
+      );
       this.db.exec("COMMIT");
       return edge?.version ?? 0;
     } catch (error) {
@@ -630,21 +692,30 @@ export class ThreadDb {
   latestDetails(threadId: string): DetailsRow | undefined {
     return this.db.prepare(
       `SELECT thread_id AS threadId, version, created_at AS createdAt,
-              written_by AS writtenBy, state,
-              priority, topic, summary
+              written_by AS writtenBy, state, priority, topic, status_summary AS statusSummary,
+              bookmark_index AS bookmarkIndex, bookmark_message_at AS bookmarkMessageAt
        FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1`,
     ).get(threadId) as unknown as DetailsRow | undefined;
   }
 
+  /** Model-written status-summary revisions, newest first. */
+  statusSummaryHistory(threadId: string, limit: number): StatusSummaryRevision[] {
+    return this.db.prepare(
+      `SELECT version, created_at AS createdAt, status_summary AS statusSummary, bookmark_index AS bookmarkIndex
+       FROM thread_details WHERE thread_id = ? AND written_by = 'model' AND status_summary IS NOT NULL
+       ORDER BY version DESC LIMIT ?`,
+    ).all(threadId, limit) as unknown as StatusSummaryRevision[];
+  }
+
   latestDetailsMap(): Map<string, ThreadDetails> {
     const rows = this.db.prepare(
-      `SELECT thread_id AS threadId, priority, topic, summary
+      `SELECT thread_id AS threadId, priority, topic, status_summary AS statusSummary
        FROM thread_details detail
        WHERE version = (SELECT MAX(version) FROM thread_details WHERE thread_id = detail.thread_id)`,
     ).all() as unknown as Array<DetailsRow>;
     return new Map(rows.map((row) => [row.threadId, {
       ...(row.topic != null ? { topic: row.topic } : {}),
-      ...(row.summary != null ? { summary: row.summary } : {}),
+      ...(row.statusSummary != null ? { statusSummary: row.statusSummary } : {}),
       ...(row.priority != null ? { priority: row.priority } : {}),
     }]));
   }
@@ -654,7 +725,9 @@ export class ThreadDb {
       `SELECT t.id, detail.state, t.last_message_at AS lastMessageAt,
               t.enriched_through_message_at AS enrichedThroughMessageAt,
               t.enriched_while_working AS enrichedWhileWorking,
-              t.enriched_children AS enrichedChildren, ${CHILD_EVIDENCE_SQL} AS childrenEvidence
+              t.enriched_children AS enrichedChildren,
+              t.enrichment_contract AS enrichmentContract,
+              ${CHILD_EVIDENCE_SQL} AS childrenEvidence
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE t.id = ?`,
@@ -675,11 +748,12 @@ export class ThreadDb {
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
+              detail.status_summary AS statusSummary,
               CASE WHEN t.enriched_through_message_at = t.last_message_at
                      AND t.enriched_children = ${CHILD_EVIDENCE_SQL}
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
-                   THEN COALESCE(detail.summary, t.raw_topic, '')
-                   ELSE COALESCE(t.raw_topic, '') END AS summary, detail.priority,
+                     AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
+                   THEN 0 ELSE 1 END AS statusSummaryPending, detail.priority,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
@@ -693,10 +767,9 @@ export class ThreadDb {
        LEFT JOIN thread_worktrees selection ON selection.thread_id = t.id
        LEFT JOIN worktrees selected_worktree ON selected_worktree.id = selection.worktree_id
        ${where}
-       ORDER BY CASE ${EFFECTIVE_THREAD_STATE_SQL}
-                  WHEN 'needs-you' THEN 0 WHEN 'working' THEN 1 WHEN 'idle' THEN 2 ELSE 3 END,
-                t.last_message_at DESC,
-                COALESCE(selected_worktree.repository, t.repo, '') COLLATE NOCASE ASC`,
+       -- Rows sit where they were born: a session's place never changes with its state or its
+       -- latest message, so the owner's eye can return to it. New work enters at the top.
+       ORDER BY COALESCE(t.created_at, t.last_message_at) DESC, t.id`,
     );
     const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
       Array<Omit<SessionStateRow, "lastActive">>;
@@ -708,21 +781,31 @@ export class ThreadDb {
       .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
       .map((row) => ({
         ...row,
+        statusSummaryPending: Boolean(row.statusSummaryPending),
         lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
       }));
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
+    const reassessWorkingBefore = new Date(Date.parse(this.now()) - WORKING_REASSESS_MS).toISOString();
     const ids = this.db.prepare(
       `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at
+           OR t.enrichment_contract != ${CURRENT_ENRICHMENT_CONTRACT}
            OR t.enriched_children != ${CHILD_EVIDENCE_SQL}
            OR (t.enriched_through_message_at = t.last_message_at
-             AND t.enriched_while_working != (${EFFECTIVE_THREAD_STATE_SQL} = 'working')))
-       ORDER BY t.last_message_at DESC`,
-    ).all() as Array<{ id: string }>;
+             AND t.enriched_while_working != (${EFFECTIVE_THREAD_STATE_SQL} = 'working'))
+           -- A long turn writes no message for minutes while the owner reads that row, so a
+           -- working session is reassessed on a cadence instead of waiting for the turn to end.
+           OR (${EFFECTIVE_THREAD_STATE_SQL} = 'working'
+             AND (t.last_enriched_at IS NULL OR t.last_enriched_at <= ?)))
+       -- Enrichment takes candidates in this order, so it is what the owner waits on. A row
+       -- with no title yet is showing raw prompt text, so it goes before rows that are only
+       -- refreshing a title they already have; within each group, newest work first.
+       ORDER BY (COALESCE(t.owner_title, detail.topic) IS NOT NULL) ASC, t.last_message_at DESC`,
+    ).all(reassessWorkingBefore) as Array<{ id: string }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));
     return ids.flatMap(({ id }) => {
       const row = rows.get(id);

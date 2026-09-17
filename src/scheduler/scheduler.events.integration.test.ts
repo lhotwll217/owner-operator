@@ -45,10 +45,20 @@ try {
   });
   scheduler.start();
 
+  const owed = (statusSummary: string) => parseDetails({
+    topic: "Retention decision", statusSummary, priority: 2, ownerAction: "Choose the retention period",
+  });
+
+  // A scan alone never says the owner owes anything, so nothing fires until enrichment finds
+  // the owner action in the conversation. Both findings land in one tick and batch into one run.
   state.recordPoll([
     row("a", "2026-07-09T10:00:00.000Z"),
     row("b", "2026-07-09T10:01:00.000Z"),
   ]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 0, "a yielded turn is not an owner action");
+  assert.ok(state.appendEnrichment("a", owed("Choose the retention period."), "2026-07-09T10:00:00.000Z"));
+  assert.ok(state.appendEnrichment("b", owed("Choose the retention period."), "2026-07-09T10:01:00.000Z"));
   await waitFor(() => contexts.length === 1, 1_000, "batched needs-you run");
   assert.deepEqual(contexts[0], {
     threadIds: ["a", "b"],
@@ -63,10 +73,12 @@ try {
   assert.equal(contexts.length, 1, "persisted watermarks suppress duplicate messages");
 
   state.recordObservation(row("a", "2026-07-09T10:02:00.000Z"));
+  assert.ok(state.appendEnrichment("a", owed("Still waiting on the retention period."), "2026-07-09T10:02:00.000Z"));
   await waitFor(() => contexts.length === 2, 1_000, "same-state new-message run");
   assert.equal(state.listScheduleRuns(job.id).length, 2);
 
   state.recordObservation(row("delegating-root", "2026-07-09T10:03:00.000Z"));
+  assert.ok(state.appendEnrichment("delegating-root", owed("Choose the retention period."), "2026-07-09T10:03:00.000Z"));
   const child = state.createAgentRun({
     harness: AgentRunHarness.Codex,
     task: "handle the root task",
@@ -96,14 +108,14 @@ try {
   const idle = { ...row("model-attention", "2026-07-09T10:04:00.000Z"), lastRole: "user", secondsSinceLastMessage: 7200, secondsSinceActivity: 7200 };
   state.recordObservation(idle);
   assert.equal(state.listSessionState().find((item) => item.id === idle.id)?.state, "idle");
-  const noAction = parseDetails(JSON.stringify({ topic: "CSV escaping review", summary: "The agent reports completion but CSV verification evidence is missing. No owner action.", priority: 2, ownerAction: null, attention: "needs-you" }));
+  const noAction = parseDetails({ topic: "CSV escaping review", statusSummary: "The agent reports completion but CSV verification evidence is missing. No owner action.", priority: 2, ownerAction: null, attention: "needs-you" });
   assert.ok(state.appendEnrichment(idle.id, noAction, idle.lastMessageAt));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(contexts.length, 3, "verification uncertainty without a human action cannot trigger a schedule");
   assert.equal(state.listScheduleRuns(job.id).length, 3);
   idle.lastMessageAt = "2026-07-09T10:05:00.000Z";
   state.recordObservation(idle);
-  const details = { topic: "Retention decision", summary: "Choose the retention period.", priority: 2, attention: "needs-you" as const };
+  const details = { topic: "Retention decision", statusSummary: "Choose the retention period.", priority: 2, attention: "needs-you" as const };
   assert.ok(state.appendEnrichment(idle.id, details, idle.lastMessageAt));
   await waitFor(() => contexts.length === 4, 1_000, "model attention triggers needs-you schedule");
   state.renameThread(idle.id, "Pinned decision");

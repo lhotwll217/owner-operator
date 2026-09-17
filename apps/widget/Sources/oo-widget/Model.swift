@@ -20,15 +20,6 @@ enum ThreadState: String, Decodable {
     case idle
     case done
 
-    /// Loudest-first ordering, == core STATE_RANK.
-    var rank: Int {
-        switch self {
-        case .needsYou: return 0
-        case .working: return 1
-        case .idle: return 2
-        case .done: return 3
-        }
-    }
 
     /// Glyphs match the core thread-state model.
     var glyph: String {
@@ -69,7 +60,9 @@ struct SessionStateRow: Decodable, Identifiable {
     let topic: String
     let generatedTopic: String?
     let ownerTitle: String?
-    let summary: String?
+    let statusSummary: String?
+    /// The status summary has not caught up with the latest activity yet; the last one still shows.
+    let statusSummaryPending: Bool
     let priority: Int?
     let state: ThreadState
     let lastActive: String
@@ -86,7 +79,7 @@ struct SessionStateRow: Decodable, Identifiable {
     var nestingDepth: Int = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, priority
+        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, statusSummary, statusSummaryPending, priority
         case state, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
         case diffAdded, diffDeleted, parentThreadId
     }
@@ -101,7 +94,8 @@ struct SessionStateRow: Decodable, Identifiable {
         topic = (try? c.decode(String.self, forKey: .topic)) ?? "(untitled)"
         generatedTopic = try? c.decode(String.self, forKey: .generatedTopic)
         ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
-        summary = try? c.decode(String.self, forKey: .summary)
+        statusSummary = try? c.decode(String.self, forKey: .statusSummary)
+        statusSummaryPending = (try? c.decode(Bool.self, forKey: .statusSummaryPending)) ?? false
         priority = try? c.decode(Int.self, forKey: .priority)
         let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
         state = ThreadState(rawValue: raw) ?? .idle
@@ -122,6 +116,17 @@ struct SessionStateRow: Decodable, Identifiable {
         }
         return topic
     }
+
+    /// The status summary a widget surface shows. Every visible row carries one, including a
+    /// working row: that is where the owner reads what is happening right now.
+    var displayStatusSummary: String? {
+        guard let statusSummary, !statusSummary.isEmpty else { return nil }
+        return statusSummary
+    }
+
+    /// A delegated child's status summary stays folded until the owner opens it, so a parent's
+    /// children read as a list of runs rather than a wall of nested prose.
+    var statusSummaryStartsCollapsed: Bool { nestingDepth > 0 }
 
     func hasOldAttention(at now: Date = Date()) -> Bool {
         guard state == .needsYou, let lastMessage = parseISODate(lastMessageAt) else { return false }
@@ -159,16 +164,6 @@ func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], 
 
     let visible = rows.filter { $0.state != .done && !hidden.contains($0.id) }
 
-    func attentionBefore(_ l: SessionStateRow, _ r: SessionStateRow) -> Bool {
-        l.state.rank != r.state.rank
-            ? l.state.rank < r.state.rank
-            : l.lastMessageAt > r.lastMessageAt
-    }
-
-    func attention(_ rows: [SessionStateRow]) -> [SessionStateRow] {
-        rows.sorted(by: attentionBefore)
-    }
-
     let visibleIds = Set(visible.map(\.id))
     var rootsByRepo: [String: [SessionStateRow]] = [:]
     var childrenByParent: [String: [SessionStateRow]] = [:]
@@ -180,29 +175,20 @@ func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], 
         }
     }
 
-    func loudestInTree(_ root: SessionStateRow) -> SessionStateRow {
-        attention([root] + (childrenByParent[root.id] ?? [])).first ?? root
-    }
-
-    var groups = rootsByRepo.map { repo, roots -> RepoGroup in
-        let orderedRoots = roots.sorted { attentionBefore(loudestInTree($0), loudestInTree($1)) }
+    // Rows keep the daemon's order and groups are alphabetical, so nothing moves when a state
+    // or a latest message changes; the owner's eye can return to where a row was.
+    let groups = rootsByRepo.map { repo, roots -> RepoGroup in
         var flattened: [SessionStateRow] = []
-        for root in orderedRoots {
+        for root in roots {
             flattened.append(root)
-            flattened.append(contentsOf: attention(childrenByParent[root.id] ?? []).map { child in
+            flattened.append(contentsOf: (childrenByParent[root.id] ?? []).map { child in
                 var nested = child
                 nested.nestingDepth = 1
                 return nested
             })
         }
         return RepoGroup(repo: repo, rows: flattened)
-    }
-    groups.sort { a, b in
-        let la = attention(a.rows)[0], lb = attention(b.rows)[0]
-        if attentionBefore(la, lb) { return true }
-        if attentionBefore(lb, la) { return false }
-        return a.repo < b.repo
-    }
+    }.sorted { $0.repo < $1.repo }
     return (groups, counts)
 }
 
