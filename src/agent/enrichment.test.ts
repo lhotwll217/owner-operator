@@ -24,8 +24,8 @@ for (const attention of ["needs-you", "working", "done"]) {
   assert.equal(parseDetails({ ...recorded, attention }).attention, "idle",
     "a model flag cannot create owner attention or lifecycle state without an owner action");
 }
-assert.throws(() => parseDetails({ ...recorded, statusSummary: "One. Two. Three." }), /at most 2 sentences/);
-assert.throws(() => parseDetails({ ...recorded, statusSummary: "x".repeat(STATUS_SUMMARY_MAX_CHARS + 1) }), /characters/);
+assert.equal(parseDetails({ ...recorded, statusSummary: "x".repeat(STATUS_SUMMARY_MAX_CHARS + 30) }).statusSummary.length, STATUS_SUMMARY_MAX_CHARS + 30,
+  "a status summary over the target is shown as written; the limit is the prompt's, not a gate");
 
 assert.deepEqual(
   parseDetails({ ...recorded, topic: null, statusSummary: null }, { title: "Export implementation", statusSummary: "Export under way." }),
@@ -83,26 +83,5 @@ const kept = await enrichThread("More tool calls.", {
 });
 assert.deepEqual(kept, { topic: "Export implementation", statusSummary: "Export under way.", priority: 3, attention: "idle" });
 assert.match(historyPrompt, /v3 2026-06-09T12:00:00.000Z, written at message 41: Export under way\.\n- v2 .*: Export design chosen\./, "the model reads the recorded revisions, newest first, with their positions");
-
-let repairPrompt = "";
-let repairCalls = 0;
-const long = "Export implemented; retention verified by one test; full spec coverage, CSV escaping, and downstream import checks remain unverified pending review.";
-const repaired = await enrichThread("Export work.", {
-  services: fakeServices([
-    { ...recorded, statusSummary: long },
-    { ...recorded, statusSummary: "Export implemented; spec coverage unverified." },
-  ], (prompt) => { repairCalls++; repairPrompt = prompt; }),
-});
-assert.equal(repairCalls, 2, "an overlong status summary receives one repair call");
-assert.match(repairPrompt, new RegExp(`ran ${long.length} characters`), "the repair call carries the overshot text and its length");
-assert.equal(repaired.statusSummary, "Export implemented; spec coverage unverified.");
-
-const twiceLong = await enrichThread("Export work.", {
-  services: fakeServices([{ ...recorded, topic: "Export retention decision", statusSummary: long }, { ...recorded, topic: "Export retention decision", statusSummary: long }]),
-  statusSummaries: [{ version: 1, createdAt: "2026-06-09T11:00:00.000Z", statusSummary: "Export under way.", bookmarkIndex: 4 }],
-});
-assert.deepEqual(twiceLong, { topic: "Export retention decision", statusSummary: "Export under way.", priority: 2, attention: "idle" },
-  "two length misses still land the title and keep the previous status summary");
-await assert.rejects(enrichThread("Export work.", { services: fakeServices([{ ...recorded, statusSummary: long }, { ...recorded, statusSummary: long }]) }), /characters/);
 
 console.log("ok - schema-bounded status summaries, kept text, history-grounded prompt, cross-session owner-action reconciliation");

@@ -78,9 +78,10 @@ with active delegated children. `ThreadEnrichment` separates required presentati
 State applies attention only to settled rows. Working status remains deterministic and does
 not require model agreement, while `needs-you` comes only from that assessment: a scan sees a
 turn end, not whether anything was asked of the owner. Completed work stays visible until an explicit Done action.
-The model records its assessment through one strict-schema tool call: the status summary carries
-a character limit in the schema, the prompt carries the alignment examples, and `null` keeps the
-current title or status summary unchanged. The model also reads the thread's last three recorded
+The model records its assessment through one strict-schema tool call: the prompt carries the
+alignment examples and the 120-character target, the schema carries a backstop above it, and
+`null` keeps the current title or status summary unchanged. What the model returns is shown; there
+is no length gate and no retry. The model also reads the thread's last three recorded
 status-summary revisions with their positions, so a new revision continues that account. A
 provisional owner action triggers one bounded privacy-aware search across other authorized
 sessions before the assessment lands, so later evidence can clear an already-settled obligation.
