@@ -127,7 +127,8 @@ try {
   const childRowMs = await until("child row", () => Boolean(row(kid)));
   const parentWorkingMs = await until("parent working", () => row(fresh)?.state === "working");
   const childTitleMs = await until("child title", () => Boolean(row(kid)?.generatedTopic));
-  await record("child-running", { childRowMs, parentWorkingMs, childTitleMs, childParent: row(kid)?.parentThreadId === fresh ? 1 : 0 });
+  const parentSettledMs = await until("parent reassessed with the child", () => row(fresh)?.summaryPending === false);
+  await record("child-running", { childRowMs, parentWorkingMs, childTitleMs, parentSettledMs, childParent: row(kid)?.parentThreadId === fresh ? 1 : 0 });
 
   // 4. The child completes.
   const parentBefore = row(fresh)?.summary;
