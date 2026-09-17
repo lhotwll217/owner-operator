@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS thread_worktrees (
 );
 `;
 
-const CURRENT_ENRICHMENT_CONTRACT = 1;
+const CURRENT_ENRICHMENT_CONTRACT = 2;
 
 const WORKTREE_COLUMNS = `
   id, repository, path, git_common_dir AS gitCommonDir,
@@ -698,12 +698,15 @@ export class ThreadDb {
     ).get(threadId) as unknown as DetailsRow | undefined;
   }
 
-  /** Model-written status-summary revisions, newest first. */
+  /** Model-written status-summary revisions, newest first. Empty for a thread last assessed
+   * under an older contract: those summaries are not offered as an account to keep. */
   statusSummaryHistory(threadId: string, limit: number): StatusSummaryRevision[] {
     return this.db.prepare(
-      `SELECT version, created_at AS createdAt, status_summary AS statusSummary, bookmark_index AS bookmarkIndex
-       FROM thread_details WHERE thread_id = ? AND written_by = 'model' AND status_summary IS NOT NULL
-       ORDER BY version DESC LIMIT ?`,
+      `SELECT d.version, d.created_at AS createdAt, d.status_summary AS statusSummary, d.bookmark_index AS bookmarkIndex
+       FROM thread_details d JOIN threads t ON t.id = d.thread_id
+       WHERE d.thread_id = ? AND d.written_by = 'model' AND d.status_summary IS NOT NULL
+         AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
+       ORDER BY d.version DESC LIMIT ?`,
     ).all(threadId, limit) as unknown as StatusSummaryRevision[];
   }
 

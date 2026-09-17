@@ -37,6 +37,8 @@ try {
   check.close();
 
   const reopened = new State(path, options);
+  assert.deepEqual(reopened.statusSummaryHistory(reopened.listSessionState()[0].id, 3), [],
+    "a summary written under an older contract is not offered as an account to keep");
   assert.equal(reopened.appendEnrichment(row.id, { topic: "Updated export title", statusSummary: "Export verified.", priority: 2, attention: "idle" }, row.lastMessageAt), true);
   reopened.close();
   const again = new State(path, options);
