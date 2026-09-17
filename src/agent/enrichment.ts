@@ -34,7 +34,7 @@ const RECORD_ASSESSMENT: Tool = {
     statusSummary: nullable(Type.String({
       minLength: 1,
       maxLength: STATUS_SUMMARY_SCHEMA_MAX_CHARS,
-      description: `New status summary of at most ${STATUS_SUMMARY_MAX_CHARS} characters, or null to keep the current one.`,
+      description: `Status summary of at most ${STATUS_SUMMARY_MAX_CHARS} characters. Null keeps the recorded one when the prompt lists recorded status summaries.`,
     })),
     ownerAction: nullable(Type.String({ minLength: 1, description: "The one unresolved action for the human owner, or null." })),
     priority: Type.Integer({ minimum: 1, maximum: 5, description: "Owner urgency." }),
