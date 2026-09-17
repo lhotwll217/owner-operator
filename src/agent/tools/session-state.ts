@@ -89,7 +89,7 @@ const cleanIndexes = (indexes: readonly number[] | undefined): number[] =>
 const cleanQueries = (queries: readonly string[] | undefined): string[] =>
   unique((queries ?? []).map((value) => value.trim()).filter(Boolean));
 const haystack = (thread: CurrentSessionStateRow): string =>
-  [thread.id, thread.repo, thread.app, thread.topic, thread.summary]
+  [thread.id, thread.repo, thread.app, thread.topic, thread.statusSummary]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -100,7 +100,7 @@ export const getCurrentSessionStateTool = defineTool({
   description:
     "Read the owner's current session state — the exact rows their widget shows: row " +
     "number, id, repo, topic, state, priority, status summary. State is authoritative: for " +
-    "'what needs me?' use state=needs-you; priority or summary wording does not override state. " +
+    "'what needs me?' use state=needs-you; priority or status-summary wording does not override state. " +
     "An obligation naming an artifact — a pull request, issue, file, or command — is only current " +
     "if nothing since settled it: search that artifact across sessions before reporting it, " +
     "because the session that settled it is usually a different one. " +

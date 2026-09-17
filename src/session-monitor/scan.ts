@@ -35,7 +35,7 @@ export async function sampleTranscript(threadId: string, source: string, maxChar
 /**
  * One privacy-aware read of a session, and the position it reached. The helper reports the
  * message count of the view it returned; the last index of that view is the position a status
- * summary written from it can be returned to with `--session <id> --at <index> --include-tools`.
+ * status summary written from it can be returned to with `--session <id> --at <index> --include-tools`.
  */
 async function skim(threadId: string, maxChars: number): Promise<{ stdout: string; position: number | null }> {
   const { stdout } = await execFileAsync(process.execPath, [
@@ -121,7 +121,7 @@ export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<
   let remaining = 24_000 - coverage.length - 200;
   const activeHeaders = active.reduce((sum, child) => sum + header(child).length, 0);
   const activeBudget = Math.min(8_000, Math.floor((remaining - activeHeaders) / Math.max(1, active.length)));
-  if (activeBudget < 1_000) throw new Error("active child evidence exceeds the bounded context; parent summary remains eligible");
+  if (activeBudget < 1_000) throw new Error("active child evidence exceeds the bounded context; parent status summary remains eligible");
   for (const child of active) {
     const sample = header(child) + await sampleTranscript(child.id, child.source, activeBudget);
     samples.push(sample);

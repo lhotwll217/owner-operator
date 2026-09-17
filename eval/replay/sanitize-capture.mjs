@@ -97,7 +97,7 @@ if (statSync(databasePath, { throwIfNoEntry: false })) {
     ["threads", "raw_topic", "id"],
     ["threads", "owner_title", "id"],
     ["thread_details", "topic", "rowid"],
-    ["thread_details", "summary", "rowid"],
+    ["thread_details", "status_summary", "rowid"],
   ];
   for (const [table, column, key] of columns) {
     const rows = db.prepare(`SELECT ${key} AS key, ${column} AS value FROM ${table} WHERE ${column} IS NOT NULL`).all();
@@ -126,7 +126,7 @@ for (const root of [capture, ...artifactRoots]) {
 }
 if (statSync(databasePath, { throwIfNoEntry: false })) {
   const db = new DatabaseSync(databasePath, { readOnly: true });
-  for (const [table, column] of [["threads", "raw_topic"], ["threads", "owner_title"], ["thread_details", "topic"], ["thread_details", "summary"]]) {
+  for (const [table, column] of [["threads", "raw_topic"], ["threads", "owner_title"], ["thread_details", "topic"], ["thread_details", "status_summary"]]) {
     for (const row of db.prepare(`SELECT ${column} AS value FROM ${table} WHERE ${column} IS NOT NULL`).all()) {
       mergeCounts(report.remaining, scanCredentials(String(row.value)));
     }

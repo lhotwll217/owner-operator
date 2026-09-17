@@ -15,7 +15,7 @@ const TIMEOUT_MS = 45_000;
 /** The longest ALIGNMENT example is 115 characters; the examples are the ceiling. */
 export const STATUS_SUMMARY_MAX_CHARS = 120;
 /** Providers enforce a schema maxLength by cutting generation at that character, so the schema
- * bound sits above the contract: a cut summary fails validation instead of reaching the widget. */
+ * bound sits above the contract: a cut status summary fails validation instead of reaching the widget. */
 const STATUS_SUMMARY_SCHEMA_MAX_CHARS = 200;
 export const STATUS_SUMMARY_HISTORY_LIMIT = 3;
 
@@ -32,7 +32,7 @@ const RECORD_ASSESSMENT: Tool = {
   description: "Record this session's title, status summary, owner action, and urgency.",
   parameters: Type.Object({
     topic: nullable(Type.String({ minLength: 1, description: "New title, or null to keep the current title." })),
-    summary: nullable(Type.String({
+    statusSummary: nullable(Type.String({
       minLength: 1,
       maxLength: STATUS_SUMMARY_SCHEMA_MAX_CHARS,
       description: `New status summary of at most ${STATUS_SUMMARY_MAX_CHARS} characters, or null to keep the current one.`,
@@ -44,15 +44,15 @@ const RECORD_ASSESSMENT: Tool = {
 };
 
 export class OverlongStatusSummaryError extends Error {
-  /** The rest of the assessment is sound; only the summary text missed the ceiling. */
-  constructor(readonly summary: string, readonly rest: Omit<EnrichmentAssessment, "summary">) {
-    super(`invalid enrichment summary: over ${STATUS_SUMMARY_MAX_CHARS} characters`);
+  /** The rest of the assessment is sound; only the status summary text missed the ceiling. */
+  constructor(readonly statusSummary: string, readonly rest: Omit<EnrichmentAssessment, "statusSummary">) {
+    super(`invalid enrichment status summary: over ${STATUS_SUMMARY_MAX_CHARS} characters`);
   }
 }
 
 interface RecordedAssessment {
   topic: string | null;
-  summary: string | null;
+  statusSummary: string | null;
   ownerAction: string | null;
   priority: number;
 }
@@ -75,7 +75,7 @@ export function parseAssessment(
   const value = args as Record<string, unknown>;
   const recorded: RecordedAssessment = {
     topic: text(value.topic, "topic"),
-    summary: text(value.summary, "summary"),
+    statusSummary: text(value.statusSummary, "statusSummary"),
     ownerAction: text(value.ownerAction, "ownerAction"),
     priority: value.priority as number,
   };
@@ -84,17 +84,17 @@ export function parseAssessment(
   }
   const topic = recorded.topic ?? current.title?.trim();
   if (!topic) throw new Error("enrichment model kept a title that does not exist");
-  const summary = recorded.summary ?? current.statusSummary?.trim();
-  if (!summary) throw new Error("enrichment model kept a status summary that does not exist");
+  const statusSummary = recorded.statusSummary ?? current.statusSummary?.trim();
+  if (!statusSummary) throw new Error("enrichment model kept a status summary that does not exist");
   const rest = {
     topic,
     attention: recorded.ownerAction === null ? "idle" as const : "needs-you" as const,
     priority: recorded.priority,
     ownerAction: recorded.ownerAction,
   };
-  if (summary.length > STATUS_SUMMARY_MAX_CHARS) throw new OverlongStatusSummaryError(summary, rest);
-  assertStatusSummaryShape(summary);
-  return { ...rest, summary };
+  if (statusSummary.length > STATUS_SUMMARY_MAX_CHARS) throw new OverlongStatusSummaryError(statusSummary, rest);
+  assertStatusSummaryShape(statusSummary);
+  return { ...rest, statusSummary };
 }
 
 export function parseDetails(args: unknown, current: Parameters<typeof parseAssessment>[1] = {}): ThreadEnrichment {
@@ -132,7 +132,7 @@ export async function enrichThread(sample: string, options: EnrichmentOptions = 
   const model = await resolveModel(runtime, services.settingsManager);
   const currentTitle = options.currentTitle?.trim() || null;
   const statusSummaries = (options.statusSummaries ?? []).slice(0, STATUS_SUMMARY_HISTORY_LIMIT);
-  const currentStatusSummary = statusSummaries[0]?.summary ?? null;
+  const currentStatusSummary = statusSummaries[0]?.statusSummary ?? null;
 
   const complete = async (evidence: string, provisionalOwnerAction?: string, overlong?: string): Promise<EnrichmentAssessment> => {
     const response = await runtime.completeSimple(model, {
@@ -142,23 +142,23 @@ export async function enrichThread(sample: string, options: EnrichmentOptions = 
         currentTitle
           ? `topic: the current title is ${JSON.stringify(currentTitle)}. Pass null while it still identifies this work. Write a new noun phrase of up to eight words only when the task itself became a categorically different piece of work, so the owner would look for it under a different name.`
           : "topic: a noun phrase of up to eight words that tells this session apart from the owner's other work. Name the specific task, not the tool or the opening request's wording.",
-        `summary: hard limit ${STATUS_SUMMARY_MAX_CHARS} characters. The task's state now, in as few words as carry it, in the register of these three examples (one task at three points):`,
+        `statusSummary: hard limit ${STATUS_SUMMARY_MAX_CHARS} characters. The task's state now, in as few words as carry it, in the register of these three examples (one task at three points):`,
         ...STATUS_SUMMARY_EXAMPLES.map((example) => `- ${example}`),
         "Stopped work names what was established and what remains unresolved.",
         ...(currentStatusSummary
           ? [
             "Its recorded status summaries, newest first:",
             ...statusSummaries.map((revision) =>
-              `- v${revision.version} ${revision.createdAt}${revision.bookmarkIndex === null ? "" : `, written at message ${revision.bookmarkIndex}`}: ${revision.summary}`),
-            "Pass null while your understanding of the task is unchanged; further tool calls, retries, or restatements of settled work are not movement. Write a new summary when a finding, decision, blocker, handoff, delegated child starting or finishing, or a step the agent reports done changes what the owner needs to know, continuing that account.",
+              `- v${revision.version} ${revision.createdAt}${revision.bookmarkIndex === null ? "" : `, written at message ${revision.bookmarkIndex}`}: ${revision.statusSummary}`),
+            "Pass null while your understanding of the task is unchanged; further tool calls, retries, or restatements of settled work are not movement. Write a new status summary when a finding, decision, blocker, handoff, delegated child starting or finishing, or a step the agent reports done changes what the owner needs to know, continuing that account.",
           ]
           : []),
-        "ownerAction: null unless the transcript identifies a current unresolved action for the human owner to take. Otherwise state that specific human action, and let summary's final sentence say what the owner must do. An owner's request for the agent to review, test, or implement is work for the agent. Missing verification evidence belongs in summary and leaves ownerAction null unless an actual human decision or human review is required. Respect later corrections and replacement work over obsolete questions. The application owns working and done status.",
+        "ownerAction: null unless the transcript identifies a current unresolved action for the human owner to take. Otherwise state that specific human action, and let statusSummary's final sentence say what the owner must do. An owner's request for the agent to review, test, or implement is work for the agent. Missing verification evidence belongs in statusSummary and leaves ownerAction null unless an actual human decision or human review is required. Respect later corrections and replacement work over obsolete questions. The application owns working and done status.",
         ...(provisionalOwnerAction
           ? [`A first pass found this possible owner action: ${JSON.stringify(provisionalOwnerAction)}. Related-session search results follow the primary session. Keep the action only if it is still unresolved for the same work. Later evidence that directly settles it makes ownerAction null. Ambiguous or unrelated matches do not settle it.`]
           : []),
         ...(overlong
-          ? [`Your previous summary ran ${overlong.length} characters, over the hard limit of ${STATUS_SUMMARY_MAX_CHARS}: ${JSON.stringify(overlong)}. Record the same state within the limit.`]
+          ? [`Your previous status summary ran ${overlong.length} characters, over the hard limit of ${STATUS_SUMMARY_MAX_CHARS}: ${JSON.stringify(overlong)}. Record the same state within the limit.`]
           : []),
         "For an automated test or approval assessment, evaluate its actual task and result. Generated role-play decisions are not decisions for the owner.",
         "priority: an integer from 1 to 5 for owner urgency.",
@@ -185,12 +185,12 @@ export async function enrichThread(sample: string, options: EnrichmentOptions = 
     } catch (error) {
       if (!(error instanceof OverlongStatusSummaryError)) throw error;
       try {
-        return await complete(evidence, provisionalOwnerAction, error.summary);
+        return await complete(evidence, provisionalOwnerAction, error.statusSummary);
       } catch (repairError) {
         // Two misses on the text still leave a sound title and owner action; the row keeps
-        // its previous summary rather than its prompt placeholder.
+        // its previous status summary rather than its prompt placeholder.
         if (repairError instanceof OverlongStatusSummaryError && currentStatusSummary) {
-          return { ...repairError.rest, summary: currentStatusSummary };
+          return { ...repairError.rest, statusSummary: currentStatusSummary };
         }
         throw repairError;
       }

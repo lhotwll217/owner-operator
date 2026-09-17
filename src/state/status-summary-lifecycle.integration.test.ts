@@ -11,9 +11,9 @@ let clock = "2026-06-09T12:00:00.000Z";
 const at = (iso: string) => { clock = iso; };
 const state = new State(join(dir, "state.db"), { now: () => clock });
 
-const assessment = (over: Partial<{ topic: string; summary: string; priority: number; attention: "idle" | "needs-you"; bookmark: { index: number; messageAt: string } }> = {}) => ({
+const assessment = (over: Partial<{ topic: string; statusSummary: string; priority: number; attention: "idle" | "needs-you"; bookmark: { index: number; messageAt: string } }> = {}) => ({
   topic: "Export retention policy",
-  summary: "Retention policy chosen. Export implementation in progress.",
+  statusSummary: "Retention policy chosen. Export implementation in progress.",
   priority: 3,
   attention: "idle" as const,
   ...over,
@@ -47,7 +47,7 @@ try {
   );
   const unchanged = state.latestDetails(thread.id)!;
   assert.equal(unchanged.version, written.version, "the same understanding creates no new version");
-  assert.equal(unchanged.summary, written.summary, "and leaves the text alone");
+  assert.equal(unchanged.statusSummary, written.statusSummary, "and leaves the text alone");
   assert.equal(unchanged.bookmarkIndex, written.bookmarkIndex, "the recorded position belongs to the revision, not the reassessment");
   assert.ok(
     !state.listEnrichmentCandidates().some((row) => row.id === thread.id),
@@ -57,7 +57,7 @@ try {
   const moved = { ...thread, lastMessageAt: "2026-06-09T11:50:00.000Z" };
   state.recordObservation(moved);
   assert.equal(
-    state.appendEnrichment(thread.id, assessment({ summary: "Export implemented. Verification still open.", bookmark: { index: 63, messageAt: moved.lastMessageAt } }), moved.lastMessageAt),
+    state.appendEnrichment(thread.id, assessment({ statusSummary: "Export implemented. Verification still open.", bookmark: { index: 63, messageAt: moved.lastMessageAt } }), moved.lastMessageAt),
     true,
   );
   const changed = state.latestDetails(thread.id)!;

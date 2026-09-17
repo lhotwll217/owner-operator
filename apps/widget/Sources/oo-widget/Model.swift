@@ -69,9 +69,9 @@ struct SessionStateRow: Decodable, Identifiable {
     let topic: String
     let generatedTopic: String?
     let ownerTitle: String?
-    let summary: String?
+    let statusSummary: String?
     /// The status summary has not caught up with the latest activity yet; the last one still shows.
-    let summaryPending: Bool
+    let statusSummaryPending: Bool
     let priority: Int?
     let state: ThreadState
     let lastActive: String
@@ -88,7 +88,7 @@ struct SessionStateRow: Decodable, Identifiable {
     var nestingDepth: Int = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, summary, summaryPending, priority
+        case id, source, repo, project, app, topic, generatedTopic, ownerTitle, statusSummary, statusSummaryPending, priority
         case state, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
         case diffAdded, diffDeleted, parentThreadId
     }
@@ -103,8 +103,8 @@ struct SessionStateRow: Decodable, Identifiable {
         topic = (try? c.decode(String.self, forKey: .topic)) ?? "(untitled)"
         generatedTopic = try? c.decode(String.self, forKey: .generatedTopic)
         ownerTitle = try? c.decode(String.self, forKey: .ownerTitle)
-        summary = try? c.decode(String.self, forKey: .summary)
-        summaryPending = (try? c.decode(Bool.self, forKey: .summaryPending)) ?? false
+        statusSummary = try? c.decode(String.self, forKey: .statusSummary)
+        statusSummaryPending = (try? c.decode(Bool.self, forKey: .statusSummaryPending)) ?? false
         priority = try? c.decode(Int.self, forKey: .priority)
         let raw = (try? c.decode(String.self, forKey: .state)) ?? "idle"
         state = ThreadState(rawValue: raw) ?? .idle
@@ -129,7 +129,7 @@ struct SessionStateRow: Decodable, Identifiable {
     /// The status summary a widget surface shows. Every visible row carries one, including a
     /// working row: that is where the owner reads what is happening right now.
     var displayStatusSummary: String? {
-        guard let statusSummary = summary, !statusSummary.isEmpty else { return nil }
+        guard let statusSummary, !statusSummary.isEmpty else { return nil }
         return statusSummary
     }
 

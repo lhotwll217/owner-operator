@@ -41,7 +41,7 @@ try {
   assert.ok(sample.indexOf("Delegated child older-running") < sample.indexOf("Delegated child completed"));
   assert.ok(sample.length <= 48_000, "parent, children, headers and omission notice fit the context bound");
   assert.match(sample, /terminal child transcripts omitted.*context limit/i, "omitted evidence is explicitly identified as incomplete");
-  const details = { topic: "Active child progress", summary: "Active children continue; terminal history was omitted from the bounded sample.", priority: 3, attention: "idle" as const };
+  const details = { topic: "Active child progress", statusSummary: "Active children continue; terminal history was omitted from the bounded sample.", priority: 3, attention: "idle" as const };
   assert.ok(state.appendEnrichment(candidate.id, details, candidate.lastMessageAt!, candidate.children));
   transcript("completed-0");
   assert.ok(state.listEnrichmentCandidates().some(({ id }) => id === "parent"), "even an omitted child's new message invalidates the bounded assessment");

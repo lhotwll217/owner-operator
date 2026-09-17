@@ -69,8 +69,8 @@ try {
     return -1;
   }
   const view = (r: SessionStateRow | undefined) => r && {
-    id: r.id, title: r.topic, generatedTopic: r.generatedTopic, state: r.state, summary: r.summary,
-    summaryPending: r.summaryPending, parentThreadId: r.parentThreadId ?? null,
+    id: r.id, title: r.topic, generatedTopic: r.generatedTopic, state: r.state, statusSummary: r.statusSummary,
+    statusSummaryPending: r.statusSummaryPending, parentThreadId: r.parentThreadId ?? null,
   };
   let step = 0;
   async function record(name: string, timings: Record<string, number>, note?: string) {
@@ -81,7 +81,7 @@ try {
     report.push(entry);
     writeFileSync(join(out, `${label}.json`), `${JSON.stringify(entry, null, 2)}\n`);
     console.log(label, JSON.stringify(timings), note ?? "");
-    for (const r of current) console.log(`   ${r.id.padEnd(8)} ${r.state.padEnd(9)} pending=${r.summaryPending} | ${r.topic} | ${r.summary ?? "(none yet)"}`);
+    for (const r of current) console.log(`   ${r.id.padEnd(8)} ${r.state.padEnd(9)} pending=${r.statusSummaryPending} | ${r.topic} | ${r.statusSummary ?? "(none yet)"}`);
     if (!nativeBinary) return;
     const expected = join(sandbox.tempDir, `${label}.json`);
     writeFileSync(expected, JSON.stringify(current));
@@ -105,16 +105,16 @@ try {
   touch(fresh);
   const rowMs = await until("row appears", () => Boolean(row(fresh)));
   const titleMs = await until("generated title", () => Boolean(row(fresh)?.generatedTopic));
-  const summaryMs = await until("first summary", () => Boolean(row(fresh)?.summary));
+  const summaryMs = await until("first summary", () => Boolean(row(fresh)?.statusSummary));
   await record("new-session", { rowVisibleMs: rowMs, titleMs: titleMs < 0 ? -1 : rowMs + titleMs, summaryMs: summaryMs < 0 ? -1 : rowMs + titleMs + summaryMs, sinceBornMs: Date.now() - born },
     "times from the transcript file being written");
 
   // 2. The turn ends.
-  const beforeEnd = row(fresh)?.summary;
+  const beforeEnd = row(fresh)?.statusSummary;
   appendFileSync(file(fresh), message("assistant", "Retry with exponential backoff added to WebhookSender; 4 tests pass, including the max-attempts case.") + lifecycle("task_complete"));
   touch(fresh);
   const idleMs = await until("idle", () => row(fresh)?.state === "idle");
-  const refreshedMs = await until("summary refreshed", () => row(fresh)?.summary !== beforeEnd && row(fresh)?.summaryPending === false);
+  const refreshedMs = await until("summary refreshed", () => row(fresh)?.statusSummary !== beforeEnd && row(fresh)?.statusSummaryPending === false);
   await record("turn-ended", { idleMs, summaryRefreshedMs: refreshedMs });
 
   // 3. The session delegates a child.
@@ -127,26 +127,26 @@ try {
   const childRowMs = await until("child row", () => Boolean(row(kid)));
   const parentWorkingMs = await until("parent working", () => row(fresh)?.state === "working");
   const childTitleMs = await until("child title", () => Boolean(row(kid)?.generatedTopic));
-  const parentSettledMs = await until("parent reassessed with the child", () => row(fresh)?.summaryPending === false);
+  const parentSettledMs = await until("parent reassessed with the child", () => row(fresh)?.statusSummaryPending === false);
   await record("child-running", { childRowMs, parentWorkingMs, childTitleMs, parentSettledMs, childParent: row(kid)?.parentThreadId === fresh ? 1 : 0 });
 
   // 4. The child completes.
-  const parentBefore = row(fresh)?.summary;
+  const parentBefore = row(fresh)?.statusSummary;
   appendFileSync(file(kid), message("assistant", "Review complete. Backoff schedule matches the spec; one nit: jitter is not applied. No blocking findings.") + lifecycle("task_complete"));
   touch(kid);
   daemon.state.finishAgentRun(run.id, { status: AgentRunStatus.Completed, resultTail: "Review complete. No blocking findings.", error: null });
   await daemon.monitor.poll();
   const parentIdleMs = await until("parent leaves working", () => row(fresh)?.state !== "working");
-  const parentRefreshMs = await until("parent summary refreshed", () => row(fresh)?.summary !== parentBefore && row(fresh)?.summaryPending === false);
+  const parentRefreshMs = await until("parent summary refreshed", () => row(fresh)?.statusSummary !== parentBefore && row(fresh)?.statusSummaryPending === false);
   await record("child-completed", { parentLeftWorkingMs: parentIdleMs, parentSummaryRefreshedMs: parentRefreshMs });
 
   // 5. The child is followed up after completion.
-  const parentAfterChild = row(fresh)?.summary;
+  const parentAfterChild = row(fresh)?.statusSummary;
   appendFileSync(file(kid), message("user", "Apply the jitter nit and rerun the tests.") + lifecycle("task_started"));
   touch(kid);
   const childWorkingMs = await until("child working again", () => row(kid)?.state === "working");
   const parentWorkingAgainMs = await until("parent working again", () => row(fresh)?.state === "working", 30_000);
-  const parentRefreshAgainMs = await until("parent summary refreshed again", () => row(fresh)?.summary !== parentAfterChild && row(fresh)?.summaryPending === false, 90_000);
+  const parentRefreshAgainMs = await until("parent summary refreshed again", () => row(fresh)?.statusSummary !== parentAfterChild && row(fresh)?.statusSummaryPending === false, 90_000);
   await record("child-followed-up", { childWorkingMs, parentWorkingAgainMs, parentSummaryRefreshedMs: parentRefreshAgainMs },
     "a completed run has a terminal status, so the parent's working state depends on the child's own transcript only if the code accounts for it");
 

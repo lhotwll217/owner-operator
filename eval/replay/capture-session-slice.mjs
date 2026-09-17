@@ -297,7 +297,7 @@ const manifest = {
     neverEnriched: authorizedRows.filter((row) => !row.enriched_through_message_at).length,
     staleEnrichment: authorizedRows.filter((row) => row.enriched_through_message_at && row.enriched_through_message_at < row.last_message_at).length,
     freshEnrichment: authorizedRows.filter((row) => row.enriched_through_message_at === row.last_message_at).length,
-    latestWithSummary: [...current.values()].filter((row) => row.summary).length,
+    latestWithSummary: [...current.values()].filter((row) => row.statusSummary).length,
     latestWithTopic: [...current.values()].filter((row) => row.topic).length,
     revisedThreads: [...current.values()].filter((row) => row.version > 1).length,
     delegatingParents: new Set(runs.map((row) => row.parent_thread_id).filter(Boolean)).size,

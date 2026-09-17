@@ -297,10 +297,10 @@ struct RowView: View {
                     doneCheck
                 }
                 if let statusSummary = shownStatusSummary {
-                    Text("→ \(statusSummary)\(row.summaryPending ? " ·" : "")")
+                    Text("→ \(statusSummary)\(row.statusSummaryPending ? " ·" : "")")
                         .foregroundStyle(.secondary).font(.system(size: isChild ? 10 : 11))
                         .fixedSize(horizontal: false, vertical: true)
-                        .help(row.summaryPending ? "This status summary is being refreshed for newer activity." : "")
+                        .help(row.statusSummaryPending ? "This status summary is being refreshed for newer activity." : "")
                 }
                 if !isChild { HStack(spacing: 6) {
                     if row.diffAdded != nil || row.diffDeleted != nil {

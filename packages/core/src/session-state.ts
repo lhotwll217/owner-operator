@@ -3,7 +3,7 @@ import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus } from ".
 /** The model-authored detail fields we cache and join onto a thread by id (the enrichment). */
 export interface ThreadDetails {
   topic?: string;
-  summary?: string;
+  statusSummary?: string;
   priority?: number;
 }
 
@@ -21,7 +21,7 @@ export interface ThreadEnrichment extends Required<ThreadDetails> {
 /** One live thread plus its optional cached model details. */
 export interface SessionStateThread extends ThreadStatus {
   generatedTopic?: string;
-  summary?: string;
+  statusSummary?: string;
   priority?: number;
   /** False once status is `done`; done rows leave the active view. */
   active: boolean;
@@ -48,7 +48,7 @@ export function toSessionStateThreads(
     return {
       ...t,
       generatedTopic: d?.topic,
-      summary: d?.summary,
+      statusSummary: d?.statusSummary,
       priority: d?.priority,
       active,
     };

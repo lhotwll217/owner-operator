@@ -3,7 +3,7 @@ import { runSessionStateWidgetProof } from "./session-state-widget-proof";
 
 await assert.rejects(runSessionStateWidgetProof({ enrich: async (candidate, sample) => ({
   topic: candidate.id === "parent" ? "Replacement agent run" : candidate.id,
-  summary: candidate.id === "parent"
+  statusSummary: candidate.id === "parent"
     ? sample.includes("CSV escaping verified") ? "Child reports CSV escaping verified." : "Replacement implementation continues."
     : sample.includes("CSV writer implemented") ? "CSV writer implemented; tests remain." : "The task is complete. No owner action.",
   priority: 2,

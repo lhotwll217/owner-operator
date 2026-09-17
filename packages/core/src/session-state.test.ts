@@ -22,7 +22,7 @@ const threads: ThreadStatus[] = [
 ];
 // Model details enrich only some (by id); un-enriched threads still appear with their raw topic.
 const details = new Map<string, ThreadDetails>([
-  ["n", { topic: "422 contract mismatch", priority: 5, summary: "Paste the drafted reply" }],
+  ["n", { topic: "422 contract mismatch", priority: 5, statusSummary: "Paste the drafted reply" }],
 ]);
 
 const rows = toSessionStateThreads(threads, details);
@@ -35,7 +35,7 @@ assert.equal(rows.find((t) => t.id === "d")!.active, false, "done status → ina
 // --- enriched thread shows the generated title; un-enriched keeps its raw topic + no badge ---
 const n = rows.find((t) => t.id === "n")!;
 assert.equal(displayTitle(n), "422 contract mismatch", "generated title wins");
-assert.equal(n.summary, "Paste the drafted reply");
+assert.equal(n.statusSummary, "Paste the drafted reply");
 assert.equal(n.priority, 5);
 assert.equal(n.state, "needs-you", "live state from the poll");
 const o = rows.find((t) => t.id === "o")!;

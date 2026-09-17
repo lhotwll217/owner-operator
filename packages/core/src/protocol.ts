@@ -52,9 +52,9 @@ export interface SessionStateRow {
   generatedTopic: string;
   ownerTitle: string | null;
   /** Latest generated recap. Null until one exists; it is retained verbatim while refreshing. */
-  summary: string | null;
-  /** A newer message, child, or working change is not reflected in `summary` yet. */
-  summaryPending: boolean;
+  statusSummary: string | null;
+  /** A newer message, child, or working change is not reflected in `statusSummary` yet. */
+  statusSummaryPending: boolean;
   priority: number | null;
   state: ThreadState;
   stateSince: string;

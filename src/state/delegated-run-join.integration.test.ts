@@ -98,7 +98,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "operator-thread",
-      { topic: "Stale handoff", summary: "Interrupt delegated work", priority: 2, attention: "needs-you" as const },
+      { topic: "Stale handoff", statusSummary: "Interrupt delegated work", priority: 2, attention: "needs-you" as const },
       "2026-07-17T10:05:00.000Z",
     ),
     true,
@@ -152,7 +152,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "operator-thread",
-      { topic: "Stale handoff", summary: "Confirm the delegated result", priority: 2, attention: "needs-you" as const },
+      { topic: "Stale handoff", statusSummary: "Confirm the delegated result", priority: 2, attention: "needs-you" as const },
       "2026-07-17T10:05:00.000Z",
       settled.children,
     ),

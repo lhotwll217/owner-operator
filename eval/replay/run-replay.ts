@@ -14,7 +14,7 @@
 //     --successive-threads <id,…>  which sessions grow (default: the visible rows with turns)
 //     --ask <file>            JSON [{id, question}] the production `oo` answers afterwards
 //     --native <binary>       LiveSummaryProof build; renders these rows in the real widget
-//     --assert-summary-shape  fail after proofs if a displayed or newly written summary has
+//     --assert-summary-shape  fail after proofs if a displayed or newly written status summary has
 //                             more than two sentences, or enrichment did not drain
 //     --active-window <w>     owner visibility window (default 36h, the owner's setting)
 //
@@ -273,8 +273,8 @@ try {
             linesShown: prefixAt(lines, position, positions).length,
             row: row && {
               state: row.state, shownTitle: row.topic, generatedTopic: row.generatedTopic,
-              summary: row.summary, parentThreadId: row.parentThreadId,
-              ...("summaryPending" in row ? { summaryPending: (row as { summaryPending?: boolean }).summaryPending } : {}),
+              statusSummary: row.statusSummary, parentThreadId: row.parentThreadId,
+              ...("statusSummaryPending" in row ? { statusSummaryPending: (row as { statusSummaryPending?: boolean }).statusSummaryPending } : {}),
             },
             revisions,
           };
@@ -317,14 +317,14 @@ try {
     const snapshot = (): boolean => {
       const before = timeline.length;
       for (const row of daemon!.state.listCurrentSessionState()) {
-        const shape = JSON.stringify([row.state, row.generatedTopic, row.ownerTitle, row.summary, row.topic]);
+        const shape = JSON.stringify([row.state, row.generatedTopic, row.ownerTitle, row.statusSummary, row.topic]);
         if (seen.get(row.id) === shape) continue;
         seen.set(row.id, shape);
         timeline.push({
           atMs: Date.now() - observeStart, id: row.id, source: row.source, state: row.state,
           generatedTopic: row.generatedTopic, ownerTitle: row.ownerTitle,
-          summary: row.summary, shownTitle: row.topic,
-          ...("summaryPending" in row ? { summaryPending: (row as { summaryPending?: boolean }).summaryPending } : {}),
+          statusSummary: row.statusSummary, shownTitle: row.topic,
+          ...("statusSummaryPending" in row ? { statusSummaryPending: (row as { statusSummaryPending?: boolean }).statusSummaryPending } : {}),
         });
       }
       return timeline.length !== before;
@@ -392,24 +392,24 @@ try {
   const response = await fetch(`http://127.0.0.1:${daemon.port}/session-state`, {
     headers: { authorization: `Bearer ${JSON.parse(execFileSync("cat", [join(sandbox.ooHome, "daemon.json")], { encoding: "utf8" })).authToken}` },
   });
-  const gatewayRows = await response.json() as Array<{ id: string; summary?: string | null }>;
+  const gatewayRows = await response.json() as Array<{ id: string; statusSummary?: string | null }>;
   write("session-state.gateway.json", gatewayRows);
   write("monitor-log.json", monitorLog);
   write("daemon.json", { port: daemon.port, ooHome: sandbox.ooHome });
 
   const finalLedger = new DatabaseSync(join(sandbox.ooHome, "state.db"), { readOnly: true });
   const generatedRevisions = (finalLedger.prepare(
-    "SELECT thread_id AS id, version, summary FROM thread_details WHERE written_by = 'model' AND summary IS NOT NULL ORDER BY thread_id, version",
-  ).all() as unknown as Array<{ id: string; version: number; summary: string }>)
+    "SELECT thread_id AS id, version, status_summary AS statusSummary FROM thread_details WHERE written_by = 'model' AND status_summary IS NOT NULL ORDER BY thread_id, version",
+  ).all() as unknown as Array<{ id: string; version: number; statusSummary: string }>)
     .filter(({ id, version }) => version > (initialVersions.get(id) ?? 0));
   finalLedger.close();
-  const displayed = gatewayRows.flatMap(({ id, summary }) => summary ? [{ id, summary }] : []);
-  const inspect = (kind: "displayed" | "revision", row: { id: string; summary: string; version?: number }) => ({
+  const displayed = gatewayRows.flatMap(({ id, statusSummary }) => statusSummary ? [{ id, statusSummary }] : []);
+  const inspect = (kind: "displayed" | "revision", row: { id: string; statusSummary: string; version?: number }) => ({
     kind,
     id: row.id,
     ...(row.version === undefined ? {} : { version: row.version }),
-    ...statusSummaryShape(row.summary),
-    summary: row.summary,
+    ...statusSummaryShape(row.statusSummary),
+    statusSummary: row.statusSummary,
   });
   const summaryShape = [
     ...displayed.map((row) => inspect("displayed", row)),

@@ -41,7 +41,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "state", description: "needs-you | working | idle | done. needs-you states an unresolved owner action found in the conversation; scans alone produce working or idle." },
       { name: "priority", description: "Model-assigned owner attention, 1-5." },
       { name: "topic", description: "Generated title; the widget/CLI row title unless owner_title overrides. It holds still through ordinary progress, so a changed value marks a categorical change in what the session is working on." },
-      { name: "summary", description: "Status summary: where the task stands now, including an owner action when relevant. A revision exists because the meaning changed; ORDER BY version reads how the work developed." },
+      { name: "status_summary", description: "Status summary: where the task stands now, including an owner action when relevant. A revision exists because the meaning changed; ORDER BY version reads how the work developed." },
       { name: "bookmark_index", description: "Message index this revision was written from. Return to it with session-search --session ID --at INDEX --include-tools." },
       { name: "bookmark_message_at", description: "Message time at that index." },
     ],

@@ -168,7 +168,7 @@ try {
       const earlyDetails = await enrichThread(earlySample, { currentTitle: early.generatedTopic });
       probe.earlyTitleMs = Date.now() - earlyStart;
       probe.earlyTitle = earlyDetails.topic;
-      probe.earlySummary = earlyDetails.summary;
+      probe.earlySummary = earlyDetails.statusSummary;
       daemon.state.appendEnrichment(row.id, earlyDetails, early.lastMessageAt!, early.children);
 
       // ---- late: the same work, the whole conversation ---------------------------------
@@ -179,14 +179,14 @@ try {
       const late = daemon.state.listEnrichmentCandidates().find((candidate) => candidate.id === row.id);
       if (!late) throw new Error("the restored thread left the enrichment set");
       probe.titleShownWhilePending = late.topic;
-      probe.recapShownWhilePending = late.summary;
+      probe.recapShownWhilePending = late.statusSummary;
       const lateStart = Date.now();
       const lateSample = await sampleEnrichment(late);
       probe.lateSampleMs = Date.now() - lateStart;
       const lateDetails = await enrichThread(lateSample, { currentTitle: late.generatedTopic });
       probe.lateTitleMs = Date.now() - lateStart;
       probe.lateTitle = lateDetails.topic;
-      probe.lateSummary = lateDetails.summary;
+      probe.lateSummary = lateDetails.statusSummary;
       daemon.state.appendEnrichment(row.id, lateDetails, late.lastMessageAt!, late.children);
       probe.titleHeld = lateDetails.topic === earlyDetails.topic;
       probe.finalTitle = daemon.state.listSessionState().find((item) => item.id === row.id)?.topic;

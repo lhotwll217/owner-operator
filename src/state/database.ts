@@ -95,7 +95,7 @@ export interface ThreadResolutionRow {
 export interface StatusSummaryRevision {
   version: number;
   createdAt: string;
-  summary: string;
+  statusSummary: string;
   /** Message index this revision was written from, under a tool-inclusive read. */
   bookmarkIndex: number | null;
 }
@@ -108,7 +108,7 @@ export interface DetailsRow {
   state: ThreadState;
   priority: number | null;
   topic: string | null;
-  summary: string | null;
+  statusSummary: string | null;
   /** Message index this revision was written from, under a tool-inclusive read. */
   bookmarkIndex: number | null;
   bookmarkMessageAt: string | null;
@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS thread_details (
   state TEXT NOT NULL CHECK (state IN ('needs-you', 'working', 'idle', 'done')),
   priority INTEGER,
   topic TEXT,
-  summary TEXT,
+  status_summary TEXT,
   bookmark_index INTEGER,
   bookmark_message_at TEXT,
   PRIMARY KEY (thread_id, version)
@@ -324,7 +324,7 @@ type DetailsPatch = Partial<{
   state: ThreadState;
   priority: number | null;
   topic: string | null;
-  summary: string | null;
+  statusSummary: string | null;
   bookmark: { index: number; messageAt: string } | null;
 }>;
 
@@ -361,6 +361,11 @@ export class ThreadDb {
       }
       if (!threads.has("enrichment_contract")) {
         this.db.exec("ALTER TABLE threads ADD COLUMN enrichment_contract INTEGER NOT NULL DEFAULT 0");
+      }
+      // The stored column takes the name the owner uses for it. A rename keeps every revision
+      // and its history in place; the data is untouched.
+      if (columns.has("summary") && !columns.has("status_summary")) {
+        this.db.exec("ALTER TABLE thread_details RENAME COLUMN summary TO status_summary");
       }
       if (!columns.has("bookmark_index")) {
         this.db.exec("ALTER TABLE thread_details ADD COLUMN bookmark_index INTEGER");
@@ -531,7 +536,7 @@ export class ThreadDb {
       state: patch.state ?? latest?.state ?? "idle",
       priority: "priority" in patch ? patch.priority ?? null : latest?.priority ?? null,
       topic: "topic" in patch ? patch.topic ?? null : latest?.topic ?? null,
-      summary: "summary" in patch ? patch.summary ?? null : latest?.summary ?? null,
+      statusSummary: "statusSummary" in patch ? patch.statusSummary ?? null : latest?.statusSummary ?? null,
       bookmark: "bookmark" in patch ? patch.bookmark ?? null : null,
     };
     // A revision is a change of meaning: the lifecycle state, the title, or the status summary.
@@ -539,17 +544,17 @@ export class ThreadDb {
     // the existing revision and the position it was written from.
     if (
       latest && latest.state === merged.state &&
-      latest.topic === merged.topic && latest.summary === merged.summary
+      latest.topic === merged.topic && latest.statusSummary === merged.statusSummary
     ) return null;
     const version = (latest?.version ?? 0) + 1;
     this.db.prepare(
       `INSERT INTO thread_details (
          thread_id, version, created_at, written_by, state,
-         priority, topic, summary, bookmark_index, bookmark_message_at
+         priority, topic, status_summary, bookmark_index, bookmark_message_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       threadId, version, this.now(), writtenBy, merged.state,
-      merged.priority, merged.topic, merged.summary,
+      merged.priority, merged.topic, merged.statusSummary,
       merged.bookmark?.index ?? null, merged.bookmark?.messageAt ?? null,
     );
     return { version, from: latest?.state ?? null, to: merged.state };
@@ -615,7 +620,7 @@ export class ThreadDb {
       const edge = this.appendDetailsInTx(threadId, {
         priority: details.priority ?? null,
         topic: details.topic ?? null,
-        summary: details.summary ?? null,
+        statusSummary: details.statusSummary ?? null,
       }, "model");
       if (throughMessageAt !== undefined) {
         this.db.prepare("UPDATE threads SET enriched_through_message_at = ?, enrichment_contract = ? WHERE id = ?")
@@ -662,7 +667,7 @@ export class ThreadDb {
         ...(!working ? { state: details.attention } : {}),
         priority: details.priority,
         topic: details.topic || currentTitle,
-        summary: details.summary,
+        statusSummary: details.statusSummary,
         bookmark: details.bookmark ?? null,
       }, "model");
       this.db.prepare(
@@ -687,7 +692,7 @@ export class ThreadDb {
   latestDetails(threadId: string): DetailsRow | undefined {
     return this.db.prepare(
       `SELECT thread_id AS threadId, version, created_at AS createdAt,
-              written_by AS writtenBy, state, priority, topic, summary,
+              written_by AS writtenBy, state, priority, topic, status_summary AS statusSummary,
               bookmark_index AS bookmarkIndex, bookmark_message_at AS bookmarkMessageAt
        FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1`,
     ).get(threadId) as unknown as DetailsRow | undefined;
@@ -696,21 +701,21 @@ export class ThreadDb {
   /** Model-written status-summary revisions, newest first. */
   statusSummaryHistory(threadId: string, limit: number): StatusSummaryRevision[] {
     return this.db.prepare(
-      `SELECT version, created_at AS createdAt, summary, bookmark_index AS bookmarkIndex
-       FROM thread_details WHERE thread_id = ? AND written_by = 'model' AND summary IS NOT NULL
+      `SELECT version, created_at AS createdAt, status_summary AS statusSummary, bookmark_index AS bookmarkIndex
+       FROM thread_details WHERE thread_id = ? AND written_by = 'model' AND status_summary IS NOT NULL
        ORDER BY version DESC LIMIT ?`,
     ).all(threadId, limit) as unknown as StatusSummaryRevision[];
   }
 
   latestDetailsMap(): Map<string, ThreadDetails> {
     const rows = this.db.prepare(
-      `SELECT thread_id AS threadId, priority, topic, summary
+      `SELECT thread_id AS threadId, priority, topic, status_summary AS statusSummary
        FROM thread_details detail
        WHERE version = (SELECT MAX(version) FROM thread_details WHERE thread_id = detail.thread_id)`,
     ).all() as unknown as Array<DetailsRow>;
     return new Map(rows.map((row) => [row.threadId, {
       ...(row.topic != null ? { topic: row.topic } : {}),
-      ...(row.summary != null ? { summary: row.summary } : {}),
+      ...(row.statusSummary != null ? { statusSummary: row.statusSummary } : {}),
       ...(row.priority != null ? { priority: row.priority } : {}),
     }]));
   }
@@ -743,12 +748,12 @@ export class ThreadDb {
               COALESCE(t.app, '') AS app,
               COALESCE(t.owner_title, detail.topic, t.raw_topic, '') AS topic,
               COALESCE(detail.topic, '') AS generatedTopic, t.owner_title AS ownerTitle,
-              detail.summary AS summary,
+              detail.status_summary AS statusSummary,
               CASE WHEN t.enriched_through_message_at = t.last_message_at
                      AND t.enriched_children = ${CHILD_EVIDENCE_SQL}
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
                      AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
-                   THEN 0 ELSE 1 END AS summaryPending, detail.priority,
+                   THEN 0 ELSE 1 END AS statusSummaryPending, detail.priority,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
@@ -777,7 +782,7 @@ export class ThreadDb {
       .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
       .map((row) => ({
         ...row,
-        summaryPending: Boolean(row.summaryPending),
+        statusSummaryPending: Boolean(row.statusSummaryPending),
         lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
       }));
   }

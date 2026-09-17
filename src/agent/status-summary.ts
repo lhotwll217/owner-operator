@@ -19,7 +19,7 @@ export function assertStatusSummaryShape(summary: string): void {
   const { sentences } = statusSummaryShape(summary);
   if (sentences > 2) {
     throw new InvalidStatusSummaryShapeError(
-      `invalid enrichment summary: expected at most 2 sentences, received ${sentences}`,
+      `invalid enrichment status summary: expected at most 2 sentences, received ${sentences}`,
     );
   }
 }

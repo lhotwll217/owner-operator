@@ -82,7 +82,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "generated-review-topic",
-      { topic: "Review the current code changes for billing", summary: "Reviewing billing changes.", priority: 2, attention: "idle" },
+      { topic: "Review the current code changes for billing", statusSummary: "Reviewing billing changes.", priority: 2, attention: "idle" },
       "2026-07-09T09:58:30.000Z",
     ),
     true,
@@ -111,7 +111,7 @@ try {
 
   state.appendEnrichment(
     "thread-1",
-    { topic: "Daemon foundation", priority: 4, summary: "Implement the state seam", attention: "needs-you" as const },
+    { topic: "Daemon foundation", priority: 4, statusSummary: "Implement the state seam", attention: "needs-you" as const },
     "2026-07-09T09:59:00.000Z",
   );
   state.registerAndSelectWorktree("thread-1", {
@@ -122,7 +122,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "oo-root",
-      { topic: "Monitor the OO root", attention: "idle", summary: "Monitoring the OO root session.", priority: 2 },
+      { topic: "Monitor the OO root", attention: "idle", statusSummary: "Monitoring the OO root session.", priority: 2 },
       "2026-07-09T09:57:00.000Z",
     ),
     true,
@@ -149,15 +149,15 @@ try {
   assert.equal(
     state.appendEnrichment(
       "thread-1",
-      { topic: "Stale title", priority: 1, summary: "Stale action", attention: "needs-you" as const },
+      { topic: "Stale title", priority: 1, statusSummary: "Stale action", attention: "needs-you" as const },
       "2026-07-09T09:59:00.000Z",
     ),
     false,
     "an enrichment for an older message cannot overwrite the current handoff",
   );
   const refreshing = state.listSessionState().find((item) => item.id === "thread-1");
-  assert.equal(refreshing?.summary, "Implement the state seam", "a newer message keeps the last recap while its replacement is pending");
-  assert.equal(refreshing?.summaryPending, true, "the projection says the recap is behind the latest activity");
+  assert.equal(refreshing?.statusSummary, "Implement the state seam", "a newer message keeps the last recap while its replacement is pending");
+  assert.equal(refreshing?.statusSummaryPending, true, "the projection says the recap is behind the latest activity");
 
   assert.deepEqual(state.markThreadsDone(["thread-1", "missing"]).missingIds, ["missing"]);
   assert.ok(!state.listSessionState().some((item) => item.id === "thread-1"), "done leaves the active projection");
@@ -177,18 +177,18 @@ try {
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap" });
   state.recordObservation({ ...row("2026-07-09T10:03:00.000Z"), id: "thread-flap", working: true });
   assert.equal(
-    state.appendEnrichment("thread-flap", { summary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
+    state.appendEnrichment("thread-flap", { statusSummary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
     true,
     "a completed enrichment lands after a state-only needs-you→working flap",
   );
   const flapped = state.listSessionState().find((item) => item.id === "thread-flap");
   assert.equal(flapped?.state, "working", "a landed enrichment does not resurrect needs-you");
-  assert.equal(flapped?.summary, "Ship the fix", "a working session projects the new summary without changing state");
+  assert.equal(flapped?.statusSummary, "Ship the fix", "a working session projects the new summary without changing state");
   // A repeat assessment of the same evidence lands and advances the reassessment clock; the
   // revision is what holds still, because the understanding did not change.
   const flapVersion = state.latestDetails("thread-flap")!.version;
   assert.equal(
-    state.appendEnrichment("thread-flap", { summary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
+    state.appendEnrichment("thread-flap", { statusSummary: "Ship the fix", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:03:00.000Z"),
     true,
     "re-assessing an already-assessed message is accepted",
   );
@@ -199,7 +199,7 @@ try {
   state.recordObservation({ ...row("2026-07-09T10:04:00.000Z"), id: "thread-stale" });
   state.recordObservation({ ...row("2026-07-09T10:04:30.000Z"), id: "thread-stale" });
   assert.equal(
-    state.appendEnrichment("thread-stale", { summary: "Stale action", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:04:00.000Z"),
+    state.appendEnrichment("thread-stale", { statusSummary: "Stale action", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:04:00.000Z"),
     false,
     "an enrichment sampled before a newer message is rejected as stale",
   );
@@ -210,7 +210,7 @@ try {
 
   state.recordObservation({ ...row("2026-07-09T10:05:00.000Z"), id: "thread-regressed" });
   assert.equal(
-    state.appendEnrichment("thread-regressed", { summary: "Enriched at T2", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:05:00.000Z"),
+    state.appendEnrichment("thread-regressed", { statusSummary: "Enriched at T2", topic: "Session progress", priority: 2, attention: "needs-you" as const }, "2026-07-09T10:05:00.000Z"),
     true,
   );
   const beforeRegression = state.listSessionState().find((item) => item.id === "thread-regressed");
@@ -242,7 +242,7 @@ try {
   assert.equal(
     state.appendEnrichment(
       "thread-1",
-      { topic: "Daemon foundation", priority: 4, summary: "Confirm the retention policy.", attention: "needs-you" as const },
+      { topic: "Daemon foundation", priority: 4, statusSummary: "Confirm the retention policy.", attention: "needs-you" as const },
       "2026-07-09T10:02:00.000Z",
     ),
     true,

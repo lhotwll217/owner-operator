@@ -9,7 +9,7 @@ read_when:
 # Widget
 
 A floating macOS panel that shows session triage. Sessions needing attention stay first.
-Triage happens in place: see each session's state and summary, rename a thread, or mark it done
+Triage happens in place: see each session's state and status summary, rename a thread, or mark it done
 without opening its harness.
 
 Every row shows a title from the moment its work is visible, and its latest status summary,

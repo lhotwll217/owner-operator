@@ -74,7 +74,7 @@ application-owned scan/search modules. Claude, Codex, and Pi samples include bou
 evidence through the privacy-aware session-search helper; other formats retain the scan sample.
 Every visible `needs-you`, `idle`, or `working` row is eligible for enrichment, including parents
 with active delegated children. `ThreadEnrichment` separates required presentation fields
-`topic`, `summary`, and `priority` from an `idle` or `needs-you` attention assessment.
+`topic`, `statusSummary`, and `priority` from an `idle` or `needs-you` attention assessment.
 State applies attention only to settled rows. Working status remains deterministic and does
 not require model agreement, while `needs-you` comes only from that assessment: a scan sees a
 turn end, not whether anything was asked of the owner. Completed work stays visible until an explicit Done action.
@@ -101,13 +101,13 @@ transcript timestamps cannot overwrite a newer watermark. Unchanged settled asse
 polling and restart. A contract change makes an older assessment eligible for one refresh. Titles
 preserve owner renames, and a generated title holds still until the
 work changes categorically. The projection keeps the last generated status summary while a newer
-one is pending and reports that with `summaryPending`; a row with no status summary yet shows its
+one is pending and reports that with `statusSummaryPending`; a row with no status summary yet shows its
 title alone. A revision is written when the meaning changes and records the session position it
 was written from, so a reader can return to that point; a reassessment that lands on the same
 understanding advances the clock alone. Working sessions are reassessed about every four minutes.
 The monitor never awaits the model in its scan hot path.
 Observed child transcripts and run statuses accompany the parent sample within a bounded context.
-Child message or run-status changes refresh the parent summary and reject an in-flight older result.
+Child message or run-status changes refresh the parent status summary and reject an in-flight older result.
 The synchronous transcript parser and git inspection run in a child process, so reconciliation
 cannot block Gateway health, SSE, or widget requests. Periodic scan failures are logged and retried
 at the next normal reconciliation instead of becoming unhandled rejections; enrichment failures use

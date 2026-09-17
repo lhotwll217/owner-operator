@@ -23,11 +23,11 @@ try {
   const rows = await monitor.poll();
   assert.equal(rows[0].state, "idle", "scan is reconciled through state");
   assert.equal(rows[0].topic, scanned.topic, "a title shows from the first observation");
-  assert.equal(rows[0].summary, null, "no recap is invented before one is generated");
+  assert.equal(rows[0].statusSummary, null, "no recap is invented before one is generated");
 
-  finishEnrichment({ topic: "Daemon foundation", summary: "Review the state seam", priority: 2, attention: "needs-you" as const });
+  finishEnrichment({ topic: "Daemon foundation", statusSummary: "Review the state seam", priority: 2, attention: "needs-you" as const });
   await waitFor(
-    () => state.listSessionState()[0]?.summary === "Review the state seam",
+    () => state.listSessionState()[0]?.statusSummary === "Review the state seam",
     1_000,
     "asynchronous enrichment",
   );
@@ -65,12 +65,12 @@ try {
       peakInFlight = Math.max(peakInFlight, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 20));
       inFlight--;
-      return { topic: "Parallel", summary: "Enriched.", priority: 3, attention: "idle" as const };
+      return { topic: "Parallel", statusSummary: "Enriched.", priority: 3, attention: "idle" as const };
     },
     enrichConcurrency: 4,
   });
   await parallel.poll();
-  await waitFor(() => state.listSessionState().filter((row) => row.id.startsWith("parallel-") && row.summary === "Enriched.").length === 6, 1_000, "parallel enrichment");
+  await waitFor(() => state.listSessionState().filter((row) => row.id.startsWith("parallel-") && row.statusSummary === "Enriched.").length === 6, 1_000, "parallel enrichment");
   parallel.stop();
   assert.equal(peakInFlight, 4, "enrichment runs several threads at once, bounded by enrichConcurrency");
 
@@ -81,14 +81,14 @@ try {
     scan: async () => midDrainRows,
     enrich: async (candidate) => {
       if (candidate.id === "mid-drain-a") await gate;
-      return { topic: "Mid drain", summary: "Enriched.", priority: 3, attention: "idle" as const };
+      return { topic: "Mid drain", statusSummary: "Enriched.", priority: 3, attention: "idle" as const };
     },
   });
   await midDrain.poll();
   midDrainRows = [...midDrainRows, fakeScanRow({ id: "mid-drain-b", lastMessageAt: new Date().toISOString() })];
   await midDrain.poll();
   release();
-  await waitFor(() => state.listSessionState().find((row) => row.id === "mid-drain-b")?.summary === "Enriched.", 1_000,
+  await waitFor(() => state.listSessionState().find((row) => row.id === "mid-drain-b")?.statusSummary === "Enriched.", 1_000,
     "a poll that lands mid-drain gets its own enrichment pass without waiting for the next tick");
   midDrain.stop();
 
@@ -115,7 +115,7 @@ try {
     scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:05:00.000Z" })],
     enrich: async () => {
       gatedEnrichmentCalls += 1;
-      return { topic: "should not run", summary: "should not run", priority: 2, attention: "needs-you" as const };
+      return { topic: "should not run", statusSummary: "should not run", priority: 2, attention: "needs-you" as const };
     },
     canEnrich: () => false,
   });
