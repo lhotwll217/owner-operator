@@ -71,6 +71,7 @@ export class SessionMonitor {
   private polling = false;
   private pendingFiles = new Set<string>();
   private enriching = false;
+  private enrichAgain = false;
   private readonly logger: (record: SessionMonitorLogRecord) => void;
   current: SessionStateRow[] = [];
 
@@ -168,7 +169,8 @@ export class SessionMonitor {
   }
 
   private scheduleEnrichment(): void {
-    if (this.options.canEnrich?.() === false || !this.options.enrich || this.enriching) return;
+    if (this.options.canEnrich?.() === false || !this.options.enrich) return;
+    if (this.enriching) { this.enrichAgain = true; return; }
     this.enriching = true;
     queueMicrotask(() => this.runEnrichmentInBackground());
   }
@@ -190,12 +192,16 @@ export class SessionMonitor {
     try {
       // One snapshot, one attempt per thread per pass: a candidate whose result is
       // rejected or whose call fails waits for the next poll instead of retrying in a
-      // tight loop, and one failing thread cannot block the rest.
-      const queue = this.state.listEnrichmentCandidates().filter((candidate) => candidate.lastMessageAt);
-      const workers = Math.min(this.options.enrichConcurrency ?? 10, queue.length);
-      await Promise.all(Array.from({ length: workers }, async () => {
-        for (let candidate = queue.shift(); candidate; candidate = queue.shift()) await this.enrichOne(candidate);
-      }));
+      // tight loop, and one failing thread cannot block the rest. A poll that lands
+      // mid-pass gets its own pass afterwards instead of waiting for the next tick.
+      do {
+        this.enrichAgain = false;
+        const queue = this.state.listEnrichmentCandidates().filter((candidate) => candidate.lastMessageAt);
+        const workers = Math.min(this.options.enrichConcurrency ?? 10, queue.length);
+        await Promise.all(Array.from({ length: workers }, async () => {
+          for (let candidate = queue.shift(); candidate; candidate = queue.shift()) await this.enrichOne(candidate);
+        }));
+      } while (this.enrichAgain);
     } finally {
       this.enriching = false;
     }

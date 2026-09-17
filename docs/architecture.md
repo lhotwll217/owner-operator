@@ -84,7 +84,9 @@ current title or status summary unchanged. The model also reads the thread's las
 status-summary revisions with their positions, so a new revision continues that account. A
 provisional owner action triggers one bounded privacy-aware search across other authorized
 sessions before the assessment lands, so later evidence can clear an already-settled obligation.
-Enrichment runs several threads at once, bounded by `enrichConcurrency` (default 10).
+Enrichment runs several threads at once, bounded by `enrichConcurrency` (default 10). A poll
+that lands while a pass is running gets its own pass afterwards, so a turn ending or a child
+starting is reassessed within one model call rather than at the next tick.
 
 The monitor scans every store once at start. From then on the transcript watcher names the file
 that changed and the scan parses only that transcript and the files sharing its session id; the

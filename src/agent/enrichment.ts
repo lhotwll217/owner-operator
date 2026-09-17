@@ -150,7 +150,7 @@ export async function enrichThread(sample: string, options: EnrichmentOptions = 
             "Its recorded status summaries, newest first:",
             ...statusSummaries.map((revision) =>
               `- v${revision.version} ${revision.createdAt}${revision.bookmarkIndex === null ? "" : `, written at message ${revision.bookmarkIndex}`}: ${revision.summary}`),
-            "Pass null while your understanding of the task is unchanged; further tool calls, retries, or restatements of settled work are not movement. Write a new summary when a finding, decision, blocker, handoff, or completed step changes what the owner needs to know, continuing that account.",
+            "Pass null while your understanding of the task is unchanged; further tool calls, retries, or restatements of settled work are not movement. Write a new summary when a finding, decision, blocker, handoff, delegated child starting or finishing, or a step the agent reports done changes what the owner needs to know, continuing that account.",
           ]
           : []),
         "ownerAction: null unless the transcript identifies a current unresolved action for the human owner to take. Otherwise state that specific human action, and let summary's final sentence say what the owner must do. An owner's request for the agent to review, test, or implement is work for the agent. Missing verification evidence belongs in summary and leaves ownerAction null unless an actual human decision or human review is required. Respect later corrections and replacement work over obsolete questions. The application owns working and done status.",

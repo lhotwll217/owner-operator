@@ -74,6 +74,24 @@ try {
   parallel.stop();
   assert.equal(peakInFlight, 4, "enrichment runs several threads at once, bounded by enrichConcurrency");
 
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let midDrainRows = [fakeScanRow({ id: "mid-drain-a", lastMessageAt: new Date().toISOString() })];
+  const midDrain = new SessionMonitor(state, {
+    scan: async () => midDrainRows,
+    enrich: async (candidate) => {
+      if (candidate.id === "mid-drain-a") await gate;
+      return { topic: "Mid drain", summary: "Enriched.", priority: 3, attention: "idle" as const };
+    },
+  });
+  await midDrain.poll();
+  midDrainRows = [...midDrainRows, fakeScanRow({ id: "mid-drain-b", lastMessageAt: new Date().toISOString() })];
+  await midDrain.poll();
+  release();
+  await waitFor(() => state.listSessionState().find((row) => row.id === "mid-drain-b")?.summary === "Enriched.", 1_000,
+    "a poll that lands mid-drain gets its own enrichment pass without waiting for the next tick");
+  midDrain.stop();
+
   const productRoot = join(dir, "sessions");
   mkdirSync(productRoot, { recursive: true });
   saveSessionRoots(dir, []);

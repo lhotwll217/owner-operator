@@ -68,6 +68,7 @@ node --import tsx eval/replay/run-replay.ts --capture <capture> --out <artifacts
   [--no-enrich] [--sample-only] [--threads N] [--native <LiveSummaryProof binary>] [--ask <questions.json>] \
   [--assert-summary-shape]
 node --import tsx eval/replay/title-lifecycle-probe.ts --capture <capture> --out <artifacts>
+node --import tsx eval/lifecycle-probe.ts --out <artifacts> [--native <LiveSummaryProof binary>]
 ```
 
 Sanitize before reuse: a capture holds whatever the owner's transcripts hold. Redaction keeps every
@@ -83,7 +84,11 @@ positions rather than from whatever the capture inherited. `--no-enrich` reprodu
 state untouched. `--assert-summary-shape` rejects generated summaries over two sentences; in
 daemon-enrichment mode it also requires every queued assessment to drain and every displayed
 summary to satisfy that shape. The title probe observes each conversation twice — early and whole — to measure
-how fast a distinguishing title arrives and whether it then holds still.
+how fast a distinguishing title arrives and whether it then holds still. `lifecycle-probe.ts`
+runs a real daemon with the watcher armed and the production enrichment against synthetic
+transcripts, stepping one session through birth, turn end, delegating a child, the child
+completing, and a follow-up to the child; each step records the rows, the milliseconds each
+change took to land, and with `--native` a widget frame.
 
 ## PR comparison contract
 

@@ -269,14 +269,18 @@ struct RowView: View {
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
 
+    /// A delegated child is a line under its parent, not a peer: smaller type, the state dot,
+    /// and no priority, diff, or app badge of its own.
+    private var isChild: Bool { row.nestingDepth > 0 }
+
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             Text(row.state.glyph)
-                .foregroundStyle(row.state.color).font(.system(size: 12))
+                .foregroundStyle(row.state.color).font(.system(size: isChild ? 9 : 12))
                 .frame(width: 12, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    if let p = row.priority {
+                    if let p = row.priority, !isChild {
                         Text("P\(p)").foregroundStyle(priorityColor(p)).font(.system(size: 10, weight: .bold))
                     }
                     title
@@ -294,18 +298,18 @@ struct RowView: View {
                 }
                 if let statusSummary = shownStatusSummary {
                     Text("→ \(statusSummary)\(row.summaryPending ? " ·" : "")")
-                        .foregroundStyle(.secondary).font(.system(size: 11))
+                        .foregroundStyle(.secondary).font(.system(size: isChild ? 10 : 11))
                         .fixedSize(horizontal: false, vertical: true)
                         .help(row.summaryPending ? "This status summary is being refreshed for newer activity." : "")
                 }
-                HStack(spacing: 6) {
+                if !isChild { HStack(spacing: 6) {
                     if row.diffAdded != nil || row.diffDeleted != nil {
                         Text("+\(row.diffAdded ?? 0)").foregroundStyle(.green).font(.system(size: 10))
                         Text("-\(row.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
                     }
                     Spacer()
                     AppBadge(app: row.app)
-                }
+                } }
             }
         }
         .onHover { rowHovering = $0 }
@@ -351,7 +355,7 @@ struct RowView: View {
                 .onSubmit { editing = false; commit() }
                 .onExitCommand { editing = false }
         } else {
-            Text(row.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+            Text(row.title).font(.system(size: isChild ? 11 : 12)).fixedSize(horizontal: false, vertical: true)
                 .onTapGesture(count: 2) { startEditing() }
         }
     }
