@@ -767,10 +767,9 @@ export class ThreadDb {
        LEFT JOIN thread_worktrees selection ON selection.thread_id = t.id
        LEFT JOIN worktrees selected_worktree ON selected_worktree.id = selection.worktree_id
        ${where}
-       ORDER BY CASE ${EFFECTIVE_THREAD_STATE_SQL}
-                  WHEN 'needs-you' THEN 0 WHEN 'working' THEN 1 WHEN 'idle' THEN 2 ELSE 3 END,
-                t.last_message_at DESC,
-                COALESCE(selected_worktree.repository, t.repo, '') COLLATE NOCASE ASC`,
+       -- Rows sit where they were born: a session's place never changes with its state or its
+       -- latest message, so the owner's eye can return to it. New work enters at the top.
+       ORDER BY COALESCE(t.created_at, t.last_message_at) DESC, t.id`,
     );
     const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
       Array<Omit<SessionStateRow, "lastActive">>;

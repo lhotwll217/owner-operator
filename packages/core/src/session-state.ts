@@ -1,4 +1,4 @@
-import { isActiveState, sortByAttention, STATE_RANK, type ThreadStatus } from "./status";
+import { isActiveState, type ThreadStatus } from "./status";
 
 /** The model-authored detail fields we cache and join onto a thread by id (the enrichment). */
 export interface ThreadDetails {
@@ -72,13 +72,12 @@ export function numberSessionStateRows(threads: readonly SessionStateThread[]): 
 
 export interface SessionStateGroup { repo: string; threads: SessionStateThread[]; }
 
-/** Group by repo; within a group loudest-first; groups ordered by their loudest thread. */
+/** Group by repo, groups alphabetical, rows in the order the daemon projected them. Nothing
+ * here re-sorts: a row's place is fixed by the projection so it never moves under the owner. */
 export function groupSessionStateByRepo(threads: readonly SessionStateThread[]): SessionStateGroup[] {
   const byRepo = new Map<string, SessionStateThread[]>();
   for (const t of threads) (byRepo.get(t.repo) ?? byRepo.set(t.repo, []).get(t.repo)!).push(t);
-  const groups = [...byRepo.entries()].map(([repo, ts]) => ({ repo, threads: sortByAttention(ts) }));
-  return groups.sort((a, b) => {
-    const ra = STATE_RANK[a.threads[0].state], rb = STATE_RANK[b.threads[0].state];
-    return ra - rb || b.threads[0].lastMessageAt.localeCompare(a.threads[0].lastMessageAt) || a.repo.localeCompare(b.repo);
-  });
+  return [...byRepo.entries()]
+    .map(([repo, ts]) => ({ repo, threads: ts }))
+    .sort((a, b) => a.repo.localeCompare(b.repo));
 }

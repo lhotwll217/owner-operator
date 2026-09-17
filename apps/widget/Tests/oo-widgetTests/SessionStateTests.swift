@@ -196,33 +196,24 @@ struct SessionStateTests {
         #expect(await stub.requestCount("/session-state") == 3)
     }
 
-    @Test func loudestFirstWithinGroup() throws {
+    @Test func rowsKeepTheDaemonsOrderWhateverTheirState() throws {
         let input = try rows([
             row(id: "i", state: "idle"),
-            row(id: "n", state: "needs-you"),
+            row(id: "n", state: "needs-you", lastMessageAt: "2026-01-02T00:00:00.000Z"),
             row(id: "w", state: "working"),
         ])
         let (groups, _) = buildSessionState(rows: input)
         #expect(groups.count == 1)
-        #expect(groups[0].rows.map(\.id) == ["n", "w", "i"])
+        #expect(groups[0].rows.map(\.id) == ["i", "n", "w"])
     }
 
-    @Test func recencyTiebreak() throws {
+    @Test func groupsAreAlphabetical() throws {
         let input = try rows([
-            row(id: "old", state: "needs-you", lastMessageAt: "2026-01-01T00:00:00.000Z"),
-            row(id: "new", state: "needs-you", lastMessageAt: "2026-01-02T00:00:00.000Z"),
-        ])
-        let (groups, _) = buildSessionState(rows: input)
-        #expect(groups[0].rows.map(\.id) == ["new", "old"])
-    }
-
-    @Test func groupsOrderedByLoudestRow() throws {
-        let input = try rows([
-            row(id: "a", repo: "alpha", state: "idle"),
             row(id: "b", repo: "beta", state: "needs-you"),
+            row(id: "a", repo: "alpha", state: "idle"),
         ])
         let (groups, _) = buildSessionState(rows: input)
-        #expect(groups.map(\.repo) == ["beta", "alpha"])
+        #expect(groups.map(\.repo) == ["alpha", "beta"])
     }
 
     @Test func delegatedChildrenNestImmediatelyAfterTheirParent() throws {

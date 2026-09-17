@@ -20,15 +20,6 @@ enum ThreadState: String, Decodable {
     case idle
     case done
 
-    /// Loudest-first ordering, == core STATE_RANK.
-    var rank: Int {
-        switch self {
-        case .needsYou: return 0
-        case .working: return 1
-        case .idle: return 2
-        case .done: return 3
-        }
-    }
 
     /// Glyphs match the core thread-state model.
     var glyph: String {
@@ -173,16 +164,6 @@ func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], 
 
     let visible = rows.filter { $0.state != .done && !hidden.contains($0.id) }
 
-    func attentionBefore(_ l: SessionStateRow, _ r: SessionStateRow) -> Bool {
-        l.state.rank != r.state.rank
-            ? l.state.rank < r.state.rank
-            : l.lastMessageAt > r.lastMessageAt
-    }
-
-    func attention(_ rows: [SessionStateRow]) -> [SessionStateRow] {
-        rows.sorted(by: attentionBefore)
-    }
-
     let visibleIds = Set(visible.map(\.id))
     var rootsByRepo: [String: [SessionStateRow]] = [:]
     var childrenByParent: [String: [SessionStateRow]] = [:]
@@ -194,29 +175,20 @@ func buildSessionState(rows input: [SessionStateRow], hidden: Set<String> = [], 
         }
     }
 
-    func loudestInTree(_ root: SessionStateRow) -> SessionStateRow {
-        attention([root] + (childrenByParent[root.id] ?? [])).first ?? root
-    }
-
-    var groups = rootsByRepo.map { repo, roots -> RepoGroup in
-        let orderedRoots = roots.sorted { attentionBefore(loudestInTree($0), loudestInTree($1)) }
+    // Rows keep the daemon's order and groups are alphabetical, so nothing moves when a state
+    // or a latest message changes; the owner's eye can return to where a row was.
+    let groups = rootsByRepo.map { repo, roots -> RepoGroup in
         var flattened: [SessionStateRow] = []
-        for root in orderedRoots {
+        for root in roots {
             flattened.append(root)
-            flattened.append(contentsOf: attention(childrenByParent[root.id] ?? []).map { child in
+            flattened.append(contentsOf: (childrenByParent[root.id] ?? []).map { child in
                 var nested = child
                 nested.nestingDepth = 1
                 return nested
             })
         }
         return RepoGroup(repo: repo, rows: flattened)
-    }
-    groups.sort { a, b in
-        let la = attention(a.rows)[0], lb = attention(b.rows)[0]
-        if attentionBefore(la, lb) { return true }
-        if attentionBefore(lb, la) { return false }
-        return a.repo < b.repo
-    }
+    }.sorted { $0.repo < $1.repo }
     return (groups, counts)
 }
 

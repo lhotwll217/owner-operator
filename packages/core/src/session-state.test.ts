@@ -50,14 +50,15 @@ const renamed = toSessionStateThreads(
 assert.equal(displayTitle(renamed), "Owner's name", "owner rename wins over the generated title");
 
 // --- grouping over the live set ---
-assert.deepEqual(groupSessionStateByRepo(rows).map((g) => g.repo), ["billing", "owner-operator"], "needs-you group first");
+assert.deepEqual(groupSessionStateByRepo(rows).map((g) => g.repo), ["billing", "owner-operator"], "groups are alphabetical");
+assert.deepEqual(groupSessionStateByRepo(rows).flatMap((g) => g.threads.map((t) => t.id)), ["n", "old", "d", "o"], "rows keep the projection's order within a group");
 
 // --- numbering: ACTIVE rows only, 1…n in display order ---
 const { groups, byNum } = numberSessionStateRows(rows);
 assert.equal(byNum.size, 3, "done rows are not numbered (they left session state)");
 assert.deepEqual([...byNum.keys()], [1, 2, 3], "numbers are 1…n");
 assert.deepEqual(groups.flatMap((g) => g.threads).map((t) => t.num), [1, 2, 3], "rendered order carries the same numbers");
-assert.equal(byNum.get(1)!.id, "n", "display order: needs-you first");
+assert.equal(byNum.get(1)!.id, "n", "display order follows the projection");
 assert.equal(byNum.get(2)!.id, "old", "same repo stays grouped");
 assert.equal(byNum.get(3)!.id, "o", "next repo follows");
 assert.ok(!rows.some((t) => t.num !== undefined), "numbering is pure — inputs untouched");

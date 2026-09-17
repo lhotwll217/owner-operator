@@ -83,15 +83,6 @@ export function cleanTopic(raw: string): string {
   return raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || "(untitled)";
 }
 
-/** Loudest-first ordering: needs-you → working → idle → done, then most recent. */
-export const STATE_RANK: Record<ThreadState, number> = { "needs-you": 0, working: 1, idle: 2, done: 3 };
-/** Generic so callers keep their richer type through the sort. */
-export function sortByAttention<T extends ThreadStatus>(threads: readonly T[]): T[] {
-  return [...threads].sort(
-    (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || b.lastMessageAt.localeCompare(a.lastMessageAt),
-  );
-}
-
 /** Lo-fi relative-time formatter (the scan's JSON gives seconds, not a string). */
 export function formatRelative(seconds: number): string {
   if (seconds < 45) return "just now";

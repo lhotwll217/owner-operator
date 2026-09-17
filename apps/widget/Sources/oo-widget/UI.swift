@@ -1,6 +1,6 @@
 // The widget's SwiftUI content, hosted inside the floating panel. Collapsed = a small always-on
-// bar (status dot · counts · the loudest needs-you leaf). Expanded in place = the full session state,
-// grouped by repo, loudest-first. Nothing here computes state — it renders the daemon's snapshot.
+// bar (status dot · counts · the freshest needs-you leaf). Expanded in place = the full session state,
+// grouped by repo in the daemon's order. Nothing here computes state — it renders the daemon's snapshot.
 
 import SwiftUI
 

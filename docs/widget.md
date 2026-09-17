@@ -14,7 +14,12 @@ without opening its harness.
 
 Every row shows a title from the moment its work is visible, and its latest status summary,
 marked when a refresh is pending — including a working row, which is where the owner reads what
-is happening right now. A delegated child's status summary stays folded until the owner opens it.
+is happening right now. A delegated child's status summary stays folded until the owner opens it,
+and a child row is a smaller line under its parent with no priority or badges of its own.
+
+Rows hold their place. Groups are alphabetical by repo; within a group, rows sit in creation
+order, newest first, and a change of state or a new message never moves one. New work enters at
+the top of its group.
 
 The widget is a pure Gateway client. It renders `/session-state` and never spawns
 a process or reads the `agent_runs` ledger directly.
@@ -32,7 +37,7 @@ guarantee; the complete boundary is in
 [Sub-agents and delegated runs](delegated-runs.md#tracking-boundary).
 
 Owner-origin Owner Operator conversations are ordinary root rows in `/session-state`; the widget
-renders them through the same grouping and attention model as coding-agent roots.
+renders them through the same grouping as coding-agent roots.
 
 Install, lifecycle, and client auth live with the daemon ([daemon.md](daemon.md)); until
 onboarding completes it displays setup-required ([onboarding.md](onboarding.md)).
