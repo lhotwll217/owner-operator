@@ -256,9 +256,7 @@ honors `OPENCODE_BIN_PATH`. OO clears it for both identities during launch and v
 this is not a claim that the stable native binary reads that variable. Provider accounts and
 allowance stay unknown.
 
-Inspection and launch both check the CLI's version signature: [stable reports bare semver](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/index.ts#L48-L52); the
-official V2 CLI reports `opencode2 v<semver>` ([command identity](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/commands.ts#L11-L39),
-[version dispatch](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/index.ts#L86-L92)).
+Inspection and launch both check the CLI's version signature. The `opencode` identity accepts legacy bare semver and current `opencode v<semver>` output. The distinct `opencode2` identity requires `opencode2 v<semver>` ([command identity](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/commands.ts#L11-L39), [version dispatch](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/index.ts#L86-L92)).
 Provenance includes the requested executable path, its real path and the verbatim version output.
 A stable binary aliased as `opencode2` is rejected. This trusts the installed executable's output:
 an arbitrary wrapper can lie about its identity or change after inspection. It is not binary

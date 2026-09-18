@@ -461,11 +461,12 @@ export function resolveOpenCodeRuntime(harness: "opencode" | "opencode2") {
   const version = execFileSync(executablePath, ["--version"], {
     env, encoding: "utf8", timeout: 5_000, maxBuffer: 64 * 1024, stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-  // Stable prints bare semver; the official V2 CLI prints its command name followed by v<semver>.
+  // OpenCode reports either bare semver (legacy) or `opencode v<semver>`; the separate
+  // opencode2 command reports `opencode2 v<semver>`.
   // Sources and the deliberate local-executable trust boundary: docs/delegated-runs.md, OpenCode.
   const semver = "\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?";
   const name = new RegExp(`^opencode2 v${semver}$`).test(version) ? "opencode2"
-    : new RegExp(`^${semver}$`).test(version) ? "opencode" : null;
+    : new RegExp(`^(?:opencode v)?${semver}$`).test(version) ? "opencode" : null;
   if (name !== harness) {
     throw new Error(`${harness} backend identity could not be confirmed: ${executablePath} resolves to ${realPath} and reports ${JSON.stringify(version)}; expected ${harness}'s CLI version signature`);
   }

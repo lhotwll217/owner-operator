@@ -25,7 +25,7 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, existsSync } from 'node:fs';
 const identity = __IDENTITY__;
 if (process.env.OPENCODE_BIN_PATH) process.exit(91);
-if (process.argv[2] === '--version') { console.log(identity === 'opencode2' ? 'opencode2 v0.0.0-fixture' : '1.18.29'); process.exit(0); }
+if (process.argv[2] === '--version') { console.log(identity === 'opencode2' ? 'opencode2 v0.0.0-fixture' : 'opencode v2.0.5'); process.exit(0); }
 if (process.argv[2] !== 'acp') process.exit(92);
 let effort = 'high';
 let pending;
@@ -73,7 +73,7 @@ try {
       assert.equal(row.harness, harness);
       assert.equal(row.acpxAgent, harness);
       assert.equal(row.runtime?.backend.name, harness);
-      assert.equal(row.runtime?.backend.version, harness === "opencode2" ? "opencode2 v0.0.0-fixture" : "1.18.29");
+      assert.equal(row.runtime?.backend.version, harness === "opencode2" ? "opencode2 v0.0.0-fixture" : "opencode v2.0.5");
       assert.equal(row.runtime?.backend.executablePath, join(bin, harness));
       assert.equal(row.session?.agentCapabilities?.loadSession, true);
       if (effort === "ultra") {
@@ -177,7 +177,7 @@ try {
       else writeFileSync(join(bin, "opencode2"), `#!${process.execPath}\nconst {spawnSync}=require('node:child_process'); const r=spawnSync(${JSON.stringify(join(bin, "opencode"))},process.argv.slice(2),{stdio:'inherit'});process.exit(r.status);`, { mode: 0o755 });
       const inspected = await tool.execute("alias", { harnesses: [AgentRunHarness.OpenCode2] }, undefined, undefined, context);
       assert.equal(inspected.details.capabilities.harnesses[0]!.runtime, null);
-      assert.match(inspected.details.capabilities.harnesses[0]!.error!, /opencode2 backend identity could not be confirmed.*1\.18\.29/);
+      assert.match(inspected.details.capabilities.harnesses[0]!.error!, /opencode2 backend identity could not be confirmed.*opencode v2\.0\.5/);
       const launched = await gateway.delegateAgent({ harness: AgentRunHarness.OpenCode2, model, effort: null, cwd: root, task: "never sent", timeoutSeconds: 20 });
       const rejected = await gateway.waitAgentRun(launched.id, 20);
       assert.equal(rejected.status, "failed");
