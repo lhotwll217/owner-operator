@@ -246,31 +246,27 @@ baseline candidate.
 
 ### OpenCode
 
-`opencode` and `opencode2` are distinct delegation and baseline identities. Both run their installed
-native `acp` command through ACPX's existing registry override, using PATH followed by
-`~/.opencode/bin` and `~/.local/bin`. Stable retains the `opencode` ACP agent identity; OO resolves
-the installed executable instead of ACPX's default `npx -y opencode-ai acp` so inspection can report
-the actual path and version without downloading a backend. A missing `opencode2` fails explicitly.
-The [V2 npm launcher](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/bin/opencode2.cjs#L33-L39)
-honors `OPENCODE_BIN_PATH`. OO clears it for both identities during launch and version checks;
-this is not a claim that the stable native binary reads that variable. Provider accounts and
-allowance stay unknown.
+Owner Operator supports only the v1 `opencode` identity. It runs the installed native `acp`
+command through ACPX's registry override, resolving `opencode` from PATH followed by
+`~/.opencode/bin` and `~/.local/bin`. Resolving the installed executable instead of ACPX's default
+`npx -y opencode-ai acp` lets inspection report the actual path and version without downloading a
+backend. The v2 `opencode2` identity is not in the delegated-harness roster because v2 stores
+sessions in SQLite, while the [session scanner](../src/session-monitor/scan-active-transcripts.mjs)
+admits OpenCode's v1 per-record JSON layout.
 
-Inspection and launch both check the CLI's version signature. The `opencode` identity accepts legacy bare semver and current `opencode v<semver>` output. The distinct `opencode2` identity requires `opencode2 v<semver>` ([command identity](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/commands.ts#L11-L39), [version dispatch](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/index.ts#L86-L92)).
-Provenance includes the requested executable path, its real path and the verbatim version output.
-A stable binary aliased as `opencode2` is rejected. This trusts the installed executable's output:
-an arbitrary wrapper can lie about its identity or change after inspection. It is not binary
-attestation. Unknown version signatures fail explicitly rather than being labeled V2 by filename.
+Inspection and launch require a v1 version signature: either bare `1.x.y` or
+`opencode v1.x.y`. Provenance includes the executable path, its real path, and verbatim version
+output. This trusts the installed executable's output; an arbitrary wrapper can lie about its
+identity or change after inspection, so it is not binary attestation. Unknown or non-v1 signatures
+fail explicitly. OO also clears inherited `OPENCODE_BIN_PATH` during launch so the resolved v1
+executable remains the only OpenCode backend path. Provider accounts and allowance stay unknown.
 
-The observer exposes initialize capabilities retained by ACPX. Both
-[stable](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L112-L135)
-and V2 advertise continuation. V2's source provides the
-[executable](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/package.json#L1-L12),
-[native ACP handler](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/commands/handlers/acp.ts#L1-L39),
-and [load/configuration contract](https://github.com/anomalyco/opencode/blob/898692af267059a743b7827e206d84df7a787a9b/packages/cli/src/acp/service.ts#L185-L299).
-Source support and advertised models do not establish local installation, authentication, model
-entitlement, or successful inference. Exact model IDs and nullable effort use the shared selection
-contract above; no OpenCode-specific model catalog or effort translation is applied.
+The observer exposes initialize capabilities retained by ACPX. The
+[v1 ACP service](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L112-L135)
+advertises continuation. Source support and advertised models do not establish local installation,
+authentication, model entitlement, or successful inference. Exact model IDs and nullable effort
+use the shared selection contract above; no OpenCode-specific model catalog or effort translation
+is applied.
 
 For OpenCode controls, OO additionally reads the same child's retained ACPX initialize capabilities
 before offering or creating retry/resume. Either `loadSession: true` or an advertised

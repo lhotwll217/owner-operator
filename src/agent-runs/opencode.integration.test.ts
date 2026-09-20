@@ -1,7 +1,7 @@
-// Native-command contract: exact stable/V2 routing survives real ACPX initialization,
-// selection and disposal. Fake ACP subprocesses prove OO integration, not release compatibility.
+// Native-command contract: exact v1 routing survives real ACPX initialization, selection and
+// disposal. Fake ACP subprocesses prove OO integration, not release compatibility.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness } from "@owner-operator/core";
@@ -25,7 +25,7 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, existsSync } from 'node:fs';
 const identity = __IDENTITY__;
 if (process.env.OPENCODE_BIN_PATH) process.exit(91);
-if (process.argv[2] === '--version') { console.log(identity === 'opencode2' ? 'opencode2 v0.0.0-fixture' : 'opencode v2.0.5'); process.exit(0); }
+if (process.argv[2] === '--version') { console.log('1.18.31'); process.exit(0); }
 if (process.argv[2] !== 'acp') process.exit(92);
 let effort = 'high';
 let pending;
@@ -60,20 +60,19 @@ for await (const line of createInterface({input:process.stdin})) {
 }
 `;
 try {
-  for (const harness of [AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2] as const) {
-    writeFileSync(join(bin, harness), fixture.replace("__IDENTITY__", JSON.stringify(harness)), { mode: 0o755 });
-  }
+  const harness = AgentRunHarness.OpenCode;
+  writeFileSync(join(bin, harness), fixture.replace("__IDENTITY__", JSON.stringify(harness)), { mode: 0o755 });
   const tool = createGetHarnessDetailsTool();
   const context = {} as Parameters<typeof tool.execute>[4];
-  for (const harness of [AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2] as const) {
-    assert.equal(openCodeBinaryPath(harness), join(bin, harness));
+  {
+    assert.equal(openCodeBinaryPath(), join(bin, harness));
     for (const effort of ["low", null, "ultra"] as const) {
       const result = await tool.execute("inspect", { inspect: [{ harness, model, effort }] }, undefined, undefined, context);
       const row = result.details.capabilities.harnesses[0]!;
       assert.equal(row.harness, harness);
       assert.equal(row.acpxAgent, harness);
       assert.equal(row.runtime?.backend.name, harness);
-      assert.equal(row.runtime?.backend.version, harness === "opencode2" ? "opencode2 v0.0.0-fixture" : "opencode v2.0.5");
+      assert.equal(row.runtime?.backend.version, "1.18.31");
       assert.equal(row.runtime?.backend.executablePath, join(bin, harness));
       assert.equal(row.session?.agentCapabilities?.loadSession, true);
       if (effort === "ultra") {
@@ -93,7 +92,7 @@ try {
     assert.equal(invalid.details.capabilities.harnesses[0]!.confirmation, null);
   }
   const requests = readFileSync(join(root, "requests.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  for (const harness of ["opencode", "opencode2"]) {
+  for (const harness of ["opencode"]) {
     const own = requests.filter(({ identity }) => identity === harness);
     assert.deepEqual(own.filter(({ method }) => method === "session/set_config_option").map(({ params }) => params),
       [{ sessionId: `${harness}-child`, configId: "effort", value: "low" }],
@@ -111,7 +110,7 @@ try {
   const gateway = await connectGateway();
   assert.ok(gateway);
   try {
-    for (const harness of [AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2]) {
+    for (const harness of [AgentRunHarness.OpenCode]) {
       const launched = await gateway.delegateAgent({ harness, model, effort: "low", cwd: root, task: "answer", timeoutSeconds: 20 });
       const done = await gateway.waitAgentRun(launched.id, 20);
       assert.equal(done.status, "completed", done.error ?? "");
@@ -144,7 +143,7 @@ try {
     }
     // An observed absence of both continuation methods must prevent a doomed row and UI control.
     // Conversely, ACP session/resume works without legacy loadSession and must remain available.
-    for (const harness of [AgentRunHarness.OpenCode, AgentRunHarness.OpenCode2]) {
+    for (const harness of [AgentRunHarness.OpenCode]) {
       for (const capabilities of [{ loadSession: false }, {}, { loadSession: false, sessionCapabilities: { resume: {} } }]) {
         writeFileSync(join(root, "capabilities.json"), JSON.stringify(capabilities));
         const launched = await gateway.delegateAgent({ harness, model, effort: null, cwd: root, task: "capabilities", timeoutSeconds: 20 });
@@ -169,39 +168,40 @@ try {
       }
     }
     rmSync(join(root, "capabilities.json"));
-    // Both a symlink and a forwarding wrapper can disguise stable behind the V2 filename.
-    // Checking the version signature must reject each through inspection AND delegated launch.
-    for (const alias of ["symlink", "wrapper"]) {
-      rmSync(join(bin, "opencode2"));
-      if (alias === "symlink") symlinkSync(join(bin, "opencode"), join(bin, "opencode2"));
-      else writeFileSync(join(bin, "opencode2"), `#!${process.execPath}\nconst {spawnSync}=require('node:child_process'); const r=spawnSync(${JSON.stringify(join(bin, "opencode"))},process.argv.slice(2),{stdio:'inherit'});process.exit(r.status);`, { mode: 0o755 });
-      const inspected = await tool.execute("alias", { harnesses: [AgentRunHarness.OpenCode2] }, undefined, undefined, context);
-      assert.equal(inspected.details.capabilities.harnesses[0]!.runtime, null);
-      assert.match(inspected.details.capabilities.harnesses[0]!.error!, /opencode2 backend identity could not be confirmed.*opencode v2\.0\.5/);
-      const launched = await gateway.delegateAgent({ harness: AgentRunHarness.OpenCode2, model, effort: null, cwd: root, task: "never sent", timeoutSeconds: 20 });
-      const rejected = await gateway.waitAgentRun(launched.id, 20);
-      assert.equal(rejected.status, "failed");
-      assert.equal(rejected.childSessionId, null);
-      assert.match(rejected.error!, /opencode2 backend identity could not be confirmed/);
-    }
-    rmSync(join(bin, "opencode2"));
-    const missingLaunch = await gateway.delegateAgent({
-      harness: AgentRunHarness.OpenCode2, model, effort: null, cwd: root, task: "never sent", timeoutSeconds: 20,
+    writeFileSync(
+      join(bin, harness),
+      fixture
+        .replace("__IDENTITY__", JSON.stringify(harness))
+        .replace("console.log('1.18.31')", "console.log('opencode v2.0.5')"),
+      { mode: 0o755 },
+    );
+    const inspectedV2 = await tool.execute(
+      "reject-v2",
+      { harnesses: [AgentRunHarness.OpenCode] },
+      undefined,
+      undefined,
+      context,
+    );
+    assert.equal(inspectedV2.details.capabilities.harnesses[0]!.runtime, null);
+    assert.match(inspectedV2.details.capabilities.harnesses[0]!.error!, /expected opencode v1/);
+    const launchedV2 = await gateway.delegateAgent({
+      harness,
+      model,
+      effort: null,
+      cwd: root,
+      task: "never sent",
+      timeoutSeconds: 20,
     });
-    const missingResult = await gateway.waitAgentRun(missingLaunch.id, 20);
-    assert.equal(missingResult.status, "failed");
-    assert.equal(missingResult.harness, AgentRunHarness.OpenCode2);
-    assert.equal(missingResult.childSessionId, null);
-    assert.match(missingResult.error!, /opencode2 CLI not found/);
+    const rejectedV2 = await gateway.waitAgentRun(launchedV2.id, 20);
+    assert.equal(rejectedV2.status, "failed");
+    assert.equal(rejectedV2.childSessionId, null);
+    assert.match(rejectedV2.error!, /expected opencode v1/);
   } finally {
     gateway.close();
     await daemon.close();
   }
-  const missing = await tool.execute("missing", { harnesses: [AgentRunHarness.OpenCode2] }, undefined, undefined, context);
-  assert.match(missing.details.capabilities.harnesses[0]!.error!, /opencode2 CLI not found/);
-  assert.equal(missing.details.capabilities.harnesses[0]!.session, null, "stable cannot satisfy a missing V2 command");
   assert.deepEqual(readdirSync(join(root, "agent-runs", "process-leases")), [], "all probes released their leases");
-  process.stdout.write("ok — OpenCode identities use real ACPX selection, exact native paths and fail closed\n");
+  process.stdout.write("ok — OpenCode v1 uses real ACPX selection and its exact native path\n");
 } finally {
   process.env = previousEnv;
   rmSync(root, { recursive: true, force: true });

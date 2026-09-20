@@ -78,7 +78,6 @@ const AGENT_RUN_HARNESS_NAMES: Readonly<Record<AgentRun["harness"], string>> = {
   codex: "Codex",
   cursor: "Cursor",
   opencode: "OpenCode",
-  opencode2: "OpenCode2",
 };
 
 export function formatAgentRunIdentity(

@@ -141,9 +141,7 @@ function defaultAgentCommand(acpAgent: string): string {
   if (acpAgent === "claude") return claudeAcpAgentCommand();
   if (acpAgent === "codex") return codexAcpAgentCommand();
   if (acpAgent === "cursor") return cursorAcpAgentCommand();
-  if (acpAgent === "opencode" || acpAgent === "opencode2") {
-    return openCodeAcpAgentCommand(acpAgent);
-  }
+  if (acpAgent === "opencode") return openCodeAcpAgentCommand();
   const command = createAgentRegistry().resolve(acpAgent);
   return Array.isArray(command) ? command.map((part) => JSON.stringify(part)).join(" ") : command;
 }
@@ -445,40 +443,38 @@ export function cursorAcpAgentCommand(): string {
   return `${JSON.stringify(cursorAgentBinaryPath())} acp`;
 }
 
-/** Both native ACP commands use ACPX's existing registry override. Resolve each exact executable
- * independently; V2 must never fall through to the stable profile or an npx download. */
-export function openCodeAcpAgentCommand(harness: "opencode" | "opencode2"): string {
-  return `'${resolveOpenCodeRuntime(harness).executablePath.replaceAll("'", "'\\''")}' acp`;
+/** Use ACPX's existing registry override with the exact installed v1 executable, never an npx
+ * download or the incompatible v2 command. */
+export function openCodeAcpAgentCommand(): string {
+  return `'${resolveOpenCodeRuntime().executablePath.replaceAll("'", "'\\''")}' acp`;
 }
 
-/** Identify the supported CLI version signatures, not merely the requested filename. This rejects
- * ordinary stable-as-V2 aliases; a user-supplied wrapper can still lie about its version. */
-export function resolveOpenCodeRuntime(harness: "opencode" | "opencode2") {
-  const executablePath = openCodeBinaryPath(harness);
+/** Identify the supported v1 CLI by version signature, not merely by filename. A user-supplied
+ * wrapper can still lie about its version. */
+export function resolveOpenCodeRuntime() {
+  const executablePath = openCodeBinaryPath();
   const realPath = realpathSync(executablePath);
   const env = { ...process.env };
   delete env.OPENCODE_BIN_PATH;
   const version = execFileSync(executablePath, ["--version"], {
     env, encoding: "utf8", timeout: 5_000, maxBuffer: 64 * 1024, stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-  // OpenCode reports either bare semver (legacy) or `opencode v<semver>`; the separate
-  // opencode2 command reports `opencode2 v<semver>`.
+  // OpenCode v1 reports either bare semver or `opencode v<semver>`.
   // Sources and the deliberate local-executable trust boundary: docs/delegated-runs.md, OpenCode.
-  const semver = "\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?";
-  const name = new RegExp(`^opencode2 v${semver}$`).test(version) ? "opencode2"
-    : new RegExp(`^(?:opencode v)?${semver}$`).test(version) ? "opencode" : null;
-  if (name !== harness) {
-    throw new Error(`${harness} backend identity could not be confirmed: ${executablePath} resolves to ${realPath} and reports ${JSON.stringify(version)}; expected ${harness}'s CLI version signature`);
+  const v1 = "1\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?";
+  const name = new RegExp(`^(?:opencode v)?${v1}$`).test(version) ? "opencode" : null;
+  if (!name) {
+    throw new Error(`opencode v1 backend identity could not be confirmed: ${executablePath} resolves to ${realPath} and reports ${JSON.stringify(version)}; expected opencode v1`);
   }
   return { name, version, executablePath, realPath };
 }
 
-export function openCodeBinaryPath(harness: "opencode" | "opencode2"): string {
+export function openCodeBinaryPath(): string {
   const candidates = [
     ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
     join(homedir(), ".opencode", "bin"),
     join(homedir(), ".local", "bin"),
-  ].map((dir) => resolve(dir, harness));
+  ].map((dir) => resolve(dir, "opencode"));
   for (const candidate of candidates) {
     try {
       accessSync(candidate, constants.X_OK);
@@ -487,7 +483,7 @@ export function openCodeBinaryPath(harness: "opencode" | "opencode2"): string {
       // Continue searching only for this exact executable name.
     }
   }
-  throw new Error(`${harness} CLI not found on PATH, ~/.opencode/bin or ~/.local/bin; install ${harness} with native ACP support`);
+  throw new Error("opencode v1 CLI not found on PATH, ~/.opencode/bin or ~/.local/bin; install opencode-ai@1 with native ACP support");
 }
 
 /** Resolve the locally installed `cursor-agent` launcher to an absolute path: the daemon's PATH

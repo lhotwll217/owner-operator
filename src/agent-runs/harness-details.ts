@@ -144,7 +144,6 @@ const ALL_HARNESSES: readonly AgentRunHarness[] = [
   AgentRunHarness.ClaudeCode,
   AgentRunHarness.Cursor,
   AgentRunHarness.OpenCode,
-  AgentRunHarness.OpenCode2,
 ];
 
 /** Observe preferences, every requested ACP session, and account sources concurrently. A source

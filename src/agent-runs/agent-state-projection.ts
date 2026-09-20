@@ -24,7 +24,7 @@ export function resumeCwdError(cwd: string): string | null {
  * file contract is documented in docs/delegated-runs.md. Keep this read synchronous alongside
  * the executor's eligibility check/row creation, and fail closed on absent or mismatched records. */
 export function openCodeContinuationError(run: AgentRun): string | null {
-  if (run.harness !== AgentRunHarness.OpenCode && run.harness !== AgentRunHarness.OpenCode2) return null;
+  if (run.harness !== AgentRunHarness.OpenCode) return null;
   const unavailable = `${run.harness} session continuation capability is unavailable for ${run.id}`;
   if (!run.acpxRecordId) return unavailable;
   try {

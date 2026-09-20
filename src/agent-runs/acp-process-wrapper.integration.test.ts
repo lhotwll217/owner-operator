@@ -83,7 +83,7 @@ try {
     "the Codex wrapper clears inherited CODEX_PATH so reported adapter-dependency provenance is exact",
   );
   process.stdout.write("ok — leased ACP wrapper preserves stdio, ownership, and pinned Codex backend selection\n");
-  for (const harness of ["opencode", "opencode2"]) {
+  for (const harness of ["opencode"]) {
     const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("process.stdout.write(process.env.OPENCODE_BIN_PATH ?? '<unset>')")}`;
     const result = execFileSync(process.execPath, [
       wrapperPath, "--oo-agent-run-lease", leaseId, "--oo-agent-kind", harness,

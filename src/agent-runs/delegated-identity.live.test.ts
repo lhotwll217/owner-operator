@@ -41,7 +41,7 @@ const harness = process.env.OO_LIVE_IDENTITY_HARNESS as AgentRunHarness | undefi
 const model = process.env.OO_LIVE_IDENTITY_MODEL?.trim();
 const effortText = process.env.OO_LIVE_IDENTITY_EFFORT?.trim();
 assert.ok(Object.values(AgentRunHarness).includes(harness!), "set OO_LIVE_IDENTITY_HARNESS to claude-code, codex, or cursor");
-assert.ok(harness !== AgentRunHarness.OpenCode && harness !== AgentRunHarness.OpenCode2,
+assert.ok(harness !== AgentRunHarness.OpenCode,
   "this credential-copy smoke supports only Claude Code, Codex and Cursor; native OpenCode validation uses the CLI/Gateway journey");
 assert.ok(model, "set OO_LIVE_IDENTITY_MODEL to an exact harness model id");
 assert.ok(effortText === "null" || AGENT_RUN_EFFORTS.includes(effortText as AgentRunEffort),

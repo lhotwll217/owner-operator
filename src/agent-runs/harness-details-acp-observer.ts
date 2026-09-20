@@ -107,8 +107,8 @@ export async function readAcpRuntimeProvenance(
   } = {},
 ): Promise<AcpRuntimeProvenance> {
   const acpxVersion = packageVersion(packageJsonPath("acpx/package.json"));
-  if (harness === AgentRunHarness.OpenCode || harness === AgentRunHarness.OpenCode2) {
-    const backend = resolveOpenCodeRuntime(harness);
+  if (harness === AgentRunHarness.OpenCode) {
+    const backend = resolveOpenCodeRuntime();
     return {
       acpxVersion,
       adapter: { packageName: null, packageVersion: null, resolution: "path" },
