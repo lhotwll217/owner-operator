@@ -3,6 +3,8 @@
 // Flatten a message's content blocks to text. opts.includeTools: when false (the
 // default), tool calls and results are excluded. Opt-in preserves their serialized
 // names, arguments, IDs, and nested output as evidence rather than instructions.
+// Reasoning traces (e.g. Claude `thinking` blocks, Pi embedded `thinking`) are
+// conversation text and always included — never gated behind includeTools.
 export function contentToText(content, opts = {}) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -12,7 +14,7 @@ export function contentToText(content, opts = {}) {
     else if (item && typeof item === 'object' && ['toolCall', 'tool_use', 'tool_result'].includes(item.type)) {
       if (opts.includeTools) chunks.push(JSON.stringify(item));
     } else if (item && typeof item === 'object') {
-      for (const key of ['text', 'output_text', 'input_text', 'content']) {
+      for (const key of ['text', 'output_text', 'input_text', 'content', 'thinking']) {
         if (typeof item[key] === 'string') chunks.push(item[key]);
       }
     }

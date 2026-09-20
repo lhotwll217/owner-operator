@@ -74,7 +74,7 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
   ([#20](https://github.com/lhotwll217/owner-operator/issues/20)).
   - Borrowed: the house vendoring model — the shared wrapper owns local policy (sources, blacklist),
     and its private `vendor/` receives the
-    [pinned upstream primitive](https://github.com/lhotwll217/session-grep/blob/f786ca24440e72f93c63e7aded30a67170f9d41c/skills/session-grep/session-grep.mjs#L1-L5)
+    [pinned upstream primitive](https://github.com/lhotwll217/session-grep/blob/787f87e418329db9cca80c71f8b3bae11a31aa34/skills/session-grep/session-grep.mjs#L1-L5)
     untouched.
 - **[Promptfoo](https://github.com/promptfoo/promptfoo/tree/7d26d8f3cccb35dc6df53b18af32f0082cef2197)** —
   first-party real-agent evaluation examples.

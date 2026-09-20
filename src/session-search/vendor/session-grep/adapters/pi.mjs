@@ -4,7 +4,9 @@
 // Tool output is its own message (role "toolResult") rather than a content block, so
 // the --include-tools gate applies at the message level here. Non-conversation roles
 // (bashExecution, custom) and non-message entries (session header, compaction,
-// branch_summary) are skipped.
+// branch_summary, thinking_level_change config events) are skipped: Pi persists no
+// standalone readable reasoning records, and embedded assistant `thinking` blocks are
+// covered by the shared contentToText extractor.
 import { contentToText } from './_shared.mjs';
 
 export default {

@@ -1,5 +1,7 @@
 // Claude Code sessions: ~/.claude/projects/<project-slug>/<session-id>.jsonl,
 // one JSON record per line; messages under .message.content as typed blocks.
+// Plaintext `thinking` blocks are reasoning traces: surfaced as conversation text
+// (shared extractor) and always searched.
 import { contentToText } from './_shared.mjs';
 
 export default {

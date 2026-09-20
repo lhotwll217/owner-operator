@@ -44,13 +44,13 @@ for (let index = 0; index < input.length; index += 1) {
   else if (arg === "--target-root") targetRoot = takeValue(arg, ++index);
   else if (arg === "--limit") limit = Number(takeValue(arg, ++index));
   else if (arg === "--max-chars") maxChars = Number(takeValue(arg, ++index));
-  else if (["--query", "--skim", "--session", "--at", "--since", "--sort", "--before", "--after", "--role"].includes(arg)) {
+  else if (["--query", "--skim", "--session", "--at", "--since", "--until", "--sort", "--before", "--after", "--role", "--focus"].includes(arg)) {
     if (arg === "--query") hasQuery = true;
     if (arg === "--session") hasSession = true;
     if (arg === "--skim") hasSkim = true;
     if (arg === "--at") hasAt = true;
     passthrough.push(arg, takeValue(arg, ++index, { allowLeadingDashes: arg === "--query" }));
-  } else if (["--any", "--candidates", "--regex", "--json", "--case-sensitive", "--include-tools"].includes(arg)) {
+  } else if (["--any", "--candidates", "--regex", "--json", "--case-sensitive", "--include-tools", "--include-skill-bodies"].includes(arg)) {
     if (arg === "--candidates") candidates = true;
     if (arg === "--json") json = true;
     passthrough.push(arg);
@@ -261,14 +261,20 @@ function renderText(output, context) {
         ` pre_policy_candidate_sessions=${output.totalCandidateSessionsBeforePolicy ?? "unknown"}`;
   console.log(
     `query=${JSON.stringify(output.query ?? "")} total_message_matches=${output.totalMatches ?? 0} ` +
-    `shown=${output.shown ?? 0}${output.session ? ` session=${output.session}` : ""}${output.any ? " any=true" : ""}` +
+    `files_with_matches=${output.filesWithMatches ?? 0} shown=${output.shown ?? 0}` +
+    `${output.session ? ` session=${output.session}` : ""}${output.any ? " any=true" : ""}` +
+    `${output.literalMultiword ? " literal_multiword=true (retry with --any; literal phrases rarely occur verbatim)" : ""}` +
+    `${output.excluded?.tools ? ` tools_excluded=${output.excluded.tools} (add --include-tools)` : ""}` +
+    `${output.excluded?.skillBodies ? ` skill_excluded=${output.excluded.skillBodies} (add --include-skill-bodies)` : ""}` +
     candidateCount +
     `${context.targetType !== "all" ? ` target_type=${context.targetType}` : ""}` +
     `${context.blacklistedDropped ? ` blacklisted_dropped=${context.blacklistedDropped}` : ""} ` +
     `discovery_session_exclusions=${sessionExclusions}`,
   );
   if (output.wordHits) {
-    console.log(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")} (high-count words are low-signal; prefer the rare ones)`);
+    console.log(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")}` +
+      `${output.messagesScanned != null ? ` (of ${output.messagesScanned} messages searched after filters)` : ""}` +
+      " (high-count words are low-signal; prefer the rare ones)");
   }
   if (output.note) console.log(`note: ${output.note}`);
   if (output.hint) console.log(`hint: ${output.hint}`);
@@ -276,15 +282,17 @@ function renderText(output, context) {
     const rank = candidate.matchedWords?.length
       ? ` matched=[${candidate.matchedWords.join(",")}] best_score=${candidate.score}`
       : "";
+    const forks = candidate.forkCopies ? ` +${candidate.forkCopies} forked copies` : "";
     console.log(
       `\n[${index + 1}] namespace=${candidate.namespace} source=${candidate.source} id=${candidate.id} repo=${candidate.repo ?? "unknown"} ` +
-      `best_idx=${candidate.index} ts=${candidate.timestamp ?? ""} hits=${candidate.hitCount}${rank}`,
+      `best_idx=${candidate.index} ts=${candidate.timestamp ?? ""} hits=${candidate.hitCount}${rank}${forks}`,
     );
     console.log(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
   }
   for (const [index, match] of (output.matches ?? []).entries()) {
     const rank = match.matchedWords ? ` matched=[${match.matchedWords.join(",")}] score=${match.score}` : "";
-    console.log(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}`);
+    const forks = match.forkCopies ? ` +${match.forkCopies} forked copies` : "";
+    console.log(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}${forks}`);
     for (const before of match.before ?? []) console.log(`  before ${before.role}: ${before.text}`);
     console.log(`  MATCH ${match.match.role}: ${match.match.text}`);
     for (const after of match.after ?? []) console.log(`  after  ${after.role}: ${after.text}`);
@@ -363,6 +371,9 @@ function printHelp() {
     "  --target-type claude|codex|pi search that coding transcript format only\n" +
     "  --target-root DIR          narrow to a configured transcript-store root\n" +
     "  --include-tools           include tool calls/results; retain this flag when following message indexes\n" +
+    "  --include-skill-bodies    include injected skill documentation, excluded by default\n" +
+    "  --until TIME              close a --since time window\n" +
+    "  --focus TEXT              center an anchored window on text inside a long message\n" +
     "  --help, -h                 show this help\n",
   );
 }

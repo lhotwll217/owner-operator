@@ -412,7 +412,14 @@ try {
     env: { ...process.env, HOME: home, OO_HOME: ooHome, OO_CURRENT_SESSION_ID: toolId }, encoding: "utf8",
   });
   const toolQuery = (...args: string[]) => JSON.parse(toolSearch("--query", toolNeedle, "--json", ...args));
-  assert.equal(toolQuery("--session", toolId).shown, 0, "tool-only evidence stays hidden by default");
+  const hiddenTools = toolQuery("--session", toolId);
+  assert.equal(hiddenTools.shown, 0, "tool-only evidence stays hidden by default");
+  assert.equal(hiddenTools.excluded.tools, 2, "wrapper preserves the upstream hidden-tool counter");
+  assert.match(
+    toolSearch("--query", toolNeedle, "--session", toolId),
+    /tools_excluded=2 \(add --include-tools\)/,
+    "text output preserves the actionable hidden-tool diagnostic",
+  );
   const toolHits = toolQuery("--session", toolId, "--include-tools");
   assert.equal(toolHits.shown, 2, "opt-in retrieves actual call arguments and result");
   const call = toolHits.matches.find((hit: { match: { role: string } }) => hit.match.role === "assistant");
@@ -422,6 +429,39 @@ try {
     "tool-enabled index round-trips to the actual call");
   assert.match(toolSearch("--skim", toolId, "--include-tools"), /successfully loaded/);
   assert.equal(toolQuery("--include-tools").shown, 0, "discovery excludes both current session and private tool evidence");
+
+  const skillNeedle = "ZZINJECTEDSKILLBODYZZ";
+  const skillId = "skillbody-1111-2222-3333-444444444444";
+  writeFileSync(
+    join(okDir, `${skillId}.jsonl`),
+    claudeMsg(
+      skillId,
+      okCwd,
+      `Base directory for this skill: /tmp/demo-skill\n\n# demo-skill\n\n${skillNeedle}`,
+    ),
+  );
+  const hiddenSkill = JSON.parse(toolSearch("--query", skillNeedle, "--session", skillId, "--json"));
+  assert.equal(hiddenSkill.shown, 0, "injected skill documentation stays hidden by default");
+  assert.equal(hiddenSkill.excluded.skillBodies, 1, "wrapper preserves the hidden-skill counter");
+  const includedSkill = JSON.parse(toolSearch(
+    "--query", skillNeedle, "--session", skillId, "--include-skill-bodies", "--json",
+  ));
+  assert.equal(includedSkill.shown, 1, "explicit opt-in searches injected skill documentation");
+
+  const focused = toolSearch(
+    "--session", previewId, "--at", "0", "--focus", previewTail,
+    "--before", "0", "--after", "0", "--max-chars", "500",
+  );
+  assert.match(focused, new RegExp(previewTail), "anchored focus keeps the requested span in a tight window");
+
+  const beforeWindow = JSON.parse(toolSearch(
+    "--query", NEEDLE, "--target-type", "claude", "--until", "2026-06-29", "--json",
+  ));
+  assert.equal(beforeWindow.shown, 0, "--until closes discovery before later messages");
+  const inclusiveWindow = JSON.parse(toolSearch(
+    "--query", NEEDLE, "--target-type", "claude", "--until", "2026-06-30", "--json",
+  ));
+  assert.ok(inclusiveWindow.shown > 0, "a date-valued --until includes that full day");
   for (const args of [
     ["--query", toolNeedle, "--session", toolPrivateId],
     ["--skim", toolPrivateId],

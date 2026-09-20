@@ -46,6 +46,8 @@ query → candidate → skim → window sequence.
 - `--query TEXT` performs literal search, including values that begin with dashes such as `--units`; add `--regex` only when the user needs a pattern. Regex matching is case-insensitive by default; a leading `(?i)` is accepted for grep compatibility.
 - Add `--role user` or `--role assistant` to search only that side of the conversation;
   `--role all` is the default.
+- Readable reasoning traces are conversation evidence and are searched by default. Tool calls,
+  tool results, and injected skill bodies remain excluded unless explicitly requested.
 - **Execution evidence:** when establishing what an agent actually read, called, changed, or
   verified, **MUST use `--include-tools`** and inspect the relevant calls and results.
   Conversation-only search cannot establish that an action did or did not occur. Tool
@@ -54,15 +56,22 @@ query → candidate → skim → window sequence.
   indexes change with this flag: retain it when following an `id`/`idx` into a scoped query,
   window, or skim.
 - Multi-word text is still one literal phrase. Use `--any` when several independent terms
-  should match; the rarest hits rank first.
+  should match; the rarest hits rank first. If the header reports `literal_multiword=true`,
+  retry with `--any` instead of treating zero hits as absence.
+- Read the exclusion counters before concluding absence. `tools_excluded=N` calls for
+  `--include-tools` when execution evidence is relevant; `skill_excluded=N` calls for
+  `--include-skill-bodies` only when the injected documentation itself is the search target.
 - For ambiguous discovery, add `--candidates --limit 8`. It groups the complete ranked match set by
   stable session ID before limits and returns one best pointer per session; drill into a candidate
   rather than feeding many repeated hits from the same transcript into context.
-- Prefer a recent `--since` window before broadening.
+- Prefer a recent `--since` window before broadening; use `--until` when the question names a
+  closed period.
 - Use enough `--before` and `--after` context for the question, then stop if that hit is
   sufficient instead of automatically reopening the session.
 - Every hit prints `id` and `idx`. If its bounded context is insufficient, use
   `--session ID --at IDX` rather than re-running several wider synonym searches.
+- Add `--focus TEXT` to an anchored window when the selected message is long and the relevant
+  span would otherwise fall outside its preview.
 - Once an ID is known, `--query TEXT --session ID` searches only that transcript. Use it to
   find a new evidence pointer without reopening global discovery or dumping a large skim.
 - For scoped chronology, compare `total_message_matches` with `shown`. If matches were omitted,

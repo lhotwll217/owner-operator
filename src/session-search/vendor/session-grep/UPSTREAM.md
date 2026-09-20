@@ -7,7 +7,7 @@ skill wraps it to inject its
 own session sources and enforce the privacy blacklist.
 
 - **Upstream:** https://github.com/lhotwll217/session-grep
-- **Synced from:** `fix/tool-evidence-pinned` @ `899afa9b2360a3c295b80535c0f98af778062c11`
+- **Synced from:** `main` @ `787f87e418329db9cca80c71f8b3bae11a31aa34`
 
 ## Rules
 
@@ -16,7 +16,7 @@ own session sources and enforce the privacy blacklist.
 - The wrapper depends only on the stable seam: `--sources-file` / `SESSION_GREP_SOURCES_FILE`
   (typed roots), `--target-root`, `--target-type` / `--source`, `--exclude-session` (canonical
   session ID), `--exclude-re` (path blacklist), `--candidates`, scoped `--query` + `--session`,
-  `--sort`, and `--json` output.
+  `--sort`, `--until`, anchored-window `--focus`, `--include-skill-bodies`, and `--json` output.
 - Upstream's `SKILL.md` is omitted. Owner Operator exposes one product skill, not the generic
   upstream skill plus an opinionated duplicate. The upstream repository remains the source
   of truth for the shareable skill and primitive.
