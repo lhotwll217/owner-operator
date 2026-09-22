@@ -43,7 +43,12 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       "for cancel, retry, resume, or an explicit owner-requested inspection.",
     parameters: Type.Object({
       harness: HarnessSchema,
-      task: Type.String({ minLength: 1, description: "The task the child agent is asked to carry out." }),
+      task: Type.String({
+        minLength: 1,
+        description:
+          "The handoff: the owner's request and pointers (entry document, session ids). " +
+          "Constraints come from the owner. Print it in chat, then pass that exact text here.",
+      }),
       cwd: Type.Optional(Type.String({ description: "Absolute working directory. Defaults to the caller's cwd." })),
       model: Type.Optional(Type.String({
         minLength: 1,

@@ -4,6 +4,7 @@ import { behavioralHarnessProblems } from "../behavioral/contract.mjs";
 export function normalizeBehavioralTrialResult(payload) {
   const events = Array.isArray(payload?.traceEvents) ? payload.traceEvents : [];
   const toolExecutions = [];
+  const assistantTexts = [];
   const byId = new Map();
   const usage = { input: 0, output: 0, cacheRead: 0, total: 0, cost: 0 };
   let turns = 0;
@@ -19,6 +20,7 @@ export function normalizeBehavioralTrialResult(payload) {
         id: event.id,
         name: event.tool,
         input: event.args,
+        index: event.index ?? null,
         isError: null,
         resultChars: null,
         result: null,
@@ -34,6 +36,8 @@ export function normalizeBehavioralTrialResult(payload) {
       execution.isError = Boolean(event.isError);
       execution.result = event.result ?? null;
       execution.resultChars = JSON.stringify(event.result ?? "").length;
+    } else if (event.event === "assistant_text") {
+      assistantTexts.push({ index: event.index ?? null, text: event.text ?? "" });
     } else if (event.event === "turn") {
       turns += 1;
       usage.input += Number(event.usage?.input ?? 0);
@@ -56,6 +60,7 @@ export function normalizeBehavioralTrialResult(payload) {
     configuredToolRoster: payload?.configuredToolRoster ?? [],
     toolExecutions,
     toolCalls: toolExecutions.map(({ name, input }) => ({ name, input })),
+    assistantTexts,
     toolCallCount: toolExecutions.length,
     toolResultChars: toolExecutions.reduce((total, item) => total + Number(item.resultChars ?? 0), 0),
     tokensTotal: usage.total,

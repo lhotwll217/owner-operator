@@ -48,7 +48,7 @@ live under [`hypotheses/`](hypotheses/).
 Needs: `oo`'s configured model backend — subjects and grader all run on it (copy
 `.pi/settings.example.json` to the ignored `.pi/settings.json` only to customize it; it
 also pins the subject's `defaultThinkingLevel`, recorded as `reasoning_level`). The grader
-is a cheap pinned model at minimal reasoning (`openai-codex/gpt-5.4`; override with
+is a pinned model at high reasoning (`openai-codex/gpt-5.6-luna`; override with
 `EVAL_GRADER_MODEL=provider/model` — it is not a subject). No API keys.
 
 ## Replay: the owner's own sessions

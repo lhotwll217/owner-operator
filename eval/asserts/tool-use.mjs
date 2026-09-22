@@ -372,6 +372,22 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (calls("delegate_agent").length || !sameValue(before.agentRuns, after.agentRuns)) {
       problems.push("mismatched inspection delegated or persisted a lower-quality run");
     }
+  } else if (claim === "handoff-printed-before-send") {
+    const delegated = successful("delegate_agent");
+    if (delegated.length !== 1) problems.push(`expected exactly one successful delegated launch, got ${delegated.length}`);
+    const launch = delegated[0];
+    if (launch) {
+      const task = String(launch.input?.task ?? "").trim();
+      const printed = (providerMetadata.assistantTexts ?? []).some((entry) =>
+        task && entry.text.includes(task) && typeof entry.index === "number" && entry.index < launch.index
+      );
+      if (!printed) problems.push("handoff was not printed in chat before delegate_agent");
+    }
+  } else if (claim === "handoff-waits-when-asked") {
+    const launched = executions.filter((execution) => execution.name === "delegate_agent");
+    if (launched.length) problems.push(`delegate_agent was called ${launched.length} time(s) although the owner asked to see the handoff first`);
+    const shown = (providerMetadata.assistantTexts ?? []).some((entry) => /grok/i.test(entry.text));
+    if (!shown) problems.push("no handoff naming the requested model was printed in chat");
   } else {
     problems.push(`unsupported delegation behavior claim: ${claim || "missing"}`);
   }

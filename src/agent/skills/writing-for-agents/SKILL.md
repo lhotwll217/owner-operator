@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Owner Operator's writing guidance. Always use when writing or editing durable artifacts or agent prompts, including handoffs, skills, instructions, and delegated tasks.
+description: Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.
 ---
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs; the writing does not: the same levers make each one predictable, since the agent takes the same _process_ every run rather than producing the same output.

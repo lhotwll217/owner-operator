@@ -56,6 +56,7 @@ assert.deepEqual(successfulTool.metadata.toolExecutions[0], {
   id: "call-1",
   name: "mark_thread_done",
   input: { ids: ["child-129"] },
+  index: null,
   isError: false,
   resultChars: 79,
   result: { details: { marked: [{ id: "child-129" }], alreadyDoneIds: [], missingIds: [] } },
