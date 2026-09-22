@@ -372,11 +372,14 @@ function subscribeToTrajectory(
   session: ManagedSession["session"],
   events: Array<Record<string, unknown>>,
 ): void {
+  const push = (record: Record<string, unknown>) => {
+    events.push({ ...record, index: events.length });
+  };
   session.subscribe((event: any) => {
     if (event.type === "tool_execution_start") {
-      events.push({ event: "tool_call", id: event.toolCallId, tool: event.toolName, args: event.args });
+      push({ event: "tool_call", id: event.toolCallId, tool: event.toolName, args: event.args });
     } else if (event.type === "tool_execution_end") {
-      events.push({
+      push({
         event: "tool_result",
         id: event.toolCallId,
         tool: event.toolName,
@@ -384,8 +387,12 @@ function subscribeToTrajectory(
         result: event.result ?? null,
       });
     } else if (event.type === "message_end" && event.message?.role === "assistant") {
-      const { usage, stopReason, errorMessage } = event.message;
-      events.push({ event: "turn", stopReason, usage, ...(errorMessage ? { errorMessage } : {}) });
+      const { usage, stopReason, errorMessage, content } = event.message;
+      push({ event: "turn", stopReason, usage, ...(errorMessage ? { errorMessage } : {}) });
+      const text = Array.isArray(content)
+        ? content.filter((block: any) => block?.type === "text").map((block: any) => block.text).join("")
+        : "";
+      if (text.trim()) push({ event: "assistant_text", text });
     }
   });
 }

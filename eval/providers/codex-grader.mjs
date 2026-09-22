@@ -8,8 +8,8 @@ import { join } from 'node:path';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 
 // Single source of the judge identity: the run manifest logs these same values.
-export const DEFAULT_GRADER_MODEL = 'openai-codex/gpt-5.4';
-export const DEFAULT_GRADER_REASONING = 'minimal';
+export const DEFAULT_GRADER_MODEL = 'openai-codex/gpt-5.6-luna';
+export const DEFAULT_GRADER_REASONING = 'high';
 
 const SYSTEM =
   'You are a strict grader. Judge factual correctness against the rubric ONLY — ignore ' +
@@ -45,7 +45,7 @@ export default class CodexGraderProvider {
         systemPrompt: SYSTEM,
         messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
       }, {
-        reasoning: this.config.reasoning ?? DEFAULT_GRADER_REASONING,
+        reasoning: process.env.EVAL_GRADER_REASONING ?? this.config.reasoning ?? DEFAULT_GRADER_REASONING,
         maxTokens: 4096,
         signal: AbortSignal.timeout(120000),
         maxRetries: 2,
