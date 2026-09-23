@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import {
   type AgentRun,
   type AgentRunCreateInput,
+  type AgentRunLogRecord,
   type DaemonHealth,
   type DaemonInfo,
   type DaemonReady,
@@ -203,6 +204,44 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       { timeoutSeconds },
       Math.max(LONG_OPERATION_MS, (timeoutSeconds + 5) * 1_000),
     ),
+    async *agentRunLog(id, options = {}) {
+      const query = new URLSearchParams({
+        ...(options.after ? { after: String(options.after) } : {}),
+        ...(options.follow === false ? { follow: "0" } : {}),
+      });
+      const path = `/agent-runs/${encodeURIComponent(id)}/events${query.size ? `?${query}` : ""}`;
+      const response = await fetch(`http://127.0.0.1:${target.info.port}${path}`, {
+        headers: { authorization: `Bearer ${target.info.authToken}` },
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      if (!response.ok) {
+        let body: unknown = null;
+        try { body = await response.json(); } catch { /* status alone still identifies the failure */ }
+        throw new GatewayRequestError(path, response.status, body);
+      }
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) return;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          let seq: number | null = null;
+          let data: string | null = null;
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("id: ")) seq = Number(line.slice(4));
+            else if (line.startsWith("data: ")) data = line.slice(6);
+          }
+          if (data !== null) yield { seq, record: JSON.parse(data) as AgentRunLogRecord };
+          boundary = buffer.indexOf("\n\n");
+        }
+      }
+    },
     queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>(
       "/query-database",
       request,

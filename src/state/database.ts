@@ -14,6 +14,9 @@ import {
   type AgentRunHarness,
   type AgentRunEffort,
   type AgentRunOutcome,
+  type AgentRunLogRecord,
+  type AgentRunResultRecord,
+  type AgentRunStreamEvent,
   type ScheduleDefinition,
   type ScheduleRun,
   type ScheduleTriggerContext,
@@ -248,6 +251,15 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_child_session
 CREATE INDEX IF NOT EXISTS idx_agent_runs_parent_created
   ON agent_runs(parent_thread_id, created_at DESC) WHERE parent_thread_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS agent_run_events (
+  run_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  record TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  PRIMARY KEY (run_id, seq)
+);
+
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY,
   repository TEXT NOT NULL,
@@ -284,6 +296,17 @@ const AGENT_RUN_COLUMNS = `
   acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
   retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
+
+/** Per-run event-log retention: ACPX's own session event-log default of 5 segments of 64 MiB
+ * (https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/event-log.ts#L5-L6).
+ * Past it the oldest stream events go first; the terminal record is never evicted. */
+export const AGENT_RUN_EVENT_LOG_MAX_BYTES = 5 * 64 * 1024 * 1024;
+
+export interface AgentRunLogEntry {
+  seq: number;
+  at: string;
+  record: AgentRunLogRecord;
+}
 
 export interface AgentRunInsert {
   id: string;
@@ -331,10 +354,15 @@ type DetailsPatch = Partial<{
 export class ThreadDb {
   private readonly db: DatabaseSync;
   private readonly now: () => string;
+  /** Stored event-log bytes per run, loaded on first append; a run only streams in one daemon. */
+  private readonly eventLogBytes = new Map<string, number>();
 
-  constructor(dbPath: string = defaultDbPath(), options: { now?: () => string } = {}) {
+  private readonly eventLogMaxBytes: number;
+
+  constructor(dbPath: string = defaultDbPath(), options: { now?: () => string; eventLogMaxBytes?: number } = {}) {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
     this.now = options.now ?? (() => new Date().toISOString());
+    this.eventLogMaxBytes = options.eventLogMaxBytes ?? AGENT_RUN_EVENT_LOG_MAX_BYTES;
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
@@ -1147,7 +1175,10 @@ export class ThreadDb {
       outcome.childSessionId ?? null, outcome.acpxRecordId ?? null,
       id, AgentRunStatus.Pending, AgentRunStatus.Running,
     ).changes) > 0;
-    return changed ? this.agentRunById(id)! : null;
+    if (!changed) return null;
+    const run = this.agentRunById(id)!;
+    this.appendResultRecord(run);
+    return run;
   }
 
   markRunningAgentRunsInterrupted(reason: string): string[] {
@@ -1158,6 +1189,7 @@ export class ThreadDb {
       this.db.prepare(
         "UPDATE agent_runs SET status = ?, finished_at = ?, error = ? WHERE status = ?",
       ).run(AgentRunStatus.Interrupted, this.now(), reason, AgentRunStatus.Running);
+      for (const id of ids) this.appendResultRecord(this.agentRunById(id)!);
     }
     return ids;
   }
@@ -1179,8 +1211,71 @@ export class ThreadDb {
     );
     for (const id of stale) {
       mark.run(AgentRunStatus.Lost, this.now(), "run lost: no live turn and no recent activity", id, AgentRunStatus.Running);
+      this.appendResultRecord(this.agentRunById(id)!);
     }
     return stale;
+  }
+
+  /** Append one child stream event while the run is running; returns its sequence number. */
+  appendAgentRunEvent(runId: string, event: AgentRunStreamEvent): number | null {
+    const running = this.db.prepare("SELECT 1 FROM agent_runs WHERE id = ? AND status = ?")
+      .get(runId, AgentRunStatus.Running);
+    if (!running) return null;
+    const seq = this.insertLogRecord(runId, event);
+    this.enforceEventLogBudget(runId);
+    return seq;
+  }
+
+  /** The run's log after `afterSeq`, in order. The final entry is the terminal record once written. */
+  agentRunEvents(runId: string, afterSeq = 0): AgentRunLogEntry[] {
+    return (this.db.prepare(
+      "SELECT seq, at, record FROM agent_run_events WHERE run_id = ? AND seq > ? ORDER BY seq",
+    ).all(runId, afterSeq) as Array<{ seq: number; at: string; record: string }>)
+      .map((row) => ({ seq: row.seq, at: row.at, record: JSON.parse(row.record) as AgentRunLogRecord }));
+  }
+
+  private appendResultRecord(run: AgentRun): void {
+    const record: AgentRunResultRecord = {
+      type: "result",
+      runId: run.id,
+      status: run.status,
+      ...(run.error ? { error: { message: run.error } } : {}),
+    };
+    this.insertLogRecord(run.id, record);
+  }
+
+  private insertLogRecord(runId: string, record: AgentRunLogRecord): number {
+    const text = JSON.stringify(record);
+    const bytes = Buffer.byteLength(text);
+    const { seq } = this.db.prepare(
+      `INSERT INTO agent_run_events (run_id, seq, at, record, bytes)
+       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_run_events WHERE run_id = ?), ?, ?, ?)
+       RETURNING seq`,
+    ).get(runId, runId, this.now(), text, bytes) as { seq: number };
+    const known = this.eventLogBytes.get(runId);
+    if (known !== undefined) this.eventLogBytes.set(runId, known + bytes);
+    return seq;
+  }
+
+  private enforceEventLogBudget(runId: string): void {
+    let total = this.eventLogBytes.get(runId);
+    if (total === undefined) {
+      total = (this.db.prepare("SELECT COALESCE(SUM(bytes), 0) AS total FROM agent_run_events WHERE run_id = ?")
+        .get(runId) as { total: number }).total;
+      this.eventLogBytes.set(runId, total);
+    }
+    if (total <= this.eventLogMaxBytes) return;
+    const oldest = this.db.prepare(
+      "SELECT seq, bytes FROM agent_run_events WHERE run_id = ? ORDER BY seq",
+    ).iterate(runId) as Iterable<{ seq: number; bytes: number }>;
+    let through = 0;
+    for (const row of oldest) {
+      if (total <= this.eventLogMaxBytes) break;
+      total -= row.bytes;
+      through = row.seq;
+    }
+    this.db.prepare("DELETE FROM agent_run_events WHERE run_id = ? AND seq <= ?").run(runId, through);
+    this.eventLogBytes.set(runId, total);
   }
 
   agentRunById(id: string): AgentRun | undefined {

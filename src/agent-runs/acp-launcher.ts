@@ -14,14 +14,18 @@ import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
   AgentRunStatus,
+  isAgentRunEffort,
+  type AgentRunEffort,
   type AgentRunLaunchRequest,
+  type AgentRunStreamEvent,
   type AgentRunLaunchResult,
   type AgentRunTurnIntent,
   type ChildIdentity,
 } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import type { AgentRunLauncher } from "./executor";
-import { applyAndConfirmAcpSelection } from "./acp-session-selection";
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import { applyAndConfirmAcpSelection, resolveThoughtLevelSelector } from "./acp-session-selection";
 import {
   closeAgentRunProcessLease,
   createAgentRunProcessLease,
@@ -305,22 +309,19 @@ async function runAcpTurn(
 ): Promise<AgentRunLaunchResult> {
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
-  if (request.run.model === null) {
-    throw new Error(
-      `ACP selection confirmation requires the recorded model for ${request.run.harness}; `
-      + `requested effort=${request.run.effort === null ? "null" : JSON.stringify(request.run.effort)}`,
-    );
-  }
+  // An unpinned run (the harness's own choice) confirms the model the session reports now.
+  const model = request.run.model ?? await harnessSelectedModel(runtime, handle, request);
   const confirmed = await applyAndConfirmAcpSelection(runtime, handle, {
-    model: request.run.model,
+    model,
     effort: request.run.effort,
   });
+  const observedEffort = confirmed.effort ?? (request.run.model === null ? harnessSelectedEffort(confirmed.configOptions) : undefined);
   request.onActivity({
     effortApplied: confirmed.effort !== undefined,
     harnessIdentity: {
       observed: true,
       model: confirmed.model,
-      ...(confirmed.effort !== undefined ? { effort: confirmed.effort } : {}),
+      ...(observedEffort !== undefined ? { effort: observedEffort } : {}),
     },
   });
 
@@ -341,6 +342,7 @@ async function runAcpTurn(
   let bufferedBytes = 0;
   for await (const event of turn.events) {
     if (request.signal.aborted) break;
+    request.onEvent?.(event as AgentRunStreamEvent);
     if (event.type === "text_delta" && event.stream !== "thought") {
       chunks.push(event.text);
       bufferedBytes += Buffer.byteLength(event.text);
@@ -379,6 +381,23 @@ async function runAcpTurn(
     error: result.error.message,
     ...identity,
   };
+}
+
+async function harnessSelectedModel(
+  runtime: AcpRuntime,
+  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
+  request: AgentRunLaunchRequest,
+): Promise<string> {
+  const model = runtime.getStatus ? (await runtime.getStatus({ handle })).models?.currentModelId : undefined;
+  if (!model) throw new Error(`ACP session for ${request.run.harness} reported no current model to record`);
+  return model;
+}
+
+/** The thought level the harness chose for itself, when it advertises one in the effort vocabulary. */
+function harnessSelectedEffort(options: SessionConfigOption[]): AgentRunEffort | undefined {
+  const resolution = resolveThoughtLevelSelector(options);
+  const value = resolution.kind === "found" ? resolution.selector.currentValue : undefined;
+  return isAgentRunEffort(value) ? value : undefined;
 }
 
 /** Harness-owned interpretations of a "completed" turn's result text. The generic runner only

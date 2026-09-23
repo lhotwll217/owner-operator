@@ -152,6 +152,7 @@ export class AgentRunExecutor {
     const launch = resolveAgentRunLaunch(input.harness, {
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.effort !== undefined ? { effort: input.effort } : {}),
+      ...(input.onMissingBaseline ? { onMissingBaseline: input.onMissingBaseline } : {}),
     });
     const run = this.state.createAgentRun({
       harness: input.harness,
@@ -331,6 +332,9 @@ export class AgentRunExecutor {
         signal: controller.signal,
         onActivity: (update) => {
           this.state.recordAgentRunActivity(run.id, update);
+        },
+        onEvent: (event) => {
+          this.state.appendAgentRunEvent(run.id, event);
         },
       });
       // An abort intent always wins over the launcher's own outcome — status AND reason. Launchers

@@ -10,9 +10,11 @@ import {
   GatewayEventKind,
   MAX_AGENT_RUN_WAIT_SECONDS,
   isAgentRunEffort,
+  isTerminalAgentRunStatus,
   validateAgentRunResumeTask,
   type AgentRun,
   type AgentRunCreateInput,
+  type AgentRunLogRecord,
   type DaemonHealth,
   type DaemonReady,
   type DatabaseQueryRequest,
@@ -58,6 +60,10 @@ export interface GatewayAgentRuns {
   retry(id: string): AgentRun;
   resume(id: string, task: string): AgentRun;
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
+  /** The run's durable log after `afterSeq`, in order; the terminal record closes it. */
+  events(id: string, afterSeq: number): Array<{ seq: number; record: AgentRunLogRecord }>;
+  /** Wake-up after a run's log grows; returns the unsubscribe. */
+  subscribeLog(listener: (runId: string) => void): () => void;
 }
 
 export interface GatewayHarness {
@@ -122,6 +128,7 @@ function hasValidAuthorization(header: string | undefined, authToken: string): b
 /** Loopback transport only: all behavior is delegated through injected public seams. */
 export async function startGateway(options: GatewayOptions): Promise<RunningGateway> {
   const streams = new Set<ServerResponse>();
+  const runLogStreams = new Set<ServerResponse>();
   const broadcast = (event: GatewayEvent): void => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const stream of streams) stream.write(frame);
@@ -224,6 +231,54 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (agentRunId && request.method === "GET" && url.pathname === `/agent-runs/${agentRunId}`) {
         const run = options.agentRuns.get(agentRunId);
         return run ? respond(200, run) : respond(404, { error: "no such agent run" });
+      }
+      if (agentRunId && request.method === "GET" && url.pathname === `/agent-runs/${agentRunId}/events`) {
+        if (!options.agentRuns.get(agentRunId)) return respond(404, { error: "no such agent run" });
+        // Replays from the start (or after Last-Event-ID / ?after=) and tails to the terminal
+        // record; ?follow=0 returns the log so far. Additive to GET /events, which is unchanged.
+        const follow = url.searchParams.get("follow") !== "0";
+        let after = Number(request.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0);
+        if (!Number.isSafeInteger(after) || after < 0) return respond(400, { error: "after must be a non-negative integer" });
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        });
+        let ended = false;
+        let unsubscribe = (): void => undefined;
+        const end = (): void => {
+          if (ended) return;
+          ended = true;
+          unsubscribe();
+          runLogStreams.delete(response);
+          response.end();
+        };
+        const flush = (): boolean => {
+          for (const entry of options.agentRuns.events(agentRunId, after)) {
+            response.write(`id: ${entry.seq}\ndata: ${JSON.stringify(entry.record)}\n\n`);
+            after = entry.seq;
+            if (entry.record.type === "result") return true;
+          }
+          return false;
+        };
+        runLogStreams.add(response);
+        request.on("close", end);
+        unsubscribe = options.agentRuns.subscribeLog((runId) => {
+          if (runId === agentRunId && !ended && flush()) end();
+        });
+        if (flush()) return end();
+        const run = options.agentRuns.get(agentRunId);
+        if (run && isTerminalAgentRunStatus(run.status)) {
+          if (!flush()) {
+            // A run finalized before event logs existed has no stored terminal record.
+            response.write(`data: ${JSON.stringify({
+              type: "result", runId: run.id, status: run.status, ...(run.error ? { error: { message: run.error } } : {}),
+            })}\n\n`);
+          }
+          return end();
+        }
+        if (!follow) return end();
+        return;
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/cancel`) {
         return respond(200, await options.agentRuns.cancel(agentRunId));
@@ -329,6 +384,8 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       unsubscribe();
       for (const stream of streams) stream.end();
       streams.clear();
+      for (const stream of runLogStreams) stream.end();
+      runLogStreams.clear();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

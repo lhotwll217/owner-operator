@@ -163,6 +163,39 @@ assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
 
+// Every child event reaches the run's event log, in order, including thought and status.
+const streamed = [
+  { type: "text_delta", stream: "thought", text: "thinking" },
+  { type: "tool_call", text: "read", title: "Read file", toolCallId: "t1", status: "pending" },
+  { type: "status", text: "working" },
+  { type: "text_delta", stream: "output", text: "done" },
+];
+const logged: unknown[] = [];
+const unpinnedActivity: AgentRunActivityUpdate[] = [];
+const unpinnedOptions: Array<{ key: string; value: string }> = [];
+const unpinnedRuntime = {
+  ...runtime,
+  setConfigOption: async ({ key, value }: { key: string; value: string }) => { unpinnedOptions.push({ key, value }); },
+  startTurn: () => ({
+    events: (async function* () { yield* streamed; })(),
+    result: Promise.resolve({ status: "completed" }),
+  }),
+} as unknown as AcpRuntime;
+const unpinned = await createAcpLauncher({ runtimeFactory: () => unpinnedRuntime })({
+  run: { ...run, model: null, effort: null },
+  turnIntent: { kind: "fresh" },
+  signal: new AbortController().signal,
+  onActivity: (update) => unpinnedActivity.push(update),
+  onEvent: (event) => logged.push(event),
+});
+assert.deepEqual(logged, streamed, "the launcher forwards every ACP event verbatim and in order");
+assert.equal(unpinned.status, AgentRunStatus.Completed, "an unpinned run launches with the harness's own choice");
+assert.deepEqual(unpinnedOptions, [], "an unpinned run changes nothing on the session");
+assert.deepEqual(unpinnedActivity[1], {
+  effortApplied: false,
+  harnessIdentity: { observed: true, model: "harness-resolved-model", effort: "ultra" },
+}, "the harness-confirmed model and thought level are recorded");
+
 const cursorModel = "composer-2.5[fast=true]";
 const cursorTerminalError = "Error: RetriableError: [internal] Failed to run step, exceeded max retries";
 const cursorStatus = async () => ({

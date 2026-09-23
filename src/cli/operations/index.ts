@@ -3,11 +3,13 @@ import { runNoun, type Noun } from "./operation";
 import { db } from "./db";
 import { harness } from "./harness";
 import { schedules } from "./schedules";
+import { runs } from "./runs";
 import { runSearch } from "./search";
 import { sessionState } from "./session-state";
 
 export const NOUNS: Partial<Record<OperationNoun, Noun>> = {
   "session-state": sessionState,
+  runs,
   schedules,
   db,
   harness,

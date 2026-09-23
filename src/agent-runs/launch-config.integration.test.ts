@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness, approveDelegatedBaseline } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunMissingBaseline, approveDelegatedBaseline } from "@owner-operator/core";
 import { proposeDelegatedBaseline, resolveAgentRunLaunch } from "./launch-config";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-launch-config-"));
@@ -13,6 +13,14 @@ try {
     model: "provider/model/stable", effort: "high",
   });
   assert.throws(() => resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), /no approved delegated baseline/);
+  // CLI callers: caller pin, then approved baseline, then the harness's own choice.
+  const harnessChoice = { onMissingBaseline: AgentRunMissingBaseline.HarnessChoice };
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, harnessChoice, ooHome), { model: null, effort: null },
+    "no pin and no baseline launches unpinned instead of failing");
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, { ...harnessChoice, effort: "low" }, ooHome), { model: null, effort: "low" });
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.OpenCode, harnessChoice, ooHome), {
+    model: "provider/model/stable", effort: "high",
+  }, "an approved baseline still wins over the harness's choice");
   approveDelegatedBaseline(AgentRunHarness.Codex, { model: "approved-model", effort: "high" }, ooHome);
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), { model: "approved-model", effort: "high" });
   assert.deepEqual(

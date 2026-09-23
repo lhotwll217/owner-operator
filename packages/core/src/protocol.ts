@@ -1,4 +1,4 @@
-import type { AgentRun, AgentRunCreateInput, AgentRunEffort, AgentRunHarness } from "./agent-runs";
+import type { AgentRun, AgentRunCreateInput, AgentRunEffort, AgentRunHarness, AgentRunLogRecord } from "./agent-runs";
 import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
@@ -140,6 +140,12 @@ export interface GatewayApi {
   retryAgentRun(id: string): Promise<AgentRun>;
   resumeAgentRun(id: string, task: string): Promise<AgentRun>;
   waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
+  /** A run's durable event log from GET /agent-runs/:id/events: replayed after `after`, then
+   * tailed until the terminal record unless `follow` is false. Ends early if the stream drops. */
+  agentRunLog(
+    id: string,
+    options?: { after?: number; follow?: boolean; signal?: AbortSignal },
+  ): AsyncIterable<{ seq: number | null; record: AgentRunLogRecord }>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
   /** One ephemeral harness observation, run by the daemon that owns probe processes. */
   harnessDetails(request: HarnessDetailsRequest): Promise<HarnessDetailsResponse>;

@@ -1,11 +1,13 @@
 /** What model and reasoning effort a delegated run actually launches with, and how the baseline it
  * falls back to is proposed to the owner.
  *
- * Owner Operator holds no product literals here. A run either carries the values its caller pinned
- * or the values the owner approved for that harness; with neither, there is no honest answer and
- * the launch asks instead of inventing one. */
+ * Owner Operator holds no product literals here. A run carries the values its caller pinned, else
+ * the values the owner approved for that harness. With neither, the Operator's launch asks instead
+ * of inventing one; a CLI caller opts into the harness's own choice, which the launcher records
+ * once the harness confirms it. */
 
 import {
+  AgentRunMissingBaseline,
   isAgentRunEffort,
   loadDelegatedBaseline,
   type AgentRunEffort,
@@ -17,12 +19,14 @@ import { discoverAcpBaselineCandidate, type HarnessBaselineCandidate } from "./h
 export interface AgentRunLaunchPins {
   model?: string | null;
   effort?: AgentRunEffort | null;
+  onMissingBaseline?: AgentRunMissingBaseline;
 }
 
 /** The identity a run launches with. Both fields are resolved before the durable row is written,
  * so the ledger always states what was actually requested of the harness. */
 export interface ResolvedAgentRunLaunch {
-  model: string;
+  /** Null only for harness-choice: the harness selects, and the launcher records what it confirms. */
+  model: string | null;
   effort: AgentRunEffort | null;
 }
 
@@ -38,6 +42,9 @@ export function resolveAgentRunLaunch(
   }
   const baseline = loadDelegatedBaseline(harness, ooHome);
   const model = pins.model === undefined ? baseline?.model ?? null : pins.model;
+  if (!model && pins.onMissingBaseline === AgentRunMissingBaseline.HarnessChoice) {
+    return { model: null, effort: Object.hasOwn(pins, "effort") ? pins.effort ?? null : null };
+  }
   if (!model) {
     throw new Error(
       `no approved delegated baseline for ${harness}: pin a model on this call, or discover a ` +

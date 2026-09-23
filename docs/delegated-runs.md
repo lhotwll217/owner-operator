@@ -89,8 +89,23 @@ The ledger is a live, durable projection—not just a final result:
 2. Queue claim records `running` and `started_at`.
 3. ACP session creation records `child_session_id` and `acpx_record_id`.
 4. Non-thought ACP text, status, and tool-call events replace `activity` with a bounded preview
-   and advance `last_activity_at`. This is latest activity, not a durable event log.
+   and advance `last_activity_at`.
 5. Turn completion records the terminal status, `finished_at`, bounded `result_tail`, and `error`.
+
+**Event log.** Separately from the `activity` preview, every ACPX `AcpRuntimeEvent` the child
+emits (`text_delta`, including thought, `status`, `tool_call`) is stored verbatim and in order in
+`agent_run_events`, and every finalization path (completion, cancel, timeout, daemon stop, restart
+interruption, the lost sweep) appends one terminal record shaped like ACPX's
+`AcpRuntimeTurnResult`: `{"type":"result","runId","status","error"?}` with the run's own terminal
+status. Retention follows ACPX's own session event-log default of 5 × 64 MiB per run
+([`event-log.ts`](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/event-log.ts#L5-L6));
+past it the oldest events go first and the terminal record is never evicted.
+
+`GET /agent-runs/:id/events` is an SSE route that replays the log from the start (or after
+`Last-Event-ID` / `?after=`, one `id:` per stored sequence number) and tails it until the terminal
+record; `?follow=0` returns the log so far. It is additive: `GET /events` still carries only
+invalidation kinds. `oo runs delegate` and `oo runs logs --follow` stream this route
+([cli.md](cli.md)); a detached or killed CLI never affects the daemon-owned run.
 
 Every successful mutation publishes an `agent-run.changed` invalidation. Gateway SSE deliberately
 carries only the event kind; clients refetch `/agent-runs` or `/agent-runs/:id` for durable truth.
@@ -151,8 +166,11 @@ resource retains the run projection. Pi completion delivery uses the shared comp
 - **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, `delegate_agent` resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
-  before creating the durable row. With no approved baseline it asks instead of inheriting an
-  ambient harness default or inventing a product default.
+  before creating the durable row. With no approved baseline the Operator asks instead of
+  inheriting an ambient harness default or inventing a product default. A CLI caller
+  (`oo runs delegate`) resolves caller pin, then approved baseline, then the harness's own choice:
+  a missing baseline launches unpinned, and the launcher records the model and thought level the
+  harness confirms in `harnessIdentity`. The CLI never prints, accepts, or changes the baseline.
 - **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`), including explicit
   `null`. Its canonical vocabulary lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts);
   resolution follows the same caller pin then approved-baseline order as model and lands in the
