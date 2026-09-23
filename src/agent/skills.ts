@@ -13,6 +13,8 @@ export interface OwnerOperatorResourceOptions {
   personalSkillsRoot?: string;
 }
 
+export const OUTSIDE_AGENT_SKILL = "owner-operator";
+
 type ResourceOptions = Omit<ConstructorParameters<typeof DefaultResourceLoader>[0], "cwd" | "agentDir">;
 
 /** Disable every ambient Pi resource channel, then add only Owner Operator-owned resources. */
@@ -41,6 +43,12 @@ export function ownerOperatorResourceLoaderOptions(
       paths.workspaceSkills,
       ...personalPaths,
     ],
+    // The outside-agent skill (skills/owner-operator) teaches other agents to call `oo`; its
+    // installer links it into the personal root, but the product agent never loads it.
+    skillsOverride: (base) => ({
+      ...base,
+      skills: base.skills.filter((skill) => skill.name !== OUTSIDE_AGENT_SKILL),
+    }),
     agentsFilesOverride: () => ({
       agentsFiles: existsSync(paths.workspaceInstructions)
         ? [{ path: paths.workspaceInstructions, content: readFileSync(paths.workspaceInstructions, "utf8") }]

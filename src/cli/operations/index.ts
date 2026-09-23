@@ -6,21 +6,18 @@ import { schedules } from "./schedules";
 import { runs } from "./runs";
 import { runSearch } from "./search";
 import { sessionState } from "./session-state";
+import { skill } from "./skill";
 
-export const NOUNS: Partial<Record<OperationNoun, Noun>> = {
+export const NOUNS: Record<Exclude<OperationNoun, "search">, Noun> = {
   "session-state": sessionState,
   runs,
   schedules,
   db,
   harness,
+  skill,
 };
 
 export async function runOperation(noun: OperationNoun, argv: readonly string[]): Promise<number> {
   if (noun === "search") return runSearch(argv);
-  const definition = NOUNS[noun];
-  if (!definition) {
-    process.stderr.write(`oo ${noun}: not available yet\n`);
-    return 2;
-  }
-  return runNoun(noun, definition, argv);
+  return runNoun(noun, NOUNS[noun], argv);
 }
