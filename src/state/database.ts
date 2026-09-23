@@ -1166,7 +1166,27 @@ export class ThreadDb {
   }
 
   /** Finalize a run. Terminal states are monotonic: only pending/running rows can finish. */
+  /** Run `fn` as one SQLite savepoint: a terminal status and its result record, or a sequence
+   * number and its event, commit together or not at all. Savepoints nest inside a transaction. */
+  private atomically<T>(fn: () => T): T {
+    this.db.exec("SAVEPOINT agent_run_log");
+    try {
+      const result = fn();
+      this.db.exec("RELEASE agent_run_log");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK TO agent_run_log");
+      this.db.exec("RELEASE agent_run_log");
+      this.eventLogBytes.clear(); // recounted from the rows on the next append
+      throw error;
+    }
+  }
+
   finishAgentRun(id: string, outcome: AgentRunOutcome): AgentRun | null {
+    return this.atomically(() => this.finishAgentRunInTransaction(id, outcome));
+  }
+
+  private finishAgentRunInTransaction(id: string, outcome: AgentRunOutcome): AgentRun | null {
     const changed = Number(this.db.prepare(
       `UPDATE agent_runs SET status = ?, finished_at = ?, result_tail = ?, error = ?,
          child_session_id = COALESCE(?, child_session_id),
@@ -1184,6 +1204,10 @@ export class ThreadDb {
   }
 
   markRunningAgentRunsInterrupted(reason: string): string[] {
+    return this.atomically(() => this.markRunningAgentRunsInterruptedInTransaction(reason));
+  }
+
+  private markRunningAgentRunsInterruptedInTransaction(reason: string): string[] {
     const ids = (this.db.prepare(
       "SELECT id FROM agent_runs WHERE status = ? ORDER BY created_at ASC",
     ).all(AgentRunStatus.Running) as Array<{ id: string }>).map((row) => row.id);
@@ -1212,8 +1236,10 @@ export class ThreadDb {
       "UPDATE agent_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = ?",
     );
     for (const id of stale) {
-      mark.run(AgentRunStatus.Lost, this.now(), "run lost: no live turn and no recent activity", id, AgentRunStatus.Running);
-      this.appendResultRecord(this.agentRunById(id)!);
+      this.atomically(() => {
+        mark.run(AgentRunStatus.Lost, this.now(), "run lost: no live turn and no recent activity", id, AgentRunStatus.Running);
+        this.appendResultRecord(this.agentRunById(id)!);
+      });
     }
     return stale;
   }
@@ -1223,12 +1249,29 @@ export class ThreadDb {
     const running = this.db.prepare("SELECT 1 FROM agent_runs WHERE id = ? AND status = ?")
       .get(runId, AgentRunStatus.Running);
     if (!running) return null;
-    const seq = this.insertLogRecord(runId, event);
-    this.enforceEventLogBudget(runId);
-    return seq;
+    return this.atomically(() => {
+      const seq = this.insertLogRecord(runId, event);
+      this.enforceEventLogBudget(runId);
+      return seq;
+    });
   }
 
   /** The run's log after `afterSeq`, in order. The final entry is the terminal record once written. */
+  /** The run's log after `afterSeq`, read lazily in order, so a consumer can stop at backpressure
+   * without materializing the rest. Breaking out of the loop finalizes the statement. */
+  *iterateAgentRunEvents(runId: string, afterSeq = 0): Generator<AgentRunLogEntry> {
+    const rows = this.db.prepare(
+      "SELECT seq, at, record FROM agent_run_events WHERE run_id = ? AND seq > ? ORDER BY seq",
+    ).iterate(runId, afterSeq) as Iterable<{ seq: number; at: string; record: string }>;
+    for (const row of rows) yield { seq: row.seq, at: row.at, record: JSON.parse(row.record) as AgentRunLogRecord };
+  }
+
+  /** The last sequence number ever issued for the run, or null for a run that never logged. */
+  agentRunLastSeq(runId: string): number | null {
+    return (this.db.prepare("SELECT last_seq FROM agent_run_event_sequences WHERE run_id = ?")
+      .get(runId) as { last_seq: number } | undefined)?.last_seq ?? null;
+  }
+
   agentRunEvents(runId: string, afterSeq = 0): AgentRunLogEntry[] {
     return (this.db.prepare(
       "SELECT seq, at, record FROM agent_run_events WHERE run_id = ? AND seq > ? ORDER BY seq",

@@ -60,8 +60,10 @@ export interface GatewayAgentRuns {
   retry(id: string): AgentRun;
   resume(id: string, task: string): AgentRun;
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
-  /** The run's durable log after `afterSeq`, in order; the terminal record closes it. */
-  events(id: string, afterSeq: number): Array<{ seq: number; record: AgentRunLogRecord }>;
+  /** The run's durable log after `afterSeq`, in order, read lazily; the terminal record closes it. */
+  events(id: string, afterSeq: number): Iterable<{ seq: number; record: AgentRunLogRecord }>;
+  /** The last sequence number ever issued for the run; null for a run finalized before logs existed. */
+  lastSeq(id: string): number | null;
   /** Wake-up after a run's log grows; returns the unsubscribe. */
   subscribeLog(listener: (runId: string) => void): () => void;
 }
@@ -245,6 +247,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           connection: "keep-alive",
         });
         let ended = false;
+        let draining = false;
         let unsubscribe = (): void => undefined;
         const end = (): void => {
           if (ended) return;
@@ -253,31 +256,39 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           runLogStreams.delete(response);
           response.end();
         };
-        const flush = (): boolean => {
+        // Write from SQLite until the socket reports backpressure, then wait for drain. Rows are
+        // read lazily, so a slow reader holds at most one socket buffer of the log in memory.
+        const pump = (): void => {
+          if (ended || draining) return;
           for (const entry of options.agentRuns.events(agentRunId, after)) {
-            response.write(`id: ${entry.seq}\ndata: ${JSON.stringify(entry.record)}\n\n`);
+            const accepted = response.write(`id: ${entry.seq}\ndata: ${JSON.stringify(entry.record)}\n\n`);
             after = entry.seq;
-            if (entry.record.type === "result") return true;
+            if (entry.record.type === "result") return end();
+            if (!accepted) {
+              draining = true;
+              response.once("drain", () => { draining = false; pump(); });
+              return;
+            }
           }
-          return false;
+          const run = options.agentRuns.get(agentRunId);
+          if (run && isTerminalAgentRunStatus(run.status)) {
+            // Only a run finalized before event logs existed lacks a stored terminal record; a
+            // cursor already past a stored one simply ends without a duplicate.
+            if (options.agentRuns.lastSeq(agentRunId) === null) {
+              response.write(`data: ${JSON.stringify({
+                type: "result", runId: run.id, status: run.status, ...(run.error ? { error: { message: run.error } } : {}),
+              })}\n\n`);
+            }
+            return end();
+          }
+          if (!follow) return end();
         };
         runLogStreams.add(response);
         request.on("close", end);
         unsubscribe = options.agentRuns.subscribeLog((runId) => {
-          if (runId === agentRunId && !ended && flush()) end();
+          if (runId === agentRunId) pump();
         });
-        if (flush()) return end();
-        const run = options.agentRuns.get(agentRunId);
-        if (run && isTerminalAgentRunStatus(run.status)) {
-          if (!flush()) {
-            // A run finalized before event logs existed has no stored terminal record.
-            response.write(`data: ${JSON.stringify({
-              type: "result", runId: run.id, status: run.status, ...(run.error ? { error: { message: run.error } } : {}),
-            })}\n\n`);
-          }
-          return end();
-        }
-        if (!follow) return end();
+        pump();
         return;
       }
       if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/cancel`) {

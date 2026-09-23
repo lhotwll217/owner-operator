@@ -100,12 +100,12 @@ export const runs: Noun = {
   verbs: {
     delegate: {
       args: "<task>",
-      summary: "launch a child agent and stream it to stdout until it finishes",
+      summary: "launch a child agent and stream it to stdout until it finishes; model and effort resolve pin, then approved baseline, then harness choice",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
-        model: { type: "string", help: "pin an exact model id; omitted, the harness decides" },
-        effort: { type: "string", help: `pin reasoning effort: ${AGENT_RUN_EFFORTS.join(", ")}` },
+        model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice" },
+        effort: { type: "string", help: `reasoning effort (${AGENT_RUN_EFFORTS.join(", ")}); omitted: resolved like --model` },
         cwd: { type: "string", help: "child working directory (default: current directory)" },
         "from-session": { type: "string", help: "the calling coding session, recorded as the run's parent" },
         "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow`" },

@@ -97,7 +97,7 @@ emits (`text_delta`, including thought, `status`, `tool_call`) is stored verbati
 `agent_run_events`, and every finalization path (completion, cancel, timeout, daemon stop, restart
 interruption, the lost sweep) appends one terminal record shaped like ACPX's
 `AcpRuntimeTurnResult`: `{"type":"result","runId","status","error"?}` with the run's own terminal
-status. Retention defaults to ACPX's own session event-log default of 5 × 64 MiB per run
+status, committed in the same SQLite savepoint as the terminal row. Retention defaults to ACPX's own session event-log default of 5 × 64 MiB per run
 ([`event-log.ts`](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/event-log.ts#L5-L6));
 the owner can set another per-run byte budget as `agentRunEventLogMaxBytes` in
 `$OO_HOME/settings.json` (a positive integer, read at daemon start; any other value is logged as
@@ -107,7 +107,9 @@ terminal record is never evicted. Sequence numbers come from a per-run counter
 
 `GET /agent-runs/:id/events` is an SSE route that replays the log from the start (or after
 `Last-Event-ID` / `?after=`, one `id:` per stored sequence number) and tails it until the terminal
-record; `?follow=0` returns the log so far. It is additive: `GET /events` still carries only
+record; `?follow=0` returns the log so far. Rows are read lazily and written until the socket
+pushes back, then the route waits for drain, so a slow reader never makes the daemon buffer the
+log. A result is synthesized only for a run finalized before event logs existed. It is additive: `GET /events` still carries only
 invalidation kinds. `oo runs delegate` and `oo runs logs --follow` stream this route
 ([cli.md](cli.md)); a detached or killed CLI never affects the daemon-owned run.
 

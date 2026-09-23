@@ -130,7 +130,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       retry: (id) => agentRuns.retry(id),
       resume: (id, task) => agentRuns.resume(id, task),
       wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
-      events: (id, afterSeq) => state.agentRunEvents(id, afterSeq),
+      events: (id, afterSeq) => state.iterateAgentRunEvents(id, afterSeq),
+      lastSeq: (id) => state.agentRunLastSeq(id),
       subscribeLog: (listener) => state.subscribeAgentRunLog(listener),
     },
     // Probe sessions spawn here, under the same leased launcher seam whose orphans startup reaps.

@@ -78,6 +78,10 @@ try {
     for await (const chunk of response.body!) invalidations.push(decoder.decode(chunk));
   }).catch(() => undefined);
 
+  const delegateHelp = await runOo(["runs", "delegate", "--help"]);
+  assert.match(delegateHelp.stdout, /--model <value>\s+exact model id; omitted: the approved delegated baseline, else the harness's own choice/,
+    "help states the resolution order: pin, approved baseline, harness choice");
+
   // delegate --json: NDJSON events as they happen, then the result line; exit 0 on completed.
   const delegated = await runOo(["runs", "delegate", "--harness", "claude-code", "reply OO_STREAM_OK", "--json"]);
   assert.equal(delegated.status, 0, delegated.stderr);

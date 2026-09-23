@@ -369,6 +369,14 @@ export class State {
     return this.db.agentRunEvents(id, afterSeq);
   }
 
+  iterateAgentRunEvents(id: string, afterSeq = 0): Iterable<AgentRunLogEntry> {
+    return this.db.iterateAgentRunEvents(id, afterSeq);
+  }
+
+  agentRunLastSeq(id: string): number | null {
+    return this.db.agentRunLastSeq(id);
+  }
+
   /** Process-local wake-up for run-log tailers, separate from the domain bus so the Gateway's
    * invalidation stream never carries per-event traffic. SQLite remains the log's truth. */
   subscribeAgentRunLog(listener: (runId: string) => void): () => void {
