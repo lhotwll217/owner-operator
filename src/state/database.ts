@@ -380,6 +380,9 @@ export class ThreadDb {
     this.db.exec(SCHEMA);
     this.migrateSessionSummaries();
     this.migrateAgentRunEffort();
+    // Logs stored before the per-run counter existed continue from their highest stored record.
+    this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
+      SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
   }
 
   private migrateSessionSummaries(): void {
