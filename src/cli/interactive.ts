@@ -48,7 +48,7 @@ import { createInteractiveAgentRunDeliveryExtension } from "../agent-runs/agent-
 import { buildOoTheme, ooInteractiveOptions, ooMarker, ooPresentationExtension } from "../shared/oo-presentation";
 
 if (!process.stdout.isTTY) {
-  console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `./oo` in a real terminal, or `./oo \"question\"` for a headless single turn.");
+  console.error("Owner Operator interactive mode needs an interactive terminal.\nUse `oo` in a real terminal, or `oo -p \"question\"` for a headless single turn.");
   process.exit(1);
 }
 

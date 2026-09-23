@@ -34,7 +34,9 @@ operation failures exit 1 and print the Gateway's error payload to stderr (as JS
 
 ## Operations
 
-`oo <noun> --help` lists each noun's verbs and is the source of truth for them.
+`oo <noun> --help` is the source of truth for each noun: verb nouns list their verbs, and
+`oo <noun> <verb> --help` lists a verb's flags. `search` has no verbs; `oo search --help` prints the
+search wrapper's own flags, which are its contract.
 
 | Noun | Covers |
 |---|---|

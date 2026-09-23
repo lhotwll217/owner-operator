@@ -25,8 +25,8 @@ const USAGE = `Owner Operator (oo) — track and act on your local CLI agent ses
   oo daemon                       run the state-owning daemon
   oo --help | -h                  this help
 
-Operations (model-free; every verb accepts --json; \`oo <noun> --help\` lists verbs):
-${OPERATION_NOUNS.map((noun) => `  oo ${noun}`).join("\n")}
+Operations (model-free; \`oo <noun> --help\` shows each noun's usage; --json gives machine-readable output):
+${OPERATION_NOUNS.map((noun) => `  oo ${noun}${noun === "search" ? "            flags only, no verbs; --help prints the search flags" : ""}`).join("\n")}
 
 Model: imported or configured under OO_HOME/pi/settings.json`;
 

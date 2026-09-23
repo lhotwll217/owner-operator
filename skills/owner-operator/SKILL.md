@@ -27,7 +27,8 @@ identified automatically.
 ## Operations
 
 `oo <noun> <verb>` operations make no model call. `oo --help` lists the nouns;
-`oo <noun> --help` lists that noun's verbs and flags. Add `--json` for machine-readable output.
+`oo <noun> --help` lists that noun's verbs (`oo search --help` lists its search flags instead). Add
+`--json` for machine-readable output.
 
 ## Delegating
 

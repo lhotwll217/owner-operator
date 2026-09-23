@@ -31,8 +31,9 @@ try {
   assert.match(help.stdout, /oo -p \| --prompt/, "top-level help advertises -p");
   assert.match(help.stdout, /oo --continue/, "top-level help advertises --continue");
   for (const noun of ["session-state", "runs", "schedules", "db", "harness", "search", "skill"]) {
-    assert.match(help.stdout, new RegExp(`oo ${noun}\\n`), `top-level help lists the ${noun} noun`);
+    assert.match(help.stdout, new RegExp(`^  oo ${noun}(\\s|$)`, "m"), `top-level help lists the ${noun} noun`);
   }
+  assert.match(help.stdout, /oo search +flags only, no verbs/, "top-level help says search has flags, not verbs");
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
   assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
@@ -42,6 +43,12 @@ try {
     assert.match(help.stdout, /Owner Operator \(oo\)/, `${argv.join(" ")} prints usage`);
   }
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "`oo daemon --help` starts no daemon");
+
+  // Bare `oo` without a terminal points at the current headless spelling.
+  const notTty = spawnSync(ooBin, [], { ...opts, stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(notTty.status, 1);
+  assert.match(notTty.stderr, /`oo -p "question"`/, "the non-TTY hint names -p");
+  assert.doesNotMatch(notTty.stderr, /oo "question"/, "the removed bare-prompt spelling is gone");
 
   const nounHelp = spawnSync(ooBin, ["session-state", "--help"], opts);
   assert.equal(nounHelp.status, 0, `noun help exits 0 (stderr: ${nounHelp.stderr})`);
