@@ -197,14 +197,15 @@ try {
       let blacklistedDropped = 0;
       const entries = candidates ? output.candidates ?? [] : output.matches ?? [];
       for (const entry of entries) {
-        if (fileBlacklisted(entry.path)) {
+        const file = transcriptFileFor(entry);
+        if (!file || fileBlacklisted(file)) {
           blacklistedDropped += 1;
           continue;
         }
-        const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(entry.path) };
+        const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(file) };
         if (candidates) {
           let repo = null;
-          try { repo = resolveRepo(searchCwdFromFile(entry.path)); } catch { /* best effort label */ }
+          try { repo = resolveRepo(searchCwdFromFile(file)); } catch { /* best effort label */ }
           allowed.push({ ...identified, repo });
         } else {
           allowed.push(identified);
@@ -250,53 +251,105 @@ function runPrimitive(args) {
 }
 
 /** The primitive budgets its own JSON, but the wrapper then adds namespace, app, repo, and
- * exclusion fields and renders its own text. Hold the final output to --max-chars the same way the
- * primitive does: drop trailing entries, counted as omitted by the output budget. */
+ * exclusion fields and renders its own text. Hold the final output to --max-chars the way the
+ * primitive does — evidence outranks metadata, and a hit outranks its context: drop trailing
+ * entries (counted as omitted), then shrink the last hit (context, then path, then the match text
+ * around its matching span), then trim metadata; the hit is dropped only if nothing else fits. */
 function withinBudget(output, render) {
   const key = candidates ? "candidates" : "matches";
+  const over = () => Buffer.byteLength(rendered) - maxChars;
   let rendered = render(output);
-  while (Buffer.byteLength(rendered) > maxChars && output[key].length > 1) {
+  const refresh = () => { rendered = render(output); };
+  const omitted = (count) => {
+    output.omittedByBudget = (output.omittedByBudget ?? 0) + count;
+    output.note = `... ${output.omittedByBudget} more matching ${candidates ? "sessions" : "messages"} omitted by the ${maxChars}-byte output budget — narrow the search or raise --max-chars`;
+  };
+  while (over() > 0 && output[key].length > 1) {
     output[key].pop();
     output.shown = output[key].length;
-    output.omittedByBudget = (output.omittedByBudget ?? 0) + 1;
-    output.note = `... ${output.omittedByBudget} more matching ${candidates ? "sessions" : "messages"} omitted by the ${maxChars}-byte output budget — narrow the search or raise --max-chars`;
-    rendered = render(output);
+    omitted(1);
+    refresh();
   }
-  // Evidence outranks context, as in the primitive: the last hit is shrunk before it is dropped —
-  // its surrounding messages go first, then its match text, then its path.
   const [hit] = output[key];
-  if (hit && Buffer.byteLength(rendered) > maxChars) {
-    if (hit.before?.length || hit.after?.length) {
-      hit.before = [];
-      hit.after = [];
-      rendered = render(output);
-    }
-    const cut = (value, over) => {
-      const bytes = Buffer.from(String(value ?? ""));
-      return `${bytes.subarray(0, Math.max(0, bytes.length - over - 3)).toString().replace(/\uFFFD$/, "")}...`;
-    };
-    for (const field of ["text", "path"]) {
-      const holder = field === "text" ? hit.match : hit;
-      while (holder && Buffer.byteLength(rendered) > maxChars && String(holder[field] ?? "").length > 3) {
-        holder[field] = cut(holder[field], Buffer.byteLength(rendered) - maxChars);
-        rendered = render(output);
+  if (hit && over() > 0 && (hit.before?.length || hit.after?.length)) {
+    hit.before = [];
+    hit.after = [];
+    refresh();
+  }
+  if (hit && over() > 0 && typeof hit.path === "string") {
+    // The id names the session; the path's tail (its file) is the part worth keeping.
+    hit.path = keepTail(hit.path, Buffer.byteLength(hit.path) - over());
+    refresh();
+  }
+  if (hit?.match && over() > 0) {
+    hit.match.text = keepSpan(String(hit.match.text ?? ""), queryTerms(output), Buffer.byteLength(String(hit.match.text ?? "")) - over());
+    refresh();
+  }
+  // Metadata goes before the last piece of evidence.
+  const trims = [
+    () => { delete output.wordHits; delete output.messagesScanned; },
+    () => { delete output.hint; },
+    () => { if (output.note) output.note = `${output.omittedByBudget ?? 0} omitted by the output budget`; },
+    () => {
+      const exclusions = output.discoverySessionExclusions;
+      if (exclusions?.sessionIds?.length) {
+        exclusions.sessionIdsOmitted = exclusions.sessionIds.length;
+        exclusions.sessionIds = [];
       }
-    }
-    if (Buffer.byteLength(rendered) > maxChars) {
-      output[key] = [];
-      output.shown = 0;
-      output.omittedByBudget = (output.omittedByBudget ?? 0) + 1;
-      rendered = render(output);
+    },
+    () => { if (typeof output.query === "string") output.query = keepTail(output.query, Math.max(8, Buffer.byteLength(output.query) - over())); },
+  ];
+  for (const trim of trims) {
+    if (over() <= 0) break;
+    trim();
+    refresh();
+  }
+  if (over() > 0 && output[key].length) {
+    output[key] = [];
+    output.shown = 0;
+    omitted(1);
+    refresh();
+    for (const trim of trims) {
+      if (over() <= 0) break;
+      trim();
+      refresh();
     }
   }
   return rendered;
+}
+
+function queryTerms(output) {
+  const query = String(output.query ?? "");
+  return (output.any ? query.split(/[\s|]+/) : [query]).map((term) => term.trim()).filter(Boolean);
+}
+
+/** Keep at most `maxBytes` of `value`, from its end. */
+function keepTail(value, maxBytes) {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return value;
+  return `...${bytes.subarray(bytes.length - Math.max(0, maxBytes - 3)).toString().replace(/^\uFFFD/, "")}`;
+}
+
+/** Keep at most `maxBytes` of `text`, centred on the first query term it contains. */
+function keepSpan(text, terms, maxBytes) {
+  const bytes = Buffer.from(text);
+  if (bytes.length <= maxBytes) return text;
+  const lower = text.toLowerCase();
+  const at = terms.map((term) => lower.indexOf(term.toLowerCase())).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0;
+  const budget = Math.max(0, maxBytes - 6);
+  const center = Buffer.byteLength(text.slice(0, at));
+  const start = Math.max(0, Math.min(center - Math.floor(budget / 3), bytes.length - budget));
+  const kept = bytes.subarray(start, start + budget).toString().replace(/^\uFFFD|\uFFFD$/g, "");
+  return `${start > 0 ? "..." : ""}${kept}${start + budget < bytes.length ? "..." : ""}`;
 }
 
 function renderText(output, context) {
   const lines = [];
   const say = (line) => lines.push(line);
   const sessionExclusions = output.discoverySessionExclusions?.applied
-    ? `applied:${output.discoverySessionExclusions.sessionIds.join(",")}`
+    ? output.discoverySessionExclusions.sessionIdsOmitted
+      ? `applied:${output.discoverySessionExclusions.sessionIdsOmitted}-ids-omitted-by-budget`
+      : `applied:${output.discoverySessionExclusions.sessionIds.join(",")}`
     : output.discoverySessionExclusions?.reason?.startsWith("explicit stable-session scope")
       ? "not-needed:explicit-session-scope"
       : "unavailable";
@@ -351,6 +404,15 @@ function renderText(output, context) {
     say("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** The transcript file behind a primitive hit. Under a tight --max-chars the primitive shortens a
+ * hit's `path` for display, so a path that is not a file is found again by its session id within
+ * the configured sources. Null when it cannot be found; callers then drop the hit (fail closed). */
+function transcriptFileFor(entry) {
+  if (typeof entry.path === "string" && fs.existsSync(entry.path)) return entry.path;
+  transcriptFileFor.index ??= new Map(sources.flatMap(({ root }) => walk(root)).map((file) => [path.basename(file, ".jsonl"), file]));
+  return transcriptFileFor.index.get(entry.id) ?? null;
 }
 
 function sourceIdentity(file) {
