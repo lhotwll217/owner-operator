@@ -232,8 +232,9 @@ try {
           : { applied: false, reason: "current OO and external caller session ids unavailable" };
       if (blacklistedDropped) output.blacklistedDropped = blacklistedDropped;
 
-      if (json) process.stdout.write(`${JSON.stringify(output)}\n`);
-      else renderText(output, { targetType, blacklistedDropped });
+      process.stdout.write(withinBudget(output, (fitted) => json
+        ? `${JSON.stringify(fitted)}\n`
+        : renderText(fitted, { targetType, blacklistedDropped })));
     }
   }
 } finally {
@@ -248,7 +249,52 @@ function runPrimitive(args) {
   });
 }
 
+/** The primitive budgets its own JSON, but the wrapper then adds namespace, app, repo, and
+ * exclusion fields and renders its own text. Hold the final output to --max-chars the same way the
+ * primitive does: drop trailing entries, counted as omitted by the output budget. */
+function withinBudget(output, render) {
+  const key = candidates ? "candidates" : "matches";
+  let rendered = render(output);
+  while (Buffer.byteLength(rendered) > maxChars && output[key].length > 1) {
+    output[key].pop();
+    output.shown = output[key].length;
+    output.omittedByBudget = (output.omittedByBudget ?? 0) + 1;
+    output.note = `... ${output.omittedByBudget} more matching ${candidates ? "sessions" : "messages"} omitted by the ${maxChars}-byte output budget — narrow the search or raise --max-chars`;
+    rendered = render(output);
+  }
+  // Evidence outranks context, as in the primitive: the last hit is shrunk before it is dropped —
+  // its surrounding messages go first, then its match text, then its path.
+  const [hit] = output[key];
+  if (hit && Buffer.byteLength(rendered) > maxChars) {
+    if (hit.before?.length || hit.after?.length) {
+      hit.before = [];
+      hit.after = [];
+      rendered = render(output);
+    }
+    const cut = (value, over) => {
+      const bytes = Buffer.from(String(value ?? ""));
+      return `${bytes.subarray(0, Math.max(0, bytes.length - over - 3)).toString().replace(/\uFFFD$/, "")}...`;
+    };
+    for (const field of ["text", "path"]) {
+      const holder = field === "text" ? hit.match : hit;
+      while (holder && Buffer.byteLength(rendered) > maxChars && String(holder[field] ?? "").length > 3) {
+        holder[field] = cut(holder[field], Buffer.byteLength(rendered) - maxChars);
+        rendered = render(output);
+      }
+    }
+    if (Buffer.byteLength(rendered) > maxChars) {
+      output[key] = [];
+      output.shown = 0;
+      output.omittedByBudget = (output.omittedByBudget ?? 0) + 1;
+      rendered = render(output);
+    }
+  }
+  return rendered;
+}
+
 function renderText(output, context) {
+  const lines = [];
+  const say = (line) => lines.push(line);
   const sessionExclusions = output.discoverySessionExclusions?.applied
     ? `applied:${output.discoverySessionExclusions.sessionIds.join(",")}`
     : output.discoverySessionExclusions?.reason?.startsWith("explicit stable-session scope")
@@ -260,7 +306,7 @@ function renderText(output, context) {
       ? ` candidate_sessions=${output.totalCandidateSessions}`
       : ` candidate_sessions_at_least=${output.candidateSessionsAfterPolicyAtLeast ?? output.candidates.length}` +
         ` pre_policy_candidate_sessions=${output.totalCandidateSessionsBeforePolicy ?? "unknown"}`;
-  console.log(
+  say(
     `query=${JSON.stringify(output.query ?? "")} total_message_matches=${output.totalMatches ?? 0} ` +
     `files_with_matches=${output.filesWithMatches ?? 0} shown=${output.shown ?? 0}` +
     `${output.session ? ` session=${output.session}` : ""}${output.any ? " any=true" : ""}` +
@@ -273,37 +319,38 @@ function renderText(output, context) {
     `discovery_session_exclusions=${sessionExclusions}`,
   );
   if (output.wordHits) {
-    console.log(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")}` +
+    say(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")}` +
       `${output.messagesScanned != null ? ` (of ${output.messagesScanned} messages searched after filters)` : ""}` +
       " (high-count words are low-signal; prefer the rare ones)");
   }
-  if (output.note) console.log(`note: ${output.note}`);
-  if (output.hint) console.log(`hint: ${output.hint}`);
+  if (output.note) say(`note: ${output.note}`);
+  if (output.hint) say(`hint: ${output.hint}`);
   for (const [index, candidate] of (output.candidates ?? []).entries()) {
     const rank = candidate.matchedWords?.length
       ? ` matched=[${candidate.matchedWords.join(",")}] best_score=${candidate.score}`
       : "";
     const forks = candidate.forkCopies ? ` +${candidate.forkCopies} forked copies` : "";
-    console.log(
+    say(
       `\n[${index + 1}] namespace=${candidate.namespace} source=${candidate.source} id=${candidate.id} repo=${candidate.repo ?? "unknown"} ` +
       `best_idx=${candidate.index} ts=${candidate.timestamp ?? ""} hits=${candidate.hitCount}${rank}${forks}`,
     );
-    console.log(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
+    say(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
   }
   for (const [index, match] of (output.matches ?? []).entries()) {
     const rank = match.matchedWords ? ` matched=[${match.matchedWords.join(",")}] score=${match.score}` : "";
     const forks = match.forkCopies ? ` +${match.forkCopies} forked copies` : "";
-    console.log(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}${forks}`);
-    for (const before of match.before ?? []) console.log(`  before ${before.role}: ${before.text}`);
-    console.log(`  MATCH ${match.match.role}: ${match.match.text}`);
-    for (const after of match.after ?? []) console.log(`  after  ${after.role}: ${after.text}`);
+    say(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}${forks}`);
+    for (const before of match.before ?? []) say(`  before ${before.role}: ${before.text}`);
+    say(`  MATCH ${match.match.role}: ${match.match.text}`);
+    for (const after of match.after ?? []) say(`  after  ${after.role}: ${after.text}`);
   }
   if ((output.matches ?? []).some((match) => String(match.match?.text ?? "").endsWith("..."))) {
-    console.log("\nhint: a match preview was truncated; use --session ID --at IDX for fuller context around that hit");
+    say("\nhint: a match preview was truncated; use --session ID --at IDX for fuller context around that hit");
   }
   if (output.candidates?.length) {
-    console.log("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
+    say("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
   }
+  return `${lines.join("\n")}\n`;
 }
 
 function sourceIdentity(file) {

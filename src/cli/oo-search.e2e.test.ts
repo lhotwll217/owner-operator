@@ -103,6 +103,34 @@ try {
   assert.deepEqual((JSON.parse(both.stdout) as { discoverySessionExclusions: unknown }).discoverySessionExclusions,
     { applied: true, sessionIds: [ids.caller] }, "a real --from-session after it still applies");
 
+  // --max-chars is a hard ceiling on the final output, after the wrapper's own fields, in every
+  // mode, and the daemon path stays byte-identical to the wrapper.
+  const BUDGET = "ZZBUDGETZZ";
+  for (let index = 0; index < 40; index++) {
+    const id = `01a06c11-58bd-7938-a429-ef77a510${String(index).padStart(4, "0")}`;
+    const timestamp = `2026-09-05T10:${String(index).padStart(2, "0")}:51.293Z`;
+    writeFileSync(join(ooHome, "sessions", `${timestamp.replaceAll(":", "-").replace(".", "-")}_${id}.jsonl`), [
+      { type: "session", version: 3, id, timestamp, cwd: publicDir },
+      { type: "message", id: "m1", parentId: null, timestamp, message: { role: "user", content: [{ type: "text", text: `${BUDGET} ${"context ".repeat(80)}` }] } },
+      { type: "message", id: "m2", parentId: "m1", timestamp, message: { role: "assistant", content: [{ type: "text", text: `${BUDGET} ${"answer ".repeat(80)}` }] } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  }
+  for (const maxChars of [600, 700, 1_000, 4_000]) {
+    for (const mode of [[], ["--json"], ["--candidates"], ["--candidates", "--json"]]) {
+      const args = ["--query", BUDGET, "--owner-operator", "--max-chars", String(maxChars), ...mode];
+      const bounded = await runOo(["search", ...args]);
+      assert.equal(bounded.status, 0, bounded.stderr);
+      assert.ok(Buffer.byteLength(bounded.stdout) <= maxChars,
+        `${mode.join(" ") || "text"} at --max-chars ${maxChars} printed ${Buffer.byteLength(bounded.stdout)} bytes`);
+      assert.equal(bounded.stdout, wrapper(args), "the daemon path matches the wrapper byte for byte");
+    }
+  }
+  const saturated = JSON.parse((await runOo(["search", "--query", BUDGET, "--owner-operator", "--max-chars", "4000", "--json"])).stdout) as {
+    shown: number; omittedByBudget?: number; matches: Array<{ namespace: string }>;
+  };
+  assert.ok(saturated.shown > 0 && (saturated.omittedByBudget ?? 0) > 0, "a saturated result keeps hits and reports omissions");
+  assert.ok(saturated.matches.every((match) => match.namespace === "owner-operator"), "wrapper fields survive fitting");
+
   // Wrapper errors and exit codes pass through.
   const bad = await runOo(["search", "--nope"]);
   assert.equal(bad.status, 1);
