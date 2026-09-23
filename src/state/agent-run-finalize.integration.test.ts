@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import { ThreadDb } from "./database";
+import { State } from "./state";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-finalize-"));
 const path = join(dir, "state.db");
@@ -43,6 +44,27 @@ try {
   }
   other.close();
   db.close();
+  // A lost sweep that fails part way still announces the runs it already finalized, so a follower
+  // of an earlier run receives its terminal record.
+  const statePath = join(dir, "sweep.db");
+  const state = new State(statePath);
+  const ids = ["first", "second"].map((task) => {
+    const run = state.createAgentRun({ harness: AgentRunHarness.ClaudeCode, task, cwd: "/tmp", depth: 1, timeoutSeconds: 60 });
+    state.claimNextPendingAgentRun(3);
+    return run.id;
+  });
+  const sweepOther = new DatabaseSync(statePath);
+  sweepOther.exec(`CREATE TRIGGER fail_second BEFORE INSERT ON agent_run_events
+    WHEN json_extract(NEW.record, '$.runId') = '${ids[1]}' BEGIN SELECT RAISE(ABORT, 'second result failed'); END`);
+  const woken: string[] = [];
+  state.subscribeAgentRunLog((runId) => woken.push(runId));
+  assert.throws(() => state.markAgentRunsLost([], "9999-01-01T00:00:00.000Z"), /second result failed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.agentRunById(ids[0]!)!.status, AgentRunStatus.Lost, "the first run was finalized");
+  assert.deepEqual(woken, [ids[0]], "its log follower is woken even though the sweep failed later");
+  assert.equal(state.agentRunById(ids[1]!)!.status, AgentRunStatus.Running, "the failed run stays running for the next sweep");
+  sweepOther.close();
+  state.close();
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
