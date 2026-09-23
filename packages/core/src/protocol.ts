@@ -1,4 +1,4 @@
-import type { AgentRun, AgentRunCreateInput } from "./agent-runs";
+import type { AgentRun, AgentRunCreateInput, AgentRunEffort, AgentRunHarness } from "./agent-runs";
 import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
@@ -92,6 +92,15 @@ export type DatabaseQueryRequest =
 
 export type DatabaseQueryResponse = unknown;
 
+/** Inputs of one harness-details observation; the daemon runs it and returns the snapshot. */
+export interface HarnessDetailsRequest {
+  harnesses?: AgentRunHarness[];
+  inspect?: Array<{ harness: AgentRunHarness; model: string; effort: AgentRunEffort | null }>;
+  includeBaselineCandidates?: boolean;
+}
+
+export type HarnessDetailsResponse = unknown;
+
 export interface GatewayApi {
   health(): Promise<DaemonHealth>;
   ready(): Promise<DaemonReady>;
@@ -114,6 +123,8 @@ export interface GatewayApi {
   resumeAgentRun(id: string, task: string): Promise<AgentRun>;
   waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
+  /** One ephemeral harness observation, run by the daemon that owns probe processes. */
+  harnessDetails(request: HarnessDetailsRequest): Promise<HarnessDetailsResponse>;
   useWorktree(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
   resolveWorktreeCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
   /** Connection callbacks bracket each live SSE stream, including replacement reconnects. */

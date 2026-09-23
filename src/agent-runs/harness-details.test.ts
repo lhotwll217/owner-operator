@@ -203,6 +203,16 @@ const baseline = await readHarnessDetails({
     readCodexPayloads: async () => ({ account: null, rateLimits: null }),
   },
 });
+const unrequested = await readHarnessDetails({
+  harnesses: [AgentRunHarness.Codex],
+  deps: {
+    readRegistryProvenance: () => ({ acpxVersion: "0.13.1", registeredAgentNames: ["codex"] }),
+    readPreferences: () => ({ path: "/fixture/preferences.md", source: null, content: null, error: null }),
+    observeCapability: async () => capability(AgentRunHarness.Codex),
+    readCodexPayloads: async () => ({ account: null, rateLimits: null }),
+  },
+});
+assert.doesNotMatch(JSON.stringify(unrequested), /baseline/i, "a snapshot without requested candidates carries no baseline field");
 assert.deepEqual(baseline.capabilities.harnesses[0]?.baselineCandidate, {
   model: "launch-model",
   effort: "high",

@@ -9,6 +9,8 @@ import {
   type DatabaseQueryResponse,
   type GatewayApi,
   type GatewayEvent,
+  type HarnessDetailsRequest,
+  type HarnessDetailsResponse,
   type MarkThreadsDoneResult,
   type ResolveWorktreeCwdRequest,
   type ResolveWorktreeCwdResult,
@@ -26,6 +28,9 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const FAST_REQUEST_MS = 2_000;
 const MUTATION_REQUEST_MS = 10_000;
 const LONG_OPERATION_MS = 60_000;
+// Above the ACP observer's 90s per-session bound (src/agent-runs/harness-details-acp-observer.ts);
+// sessions are observed concurrently.
+const HARNESS_DETAILS_MS = 120_000;
 let memo: Promise<GatewayApi> | null = null;
 
 export interface GatewayProbe {
@@ -200,6 +205,11 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       "/query-database",
       request,
       LONG_OPERATION_MS,
+    ),
+    harnessDetails: (request: HarnessDetailsRequest) => post<HarnessDetailsResponse>(
+      "/harness-details",
+      request,
+      HARNESS_DETAILS_MS,
     ),
     useWorktree: (request: UseWorktreeRequest) => post<UseWorktreeResult>(
       "/worktrees/use",

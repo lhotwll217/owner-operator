@@ -73,7 +73,7 @@ const gateway = await startGateway({
   state,
   monitor: { poll: async () => undefined },
   scheduler: {} as never,
-  query: {} as never,
+  query: {} as never, harness: {} as never,
   worktrees: {
     use: async (request) => {
       ordering.push("use_worktree");

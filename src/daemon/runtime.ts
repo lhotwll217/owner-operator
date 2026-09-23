@@ -8,13 +8,14 @@ import {
   ensureOwnerOperatorWorkspace,
   isOnboarded,
 } from "@owner-operator/core";
-import { startGateway, type RunningGateway } from "../gateway/server";
+import { startGateway, type GatewayHarness, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
 import { sampleEnrichment, sampleRelatedOwnerAction } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
 import { deriveParentAgentStateWithEnvironment } from "../agent-runs/agent-state-projection";
+import { readHarnessDetails } from "../agent-runs/harness-details";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
 import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/paths";
@@ -27,6 +28,8 @@ export interface DaemonOptions {
   monitor?: SessionMonitorOptions;
   scheduler?: SchedulerOptions;
   agentRuns?: AgentRunExecutorOptions;
+  /** Injectable for tests; production observes real harnesses in this process. */
+  harness?: GatewayHarness;
   watch?: boolean;
   fingerprintIntervalMs?: number;
   enableEnrichment?: boolean;
@@ -127,6 +130,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       resume: (id, task) => agentRuns.resume(id, task),
       wait: (id, timeoutSeconds) => agentRuns.wait(id, timeoutSeconds * 1_000),
     },
+    // Probe sessions spawn here, under the same leased launcher seam whose orphans startup reaps.
+    harness: options.harness ?? { details: (request) => readHarnessDetails(request) },
     worktrees: {
       use: (request) => worktrees.use(request),
       resolveCwd: (request) => worktrees.resolveCwd(request),

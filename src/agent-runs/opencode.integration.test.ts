@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness } from "@owner-operator/core";
 import { openCodeBinaryPath } from "./acp-launcher";
+import { readHarnessDetails } from "./harness-details";
 import { createGetHarnessDetailsTool } from "../agent/tools/get-harness-details";
 import { startDaemon } from "../daemon/runtime";
 import { connectGateway } from "../gateway/client";
@@ -62,7 +63,8 @@ for await (const line of createInterface({input:process.stdin})) {
 try {
   const harness = AgentRunHarness.OpenCode;
   writeFileSync(join(bin, harness), fixture.replace("__IDENTITY__", JSON.stringify(harness)), { mode: 0o755 });
-  const tool = createGetHarnessDetailsTool();
+  // Observes the fixture binary in this process; the Gateway transport is covered by oo-harness.e2e.
+  const tool = createGetHarnessDetailsTool({ read: readHarnessDetails });
   const context = {} as Parameters<typeof tool.execute>[4];
   {
     assert.equal(openCodeBinaryPath(), join(bin, harness));

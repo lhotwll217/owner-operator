@@ -185,7 +185,11 @@ effort—bypasses selection and reaches `delegate_agent` unchanged. The permanen
 only that invocation and precedence rule.
 
 `get_harness_details` returns one namespaced snapshot: raw owner preferences, launch-authoritative
-ACP capabilities, and provider account/allowance observations remain separate. Every supported
+ACP capabilities, and provider account/allowance observations remain separate. The daemon observes
+through `POST /harness-details`; the native tool and `oo harness details` both call that route, so
+probe sessions are daemon children and daemon startup reaps a probe orphaned by a crash. A snapshot
+carries a `baselineCandidate` only when `includeBaselineCandidates` is requested, which the CLI never
+does. Every supported
 harness capability row comes from a disposable session through the same leased ACPX launch seam as
 delegation and includes the complete advertised `SessionConfigOption[]` plus exact ACPX, adapter,
 backend, resolution-source, and observation-time provenance. Provider-specific model projections

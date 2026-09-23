@@ -1,12 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  AgentRunHarness,
   DatabaseQueryAction,
   DEFAULT_AGENT_RUN_WAIT_SECONDS,
   DEFAULT_DAEMON_PORT,
   DomainEventKind,
   GatewayEventKind,
   MAX_AGENT_RUN_WAIT_SECONDS,
+  isAgentRunEffort,
   validateAgentRunResumeTask,
   type AgentRun,
   type AgentRunCreateInput,
@@ -14,6 +16,7 @@ import {
   type DaemonReady,
   type DatabaseQueryRequest,
   type GatewayEvent,
+  type HarnessDetailsRequest,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -54,6 +57,10 @@ export interface GatewayAgentRuns {
   wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
 }
 
+export interface GatewayHarness {
+  details(request: HarnessDetailsRequest): Promise<unknown>;
+}
+
 export interface GatewayWorktrees {
   use(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
   resolveCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
@@ -67,6 +74,7 @@ export interface GatewayOptions {
   agentRuns: GatewayAgentRuns;
   worktrees: GatewayWorktrees;
   query: GatewayQueryService;
+  harness: GatewayHarness;
   health: () => DaemonHealth;
   ready: () => DaemonReady;
   port?: number;
@@ -243,6 +251,29 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           return respond(200, options.query.query(query.sql));
         }
         return respond(400, { error: "invalid database query request" });
+      }
+
+      if (route === "POST /harness-details") {
+        const body = await readBody(request) as Record<string, unknown> | null;
+        if (body === null || typeof body !== "object" || Array.isArray(body)) {
+          return respond(400, { error: "harness details body must be an object" });
+        }
+        const harnesses = body.harnesses ?? [];
+        const inspect = body.inspect ?? [];
+        const known = (value: unknown): boolean => Object.values(AgentRunHarness).includes(value as AgentRunHarness);
+        if (!Array.isArray(harnesses) || !harnesses.every(known)) {
+          return respond(400, { error: `harnesses must be supported harness ids: ${Object.values(AgentRunHarness).join(", ")}` });
+        }
+        if (!Array.isArray(inspect) || !inspect.every((entry) =>
+          entry && typeof entry === "object" && known(entry.harness) &&
+          typeof entry.model === "string" && entry.model.trim() &&
+          (entry.effort === null || isAgentRunEffort(entry.effort)))) {
+          return respond(400, { error: "inspect entries need a supported harness, an exact model, and an effort or null" });
+        }
+        if (body.includeBaselineCandidates !== undefined && typeof body.includeBaselineCandidates !== "boolean") {
+          return respond(400, { error: "includeBaselineCandidates must be a boolean" });
+        }
+        return respond(200, await options.harness.details(body as HarnessDetailsRequest));
       }
 
       if (route === "POST /worktrees/use") {

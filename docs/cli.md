@@ -40,6 +40,7 @@ operation failures exit 1 and print the Gateway's error payload to stderr (as JS
 |---|---|
 | `session-state` | current session rows (`GET /session-state`) and marking them done (`POST /done`) |
 | `schedules` | durable schedules (`/schedules`); `create`/`update` read the `POST /schedules` body from `--from <file\|->`, so the schedule contract stays the Gateway's ([scheduler.md](scheduler.md)) |
+| `harness` | one ephemeral harness-details snapshot (`POST /harness-details`); `--inspect <harness>:<model>[:<effort>]` confirms an exact identity, an omitted effort is null. It never carries delegated-baseline data ([delegated-runs.md](delegated-runs.md#harness-details)) |
 | `db` | read-only SQL over the state database (`POST /query-database`); `describe` shows [schema docs](../src/state/schema-docs.ts) |
 
 `session-state done` takes explicit ids only, from `session-state list`, with no environment
