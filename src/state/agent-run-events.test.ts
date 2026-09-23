@@ -50,4 +50,18 @@ assert.equal((kept.at(-2)!.record as { text?: string }).text, "chunk-19", "the n
 assert.equal(kept.at(-1)?.record.type, "result", "the terminal record is never evicted");
 assert.ok(kept.every((entry, index) => index === 0 || entry.seq === kept[index - 1]!.seq + 1), "no gaps after the evicted prefix");
 
+// Full eviction (one event larger than the budget) never restarts numbering, so a follower that
+// already saw a sequence number cannot miss later events.
+const tiny = new ThreadDb(":memory:", { eventLogMaxBytes: 100 });
+tiny.createAgentRun({ id: "f", harness: AgentRunHarness.ClaudeCode, task: "t", cwd: "/tmp", depth: 1, timeoutSeconds: 60 });
+tiny.claimNextPendingAgentRun(3);
+assert.deepEqual([
+  tiny.appendAgentRunEvent("f", { type: "text_delta", text: "a" }),
+  tiny.appendAgentRunEvent("f", { type: "text_delta", text: "x".repeat(500) }),
+  tiny.appendAgentRunEvent("f", { type: "text_delta", text: "b" }),
+], [1, 2, 3], "sequence numbers stay monotonic across full eviction");
+tiny.finishAgentRun("f", { status: AgentRunStatus.Completed, resultTail: null, error: null });
+assert.deepEqual(tiny.agentRunEvents("f", 2).map(({ seq, record }) => [seq, record.type]), [[3, "text_delta"], [4, "result"]],
+  "a follower after seq 2 still receives the next event and the terminal record");
+
 process.stdout.write("ok — agent-run event log: running-only appends, one terminal record per finalization, ordered, bounded\n");

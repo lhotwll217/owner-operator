@@ -5,6 +5,7 @@ import {
   isBlacklisted,
   loadBlacklist,
   loadActiveWindow,
+  loadAgentRunEventLogMaxBytes,
   parseWindowMs,
   resolveState,
   type AgentRun,
@@ -32,6 +33,8 @@ export interface StateOptions {
   bus?: InMemoryEventBus;
   now?: () => string;
   activeWindow?: string;
+  /** Per-run event-log retention; defaults to the owner's `agentRunEventLogMaxBytes` setting. */
+  eventLogMaxBytes?: number;
 }
 
 /** The daemon's sole durable-state seam. All writes commit before events are published. */
@@ -48,7 +51,16 @@ export class State {
     this.now = options.now ?? (() => new Date().toISOString());
     this.activeWindow = options.activeWindow ?? loadActiveWindow(ownerOperatorHome());
     this.blacklist = () => loadBlacklist(ownerOperatorHome());
-    this.db = new ThreadDb(dbPath, { now: this.now });
+    const eventLogMaxBytes = options.eventLogMaxBytes ?? loadAgentRunEventLogMaxBytes(ownerOperatorHome(), (value) => {
+      process.stderr.write(`${JSON.stringify({
+        component: "state",
+        event: "setting-rejected",
+        setting: "agentRunEventLogMaxBytes",
+        value,
+        reason: "must be a positive integer byte count; using the default",
+      })}\n`);
+    });
+    this.db = new ThreadDb(dbPath, { now: this.now, eventLogMaxBytes });
     this.db.purgeBlacklisted(this.blacklist());
   }
 

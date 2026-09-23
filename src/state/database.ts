@@ -28,6 +28,7 @@ import {
   type ThreadState,
   type EnrichmentCandidate,
   type RegisteredWorktree,
+  DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES,
 } from "@owner-operator/core";
 import { stateDatabasePath } from "../shared/paths";
 
@@ -260,6 +261,11 @@ CREATE TABLE IF NOT EXISTS agent_run_events (
   PRIMARY KEY (run_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS agent_run_event_sequences (
+  run_id TEXT PRIMARY KEY,
+  last_seq INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS worktrees (
   id TEXT PRIMARY KEY,
   repository TEXT NOT NULL,
@@ -296,11 +302,6 @@ const AGENT_RUN_COLUMNS = `
   acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
   retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
-
-/** Per-run event-log retention: ACPX's own session event-log default of 5 segments of 64 MiB
- * (https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/event-log.ts#L5-L6).
- * Past it the oldest stream events go first; the terminal record is never evicted. */
-export const AGENT_RUN_EVENT_LOG_MAX_BYTES = 5 * 64 * 1024 * 1024;
 
 export interface AgentRunLogEntry {
   seq: number;
@@ -362,7 +363,8 @@ export class ThreadDb {
   constructor(dbPath: string = defaultDbPath(), options: { now?: () => string; eventLogMaxBytes?: number } = {}) {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
     this.now = options.now ?? (() => new Date().toISOString());
-    this.eventLogMaxBytes = options.eventLogMaxBytes ?? AGENT_RUN_EVENT_LOG_MAX_BYTES;
+    // Past the per-run budget the oldest stream events go first; the terminal record is never evicted.
+    this.eventLogMaxBytes = options.eventLogMaxBytes ?? DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES;
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
@@ -1247,11 +1249,17 @@ export class ThreadDb {
   private insertLogRecord(runId: string, record: AgentRunLogRecord): number {
     const text = JSON.stringify(record);
     const bytes = Buffer.byteLength(text);
+    // The sequence lives apart from the retained rows, so eviction can never reuse a number a
+    // follower has already seen. A run logged before this counter existed continues from its max.
     const { seq } = this.db.prepare(
-      `INSERT INTO agent_run_events (run_id, seq, at, record, bytes)
-       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_run_events WHERE run_id = ?), ?, ?, ?)
-       RETURNING seq`,
-    ).get(runId, runId, this.now(), text, bytes) as { seq: number };
+      `INSERT INTO agent_run_event_sequences (run_id, last_seq)
+       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_run_events WHERE run_id = ?))
+       ON CONFLICT (run_id) DO UPDATE SET last_seq = last_seq + 1
+       RETURNING last_seq AS seq`,
+    ).get(runId, runId) as { seq: number };
+    this.db.prepare(
+      "INSERT INTO agent_run_events (run_id, seq, at, record, bytes) VALUES (?, ?, ?, ?, ?)",
+    ).run(runId, seq, this.now(), text, bytes);
     const known = this.eventLogBytes.get(runId);
     if (known !== undefined) this.eventLogBytes.set(runId, known + bytes);
     return seq;

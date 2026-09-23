@@ -5,6 +5,7 @@
 // documented default (never throws):
 //
 //   { "activeWindow": "36h" }   // how far back "active" looks — session-state inclusion
+//   { "agentRunEventLogMaxBytes": 67108864 }   // per-run delegated-run event-log retention
 //
 // Plain ESM (not TS) so the zero-install scan skill runs the exact code the gateway uses
 // (re-exported via @owner-operator/core). Types: settings.d.mts.
@@ -50,4 +51,32 @@ export function loadActiveWindow(ooHome = process.env.OO_HOME ?? join(homedir(),
     if (typeof cfg.activeWindow === "string" && isWindowSpec(cfg.activeWindow)) return cfg.activeWindow.trim();
   } catch { /* missing/invalid → default */ }
   return DEFAULT_ACTIVE_WINDOW;
+}
+
+/** Per-run event-log retention default: ACPX's own session event-log default of 5 segments of
+ * 64 MiB (https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/event-log.ts#L5-L6). */
+export const DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES = 5 * 64 * 1024 * 1024;
+
+/** True for a usable retention budget: a positive safe integer byte count. */
+export function isEventLogMaxBytes(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * The owner's per-run event-log retention from <ooHome>/settings.json `agentRunEventLogMaxBytes`.
+ * Missing → the ACPX default. A present but unusable value also falls back, and is reported through
+ * `onRejected` so the daemon can say why the owner's setting did not apply. Never throws.
+ */
+export function loadAgentRunEventLogMaxBytes(
+  ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator"),
+  onRejected = () => undefined,
+) {
+  try {
+    const cfg = JSON.parse(readFileSync(join(ooHome, "settings.json"), "utf8")) || {};
+    if (Object.hasOwn(cfg, "agentRunEventLogMaxBytes")) {
+      if (isEventLogMaxBytes(cfg.agentRunEventLogMaxBytes)) return cfg.agentRunEventLogMaxBytes;
+      onRejected(cfg.agentRunEventLogMaxBytes);
+    }
+  } catch { /* missing/invalid file → default */ }
+  return DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES;
 }

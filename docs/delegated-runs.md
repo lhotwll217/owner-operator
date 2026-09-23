@@ -97,9 +97,13 @@ emits (`text_delta`, including thought, `status`, `tool_call`) is stored verbati
 `agent_run_events`, and every finalization path (completion, cancel, timeout, daemon stop, restart
 interruption, the lost sweep) appends one terminal record shaped like ACPX's
 `AcpRuntimeTurnResult`: `{"type":"result","runId","status","error"?}` with the run's own terminal
-status. Retention follows ACPX's own session event-log default of 5 × 64 MiB per run
+status. Retention defaults to ACPX's own session event-log default of 5 × 64 MiB per run
 ([`event-log.ts`](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/event-log.ts#L5-L6));
-past it the oldest events go first and the terminal record is never evicted.
+the owner can set another per-run byte budget as `agentRunEventLogMaxBytes` in
+`$OO_HOME/settings.json` (a positive integer, read at daemon start; any other value is logged as
+`setting-rejected` and the default applies). Past the budget the oldest events go first and the
+terminal record is never evicted. Sequence numbers come from a per-run counter
+(`agent_run_event_sequences`), so eviction never reuses one a follower has already seen.
 
 `GET /agent-runs/:id/events` is an SSE route that replays the log from the start (or after
 `Last-Event-ID` / `?after=`, one `id:` per stored sequence number) and tails it until the terminal

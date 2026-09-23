@@ -6,7 +6,14 @@ import assert from "node:assert";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseWindowMs, isWindowSpec, loadActiveWindow, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
+import {
+  parseWindowMs,
+  isWindowSpec,
+  loadActiveWindow,
+  loadAgentRunEventLogMaxBytes,
+  DEFAULT_ACTIVE_WINDOW,
+  DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES,
+} from "./settings.mjs";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-settings-"));
 const NOW = 1_700_000_000_000; // fixed epoch ms — keeps the rolling-window math deterministic
@@ -36,7 +43,21 @@ try {
   writeFileSync(join(ooHome, "settings.json"), "{ not json");
   assert.equal(loadActiveWindow(ooHome), DEFAULT_ACTIVE_WINDOW, "invalid JSON → default");
 
-  process.stdout.write("ok — settings: window grammar (Nh/Nd/today/ISO), spec validation, active-window load + fallbacks\n");
+  // Event-log retention: absent → ACPX default; a positive integer applies; anything else is
+  // reported and falls back.
+  writeFileSync(join(ooHome, "settings.json"), JSON.stringify({}));
+  assert.equal(loadAgentRunEventLogMaxBytes(ooHome), DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES);
+  assert.equal(DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES, 5 * 64 * 1024 * 1024, "default is ACPX's 5 x 64 MiB");
+  writeFileSync(join(ooHome, "settings.json"), JSON.stringify({ agentRunEventLogMaxBytes: 1_048_576 }));
+  assert.equal(loadAgentRunEventLogMaxBytes(ooHome), 1_048_576, "the owner's budget applies");
+  for (const bad of [0, -5, 1.5, "64MB", null]) {
+    writeFileSync(join(ooHome, "settings.json"), JSON.stringify({ agentRunEventLogMaxBytes: bad }));
+    const rejected: unknown[] = [];
+    assert.equal(loadAgentRunEventLogMaxBytes(ooHome, (value) => rejected.push(value)), DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES);
+    assert.deepEqual(rejected, [bad], `${JSON.stringify(bad)} is reported and falls back`);
+  }
+
+  process.stdout.write("ok — settings: window grammar (Nh/Nd/today/ISO), spec validation, active-window load + fallbacks, event-log retention\n");
 } finally {
   rmSync(ooHome, { recursive: true, force: true });
 }

@@ -142,6 +142,14 @@ export const SCHEMA_DOCS: TableDoc[] = [
     ],
   },
   {
+    name: "agent_run_event_sequences",
+    description: "Last event sequence number issued per run, kept apart from retained agent_run_events rows so numbering stays monotonic after eviction.",
+    columns: [
+      { name: "run_id", description: "References agent_runs.id." },
+      { name: "last_seq", description: "Highest agent_run_events.seq ever issued for the run." },
+    ],
+  },
+  {
     name: "worktrees",
     description: "Owner Operator-created Git worktrees. Row presence is creation provenance; mutable Git facts remain live-only.",
     columns: [
