@@ -175,9 +175,7 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       `/schedules/${encodeURIComponent(id)}`,
       { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
     ),
-    deleteSchedule: async (id: string) => {
-      await json(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
-    },
+    deleteSchedule: (id: string) => json<{ ok: true }>(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }),
     runSchedule: (id: string) => post<ScheduleRun>(`/schedules/${encodeURIComponent(id)}/run`, {}),
     agentState: (parentThreadId?: string) => json<ParentAgentStateView>(
       `/agent-state${parentThreadId ? `?parentThreadId=${encodeURIComponent(parentThreadId)}` : ""}`,

@@ -185,7 +185,9 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(200, options.scheduler.updateSchedule(scheduleId, await readBody(request) as ScheduleCreateInput));
       }
       if (scheduleId && request.method === "DELETE" && url.pathname === `/schedules/${scheduleId}`) {
-        return respond(options.scheduler.deleteSchedule(scheduleId) ? 200 : 404, { ok: true });
+        return options.scheduler.deleteSchedule(scheduleId)
+          ? respond(200, { ok: true })
+          : respond(404, { error: `no such schedule: ${scheduleId}` });
       }
       if (scheduleId && request.method === "POST" && url.pathname === `/schedules/${scheduleId}/run`) {
         return respond(202, await options.scheduler.runNow(scheduleId));

@@ -102,7 +102,7 @@ export interface GatewayApi {
   listSchedules(): Promise<ScheduleDefinition[]>;
   createSchedule(input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;
-  deleteSchedule(id: string): Promise<void>;
+  deleteSchedule(id: string): Promise<{ ok: true }>;
   runSchedule(id: string): Promise<ScheduleRun>;
   /** Shared, surface-independent delegated-run presentation derived from durable rows. */
   agentState(parentThreadId?: string): Promise<ParentAgentStateView>;

@@ -39,6 +39,8 @@ operation failures exit 1 and print the Gateway's error payload to stderr (as JS
 | Noun | Covers |
 |---|---|
 | `session-state` | current session rows (`GET /session-state`) and marking them done (`POST /done`) |
+| `schedules` | durable schedules (`/schedules`); `create`/`update` read the `POST /schedules` body from `--from <file\|->`, so the schedule contract stays the Gateway's ([scheduler.md](scheduler.md)) |
+| `db` | read-only SQL over the state database (`POST /query-database`); `describe` shows [schema docs](../src/state/schema-docs.ts) |
 
 `session-state done` takes explicit ids only, from `session-state list`, with no environment
 guessing, so parallel agents in one repo cannot mark each other. A harness that knows its own
