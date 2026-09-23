@@ -87,6 +87,38 @@ try {
   assert.match(unrelated[1]!.detail ?? "", /does not resolve to/);
   assert.equal(lstatSync(join(otherHome, ".claude", "skills")).isDirectory(), true);
   assert.equal(existsSync(join(otherHome, ".claude", "skills", "owner-operator")), false, "no harness link to a foreign skill");
+  // A folder that fails mid-install is reported, the rest still link, and every link made is
+  // recorded before it exists, so uninstall can remove it.
+  const failHome = join(root, "fail-home");
+  const failOo = join(root, "fail-oo");
+  mkdirSync(join(failHome, ".claude", "skills"), { recursive: true });
+  mkdirSync(join(failHome, ".cursor"), { recursive: true });
+  writeFileSync(join(failHome, ".cursor", "skills"), "a file where the skills folder should be");
+  const partial = installSkillLinks({ ...options, userHome: failHome, ooHome: failOo });
+  assert.deepEqual(partial.map(({ label, action }) => [label, action]), [
+    ["agents", "linked"], ["claude", "linked"], ["codex", "skipped"], ["cursor", "skipped"],
+  ]);
+  assert.match(partial[3]!.detail ?? "", /^failed: /);
+  const recorded = (JSON.parse(readFileSync(join(failOo, "skill-links.json"), "utf8")) as { links: Array<{ label: string }> }).links;
+  assert.deepEqual(recorded.map(({ label }) => label).sort(), ["agents", "claude"], "the links made are owned on disk");
+  assert.deepEqual(uninstallSkillLinks({ ...options, userHome: failHome, ooHome: failOo }).filter(({ action }) => action === "removed").map(({ label }) => label),
+    ["agents", "claude"]);
+
+  // Uninstall under a different CLAUDE_CONFIG_DIR still removes the link oo made in the old one.
+  const envHome = join(root, "env-home");
+  const envOo = join(root, "env-oo");
+  mkdirSync(join(envHome, ".claude", "skills"), { recursive: true });
+  installSkillLinks({ ...options, userHome: envHome, ooHome: envOo });
+  process.env.CLAUDE_CONFIG_DIR = join(root, "another-claude-home");
+  try {
+    const removed = uninstallSkillLinks({ ...options, userHome: envHome, ooHome: envOo });
+    assert.ok(removed.some(({ path, action }) => path === join(envHome, ".claude", "skills", "owner-operator") && action === "removed"),
+      "the recorded link in the previous harness home is removed");
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR;
+  }
+  assert.equal(existsSync(join(envHome, ".claude", "skills", "owner-operator")), false);
+  assert.deepEqual((JSON.parse(readFileSync(join(envOo, "skill-links.json"), "utf8")) as { links: unknown[] }).links, []);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

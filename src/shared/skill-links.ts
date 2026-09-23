@@ -80,14 +80,19 @@ function locations(options: SkillLinkOptions) {
 const lstatOrNull = (path: string) => { try { return lstatSync(path); } catch { return null; } };
 const realOrNull = (path: string) => { try { return realpathSync(path); } catch { return null; } };
 
-/** Link path → the exact target this installer wrote there. */
-type OwnedLinks = Map<string, string>;
+/** Link path → the link oo wrote there: its exact target and which folder it served. */
+type OwnedLinks = Map<string, SkillLinkTarget>;
+
+const LABELS: ReadonlyArray<SkillLinkTarget["label"]> = ["agents", "claude", "codex", "cursor"];
 
 function readManifest(path: string): OwnedLinks {
   try {
     const links = (JSON.parse(readFileSync(path, "utf8")) as { links?: unknown }).links;
     return new Map(Array.isArray(links)
-      ? links.flatMap((link) => typeof link?.path === "string" && typeof link?.target === "string" ? [[link.path, link.target] as const] : [])
+      ? links.flatMap((link) => typeof link?.path === "string" && typeof link?.target === "string" &&
+          typeof link?.folder === "string" && LABELS.includes(link?.label)
+        ? [[link.path, { label: link.label, folder: link.folder, path: link.path, target: link.target }] as const]
+        : [])
       : []);
   } catch {
     return new Map();
@@ -96,13 +101,13 @@ function readManifest(path: string): OwnedLinks {
 
 function writeManifest(path: string, links: OwnedLinks): void {
   mkdirSync(dirname(path), { recursive: true });
-  const entries = [...links].sort(([a], [b]) => a.localeCompare(b)).map(([link, target]) => ({ path: link, target }));
+  const entries = [...links.values()].sort((a, b) => a.path.localeCompare(b.path));
   writeFileSync(path, `${JSON.stringify({ links: entries }, null, 2)}\n`);
 }
 
 /** True only while the link still points exactly where this installer pointed it. */
 const stillOwned = (owned: OwnedLinks, path: string, linkTarget: string | null): boolean =>
-  linkTarget !== null && owned.get(path) === linkTarget;
+  linkTarget !== null && owned.get(path)?.target === linkTarget;
 
 /** A real directory holding a skill that declares this skill's name: a copied install. */
 function isSkillCopy(path: string): boolean {
@@ -139,63 +144,83 @@ export function installSkillLinks(options: SkillLinkOptions = {}): SkillLinkChan
   const stamp = (options.now?.() ?? new Date()).toISOString().replaceAll(":", "-");
   const changes: SkillLinkChange[] = [];
   for (const target of targets) {
-    const status = statusOf(target);
-    // Harness links point at the canonical entry, so they are only made while it is this checkout's.
-    if (target.label !== "agents" && realOrNull(target.target) !== realOrNull(source)) {
-      changes.push({ ...target, action: "skipped", detail: `${target.target} does not resolve to ${source}; not linking to it` });
-      continue;
+    try {
+      changes.push(installOne(target, { source, manifest, backups, stamp, owned }));
+    } catch (error) {
+      // One folder's failure is reported; the others still install, and ownership is on disk.
+      changes.push({ ...target, action: "skipped", detail: `failed: ${error instanceof Error ? error.message : String(error)}` });
     }
-    if (status.state === "no-folder") {
-      changes.push({ ...target, action: "skipped", detail: `${target.folder} does not exist` });
-      continue;
+  }
+  return changes;
+}
+
+function installOne(
+  target: SkillLinkTarget,
+  context: { source: string; manifest: string; backups: string; stamp: string; owned: OwnedLinks },
+): SkillLinkChange {
+  const { source, manifest, backups, stamp, owned } = context;
+  const status = statusOf(target);
+  // Harness links point at the canonical entry, so they are only made while it is this checkout's.
+  if (target.label !== "agents" && realOrNull(target.target) !== realOrNull(source)) {
+    return { ...target, action: "skipped", detail: `${target.target} does not resolve to ${source}; not linking to it` };
+  }
+  if (status.state === "no-folder") return { ...target, action: "skipped", detail: `${target.folder} does not exist` };
+  if (status.state === "linked") return { ...target, action: "already-linked" };
+  let detail: string | undefined;
+  if (status.state === "copy") {
+    if (!isSkillCopy(target.path)) {
+      return { ...target, action: "skipped", detail: `${target.path} is not an ${SKILL_NAME} skill; left untouched` };
     }
-    if (status.state === "linked") {
-      changes.push({ ...target, action: "already-linked" });
-      continue;
+    // Move the stale copy aside, outside every skills folder, so no harness loads it twice.
+    const backup = join(backups, stamp, target.label);
+    mkdirSync(dirname(backup), { recursive: true });
+    renameSync(target.path, backup);
+    detail = `previous copy moved to ${backup}`;
+  } else if (status.state === "dangling" || status.state === "other-link") {
+    if (!stillOwned(owned, target.path, status.linkTarget)) {
+      return { ...target, action: "skipped", detail: `${target.path} links to ${status.linkTarget}, not a link oo made; left untouched` };
     }
-    let detail: string | undefined;
-    if (status.state === "copy") {
-      if (!isSkillCopy(target.path)) {
-        changes.push({ ...target, action: "skipped", detail: `${target.path} is not an ${SKILL_NAME} skill; left untouched` });
-        continue;
-      }
-      // Move the stale copy aside, outside every skills folder, so no harness loads it twice.
-      const backup = join(backups, stamp, target.label);
-      mkdirSync(dirname(backup), { recursive: true });
-      renameSync(target.path, backup);
-      detail = `previous copy moved to ${backup}`;
-    } else if (status.state === "dangling" || status.state === "other-link") {
-      if (!stillOwned(owned, target.path, status.linkTarget)) {
-        changes.push({ ...target, action: "skipped", detail: `${target.path} links to ${status.linkTarget}, not a link oo made; left untouched` });
-        continue;
-      }
-      unlinkSync(target.path);
-    }
+    unlinkSync(target.path);
+  }
+  // Ownership is recorded before the link exists, so a failure can never leave an oo link that
+  // uninstall does not know about; a record without its link is simply "already gone".
+  owned.set(target.path, target);
+  writeManifest(manifest, owned);
+  try {
     mkdirSync(target.folder, { recursive: true });
     symlinkSync(target.target, target.path);
-    owned.set(target.path, target.target);
-    changes.push({ ...target, action: status.state === "copy" ? "replaced-copy" : "linked", ...(detail ? { detail } : {}) });
+  } catch (error) {
+    owned.delete(target.path);
+    writeManifest(manifest, owned);
+    throw error;
   }
-  writeManifest(manifest, owned);
-  return changes;
+  return { ...target, action: status.state === "copy" ? "replaced-copy" : "linked", ...(detail ? { detail } : {}) };
 }
 
 export function uninstallSkillLinks(options: SkillLinkOptions = {}): SkillLinkChange[] {
   const { manifest, targets } = locations(options);
   const owned = readManifest(manifest);
-  const changes = targets.map((target): SkillLinkChange => {
+  // Every recorded link is visited, even one in a harness home the current environment no longer
+  // names, alongside today's folders.
+  const visit = new Map<string, SkillLinkTarget>([...targets.map((target) => [target.path, target] as const), ...owned]);
+  const changes = [...visit.values()].map((target): SkillLinkChange => {
     const stat = lstatOrNull(target.path);
     if (!owned.has(target.path)) {
       return { ...target, action: "skipped", detail: stat ? "not a link oo made; left untouched" : "absent" };
     }
     const linkTarget = stat?.isSymbolicLink() ? readlinkSync(target.path) : null;
     if (!stillOwned(owned, target.path, linkTarget)) {
+      owned.delete(target.path); // changed or gone: no longer oo's to remove
       return { ...target, action: "skipped", detail: stat ? "changed since oo linked it; left untouched" : "already gone" };
     }
-    unlinkSync(target.path);
+    try {
+      unlinkSync(target.path);
+    } catch (error) {
+      return { ...target, action: "skipped", detail: `failed: ${error instanceof Error ? error.message : String(error)}; still recorded` };
+    }
+    owned.delete(target.path);
     return { ...target, action: "removed" };
   });
-  // Every recorded link is now removed or no longer oo's: either way nothing remains owned.
-  writeManifest(manifest, new Map());
+  writeManifest(manifest, owned);
   return changes;
 }
