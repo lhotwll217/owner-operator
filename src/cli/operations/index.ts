@@ -3,6 +3,7 @@ import { runNoun, type Noun } from "./operation";
 import { db } from "./db";
 import { harness } from "./harness";
 import { schedules } from "./schedules";
+import { runSearch } from "./search";
 import { sessionState } from "./session-state";
 
 export const NOUNS: Partial<Record<OperationNoun, Noun>> = {
@@ -13,6 +14,7 @@ export const NOUNS: Partial<Record<OperationNoun, Noun>> = {
 };
 
 export async function runOperation(noun: OperationNoun, argv: readonly string[]): Promise<number> {
+  if (noun === "search") return runSearch(argv);
   const definition = NOUNS[noun];
   if (!definition) {
     process.stderr.write(`oo ${noun}: not available yet\n`);

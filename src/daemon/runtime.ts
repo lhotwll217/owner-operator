@@ -16,6 +16,7 @@ import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/ex
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
 import { deriveParentAgentStateWithEnvironment } from "../agent-runs/agent-state-projection";
 import { readHarnessDetails } from "../agent-runs/harness-details";
+import { runSessionSearch } from "../session-search/run";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
 import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/paths";
@@ -132,6 +133,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     },
     // Probe sessions spawn here, under the same leased launcher seam whose orphans startup reaps.
     harness: options.harness ?? { details: (request) => readHarnessDetails(request) },
+    search: { run: (request) => runSessionSearch(request) },
     worktrees: {
       use: (request) => worktrees.use(request),
       resolveCwd: (request) => worktrees.resolveCwd(request),

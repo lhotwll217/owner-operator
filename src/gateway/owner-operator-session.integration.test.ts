@@ -56,7 +56,7 @@ const gateway = await startGateway({
   scheduler: {} as never,
   agentRuns: {} as never,
   worktrees: {} as never,
-  query: {} as never, harness: {} as never,
+  query: {} as never, harness: {} as never, search: {} as never,
   health,
   ready,
   port: 0,

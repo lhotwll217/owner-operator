@@ -32,7 +32,7 @@ function sessionSearchArgs(execution) {
   if (execution.input?.command === "session-search" && Array.isArray(supplied)) return supplied;
 
   const command = String(execution.input?.command ?? "");
-  const invocation = /^\s*node\s+(?:"[^"]*session-search\.mjs"|'[^']*session-search\.mjs'|\S*session-search\.mjs)(?=\s|$)/.exec(command);
+  const invocation = /^\s*oo\s+search(?=\s|$)/.exec(command);
   if (!invocation) return null;
 
   const args = [];

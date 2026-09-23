@@ -17,6 +17,8 @@ import {
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type SessionSearchRequest,
+  type SessionSearchResult,
   type SessionStateRow,
   type UseWorktreeRequest,
   type UseWorktreeResult,
@@ -210,6 +212,11 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       "/harness-details",
       request,
       HARNESS_DETAILS_MS,
+    ),
+    sessionSearch: (request: SessionSearchRequest) => post<SessionSearchResult>(
+      "/session-search",
+      request,
+      LONG_OPERATION_MS,
     ),
     useWorktree: (request: UseWorktreeRequest) => post<UseWorktreeResult>(
       "/worktrees/use",

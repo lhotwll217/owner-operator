@@ -101,6 +101,24 @@ export interface HarnessDetailsRequest {
 
 export type HarnessDetailsResponse = unknown;
 
+/** One privacy-aware transcript search, run by the daemon through the session-search wrapper. */
+export interface SessionSearchRequest {
+  /** The wrapper's own flags, forwarded unchanged. */
+  args: string[];
+  /** External coding session that is asking; excluded from open-ended discovery. */
+  callerSessionId?: string | null;
+  /** The Owner Operator session that is asking; excluded from open-ended discovery. */
+  currentSessionId?: string | null;
+  /** Absolute caller working directory; relative wrapper paths resolve from it. */
+  cwd?: string;
+}
+
+export interface SessionSearchResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
 export interface GatewayApi {
   health(): Promise<DaemonHealth>;
   ready(): Promise<DaemonReady>;
@@ -125,6 +143,7 @@ export interface GatewayApi {
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
   /** One ephemeral harness observation, run by the daemon that owns probe processes. */
   harnessDetails(request: HarnessDetailsRequest): Promise<HarnessDetailsResponse>;
+  sessionSearch(request: SessionSearchRequest): Promise<SessionSearchResult>;
   useWorktree(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
   resolveWorktreeCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
   /** Connection callbacks bracket each live SSE stream, including replacement reconnects. */

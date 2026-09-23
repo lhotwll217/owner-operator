@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { isAbsolute } from "node:path";
 import {
   AgentRunHarness,
   DatabaseQueryAction,
@@ -17,6 +18,8 @@ import {
   type DatabaseQueryRequest,
   type GatewayEvent,
   type HarnessDetailsRequest,
+  type SessionSearchRequest,
+  type SessionSearchResult,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -61,6 +64,10 @@ export interface GatewayHarness {
   details(request: HarnessDetailsRequest): Promise<unknown>;
 }
 
+export interface GatewaySessionSearch {
+  run(request: SessionSearchRequest): Promise<SessionSearchResult>;
+}
+
 export interface GatewayWorktrees {
   use(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
   resolveCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
@@ -75,6 +82,7 @@ export interface GatewayOptions {
   worktrees: GatewayWorktrees;
   query: GatewayQueryService;
   harness: GatewayHarness;
+  search: GatewaySessionSearch;
   health: () => DaemonHealth;
   ready: () => DaemonReady;
   port?: number;
@@ -274,6 +282,18 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           return respond(400, { error: "includeBaselineCandidates must be a boolean" });
         }
         return respond(200, await options.harness.details(body as HarnessDetailsRequest));
+      }
+
+      if (route === "POST /session-search") {
+        const body = await readBody(request) as Record<string, unknown> | null;
+        const optionalId = (value: unknown): boolean => value === undefined || value === null || typeof value === "string";
+        if (body === null || typeof body !== "object" || Array.isArray(body) ||
+            !Array.isArray(body.args) || !body.args.every((arg) => typeof arg === "string") ||
+            !optionalId(body.callerSessionId) || !optionalId(body.currentSessionId) ||
+            (body.cwd !== undefined && (typeof body.cwd !== "string" || !isAbsolute(body.cwd)))) {
+          return respond(400, { error: "session search needs string args, optional string session ids, and an absolute cwd" });
+        }
+        return respond(200, await options.search.run(body as unknown as SessionSearchRequest));
       }
 
       if (route === "POST /worktrees/use") {

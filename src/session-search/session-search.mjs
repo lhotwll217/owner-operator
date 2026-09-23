@@ -365,7 +365,7 @@ function takeValue(flag, index, { allowLeadingDashes = false } = {}) {
 
 function printHelp() {
   process.stdout.write(
-    "Usage: session-search.mjs (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
+    "Usage: oo search (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
     "Default discovery searches configured coding-agent stores plus Owner Operator history.\n" +
     "  --owner-operator              search Owner Operator history only\n" +
     "  --target-type claude|codex|pi search that coding transcript format only\n" +
@@ -374,6 +374,8 @@ function printHelp() {
     "  --include-skill-bodies    include injected skill documentation, excluded by default\n" +
     "  --until TIME              close a --since time window\n" +
     "  --focus TEXT              center an anchored window on text inside a long message\n" +
+    "  --json                    machine-readable query results\n" +
+    "  --from-session ID         (oo search) the calling coding session, excluded from discovery\n" +
     "  --help, -h                 show this help\n",
   );
 }

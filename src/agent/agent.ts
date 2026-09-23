@@ -38,6 +38,7 @@ import {
   type OwnerOperatorHarnessAdapters,
 } from "./tools";
 import { createOwnerOperatorToolDisplayExtension } from "./tool-display";
+import { callerSessionId } from "../shared/caller-session";
 
 export { repoRoot };
 export {
@@ -293,8 +294,7 @@ export interface OoProvenance {
 export function ooProvenance(surface: OoSurface, fromSession?: string): OoProvenance {
   const cwd = process.cwd();
   const git = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
-  const callerSession = [fromSession, process.env.OO_FROM_SESSION, process.env.CODEX_THREAD_ID]
-    .find((value) => typeof value === "string" && value.trim())?.trim();
+  const callerSession = callerSessionId(fromSession);
   return {
     surface,
     origin: callerSession ? "agent" : "owner",
