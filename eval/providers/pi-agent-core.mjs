@@ -477,6 +477,7 @@ function runOo(prompt, traceFile, timeoutMs, extraEnv) {
       '--import',
       tsxLoaderPath,
       path.join(repoRoot, 'src', 'cli', 'oo.ts'),
+      '--prompt',
       prompt,
     ], {
       cwd: repoRoot,

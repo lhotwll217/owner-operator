@@ -486,7 +486,7 @@ try {
       const trace = join(out, `${id}.trace.ndjson`);
       const started = Date.now();
       const result = spawnSync(process.execPath, [
-        "--import", "tsx", join(armRoot, "src", "cli", "oo.ts"), question,
+        "--import", "tsx", join(armRoot, "src", "cli", "oo.ts"), "--prompt", question,
       ], {
         cwd: armRoot,
         encoding: "utf8",

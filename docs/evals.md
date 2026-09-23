@@ -47,7 +47,7 @@ verified teardown deletes the disposable user; an unverified teardown retains on
 sanitized diagnostic. Retained traces redact credential-bearing fields, caller provenance, and
 absolute owner/sandbox paths. Never put secret values in eval option variables or fixtures.
 
-The CLI driver accepts only model-free commands such as `--session-state`, `--done`, help,
+The CLI driver accepts only model-free commands: operation nouns such as `session-state`, help,
 `status`, and `doctor`. Model-bearing cases use `createProductionSession`; this keeps the full
 production roster while ensuring credentials exist only in memory before the model can act.
 
@@ -89,7 +89,7 @@ const sandbox = await createSandboxUser({
   root: mkdtempSync(join(tmpdir(), "oo-cli-")),
 });
 try {
-  const result = await sandbox.runCli(["--session-state"]);
+  const result = await sandbox.runCli(["session-state", "list", "--json"]);
   process.stdout.write(result.stdout);
   if (result.exitCode !== 0) throw new Error(result.stderr);
 } finally {

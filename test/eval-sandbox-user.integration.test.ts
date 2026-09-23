@@ -262,11 +262,11 @@ try {
     modelSettings: { defaultProvider: "test-provider", defaultModel: "test-model" },
   });
   assert.equal(isOnboarded(cli.ooHome), true);
-  await assert.rejects(cli.runCli(["tell me what is ongoing"]), /model-free.*createProductionSession/i,
+  await assert.rejects(cli.runCli(["-p", "tell me what is ongoing"]), /model-free.*createProductionSession/i,
     "model-bearing trials cannot bypass the memory-only production-session credential seam");
   const daemonIdentity = JSON.parse(readFileSync(join(cli.ooHome, "daemon.json"), "utf8"));
-  const firstCli = await cli.runCli(["--session-state"]);
-  const secondCli = await cli.runCli(["--session-state"]);
+  const firstCli = await cli.runCli(["session-state", "list", "--json"]);
+  const secondCli = await cli.runCli(["session-state", "list", "--json"]);
   assert.equal(firstCli.exitCode, 0, firstCli.stderr);
   assert.equal(secondCli.exitCode, 0, secondCli.stderr);
   assert.equal(JSON.parse(readFileSync(join(cli.ooHome, "daemon.json"), "utf8")).pid, daemonIdentity.pid,

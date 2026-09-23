@@ -65,8 +65,8 @@ session; `--continue` picks up your most recent thread. For example:
 As Owner Operator can drill down into other sessions, other harness agents can also "drill
 up" and get context from Owner Operator and even invoke its native tooling. Think of it like
 an IC referring to a manager for context. Any coding agent can shell out to `oo` for a
-headless turn, or invoke certain tools directly — `oo --session-state`, for example, prints
-the current session rows as JSON with no model call. Flags and rules:
+headless turn (`oo -p "…"`), or invoke operations directly — `oo session-state list --json`,
+for example, prints the current session rows with no model call. Flags and rules:
 [docs/cli.md](docs/cli.md).
 
 ## The widget

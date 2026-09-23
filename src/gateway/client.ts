@@ -53,6 +53,15 @@ function adoptDiscoveredTarget(target: GatewayTarget, requested: DaemonInfo, dis
   }
 }
 
+/** A non-accepted Gateway response. `body` is the route's JSON error payload, kept verbatim. */
+export class GatewayRequestError extends Error {
+  constructor(readonly path: string, readonly status: number, readonly body: unknown) {
+    const error = (body as { error?: unknown } | null)?.error;
+    super(`gateway ${path}: ${status}${typeof error === "string" && error.trim() ? ` ${error.trim()}` : ""}`);
+    this.name = "GatewayRequestError";
+  }
+}
+
 interface GatewayJsonOptions {
   init?: RequestInit;
   timeoutMs?: number;
@@ -111,12 +120,9 @@ async function gatewayJson<T>(
     }
   }
   if (!accepted(response)) {
-    let detail = "";
-    try {
-      const body = await response.json() as { error?: unknown };
-      if (typeof body.error === "string" && body.error.trim()) detail = ` ${body.error.trim()}`;
-    } catch { /* an empty/non-JSON response still reports its route and status */ }
-    throw new Error(`gateway ${path}: ${response.status}${detail}`);
+    let body: unknown = null;
+    try { body = await response.json(); } catch { /* an empty/non-JSON response still reports its route and status */ }
+    throw new GatewayRequestError(path, response.status, body);
   }
   return await response.json() as T;
 }

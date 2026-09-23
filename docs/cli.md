@@ -1,31 +1,48 @@
 ---
 title: "oo CLI"
-summary: "Reference for `oo`: modes, flags, session provenance, and model-free calls"
+summary: "Reference for `oo`: grammar, operations, headless turns, and session provenance"
 read_when:
   - Driving `oo` from a script or another agent
-  - Looking up an `oo` flag, subcommand, or provenance rule
+  - Looking up an `oo` operation, flag, or provenance rule
 ---
 
 # `oo` CLI
 
-`oo` is one command. Anything that is not a recognized flag or subcommand is the
-prompt, so `oo what changed --since today` asks the model instead of erroring on
-an unknown flag. The recognized set lives in
-[`src/cli/oo-args.ts`](../src/cli/oo-args.ts).
+`oo` is a Gateway client ([daemon.md](daemon.md)): every operation is a call to the running
+daemon, which owns state, lifecycle, and child processes. The grammar lives in
+[`src/cli/oo-args.ts`](../src/cli/oo-args.ts); operations live under
+[`src/cli/operations/`](../src/cli/operations/).
 
-## Modes
+## Grammar
 
 | Invocation | What happens |
 |---|---|
 | `oo` | interactive session (embedded Pi); starts setup when needed |
-| `oo "<prompt>"` | headless single turn; prose on stdout, session id on stderr |
-| `oo -i` / `--interactive` | force interactive |
+| `oo -p "<prompt>"` / `--prompt` | one headless turn; prose on stdout, session id on stderr |
+| `oo <noun> <verb> [args] [--json]` | model-free operation over the Gateway |
 | `oo doctor` / `oo status` | effective harness configuration, no model call |
-| `oo daemon` | the long-lived daemon process: [daemon.md](daemon.md) |
-| `oo --help` / `-h` | usage |
+| `oo daemon` | the long-lived daemon process |
+| `oo --help`, `oo <noun> --help`, `oo <noun> <verb> --help` | usage at each level |
 
-`--json` and one-shot spellings are rejected with guidance instead of being treated as a
-prompt.
+A first token that is a reserved noun is an operation. Any other first token is an error that
+prints usage and exits 2; there is no bare-prompt form. Removed spellings (`--session-state`,
+`--done`, a top-level `--json`, the one-shot subcommand) exit 2 and name their replacement.
+
+Operations print text by default and the route's payload with `--json`. Usage mistakes exit 2;
+operation failures exit 1 and print the Gateway's error payload to stderr (as JSON under
+`--json`).
+
+## Operations
+
+`oo <noun> --help` lists each noun's verbs and is the source of truth for them.
+
+| Noun | Covers |
+|---|---|
+| `session-state` | current session rows (`GET /session-state`) and marking them done (`POST /done`) |
+
+`session-state done` takes explicit ids only, from `session-state list`, with no environment
+guessing, so parallel agents in one repo cannot mark each other. A harness that knows its own
+session id (e.g. a session-end hook) can self-mark.
 
 ## Interactive tool display
 
@@ -41,7 +58,8 @@ Every oo chat, human or agent, is saved under `~/.owner-operator/sessions`,
 never mixed with coding sessions, and labeled with its surface and caller repo.
 
 - `--continue` / `-c` resumes the most recent oo thread; `--session <id-or-path>`
-  resumes a specific one.
+  resumes a specific one. With `-p` the resumed thread takes one headless turn; without it,
+  the plain readline REPL opens on that thread.
 - A root with a selected OO worktree resumes with its tools bound to that exact path, including
   after CLI or daemon restart. Invalid selections fail visibly instead of falling back to the
   checkout running OO; roots without a selection keep the invocation cwd.
@@ -51,13 +69,3 @@ never mixed with coding sessions, and labeled with its surface and caller repo.
   coding-session caller; explicit stable-ID retrieval remains available.
 - Transcript discovery searches configured coding history and oo's saved conversations by
   default while retaining their source namespaces. `--owner-operator` narrows to oo history.
-
-## Model-free calls
-
-For scripts and agents that need state without a model call:
-
-- `oo --session-state` prints the current state rows as JSON.
-- `oo --done <id...>` marks threads done. Ids come from `--session-state` and are
-  explicit only, with no environment guessing, so parallel agents in one repo
-  cannot mark each other. A harness that knows its own session id (e.g. a session-end
-  hook) can self-mark.

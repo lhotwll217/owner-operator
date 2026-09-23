@@ -295,9 +295,9 @@ conversation for the consent loop (replace `claude-code` with the exact supporte
 being validated):
 
 ```sh
-HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."
-HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "I approve exactly the proposed model and effort. Persist it, then delegate a child that replies OO_BASELINE_PROOF_OK using the approved baseline explicitly."
-HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue "Refresh the claude-code baseline candidate, show the candidate and current approval, but do not approve the refresh. I decline any replacement."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo -p "Propose the current unpinned claude-code delegated baseline. Do not approve or launch anything."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue -p "I approve exactly the proposed model and effort. Persist it, then delegate a child that replies OO_BASELINE_PROOF_OK using the approved baseline explicitly."
+HOME="$PROOF_USER_HOME" OO_HOME="$PROOF_OO_HOME" ./oo --continue -p "Refresh the claude-code baseline candidate, show the candidate and current approval, but do not approve the refresh. I decline any replacement."
 ```
 
 Inspect the transcript named on stderr and
