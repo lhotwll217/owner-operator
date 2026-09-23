@@ -17,6 +17,7 @@
   "scripts": {
     "oo": "tsx src/cli/oo.ts",
     "interactive": "tsx src/cli/interactive.ts",
+    "postinstall": "shasum -a 256 package-lock.json | cut -d\" \" -f1 > node_modules/.oo-lockfile-sha256",
     "docs:list": "node scripts/docs-list.mjs",
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test --workspaces --if-present",
     "test:unit": "node test/run.mjs unit",

@@ -52,3 +52,6 @@ OWNER  OPERATOR.png
 
 # Personal Claude Code settings (the committed skills under .claude/skills/ stay tracked)
 .claude/settings.local.json
+
+# oo launcher dependency-install lock (see ./oo)
+/.oo-install.lock/
