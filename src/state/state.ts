@@ -25,7 +25,7 @@ import {
   type RegisteredWorktree,
 } from "@owner-operator/core";
 import { randomUUID } from "node:crypto";
-import { ThreadDb, type AgentRunInsert, type AgentRunLogEntry, type SessionStateRow } from "./database";
+import { PartialAgentRunSweepError, ThreadDb, type AgentRunInsert, type AgentRunLogEntry, type SessionStateRow } from "./database";
 import { InMemoryEventBus } from "./event-bus";
 import { ownerOperatorHome } from "../shared/paths";
 
@@ -402,12 +402,21 @@ export class State {
   }
 
   markAgentRunsLost(liveRunIds: readonly string[], activityCutoffIso: string): string[] {
-    const ids = this.db.markAgentRunsLost(liveRunIds, activityCutoffIso);
-    for (const id of ids) {
-      this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Lost });
-      this.notifyRunLog(id);
+    const announce = (ids: readonly string[]): void => {
+      for (const id of ids) {
+        this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Lost });
+        this.notifyRunLog(id);
+      }
+    };
+    try {
+      const ids = this.db.markAgentRunsLost(liveRunIds, activityCutoffIso);
+      announce(ids);
+      return ids;
+    } catch (error) {
+      // Runs finalized before the failure are committed; their followers must still hear it.
+      if (error instanceof PartialAgentRunSweepError) announce(error.committed);
+      throw error;
     }
-    return ids;
   }
 
   agentRunById(id: string): AgentRun | undefined {

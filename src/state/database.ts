@@ -303,6 +303,14 @@ const AGENT_RUN_COLUMNS = `
   retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
 
+/** A sweep that failed part way; `committed` lists the runs it had already finalized. */
+export class PartialAgentRunSweepError extends Error {
+  constructor(readonly committed: string[], cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "PartialAgentRunSweepError";
+  }
+}
+
 export interface AgentRunLogEntry {
   seq: number;
   at: string;
@@ -1235,13 +1243,19 @@ export class ThreadDb {
     const mark = this.db.prepare(
       "UPDATE agent_runs SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = ?",
     );
+    const committed: string[] = [];
     for (const id of stale) {
-      this.atomically(() => {
-        mark.run(AgentRunStatus.Lost, this.now(), "run lost: no live turn and no recent activity", id, AgentRunStatus.Running);
-        this.appendResultRecord(this.agentRunById(id)!);
-      });
+      try {
+        this.atomically(() => {
+          mark.run(AgentRunStatus.Lost, this.now(), "run lost: no live turn and no recent activity", id, AgentRunStatus.Running);
+          this.appendResultRecord(this.agentRunById(id)!);
+        });
+      } catch (error) {
+        throw new PartialAgentRunSweepError(committed, error);
+      }
+      committed.push(id);
     }
-    return stale;
+    return committed;
   }
 
   /** Append one child stream event while the run is running; returns its sequence number. */
