@@ -131,6 +131,41 @@ try {
   assert.ok(saturated.shown > 0 && (saturated.omittedByBudget ?? 0) > 0, "a saturated result keeps hits and reports omissions");
   assert.ok(saturated.matches.every((match) => match.namespace === "owner-operator"), "wrapper fields survive fitting");
 
+  // Metadata alone (a long --any word table, both caller ids) is also held to the budget.
+  const manyWords = Array.from({ length: 60 }, (_, index) => `word${String(index).padStart(2, "0")}xyz`).join(" ");
+  const callers = { OO_CALLER_SESSION_ID: `${ids.caller}-caller-padding`, OO_CURRENT_SESSION_ID: `${ids.current}-current-padding` };
+  for (const maxChars of [500, 600]) {
+    for (const mode of [[], ["--json"]]) {
+      const args = ["--owner-operator", "--any", "--query", manyWords, "--max-chars", String(maxChars), ...mode];
+      const metadata = await runOo(["search", ...args], callers);
+      assert.equal(metadata.status, 0, metadata.stderr);
+      assert.ok(Buffer.byteLength(metadata.stdout) <= maxChars,
+        `metadata-only ${mode.join(" ") || "text"} at ${maxChars} printed ${Buffer.byteLength(metadata.stdout)} bytes`);
+      assert.equal(metadata.stdout, wrapper(args, callers), "metadata fitting matches the wrapper");
+    }
+  }
+
+  // A sole hit keeps its matching span: a long path is shortened before the match text is cut.
+  const deepCwd = join(publicDir, ...Array.from({ length: 12 }, (_, index) => `very-long-directory-name-${index}`));
+  const deepStore = join(ooHome, "sessions", ...Array.from({ length: 8 }, (_, index) => `nested-store-folder-${index}`));
+  mkdirSync(deepCwd, { recursive: true });
+  mkdirSync(deepStore, { recursive: true });
+  const spanId = "01a06c11-58bd-7938-a429-ef77a5109999";
+  writeFileSync(join(deepStore, `2026-09-06T10-00-51-293Z_${spanId}.jsonl`), [
+    { type: "session", version: 3, id: spanId, timestamp: "2026-09-06T10:00:51.293Z", cwd: deepCwd },
+    { type: "message", id: "m1", parentId: null, timestamp: "2026-09-06T10:00:51.293Z", message: { role: "user", content: [{ type: "text", text: `${"filler ".repeat(60)} ZZSPANZZ is the answer ${"tail ".repeat(60)}` }] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  for (const maxChars of [700, 800]) {
+    const args = ["--owner-operator", "--query", "ZZSPANZZ", "--max-chars", String(maxChars), "--json"];
+    const sole = await runOo(["search", ...args]);
+    const parsed = JSON.parse(sole.stdout) as { shown: number; matches: Array<{ id: string; match: { text: string } }> };
+    assert.ok(Buffer.byteLength(sole.stdout) <= maxChars);
+    assert.equal(parsed.shown, 1, `the sole hit is kept at ${maxChars}`);
+    assert.equal(parsed.matches[0]!.id, spanId);
+    assert.match(parsed.matches[0]!.match.text, /ZZSPANZZ/, `the matching span survives at ${maxChars}`);
+    assert.equal(sole.stdout, wrapper(args));
+  }
+
   // Wrapper errors and exit codes pass through.
   const bad = await runOo(["search", "--nope"]);
   assert.equal(bad.status, 1);
