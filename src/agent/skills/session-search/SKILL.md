@@ -11,6 +11,8 @@ Run the bundled privacy-aware helper through `bash`. `OO_INSTALL_ROOT` points at
 {"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'TEXT' --since 7d"}
 ```
 
+Every mode below runs through this command with different flags; `--help` lists them all.
+
 Discovery queries search configured coding-agent stores and Owner Operator history by default,
 preserve each result's namespace and transcript format, and exclude both the current Owner
 Operator session and its external coding-agent caller when their stable IDs are available. The
@@ -91,34 +93,3 @@ Add `--owner-operator` only when the requested search scope is explicitly limite
 Use one primary mode: `--query`, `--skim ID`, or `--session ID --at IDX`. A query may add
 `--session ID` as its explicit scope.
 
-## Examples
-
-Known id supplied by the caller:
-
-```json
-{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --skim 'SESSION_ID' --max-chars 12000"}
-```
-
-Distinctive anchor whose first hit may answer the question:
-
-```json
-{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'ERR_PACKAGE_PATH_NOT_EXPORTED' --before 2 --after 5 --since 7d"}
-```
-
-Paraphrased question without an id; let rarity rank the candidate terms:
-
-```json
-{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'rollout checkpoint reconciliation' --any --candidates --limit 8 --since 7d"}
-```
-
-Fuller context around a returned `id=... idx=...` pointer:
-
-```json
-{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --session 'SESSION_ID' --at MESSAGE_INDEX --before 3 --after 5"}
-```
-
-Find another fact inside an already selected session:
-
-```json
-{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'checkpoint reconciliation' --session 'SESSION_ID'"}
-```
