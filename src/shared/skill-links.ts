@@ -80,6 +80,16 @@ function locations(options: SkillLinkOptions) {
 const lstatOrNull = (path: string) => { try { return lstatSync(path); } catch { return null; } };
 const realOrNull = (path: string) => { try { return realpathSync(path); } catch { return null; } };
 
+/** lstat that tells absence (ENOENT, ENOTDIR) apart from a path it could not inspect. */
+function inspect(path: string): { stat: ReturnType<typeof lstatSync> | null } | { error: Error } {
+  try {
+    return { stat: lstatSync(path) };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? { stat: null } : { error: error as Error };
+  }
+}
+
 /** Link path → the link oo wrote there: its exact target and which folder it served. */
 type OwnedLinks = Map<string, SkillLinkTarget>;
 
@@ -204,7 +214,11 @@ export function uninstallSkillLinks(options: SkillLinkOptions = {}): SkillLinkCh
   // names, alongside today's folders.
   const visit = new Map<string, SkillLinkTarget>([...targets.map((target) => [target.path, target] as const), ...owned]);
   const changes = [...visit.values()].map((target): SkillLinkChange => {
-    const stat = lstatOrNull(target.path);
+    const inspected = inspect(target.path);
+    if ("error" in inspected) {
+      return { ...target, action: "skipped", detail: `failed: ${inspected.error.message}; ${owned.has(target.path) ? "still recorded" : "left untouched"}` };
+    }
+    const { stat } = inspected;
     if (!owned.has(target.path)) {
       return { ...target, action: "skipped", detail: stat ? "not a link oo made; left untouched" : "absent" };
     }
