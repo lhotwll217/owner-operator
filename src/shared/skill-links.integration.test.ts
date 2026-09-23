@@ -2,7 +2,7 @@
 // existing harness folder is linked, edits in the checkout show through the links, a moved
 // checkout reads as dangling, and uninstall removes only what install created.
 import assert from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installSkillLinks, skillLinkStatus, uninstallSkillLinks } from "./skill-links";
@@ -47,7 +47,26 @@ try {
   assert.deepEqual(skillLinkStatus(options).map(({ label, state }) => [label, state]), [
     ["agents", "dangling"], ["claude", "dangling"], ["codex", "dangling"], ["cursor", "no-folder"],
   ], "a moved checkout reads as dangling");
+  // Reinstalling from the moved checkout repairs the links oo made.
+  const moved = { ...options, checkoutRoot: join(root, "moved-checkout") };
+  assert.deepEqual(installSkillLinks(moved).slice(0, 3).map(({ action }) => action), ["linked", "already-linked", "already-linked"],
+    "the canonical link is repointed and the harness links resolve through it again");
+  assert.match(readFileSync(claudeSkill, "utf8"), /v2 after git pull/);
   renameSync(join(root, "moved-checkout"), checkoutRoot);
+  assert.equal(installSkillLinks(options)[0]!.action, "linked", "and back again");
+
+  // A link the owner repointed is theirs: reinstall and uninstall leave it alone.
+  const ownerSkill = join(root, "owner-skill");
+  mkdirSync(ownerSkill);
+  const claudeLink = join(userHome, ".claude", "skills", "owner-operator");
+  unlinkSync(claudeLink);
+  symlinkSync(ownerSkill, claudeLink);
+  assert.equal(installSkillLinks(options)[1]!.action, "skipped");
+  assert.equal(readlinkSync(claudeLink), ownerSkill, "reinstall keeps the owner's link");
+  assert.equal(uninstallSkillLinks(options)[1]!.action, "skipped");
+  assert.equal(readlinkSync(claudeLink), ownerSkill, "uninstall keeps the owner's link");
+  unlinkSync(claudeLink);
+  installSkillLinks(options);
 
   // A link someone else made is never replaced or removed.
   mkdirSync(join(userHome, ".cursor", "skills"), { recursive: true });
@@ -59,6 +78,15 @@ try {
   ], "uninstall removes only the links install created");
   assert.equal(existsSync(join(userHome, ".claude", "skills", "owner-operator")), false);
   assert.ok(skillLinkStatus(options)[3]!.state === "dangling", "the foreign link is left in place");
+  // An unrelated canonical entry is skipped, and no harness is linked to it.
+  const otherHome = join(root, "other-home");
+  skill(join(otherHome, ".agents", "skills", "owner-operator"), "something-else", "not ours");
+  mkdirSync(join(otherHome, ".claude", "skills"), { recursive: true });
+  const unrelated = installSkillLinks({ ...options, userHome: otherHome, ooHome: join(root, "other-oo") });
+  assert.deepEqual(unrelated.map(({ action }) => action), ["skipped", "skipped", "skipped", "skipped"]);
+  assert.match(unrelated[1]!.detail ?? "", /does not resolve to/);
+  assert.equal(lstatSync(join(otherHome, ".claude", "skills")).isDirectory(), true);
+  assert.equal(existsSync(join(otherHome, ".claude", "skills", "owner-operator")), false, "no harness link to a foreign skill");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

@@ -4,7 +4,8 @@
  * one (vercel-labs/skills src/installer.ts createSymlink,
  * https://github.com/vercel-labs/skills/blob/7407f3893ad4dceab546ac002c3ef806e4000c73/src/installer.ts#L227-L293).
  * Every harness folder that exists is linked; `git pull` updates the skill through the links.
- * The links this installer created are recorded so uninstall removes only those. */
+ * Each link this installer created is recorded with the exact target it wrote; a link is only
+ * replaced or removed while it still points there, so a link the owner changed is never touched. */
 import {
   existsSync,
   lstatSync,
@@ -79,19 +80,29 @@ function locations(options: SkillLinkOptions) {
 const lstatOrNull = (path: string) => { try { return lstatSync(path); } catch { return null; } };
 const realOrNull = (path: string) => { try { return realpathSync(path); } catch { return null; } };
 
-function readManifest(path: string): string[] {
+/** Link path → the exact target this installer wrote there. */
+type OwnedLinks = Map<string, string>;
+
+function readManifest(path: string): OwnedLinks {
   try {
     const links = (JSON.parse(readFileSync(path, "utf8")) as { links?: unknown }).links;
-    return Array.isArray(links) ? links.filter((link): link is string => typeof link === "string") : [];
+    return new Map(Array.isArray(links)
+      ? links.flatMap((link) => typeof link?.path === "string" && typeof link?.target === "string" ? [[link.path, link.target] as const] : [])
+      : []);
   } catch {
-    return [];
+    return new Map();
   }
 }
 
-function writeManifest(path: string, links: string[]): void {
+function writeManifest(path: string, links: OwnedLinks): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ links: [...new Set(links)].sort() }, null, 2)}\n`);
+  const entries = [...links].sort(([a], [b]) => a.localeCompare(b)).map(([link, target]) => ({ path: link, target }));
+  writeFileSync(path, `${JSON.stringify({ links: entries }, null, 2)}\n`);
 }
+
+/** True only while the link still points exactly where this installer pointed it. */
+const stillOwned = (owned: OwnedLinks, path: string, linkTarget: string | null): boolean =>
+  linkTarget !== null && owned.get(path) === linkTarget;
 
 /** A real directory holding a skill that declares this skill's name: a copied install. */
 function isSkillCopy(path: string): boolean {
@@ -124,11 +135,16 @@ export function skillLinkStatus(options: SkillLinkOptions = {}): SkillLinkStatus
 export function installSkillLinks(options: SkillLinkOptions = {}): SkillLinkChange[] {
   const { source, manifest, backups, targets } = locations(options);
   if (!existsSync(join(source, "SKILL.md"))) throw new Error(`no skill at ${source}`);
-  const created = readManifest(manifest);
+  const owned = readManifest(manifest);
   const stamp = (options.now?.() ?? new Date()).toISOString().replaceAll(":", "-");
   const changes: SkillLinkChange[] = [];
   for (const target of targets) {
     const status = statusOf(target);
+    // Harness links point at the canonical entry, so they are only made while it is this checkout's.
+    if (target.label !== "agents" && realOrNull(target.target) !== realOrNull(source)) {
+      changes.push({ ...target, action: "skipped", detail: `${target.target} does not resolve to ${source}; not linking to it` });
+      continue;
+    }
     if (status.state === "no-folder") {
       changes.push({ ...target, action: "skipped", detail: `${target.folder} does not exist` });
       continue;
@@ -149,35 +165,37 @@ export function installSkillLinks(options: SkillLinkOptions = {}): SkillLinkChan
       renameSync(target.path, backup);
       detail = `previous copy moved to ${backup}`;
     } else if (status.state === "dangling" || status.state === "other-link") {
-      if (!created.includes(target.path)) {
-        changes.push({ ...target, action: "skipped", detail: `${target.path} links to ${status.linkTarget}, not created by oo; left untouched` });
+      if (!stillOwned(owned, target.path, status.linkTarget)) {
+        changes.push({ ...target, action: "skipped", detail: `${target.path} links to ${status.linkTarget}, not a link oo made; left untouched` });
         continue;
       }
       unlinkSync(target.path);
     }
     mkdirSync(target.folder, { recursive: true });
     symlinkSync(target.target, target.path);
-    created.push(target.path);
+    owned.set(target.path, target.target);
     changes.push({ ...target, action: status.state === "copy" ? "replaced-copy" : "linked", ...(detail ? { detail } : {}) });
   }
-  writeManifest(manifest, created);
+  writeManifest(manifest, owned);
   return changes;
 }
 
 export function uninstallSkillLinks(options: SkillLinkOptions = {}): SkillLinkChange[] {
   const { manifest, targets } = locations(options);
-  const created = new Set(readManifest(manifest));
+  const owned = readManifest(manifest);
   const changes = targets.map((target): SkillLinkChange => {
     const stat = lstatOrNull(target.path);
-    if (!created.has(target.path)) {
-      return { ...target, action: "skipped", detail: stat ? "not created by oo; left untouched" : "absent" };
+    if (!owned.has(target.path)) {
+      return { ...target, action: "skipped", detail: stat ? "not a link oo made; left untouched" : "absent" };
     }
-    if (!stat?.isSymbolicLink()) {
-      return { ...target, action: "skipped", detail: stat ? "no longer a link; left untouched" : "already gone" };
+    const linkTarget = stat?.isSymbolicLink() ? readlinkSync(target.path) : null;
+    if (!stillOwned(owned, target.path, linkTarget)) {
+      return { ...target, action: "skipped", detail: stat ? "changed since oo linked it; left untouched" : "already gone" };
     }
     unlinkSync(target.path);
     return { ...target, action: "removed" };
   });
-  writeManifest(manifest, []);
+  // Every recorded link is now removed or no longer oo's: either way nothing remains owned.
+  writeManifest(manifest, new Map());
   return changes;
 }
