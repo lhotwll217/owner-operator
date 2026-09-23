@@ -141,7 +141,9 @@ try {
   const textRun = parseRecord((await runOo(["schedules", "run", textRecord.id])).stdout);
   assert.deepEqual(Object.keys(textRun), Object.keys(run), "run text carries every run-record field");
   assert.equal(textRun.scheduleId, textRecord.id);
-  await runOo(["schedules", "delete", textRecord.id]);
+  const deletedText = await runOo(["schedules", "delete", textRecord.id]);
+  assert.equal(deletedText.status, 0, deletedText.stderr);
+  assert.deepEqual(parseRecord(deletedText.stdout), { ok: true }, "delete text parses back to the DELETE route's body");
 
   const missing = await runOo(["schedules", "delete", created.id, "--json"]);
   assert.equal(missing.status, 1);
