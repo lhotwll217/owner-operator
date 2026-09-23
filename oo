@@ -16,6 +16,31 @@ while [ -h "$SOURCE" ]; do
 done
 DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 
+# Installed dependencies must match the checkout's lockfile. Pulling main updates
+# package-lock.json but not node_modules, so every entry point (terminal, widget,
+# launchd daemon) silently ran the previously installed Pi. The root postinstall
+# stamps the lockfile hash into node_modules; a mismatch reinstalls with `npm ci`,
+# serialized by a lock directory because several entry points can start at once.
+lockfile_sum() { shasum -a 256 "$DIR/package-lock.json" | cut -d' ' -f1; }
+STAMP="$DIR/node_modules/.oo-lockfile-sha256"
+if [ "$(cat "$STAMP" 2>/dev/null)" != "$(lockfile_sum)" ]; then
+  GUARD="$DIR/.oo-install.lock"
+  waited=0
+  until mkdir "$GUARD" 2>/dev/null; do
+    if [ "$waited" -ge 300 ]; then
+      echo "oo: waited 300s for another dependency install; remove $GUARD if none is running" >&2
+      exit 1
+    fi
+    sleep 1; waited=$((waited + 1))
+  done
+  trap 'rmdir "$GUARD" 2>/dev/null' EXIT INT TERM
+  if [ "$(cat "$STAMP" 2>/dev/null)" != "$(lockfile_sum)" ]; then
+    echo "oo: package-lock.json changed since the last install; running npm ci" >&2
+    (cd "$DIR" && npm ci --no-audit --no-fund >&2) || { echo "oo: npm ci failed" >&2; exit 1; }
+  fi
+  rmdir "$GUARD"; trap - EXIT INT TERM
+fi
+
 if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
   shift
 fi
