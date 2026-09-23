@@ -9,6 +9,7 @@ import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
   type AgentRunEffort,
+  HARNESS_OBSERVATION_STAGE_TIMEOUT_MS,
 } from "@owner-operator/core";
 import { createAgentRegistry, type AcpRuntimeStatus } from "acpx/runtime";
 import { ownerOperatorHome } from "../shared/paths";
@@ -25,9 +26,9 @@ import {
   type LeasedAcpRuntime,
 } from "./acp-launcher";
 
-const OBSERVATION_TIMEOUT_MS = 90_000;
-const CLOSE_TIMEOUT_MS = 2_000;
-const VERSION_TIMEOUT_MS = 5_000;
+const OBSERVATION_TIMEOUT_MS = HARNESS_OBSERVATION_STAGE_TIMEOUT_MS;
+export const CLOSE_TIMEOUT_MS = 2_000;
+export const VERSION_TIMEOUT_MS = 5_000;
 const MAX_VERSION_BYTES = 64 * 1024;
 
 export interface AcpRuntimeProvenance {

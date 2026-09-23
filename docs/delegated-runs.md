@@ -211,7 +211,11 @@ only that invocation and precedence rule.
 `get_harness_details` returns one namespaced snapshot: raw owner preferences, launch-authoritative
 ACP capabilities, and provider account/allowance observations remain separate. The daemon observes
 through `POST /harness-details`; the native tool and `oo harness details` both call that route, so
-probe sessions are daemon children and daemon startup reaps a probe orphaned by a crash. A snapshot
+probe sessions are daemon children and daemon startup reaps a probe orphaned by a crash. Each
+observation's initialization, status read, and inspection are bounded separately, and the client
+waits for all three plus cleanup (`HARNESS_OBSERVATION_*` in
+[`agent-runs.ts`](../packages/core/src/agent-runs.ts)), so a slow but valid selection is never cut
+off by the transport. A snapshot
 carries a `baselineCandidate` only when `includeBaselineCandidates` is requested, which the CLI never
 does. Every supported
 harness capability row comes from a disposable session through the same leased ACPX launch seam as

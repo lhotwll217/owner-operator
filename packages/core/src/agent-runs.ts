@@ -388,3 +388,13 @@ export interface AgentRunOutcome extends ChildIdentity {
   resultTail: string | null;
   error: string | null;
 }
+
+/** One disposable harness observation runs up to three bounded stages — session initialization,
+ * status read, and candidate inspection — each within this bound, then bounded cleanup. */
+export const HARNESS_OBSERVATION_STAGE_TIMEOUT_MS = 90_000;
+export const HARNESS_OBSERVATION_STAGES = 3;
+/** Worst case of an observation's work outside its stages: the 5 s runtime version probe, a 2 s
+ * process-tree snapshot, the 2 s graceful close, and lease termination (a 2 s process list, a
+ * 750 ms kill grace, then up to 5 verification lists of 2 s, 250 ms apart). A unit test keeps this
+ * equal to the observer's and process lease's own constants. */
+export const HARNESS_OBSERVATION_CLEANUP_MS = 5_000 + 2_000 + 2_000 + (2_000 + 750 + 5 * 2_000 + 4 * 250);

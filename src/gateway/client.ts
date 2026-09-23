@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
 import {
+  HARNESS_OBSERVATION_CLEANUP_MS,
+  HARNESS_OBSERVATION_STAGES,
+  HARNESS_OBSERVATION_STAGE_TIMEOUT_MS,
   type AgentRun,
   type AgentRunCreateInput,
   type AgentRunLogRecord,
@@ -31,9 +34,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const FAST_REQUEST_MS = 2_000;
 const MUTATION_REQUEST_MS = 10_000;
 const LONG_OPERATION_MS = 60_000;
-// Above the ACP observer's 90s per-session bound (src/agent-runs/harness-details-acp-observer.ts);
-// sessions are observed concurrently.
-const HARNESS_DETAILS_MS = 120_000;
+// Harnesses are observed concurrently in the daemon, each through every bounded stage and cleanup,
+// so the request may take all of them plus one ordinary request allowance. A shorter bound would
+// abort a slow but valid selection the daemon is still confirming.
+export const HARNESS_DETAILS_REQUEST_TIMEOUT_MS =
+  HARNESS_OBSERVATION_STAGES * HARNESS_OBSERVATION_STAGE_TIMEOUT_MS + HARNESS_OBSERVATION_CLEANUP_MS + FAST_REQUEST_MS;
 let memo: Promise<GatewayApi> | null = null;
 
 export interface GatewayProbe {
@@ -250,7 +255,7 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
     harnessDetails: (request: HarnessDetailsRequest) => post<HarnessDetailsResponse>(
       "/harness-details",
       request,
-      HARNESS_DETAILS_MS,
+      HARNESS_DETAILS_REQUEST_TIMEOUT_MS,
     ),
     sessionSearch: (request: SessionSearchRequest) => post<SessionSearchResult>(
       "/session-search",
