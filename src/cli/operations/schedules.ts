@@ -23,7 +23,7 @@ function readScheduleInput(values: VerbValues): ScheduleCreateInput {
 
 /** Every field of a route record, one `field: value` line each. Values are JSON, so the text carries
  * the whole record (trigger, payload arguments, timeout, ...) and parses back to it. */
-export const recordText = (record: ScheduleDefinition | ScheduleRun): string =>
+export const recordText = (record: ScheduleDefinition | ScheduleRun | { ok: true }): string =>
   Object.entries(record).map(([field, value]) => `${field}: ${JSON.stringify(value)}`).join("\n");
 
 const scheduleLine = recordText;
@@ -66,7 +66,7 @@ export const schedules: Noun = {
       minPositionals: 1,
       async run({ positionals: [id], json }) {
         const result = await (await gateway()).deleteSchedule(id!);
-        await emit(json, result, () => `deleted ${id}`);
+        await emit(json, result, () => recordText(result));
         return 0;
       },
     },
