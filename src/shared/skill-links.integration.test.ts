@@ -2,7 +2,7 @@
 // existing harness folder is linked, edits in the checkout show through the links, a moved
 // checkout reads as dangling, and uninstall removes only what install created.
 import assert from "node:assert";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installSkillLinks, skillLinkStatus, uninstallSkillLinks } from "./skill-links";
@@ -119,6 +119,27 @@ try {
   }
   assert.equal(existsSync(join(envHome, ".claude", "skills", "owner-operator")), false);
   assert.deepEqual((JSON.parse(readFileSync(join(envOo, "skill-links.json"), "utf8")) as { links: unknown[] }).links, []);
+  // A recorded folder that cannot be read is not "gone": uninstall keeps the record and removes the
+  // link once the folder is readable again.
+  const lockedHome = join(root, "locked-home");
+  const lockedOo = join(root, "locked-oo");
+  const lockedSkills = join(lockedHome, ".claude", "skills");
+  mkdirSync(lockedSkills, { recursive: true });
+  installSkillLinks({ ...options, userHome: lockedHome, ooHome: lockedOo });
+  chmodSync(lockedSkills, 0o000);
+  let locked;
+  try {
+    locked = uninstallSkillLinks({ ...options, userHome: lockedHome, ooHome: lockedOo }).find(({ label }) => label === "claude")!;
+  } finally {
+    chmodSync(lockedSkills, 0o755);
+  }
+  assert.equal(locked.action, "skipped");
+  assert.match(locked.detail ?? "", /failed: .*EACCES.*still recorded/, "an unreadable folder is reported, not treated as absent");
+  assert.ok((JSON.parse(readFileSync(join(lockedOo, "skill-links.json"), "utf8")) as { links: Array<{ label: string }> }).links
+    .some(({ label }) => label === "claude"), "ownership of the unreadable link is kept");
+  const retried = uninstallSkillLinks({ ...options, userHome: lockedHome, ooHome: lockedOo }).find(({ label }) => label === "claude")!;
+  assert.equal(retried.action, "removed", "once readable, the recorded link is removed");
+  assert.equal(existsSync(join(lockedSkills, "owner-operator")), false);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
