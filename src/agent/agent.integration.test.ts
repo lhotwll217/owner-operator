@@ -196,9 +196,8 @@ for (const mechanic of [
     `the permanent prompt delegates ${mechanic} mechanics to the bundled skill`,
   );
 }
-assert.match(harnessPrompt, /After delegating, do not poll status/i);
 assert.match(harnessPrompt, /completion arrives automatically/i);
-assert.match(harnessPrompt, /never routine monitoring/i);
+assert.match(harnessPrompt, /run management is for\s+owner-directed lifecycle control/i);
 const sessionSearchSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "session-search", "SKILL.md"),
   "utf8",

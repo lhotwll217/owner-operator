@@ -832,3 +832,73 @@
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-waits-when-asked
+
+# Contract: with pstack-poteto-mode loaded, whose orchestrate brief template asks for agent-authored
+# scope and forbidden fields, every handoff is still printed and sent as shown. Catches pstack's
+# brief overriding the print-then-send rule.
+# Request verbatim from Owner Operator session 01a0c087-45d6-71e3-b73c-26e9063e6189, message 25,
+# sent as the `/skill:` invocation the owner used.
+- description: handoff-printed-with-pstack
+  options:
+    provider: file://eval/providers/noop-grader.mjs
+  vars:
+    id: handoff-printed-with-pstack
+    behaviorProfile: delegation-selection
+    behaviorClaim: handoff-printed-before-send
+    workspaceSkills: pstack
+    question: >-
+      /skill:pstack-poteto-mode just use grok 4.6 to implement the session grep jev integration
+      and have them test it please thanks do research with luna 5.6 using exa mcp as search
+      direction if need be
+    userHarnessPreferences: |-
+      # User harness preferences
+
+      ### Implementation
+
+      Use Muse 1.3 at medium effort for ordinary implementation.
+
+      ### Research
+
+      Use codex / gpt-5.6-luna / xhigh for research.
+    harnessDetails:
+      observedAt: "2026-09-15T12:00:00.000Z"
+      ephemeral: true
+      capabilities:
+        registry: { acpxVersion: "0.13.2", registeredAgentNames: [opencode, codex] }
+        harnesses:
+          - harness: opencode
+            acpxAgent: opencode
+            observedAt: "2026-09-15T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: "opencode-go/grok-4.6", availableModelIds: ["opencode-go/grok-4.6"] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: "opencode-go/grok-4.6", options: [{ value: "opencode-go/grok-4.6", name: "Grok 4.6" }] }
+                - { type: select, id: effort, name: Effort, category: thought_level, currentValue: medium, options: [{ value: medium, name: Medium }] }
+            usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+          - harness: codex
+            acpxAgent: codex
+            observedAt: "2026-09-15T12:00:00.000Z"
+            runtime: null
+            requestedInspection: null
+            session:
+              models: { currentModelId: gpt-5.6-luna, availableModelIds: [gpt-5.6-luna] }
+              configOptions:
+                - { type: select, id: model, name: Model, category: model, currentValue: gpt-5.6-luna, options: [{ value: gpt-5.6-luna, name: Luna 5.6 }] }
+                - { type: select, id: reasoning_effort, name: Reasoning effort, category: thought_level, currentValue: xhigh, options: [{ value: xhigh, name: Extra high }] }
+            usage: null
+            confirmation: null
+            error: null
+            baselineCandidate: null
+      account: []
+      unknowns: []
+    approvedBaseline: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
+    behaviorExpected: {}
+  metadata:
+    profile: delegation-selection
+    qtype: behavioral
+    behaviorClaim: handoff-printed-before-send

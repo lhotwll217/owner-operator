@@ -280,6 +280,9 @@ async function runBehavioralTrial({
         harnessInspections: vars.harnessInspections,
         baselineCandidate: vars.baselineCandidate,
         approvedBaseline: vars.approvedBaseline,
+        workspaceSkills: vars.workspaceSkills
+          ? { source: path.join(ownerOoHome, 'workspace', 'skills'), family: vars.workspaceSkills }
+          : undefined,
       }),
       timeoutMs,
       sourcePiAgentDir,

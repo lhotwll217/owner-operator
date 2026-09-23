@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   AgentRunHarness,
   AgentRunStatus,
   approveDelegatedBaseline,
+  ensureOwnerOperatorWorkspace,
   loadDelegatedBaseline,
   loadDelegatedBaselines,
   type AgentRunEffort,
@@ -73,6 +74,9 @@ type DelegationInput = CommonInput & {
     model: string;
     effort: AgentRunEffort | null;
   } | null;
+  // The owner's installed skill family (`pstack` copies `pstack` and every `pstack-*`), so a
+  // `/skill:` request expands inside the sandbox as it does for the owner.
+  workspaceSkills?: { source: string; family: string };
 };
 
 type ControlledSnapshot = Omit<HarnessDetailsSnapshot, "preferences">;
@@ -252,6 +256,15 @@ function delegationAdapter(
           model: scenario.approvedBaseline.model,
           effort: scenario.approvedBaseline.effort,
         }, environment.ooHome);
+      }
+      if (scenario.workspaceSkills) {
+        const { source, family } = scenario.workspaceSkills;
+        const target = ensureOwnerOperatorWorkspace(environment.ooHome).workspaceSkills;
+        const names = readdirSync(source).filter((name) => name === family || name.startsWith(`${family}-`));
+        if (!names.length) throw new Error(`no ${family} skills installed under ${source}`);
+        for (const name of names) {
+          cpSync(join(source, name), join(target, name), { recursive: true, dereference: true });
+        }
       }
     },
     sessionOptions: () => ({
