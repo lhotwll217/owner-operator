@@ -94,6 +94,15 @@ try {
   assert.equal(product.stdout, wrapper(query, { OO_CALLER_SESSION_ID: ids.caller, OO_CURRENT_SESSION_ID: ids.current }),
     "the daemon passes the caller ids exactly as the wrapper's env inputs");
 
+  // A wrapper flag's value is never read as oo's own flag, even when it looks like one.
+  const literal = await runOo(["search", "--query", "--from-session", "--owner-operator", "--json"]);
+  assert.equal(literal.status, 0, literal.stderr);
+  assert.equal((JSON.parse(literal.stdout) as { query: string }).query, "--from-session", "the value stays the query");
+  assert.match(literal.stdout, /"applied":false/, "and is not taken as provenance");
+  const both = await runOo(["search", "--query", "--from-session", "--from-session", ids.caller, "--owner-operator", "--json"]);
+  assert.deepEqual((JSON.parse(both.stdout) as { discoverySessionExclusions: unknown }).discoverySessionExclusions,
+    { applied: true, sessionIds: [ids.caller] }, "a real --from-session after it still applies");
+
   // Wrapper errors and exit codes pass through.
   const bad = await runOo(["search", "--nope"]);
   assert.equal(bad.status, 1);

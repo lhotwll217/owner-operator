@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS } from "./flags.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src/blacklist.mjs";
 import {
   loadSessionSources,
@@ -44,7 +45,7 @@ for (let index = 0; index < input.length; index += 1) {
   else if (arg === "--target-root") targetRoot = takeValue(arg, ++index);
   else if (arg === "--limit") limit = Number(takeValue(arg, ++index));
   else if (arg === "--max-chars") maxChars = Number(takeValue(arg, ++index));
-  else if (["--query", "--skim", "--session", "--at", "--since", "--until", "--sort", "--before", "--after", "--role", "--focus"].includes(arg)) {
+  else if (SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS.includes(arg)) {
     if (arg === "--query") hasQuery = true;
     if (arg === "--session") hasSession = true;
     if (arg === "--skim") hasSkim = true;
