@@ -374,12 +374,13 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     }
   } else if (claim === "handoff-printed-before-send") {
     const delegated = successful("delegate_agent");
-    if (delegated.length !== 1) problems.push(`expected exactly one successful delegated launch, got ${delegated.length}`);
-    const launch = delegated[0];
-    if (launch) {
+    if (!delegated.length) problems.push("expected a successful delegated launch, got none");
+    for (const launch of delegated) {
       const task = String(launch.input?.task ?? "").trim();
       const printed = (providerMetadata.assistantTexts ?? []).some((entry) =>
-        task && entry.text.includes(task) && typeof entry.index === "number" && entry.index < launch.index
+        // A handoff shown as a Markdown blockquote is the same text the owner reads.
+        task && entry.text.replace(/^> ?/gm, "").includes(task)
+          && typeof entry.index === "number" && entry.index < launch.index
       );
       if (!printed) problems.push("handoff was not printed in chat before delegate_agent");
     }

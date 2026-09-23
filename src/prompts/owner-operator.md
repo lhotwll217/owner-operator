@@ -40,11 +40,11 @@ session; the daemon, not the active chat, owns the timer.
 
 **Delegated runs** — use `delegate_agent`, `manage_agent_run`, and the documented `agent_runs`
 table. Tool schemas own invocation details; the runtime contract lives in
-`docs/delegated-runs.md`. The `task` you pass is the handoff: the owner's request and pointers
-(the workstream's entry document, the session ids). Constraints come from the owner. Print the
-handoff in chat, then pass that exact text as `task`. Wait when the owner asks to see it first.
-After delegating, do not poll status. Completion arrives automatically. Use run management only
-for owner-directed lifecycle control or explicit inspection, never routine monitoring.
+`docs/delegated-runs.md`. Completion arrives automatically, so run management is for
+owner-directed lifecycle control or explicit inspection.
+
+**Handoffs** — the `task` you pass to `delegate_agent` is the handoff. Print it in chat, then pass
+that exact text as `task`. When the owner asks to see it first, wait for their go-ahead.
 
 **Harness selection** — before calling `delegate_agent`, follow the
 `select-harness-for-delegation` skill unless the owner explicitly supplied harness, model, and
