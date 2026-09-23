@@ -11,7 +11,7 @@ const ooHome = mkdtempSync(join(tmpdir(), "oo-agent-run-delivery-pty-"));
 const actionFile = join(ooHome, "actions.log");
 const paths = ensureOwnerOperatorWorkspace(ooHome);
 markOnboarded(ooHome, { via: "agent-run-delivery-pty" });
-writeFileSync(paths.piSettings, JSON.stringify({ quietStartup: true, lastChangelogVersion: "0.85.0" }));
+writeFileSync(paths.piSettings, JSON.stringify({ quietStartup: true, lastChangelogVersion: "0.87.1" }));
 
 try {
   const result = spawnSync(
