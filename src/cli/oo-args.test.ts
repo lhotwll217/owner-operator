@@ -9,6 +9,9 @@ assert.deepEqual(parseOoArgs(["-p", "hi", "-h"]), { kind: "help" }, "help anywhe
 assert.deepEqual(parseOoArgs(["doctor"]), { kind: "doctor" });
 assert.deepEqual(parseOoArgs(["status"]), { kind: "doctor" }, "status aliases doctor");
 assert.deepEqual(parseOoArgs(["daemon"]), { kind: "daemon" });
+for (const argv of [["daemon", "--help"], ["daemon", "-h"], ["doctor", "--help"], ["status", "-h"]]) {
+  assert.deepEqual(parseOoArgs(argv), { kind: "help" }, `${argv.join(" ")} prints help instead of running`);
+}
 
 // Every reserved noun is an operation; its argv (including --help/--json) belongs to the noun.
 for (const noun of OPERATION_NOUNS) {

@@ -42,9 +42,10 @@ const VALUE_FLAGS = [
 export function parseOoArgs(argv: readonly string[]): OoCommand {
   const first = argv[0];
   if (isOperationNoun(first)) return { kind: "operation", noun: first, argv: argv.slice(1) };
+  // Help wins over every non-operation form, so probing `oo daemon --help` never starts a daemon.
+  if (argv.includes("--help") || argv.includes("-h")) return { kind: "help" };
   if (first === "doctor" || first === "status") return { kind: "doctor" };
   if (first === "daemon") return { kind: "daemon" };
-  if (argv.includes("--help") || argv.includes("-h")) return { kind: "help" };
 
   const removed = removedSpelling(argv);
   if (removed) return { kind: "usage-error", message: removed };

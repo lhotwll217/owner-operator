@@ -36,6 +36,13 @@ try {
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
   assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
+  for (const argv of [["daemon", "--help"], ["doctor", "-h"]]) {
+    const help = spawnSync(ooBin, argv, opts);
+    assert.equal(help.status, 0, `${argv.join(" ")} exits 0`);
+    assert.match(help.stdout, /Owner Operator \(oo\)/, `${argv.join(" ")} prints usage`);
+  }
+  assert.equal(existsSync(join(ooHome, "daemon.json")), false, "`oo daemon --help` starts no daemon");
+
   const nounHelp = spawnSync(ooBin, ["session-state", "--help"], opts);
   assert.equal(nounHelp.status, 0, `noun help exits 0 (stderr: ${nounHelp.stderr})`);
   assert.match(nounHelp.stdout, /^\s+list\s/m, "noun help lists list");
