@@ -120,6 +120,29 @@ try {
   assert.deepEqual(await cliJson(["schedules", "delete", created.id]), { ok: true }, "delete = DELETE route body");
   assert.deepEqual((await route("/schedules")).body, [], "the schedule is gone");
 
+  // Text carries the whole route record: parsing it back gives the record, so a changed
+  // interval, argument list, or timeout is visible without --json.
+  const parseRecord = (text: string): Record<string, unknown> => Object.fromEntries(text.trim().split("\n").map((line) => {
+    const at = line.indexOf(": ");
+    return [line.slice(0, at), JSON.parse(line.slice(at + 2))];
+  }));
+  const textInput = { ...input, name: "e2e text" };
+  const textCreated = await runOo(["schedules", "create", "--from", "-"], JSON.stringify(textInput));
+  const textRecord = parseRecord(textCreated.stdout) as { id: string };
+  assert.deepEqual(textRecord, ((await route("/schedules")).body as Array<{ id: string }>).find((s) => s.id === textRecord.id),
+    "create text parses back to the stored record");
+  const changed = { ...textInput, trigger: { kind: "every", everyMs: 7_200_000, anchorMs: 0 }, payload: { kind: "command", argv: ["/bin/echo", "changed"] }, timeoutSeconds: 90 };
+  const textUpdated = parseRecord((await runOo(["schedules", "update", textRecord.id, "--from", "-"], JSON.stringify(changed))).stdout);
+  assert.deepEqual([textUpdated.trigger, textUpdated.payload, textUpdated.timeoutSeconds], [changed.trigger, changed.payload, 90],
+    "update text shows the changed interval, arguments, and timeout");
+  assert.deepEqual(textUpdated, ((await route("/schedules")).body as Array<{ id: string }>).find((s) => s.id === textRecord.id));
+  const listedText = (await runOo(["schedules", "list"])).stdout.trim().split("\n\n").map(parseRecord);
+  assert.deepEqual(listedText, (await route("/schedules")).body, "list text parses back to GET /schedules");
+  const textRun = parseRecord((await runOo(["schedules", "run", textRecord.id])).stdout);
+  assert.deepEqual(Object.keys(textRun), Object.keys(run), "run text carries every run-record field");
+  assert.equal(textRun.scheduleId, textRecord.id);
+  await runOo(["schedules", "delete", textRecord.id]);
+
   const missing = await runOo(["schedules", "delete", created.id, "--json"]);
   assert.equal(missing.status, 1);
   assert.deepEqual(JSON.parse(missing.stderr), { status: 404, error: `no such schedule: ${created.id}` });

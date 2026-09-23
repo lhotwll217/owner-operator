@@ -21,11 +21,13 @@ function readScheduleInput(values: VerbValues): ScheduleCreateInput {
   }
 }
 
-const scheduleLine = (schedule: ScheduleDefinition): string =>
-  `${schedule.id}  ${schedule.enabled ? "enabled " : "disabled"}  ${schedule.trigger.kind.padEnd(8)} next=${schedule.nextRunAt ?? "-"}  ${schedule.name}`;
+/** Every field of a route record, one `field: value` line each. Values are JSON, so the text carries
+ * the whole record (trigger, payload arguments, timeout, ...) and parses back to it. */
+export const recordText = (record: ScheduleDefinition | ScheduleRun): string =>
+  Object.entries(record).map(([field, value]) => `${field}: ${JSON.stringify(value)}`).join("\n");
 
-const runLine = (run: ScheduleRun): string =>
-  `run ${run.id} of ${run.scheduleId}: ${run.status}${run.error ? ` — ${run.error}` : ""}`;
+const scheduleLine = recordText;
+const runLine = recordText;
 
 export const schedules: Noun = {
   summary: "durable prompt and command schedules (/schedules)",
@@ -34,7 +36,7 @@ export const schedules: Noun = {
       summary: "every schedule",
       async run({ json }) {
         const all = await (await gateway()).listSchedules();
-        await emit(json, all, () => all.length ? all.map(scheduleLine).join("\n") : "no schedules");
+        await emit(json, all, () => all.length ? all.map(scheduleLine).join("\n\n") : "no schedules");
         return 0;
       },
     },
