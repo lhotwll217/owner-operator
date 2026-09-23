@@ -1,5 +1,6 @@
 // The shared shape of an `oo <noun> <verb>` operation: strict per-verb flags, `--json` on every
 // verb, per-noun help as the discovery surface, and Gateway errors reported verbatim.
+import { once } from "node:events";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import type { GatewayApi } from "@owner-operator/core";
 import { GatewayRequestError } from "../../gateway/client";
@@ -125,8 +126,20 @@ export function reportFailure(error: unknown, json: boolean): void {
 }
 
 /** Print the route's payload unchanged under --json, else the verb's text rendering. */
-export function emit(json: boolean, payload: unknown, text: () => string): void {
-  process.stdout.write(json ? `${JSON.stringify(payload, null, 2)}\n` : `${text()}\n`);
+export function emit(json: boolean, payload: unknown, text: () => string): Promise<void> {
+  return writeOut(json ? `${JSON.stringify(payload, null, 2)}\n` : `${text()}\n`);
+}
+
+/** Write to stdout and wait for a full pipe to drain, so a slow reader slows the producer. */
+export async function writeOut(text: string): Promise<void> {
+  if (!process.stdout.write(text)) await once(process.stdout, "drain");
+}
+
+/** Resolve once everything queued on stdout and stderr has been handed to the OS. `process.exit`
+ * discards queued pipe writes, so every exit after output waits for this first. */
+export async function flushStdio(): Promise<void> {
+  await Promise.all([process.stdout, process.stderr].map((stream) =>
+    new Promise<void>((resolve) => stream.write("", () => resolve()))));
 }
 
 /** The ready daemon's Gateway, starting the daemon when needed. The daemon owns every state

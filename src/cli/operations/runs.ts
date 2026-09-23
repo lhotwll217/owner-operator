@@ -10,7 +10,7 @@ import {
   type AgentRunLogRecord,
 } from "@owner-operator/core";
 import { callerSessionId } from "../../shared/caller-session";
-import { emit, gateway, UsageError, type Noun } from "./operation";
+import { emit, gateway, UsageError, writeOut, type Noun } from "./operation";
 
 const HARNESSES = Object.values(AgentRunHarness) as string[];
 const RECONNECT_MS = 1_000; // the Gateway client's own SSE reconnect delay (src/gateway/client.ts)
@@ -23,28 +23,28 @@ const runLine = (run: AgentRun): string => {
 };
 
 /** Text rendering: the child's non-thought text as it streams, and one line per tool call. */
-function textRenderer(): (record: AgentRunLogRecord) => void {
+function textRenderer(): (record: AgentRunLogRecord) => Promise<void> {
   const seenToolCalls = new Set<string>();
   let atLineStart = true;
-  const write = (text: string): void => {
+  const write = async (text: string): Promise<void> => {
     if (!text) return;
-    process.stdout.write(text);
     atLineStart = text.endsWith("\n");
+    await writeOut(text);
   };
-  return (record) => {
+  return async (record) => {
     if (isAgentRunResultRecord(record)) {
-      if (!atLineStart) write("\n");
+      if (!atLineStart) await write("\n");
       process.stderr.write(`[run ${record.runId} ${record.status}${record.error ? `: ${record.error.message}` : ""}]\n`);
       return;
     }
     if (record.type === "text_delta" && record.stream !== "thought" && typeof record.text === "string") {
-      write(record.text);
+      await write(record.text);
     } else if (record.type === "tool_call") {
       const id = typeof record.toolCallId === "string" ? record.toolCallId : undefined;
       if (id && seenToolCalls.has(id)) return;
       if (id) seenToolCalls.add(id);
       const title = typeof record.title === "string" && record.title ? record.title : record.text;
-      if (typeof title === "string" && title) write(`${atLineStart ? "" : "\n"}→ ${title}\n`);
+      if (typeof title === "string" && title) await write(`${atLineStart ? "" : "\n"}→ ${title}\n`);
     }
   };
 }
@@ -55,7 +55,7 @@ function textRenderer(): (record: AgentRunLogRecord) => void {
  * following and the run is still live. */
 async function streamRunLog(id: string, json: boolean, follow: boolean): Promise<AgentRunStatus | null> {
   const render = json
-    ? (record: AgentRunLogRecord) => process.stdout.write(`${JSON.stringify(record)}\n`)
+    ? (record: AgentRunLogRecord) => writeOut(`${JSON.stringify(record)}\n`)
     : textRenderer();
   let after = 0;
   for (;;) {
@@ -66,7 +66,7 @@ async function streamRunLog(id: string, json: boolean, follow: boolean): Promise
       if (!connection) throw new Error("Owner Operator daemon is not ready");
       try {
         for await (const { seq, record } of connection.agentRunLog(id, { after, follow })) {
-          render(record);
+          await render(record);
           if (seq !== null) after = seq;
           if (isAgentRunResultRecord(record)) return record.status;
         }
@@ -90,7 +90,7 @@ const rowVerb = (summary: string, act: (id: string) => Promise<AgentRun>) => ({
   minPositionals: 1,
   async run({ positionals: [id], json }: { positionals: string[]; json: boolean }) {
     const run = await act(id!);
-    emit(json, run, () => runLine(run));
+    await emit(json, run, () => runLine(run));
     return 0;
   },
 });
@@ -131,7 +131,7 @@ export const runs: Noun = {
           onMissingBaseline: AgentRunMissingBaseline.HarnessChoice,
         });
         if (values["no-wait"]) {
-          emit(json, run, () => runLine(run));
+          await emit(json, run, () => runLine(run));
           return 0;
         }
         process.stderr.write(`[run ${run.id} ${run.status}; the daemon owns it — Ctrl-C detaches, \`oo runs logs --follow ${run.id}\` reattaches]\n`);
@@ -157,7 +157,7 @@ export const runs: Noun = {
       },
       async run({ values, json }) {
         const all = await (await gateway()).listAgentRuns(typeof values.parent === "string" ? values.parent : undefined);
-        emit(json, all, () => all.length ? all.map(runLine).join("\n") : "no runs");
+        await emit(json, all, () => all.length ? all.map(runLine).join("\n") : "no runs");
         return 0;
       },
     },
@@ -170,7 +170,7 @@ export const runs: Noun = {
       minPositionals: 2,
       async run({ positionals: [id, task], json }) {
         const run = await (await gateway()).resumeAgentRun(id!, task!);
-        emit(json, run, () => runLine(run));
+        await emit(json, run, () => runLine(run));
         return 0;
       },
     },

@@ -49,6 +49,7 @@ if (cli.kind === "doctor") {
   const { formatHarnessDoctor } = await import("../agent/doctor");
   const output = formatHarnessDoctor();
   process.stdout.write(output);
+  await (await import("./operations/operation")).flushStdio();
   process.exit(output.startsWith("Status: ready") ? 0 : 1);
 }
 
@@ -61,7 +62,10 @@ if (cli.kind === "daemon") {
 
 if (cli.kind === "operation") {
   const { runOperation } = await import("./operations");
-  process.exit(await runOperation(cli.noun, cli.argv));
+  const { flushStdio } = await import("./operations/operation");
+  const code = await runOperation(cli.noun, cli.argv);
+  await flushStdio();
+  process.exit(code);
 }
 
 if (cli.kind === "interactive") {

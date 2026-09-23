@@ -21,7 +21,7 @@ export const skill: Noun = {
       summary: "link this checkout's skill into the shared skills root and every harness folder that exists",
       async run({ json }) {
         const changes = installSkillLinks();
-        emit(json, changes, () => changes.map(changeLine).join("\n"));
+        await emit(json, changes, () => changes.map(changeLine).join("\n"));
         return 0;
       },
     },
@@ -29,7 +29,7 @@ export const skill: Noun = {
       summary: "remove only the links `oo skill install` created",
       async run({ json }) {
         const changes = uninstallSkillLinks();
-        emit(json, changes, () => changes.map(changeLine).join("\n"));
+        await emit(json, changes, () => changes.map(changeLine).join("\n"));
         return 0;
       },
     },
@@ -37,7 +37,7 @@ export const skill: Noun = {
       summary: "each link's target and whether it resolves",
       async run({ json }) {
         const statuses = skillLinkStatus();
-        emit(json, statuses, () => statuses.map(statusLine).join("\n"));
+        await emit(json, statuses, () => statuses.map(statusLine).join("\n"));
         return statuses.some((status) => status.state === "dangling") ? 1 : 0;
       },
     },

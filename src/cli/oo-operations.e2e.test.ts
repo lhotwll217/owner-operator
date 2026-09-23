@@ -26,6 +26,22 @@ const runOo = async (args: readonly string[], stdin?: string): Promise<{ status:
     child.stdin.end(stdin ?? "");
   });
 
+/** Spawn oo with its stdout paused for a second, so the pipe fills while the CLI writes. */
+const runOoSlowReader = async (args: readonly string[]): Promise<{ status: number | null; stdout: string; stderr: string }> =>
+  await new Promise((resolve, reject) => {
+    const child = spawn(ooBin, args, { cwd: repoRoot, env: { ...process.env, OO_HOME: ooHome } });
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    child.stdout.pause();
+    child.stdout.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+    child.stdout.pause();
+    setTimeout(() => child.stdout.resume(), 1_000);
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout: Buffer.concat(chunks).toString("utf8"), stderr }));
+    child.stdin.end();
+  });
+
 const route = async (path: string, init: RequestInit = {}): Promise<{ status: number; body: unknown }> => {
   const info = JSON.parse(readFileSync(join(ooHome, "daemon.json"), "utf8")) as DaemonInfo;
   const response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
@@ -66,6 +82,14 @@ try {
   assert.ok(describeText.stdout.includes(docs.columns[0]!.description), "text describe shows schema-docs column text");
   const sql = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name LIMIT 2";
   assert.deepEqual(await cliJson(["db", "query", sql]), (await query({ action: "query", sql })).body, "db query = query");
+  // A payload far larger than the pipe buffer, read only after the CLI has finished writing,
+  // must arrive whole: exit waits for stdout to drain.
+  const bigSql = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200) SELECT i, printf('%.5000c', 'x') AS pad FROM n";
+  const slow = await runOoSlowReader(["db", "query", bigSql, "--json"]);
+  assert.equal(slow.status, 0, slow.stderr);
+  assert.deepEqual(JSON.parse(slow.stdout), (await query({ action: "query", sql: bigSql })).body, "a slow reader receives the whole payload");
+  assert.ok(slow.stdout.length > 1_000_000);
+
   const write = await runOo(["db", "query", "DELETE FROM agent_runs", "--json"]);
   const writeRoute = await query({ action: "query", sql: "DELETE FROM agent_runs" });
   assert.equal(write.status, 1, "a write statement fails");

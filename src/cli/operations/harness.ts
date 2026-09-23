@@ -64,7 +64,7 @@ export const harness: Noun = {
           ...(harnesses.length ? { harnesses } : {}),
           ...(inspect.length ? { inspect } : {}),
         }) as HarnessDetailsSnapshot;
-        emit(json, snapshot, () => renderSnapshot(snapshot));
+        await emit(json, snapshot, () => renderSnapshot(snapshot));
         return 0;
       },
     },

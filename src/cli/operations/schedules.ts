@@ -34,7 +34,7 @@ export const schedules: Noun = {
       summary: "every schedule",
       async run({ json }) {
         const all = await (await gateway()).listSchedules();
-        emit(json, all, () => all.length ? all.map(scheduleLine).join("\n") : "no schedules");
+        await emit(json, all, () => all.length ? all.map(scheduleLine).join("\n") : "no schedules");
         return 0;
       },
     },
@@ -43,7 +43,7 @@ export const schedules: Noun = {
       options: FROM,
       async run({ values, json }) {
         const created = await (await gateway()).createSchedule(readScheduleInput(values));
-        emit(json, created, () => scheduleLine(created));
+        await emit(json, created, () => scheduleLine(created));
         return 0;
       },
     },
@@ -54,7 +54,7 @@ export const schedules: Noun = {
       minPositionals: 1,
       async run({ positionals: [id], values, json }) {
         const updated = await (await gateway()).updateSchedule(id!, readScheduleInput(values));
-        emit(json, updated, () => scheduleLine(updated));
+        await emit(json, updated, () => scheduleLine(updated));
         return 0;
       },
     },
@@ -64,7 +64,7 @@ export const schedules: Noun = {
       minPositionals: 1,
       async run({ positionals: [id], json }) {
         const result = await (await gateway()).deleteSchedule(id!);
-        emit(json, result, () => `deleted ${id}`);
+        await emit(json, result, () => `deleted ${id}`);
         return 0;
       },
     },
@@ -74,7 +74,7 @@ export const schedules: Noun = {
       minPositionals: 1,
       async run({ positionals: [id], json }) {
         const run = await (await gateway()).runSchedule(id!);
-        emit(json, run, () => runLine(run));
+        await emit(json, run, () => runLine(run));
         return 0;
       },
     },

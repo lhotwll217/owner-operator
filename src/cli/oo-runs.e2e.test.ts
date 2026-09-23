@@ -145,6 +145,27 @@ try {
     const current = state.agentRunById(cancelId)!;
     return current.status === AgentRunStatus.Running ? undefined : current;
   }, "cancelled")).status, AgentRunStatus.Cancelled, `cancel finalizes the run (returned ${cancelRow.status})`);
+  // A log far larger than the pipe buffer, read only after a pause, arrives whole with its
+  // terminal record: the CLI waits on backpressure and drains stdout before exiting.
+  const big = state.createAgentRun({ harness: "claude-code" as never, task: "HOLD big log", cwd: repoRoot, depth: 1, timeoutSeconds: 60 });
+  await waitFor(() => held.get(big.id), "big run running");
+  for (let index = 0; index < 400; index++) {
+    assert.notEqual(state.appendAgentRunEvent(big.id, { type: "text_delta", stream: "output", text: "y".repeat(4_000) }), null);
+  }
+  held.get(big.id)!();
+  await waitFor(() => state.agentRunById(big.id)!.status === AgentRunStatus.Running ? undefined : true, "big run finished");
+  const slow = spawnOo(["runs", "logs", big.id, "--json"]);
+  const slowClosed = new Promise<number | null>((resolve) => slow.once("close", resolve));
+  slow.stdout!.pause();
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  slow.stdout!.resume();
+  const slowStatus = await slowClosed;
+  const slowLines = ndjson(slow.out.stdout);
+  assert.equal(slowStatus, 0, slow.out.stderr);
+  assert.equal(slowLines.length, state.agentRunEvents(big.id).length, "every stored record reaches a slow reader");
+  assert.ok(slowLines.length > 400);
+  assert.equal(slowLines.at(-1)?.type, "result", "the terminal record arrives");
+
   const missing = await runOo(["runs", "logs", "no-such-run", "--json"]);
   assert.equal(missing.status, 1);
   assert.deepEqual(JSON.parse(missing.stderr), { status: 404, error: "no such agent run" });

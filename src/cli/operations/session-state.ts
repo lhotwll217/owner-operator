@@ -11,7 +11,7 @@ export const sessionState: Noun = {
       summary: "current session-state rows (GET /session-state)",
       async run({ json }) {
         const rows = await (await gateway()).sessionState();
-        emit(json, rows, () => rows.length ? rows.map(rowLine).join("\n") : "no sessions");
+        await emit(json, rows, () => rows.length ? rows.map(rowLine).join("\n") : "no sessions");
         return 0;
       },
     },
@@ -22,7 +22,7 @@ export const sessionState: Noun = {
       variadic: true,
       async run({ positionals, json }) {
         const result: MarkThreadsDoneResult = await (await gateway()).markDone(positionals);
-        emit(json, result, () => [
+        await emit(json, result, () => [
           ...result.marked.map((row) => `done     ${row.id}`),
           ...result.alreadyDoneIds.map((id) => `already  ${id}`),
           ...result.missingIds.map((id) => `missing  ${id}`),
