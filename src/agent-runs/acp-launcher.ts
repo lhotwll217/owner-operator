@@ -464,8 +464,8 @@ export function cursorAcpAgentCommand(): string {
 
 /** Use ACPX's existing registry override with the exact installed v1 executable, never an npx
  * download or the incompatible v2 command. */
-export function openCodeAcpAgentCommand(): string {
-  return `'${resolveOpenCodeRuntime().executablePath.replaceAll("'", "'\\''")}' acp`;
+export function openCodeAcpAgentCommand(executablePath: string = resolveOpenCodeRuntime().executablePath): string {
+  return `'${executablePath.replaceAll("'", "'\\''")}' acp`;
 }
 
 /** Identify the supported v1 CLI by version signature, not merely by filename. A user-supplied

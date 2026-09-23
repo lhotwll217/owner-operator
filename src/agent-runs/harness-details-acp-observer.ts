@@ -22,6 +22,7 @@ import {
   agentRunStateDir,
   createLeasedAcpRuntime,
   cursorAgentBinaryPath,
+  openCodeAcpAgentCommand,
   resolveOpenCodeRuntime,
   type LeasedAcpRuntime,
 } from "./acp-launcher";
@@ -77,6 +78,7 @@ export interface AcpObservationDeps {
     harness: AgentRunHarness;
     leaseKey: string;
     stateDir: string;
+    resolveAgentCommand?: (acpAgent: string) => string;
   }) => LeasedAcpRuntime;
   readRuntimeProvenance?: (harness: AgentRunHarness) => Promise<AcpRuntimeProvenance>;
   timeoutMs?: number;
@@ -190,7 +192,15 @@ export async function observeAcpHarness(
   let handle: Awaited<ReturnType<LeasedAcpRuntime["runtime"]["ensureSession"]>> | undefined;
   let observation: HarnessCapabilityObservation = { ...base(), runtime: provenance };
   try {
-    leased = (deps.createRuntime ?? createLeasedAcpRuntime)({ harness, leaseKey: probeKey, stateDir: probeStateDir });
+    // OpenCode's executable was already identified (and version-checked) for provenance; launching
+    // that same path keeps the observation to one version check and one backend identity.
+    const identifiedPath = harness === AgentRunHarness.OpenCode ? provenance.backend.executablePath : undefined;
+    leased = (deps.createRuntime ?? createLeasedAcpRuntime)({
+      harness,
+      leaseKey: probeKey,
+      stateDir: probeStateDir,
+      ...(identifiedPath ? { resolveAgentCommand: () => openCodeAcpAgentCommand(identifiedPath) } : {}),
+    });
     session = leased.runtime.ensureSession({
       sessionKey: probeKey,
       agent: acpxAgent,
