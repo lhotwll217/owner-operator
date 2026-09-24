@@ -30,6 +30,9 @@ identified automatically.
 `oo <noun> --help` lists that noun's verbs (`oo search --help` lists its search flags instead). Add
 `--json` for machine-readable output.
 
+To find which session handled something, `oo db query` with a `LIKE` on `thread_details.topic`
+and `status_summary` before searching transcripts.
+
 ## Delegating
 
 `oo runs delegate --harness <harness> "<task>"` launches the child and streams its output to

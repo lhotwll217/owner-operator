@@ -10,14 +10,15 @@ import {
 import {
   claudeAcpAgentCommand,
   codexAcpAgentCommand,
+  codexInitialAgentMode,
   createAcpLauncher,
   cursorAcpAgentCommand,
 } from "./acp-launcher";
 
-// The command is `"<node>" "<entrypoint>"`; the entrypoint must be a real installed file, not
+// The command is `[INITIAL_AGENT_MODE=<mode>] "<node>" "<entrypoint>"`; the entrypoint must be a real installed file, not
 // just a plausible path — Claude's is joined by convention rather than export resolution.
 const installedEntrypoint = (command: string): string => {
-  const match = /^"[^"]+" "([^"]+)"$/.exec(command);
+  const match = /^(?:INITIAL_AGENT_MODE=[\w-]+ )?"[^"]+" "([^"]+)"$/.exec(command);
   assert.ok(match, `adapter command carries a quoted node + entrypoint pair: ${command}`);
   accessSync(match[1], constants.R_OK);
   return match[1];
@@ -36,6 +37,14 @@ assert.match(codexCommand, /codex-acp\/dist\/index\.js"?$/, "Codex uses Owner Op
 assert.doesNotMatch(codexCommand, /npx|0\.0\.44/, "Codex does not fall back to acpx's registry command");
 assert.match(installedEntrypoint(codexCommand), /node_modules\/@agentclientprotocol\/codex-acp\//,
   "the Codex entrypoint is the package-lock-installed adapter");
+
+// codex-acp ignores config.toml's sandbox_mode, so the owner's top-level setting becomes the
+// adapter's initial mode; a table's sandbox_mode or an unknown value leaves the adapter default.
+assert.equal(codexInitialAgentMode('sandbox_mode = "danger-full-access"\n'), "agent-full-access");
+assert.equal(codexInitialAgentMode("sandbox_mode='read-only'"), "read-only");
+assert.equal(codexInitialAgentMode('sandbox_mode = "workspace-write"'), "agent");
+assert.equal(codexInitialAgentMode('[profiles.x]\nsandbox_mode = "danger-full-access"'), undefined);
+assert.equal(codexInitialAgentMode(undefined), undefined);
 
 // Cursor speaks ACP first-party: the resolved local CLI in server mode, no adapter package.
 try {

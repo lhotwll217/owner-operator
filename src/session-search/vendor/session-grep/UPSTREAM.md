@@ -7,7 +7,7 @@ skill wraps it to inject its
 own session sources and enforce the privacy blacklist.
 
 - **Upstream:** https://github.com/lhotwll217/session-grep
-- **Synced from:** `main` @ `787f87e418329db9cca80c71f8b3bae11a31aa34`
+- **Synced from:** `4bca8774bae94001e74a479ecbf58e34826ea7ad` @ `4bca8774bae94001e74a479ecbf58e34826ea7ad`
 
 ## Rules
 
