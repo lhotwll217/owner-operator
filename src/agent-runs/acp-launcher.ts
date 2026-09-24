@@ -1,4 +1,4 @@
-import { accessSync, constants, realpathSync } from "node:fs";
+import { accessSync, constants, readFileSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -452,7 +452,35 @@ export function claudeAcpAgentCommand(): string {
  * owns adapter compatibility. */
 export function codexAcpAgentCommand(): string {
   const entrypoint = fileURLToPath(import.meta.resolve("@agentclientprotocol/codex-acp"));
-  return [JSON.stringify(process.execPath), JSON.stringify(entrypoint)].join(" ");
+  const mode = codexInitialAgentMode(readCodexConfig());
+  return [
+    ...(mode ? [`INITIAL_AGENT_MODE=${mode}`] : []),
+    JSON.stringify(process.execPath),
+    JSON.stringify(entrypoint),
+  ].join(" ");
+}
+
+/** codex-acp ignores config.toml's `sandbox_mode` and opens every session in its own `agent`
+ * mode (workspace-write, no network), so a child could not reach the local Gateway that `oo`
+ * calls. Map the owner's configured sandbox onto the adapter's mode ids (codex-acp README,
+ * "INITIAL_AGENT_MODE") so the child gets the same gate as launching Codex directly. */
+export function codexInitialAgentMode(configToml: string | undefined): string | undefined {
+  // Only the top-level key applies; anything after the first [table] header belongs to a table.
+  const topLevel = configToml?.split(/^\s*\[/m)[0] ?? "";
+  const sandbox = /^\s*sandbox_mode\s*=\s*["']([^"']+)["']/m.exec(topLevel)?.[1];
+  return ({
+    "read-only": "read-only",
+    "workspace-write": "agent",
+    "danger-full-access": "agent-full-access",
+  } as Record<string, string>)[sandbox ?? ""];
+}
+
+function readCodexConfig(): string | undefined {
+  try {
+    return readFileSync(join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml"), "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 /** Cursor's CLI ships a first-party ACP server (`cursor-agent acp`), so no adapter package sits
