@@ -1,117 +1,81 @@
-// Owner Operator — plain frontend (readline REPL + headless single-turn). Normal turns are prose.
-// Session-state mode returns the current model-free gateway/widget state.
+// Owner Operator — `oo` entrypoint. Operations (`oo <noun> <verb>`) are model-free Gateway
+// calls; `-p` runs one headless model turn; bare resume flags open the plain readline REPL.
 // Agent core: agent.ts.
 //
-//   tsx src/cli/oo.ts                            # interactive (plain)
-//   tsx src/cli/oo.ts "what's ongoing?"          # headless single-turn, prose
-//   tsx src/cli/oo.ts --continue "and then?"     # resume most recent oo thread
-//   tsx src/cli/oo.ts --session <id> "and then?" # resume a specific oo thread
-//   tsx src/cli/oo.ts --session-state            # current session state snapshot
+//   tsx src/cli/oo.ts                             # interactive (plain)
+//   tsx src/cli/oo.ts -p "what's ongoing?"        # headless single-turn, prose
+//   tsx src/cli/oo.ts --continue -p "and then?"   # resume most recent oo thread
+//   tsx src/cli/oo.ts session-state list --json   # model-free operation
 
 import readline from "node:readline/promises";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { ensureOwnerOperatorWorkspace, isOnboarded } from "@owner-operator/core";
 import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { parseOoArgs } from "./oo-args";
+import { OPERATION_NOUNS, parseOoArgs } from "./oo-args";
 
 const USAGE = `Owner Operator (oo) — track and act on your local CLI agent sessions.
 
-  oo                         embedded Pi interactive mode
-  oo -i | --interactive      alias for the default interactive mode
-  oo "what's ongoing?"       headless single-turn question (prose)
-  oo --continue "and then?"  resume the most recent oo thread
-  oo --session <id> "more"   resume a specific oo thread
-  oo --from-session <id>     audit: record which coding session is calling
-  oo --session-state         current session state snapshot
-  oo --done <id...>          mark threads done by id (model-free; ids from --session-state)
-  oo doctor | status         effective workspace, resources, credentials, and gates
-  oo daemon                  run the state-owning daemon
-  oo --help | -h             this help
+  oo                              embedded Pi interactive mode
+  oo -p | --prompt "<text>"       one headless turn (prose on stdout, session id on stderr)
+  oo --continue [-p "<text>"]     resume the most recent oo thread
+  oo --session <id> [-p "<text>"] resume a specific oo thread
+  oo --from-session <id>          record which coding session is calling
+  oo doctor | status              effective workspace, resources, credentials, and gates
+  oo daemon                       run the state-owning daemon
+  oo --help | -h                  this help
+
+Operations (model-free; \`oo <noun> --help\` shows each noun's usage; --json gives machine-readable output):
+${OPERATION_NOUNS.map((noun) => `  oo ${noun}${noun === "search" ? "            flags only, no verbs; --help prints the search flags" : ""}`).join("\n")}
 
 Model: imported or configured under OO_HOME/pi/settings.json`;
 
 const cli = parseOoArgs(process.argv.slice(2));
 const harnessPaths = ensureOwnerOperatorWorkspace();
 
-// --help / -h: usage and exit BEFORE building a model session, so probing help never makes a
-// paid call.
-if (cli.help) {
+// Help, usage errors, and operations exit BEFORE building a model session, so probing the CLI
+// never makes a paid call.
+if (cli.kind === "help") {
   console.log(USAGE);
   process.exit(0);
 }
 
-if (cli.doctor) {
+if (cli.kind === "usage-error") {
+  process.stderr.write(`oo: ${cli.message}\n\n${USAGE}\n`);
+  process.exit(2);
+}
+
+if (cli.kind === "doctor") {
   const { formatHarnessDoctor } = await import("../agent/doctor");
   const output = formatHarnessDoctor();
   process.stdout.write(output);
+  await (await import("./operations/operation")).flushStdio();
   process.exit(output.startsWith("Status: ready") ? 0 : 1);
 }
 
 // `oo daemon` — run the state-owning daemon (no model session needed). Resolves on shutdown.
-if (cli.daemon) {
+if (cli.kind === "daemon") {
   const { daemonMain } = await import("../daemon/runtime");
   await daemonMain();
   process.exit(0);
 }
 
-if (cli.removedJson) {
-  process.stderr.write("oo: --json was renamed to --session-state\n");
-  process.exit(2);
+if (cli.kind === "operation") {
+  const { runOperation } = await import("./operations");
+  const { flushStdio } = await import("./operations/operation");
+  const code = await runOperation(cli.noun, cli.argv);
+  await flushStdio();
+  process.exit(code);
 }
 
-if (cli.removedHeadlessSubcommand) {
-  process.stderr.write("oo: that removed headless subcommand has been removed; use `oo \"question\"` for headless prose or `oo --session-state` for the model-free state snapshot\n");
-  process.exit(2);
-}
-
-if (cli.missingSession) {
-  process.stderr.write("--session needs an id or path\n" + USAGE + "\n");
-  process.exit(2);
-}
-
-if (cli.missingFromSession) {
-  process.stderr.write("--from-session needs an id\n" + USAGE + "\n");
-  process.exit(2);
-}
-
-if (cli.interactive) {
-  if (cli.continue || cli.session || cli.fromSession || cli.prompt) {
-    process.stderr.write("oo: -i/--interactive is only valid by itself; use bare `oo` for interactive mode\n");
-    process.exit(2);
-  }
+if (cli.kind === "interactive") {
   await (await import("../daemon/ensure")).ensureDaemon();
   await import("./interactive");
   process.exit(0);
 }
 
-if (cli.sessionState) {
-  await (await import("../daemon/ensure")).ensureDaemon();
-  const { getCurrentSessionStateRows } = await import("../gateway/session-state");
-  process.stdout.write(JSON.stringify(await getCurrentSessionStateRows(), null, 2) + "\n");
-  process.exit(0);
-}
-
-// --done — model-free mark-done, the write twin of --session-state. Explicit ids only:
-// coding agents get theirs from --session-state; no env or cwd guessing, so a parallel
-// agent in the same repo can never mark a sibling's session by accident.
-if (cli.done) {
-  if (cli.done.length === 0) {
-    process.stderr.write("--done needs one or more thread ids (see oo --session-state)\n" + USAGE + "\n");
-    process.exit(2);
-  }
-  await (await import("../daemon/ensure")).ensureDaemon();
-  const { resolveBackend } = await import("../gateway/client");
-  const backend = await resolveBackend();
-  const result = await backend.markDone(cli.done);
-  backend.close();
-  process.stdout.write(JSON.stringify({
-    marked: result.marked,
-    alreadyDoneIds: result.alreadyDoneIds,
-    missingIds: result.missingIds,
-  }, null, 2) + "\n");
-  process.exit(result.missingIds.length > 0 ? 1 : 0);
-}
+// Remaining form: a plain oo conversation, one headless turn with -p or the readline REPL.
+const chat = cli;
 
 if (!isOnboarded(harnessPaths.home)) {
   process.stderr.write("oo: setup required; run `oo` in an interactive terminal\n");
@@ -131,10 +95,10 @@ const {
   shutdownSessionExtensions,
 } = await import("../agent/agent");
 
-const provenance = ooProvenance("chat", cli.fromSession);
+const provenance = ooProvenance("chat", chat.fromSession);
 
 async function resolveSessionManager(): Promise<SessionManager> {
-  const ref = cli.session;
+  const ref = chat.session;
   if (ref !== undefined) {
     if (!ref) {
       process.stderr.write("--session needs an id or path\n" + USAGE + "\n");
@@ -149,7 +113,7 @@ async function resolveSessionManager(): Promise<SessionManager> {
     }
     return openOoSession(match.path, provenance);
   }
-  if (cli.continue) return continueOoSession(provenance);
+  if (chat.continue) return continueOoSession(provenance);
   return createOoSession(provenance);
 }
 
@@ -167,7 +131,7 @@ const { session, modelLabel, toolNames } = await createOwnerOperatorSession("cha
 });
 console.error(`[oo] ${modelLabel} · tools: ${toolNames.join(", ")}\n`);
 
-const headlessPrompt = cli.prompt;
+const headlessPrompt = chat.prompt;
 
 const DEBUG = !!process.env.OO_DEBUG;
 

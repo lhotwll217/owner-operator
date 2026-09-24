@@ -88,7 +88,8 @@ export interface HarnessAccountObservation {
 }
 
 export interface HarnessCapabilitySnapshot extends HarnessCapabilityObservation {
-  baselineCandidate: HarnessBaselineCandidate | null;
+  /** Present only when candidates were requested; null for an inspected or failed projection. */
+  baselineCandidate?: HarnessBaselineCandidate | null;
 }
 
 export interface HarnessUnknown {
@@ -184,9 +185,8 @@ export async function readHarnessDetails(
     Promise.all(harnesses.map((harness) => readHarnessAccount(harness, observedAt, options.deps))),
   ]);
   const capabilities = capabilityRows.map((observation): HarnessCapabilitySnapshot => {
-    if (!options.includeBaselineCandidates || observation.requestedInspection) {
-      return { ...observation, baselineCandidate: null };
-    }
+    if (!options.includeBaselineCandidates) return observation;
+    if (observation.requestedInspection) return { ...observation, baselineCandidate: null };
     try {
       return { ...observation, baselineCandidate: baselineCandidateFromObservation(observation) };
     } catch (error) {

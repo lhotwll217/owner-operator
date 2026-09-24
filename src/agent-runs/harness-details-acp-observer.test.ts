@@ -298,12 +298,12 @@ try {
     acpxVersion: "0.13.2",
     adapter: {
       packageName: "@agentclientprotocol/claude-agent-acp",
-      packageVersion: "0.74.0",
+      packageVersion: "0.81.0",
       resolution: "package-lock",
     },
     backend: {
       name: "@anthropic-ai/claude-agent-sdk",
-      version: "0.3.257",
+      version: "0.3.280",
       source: "adapter-dependency",
     },
   });

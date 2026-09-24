@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import {
+  HARNESS_OBSERVATION_CLEANUP_MS,
+  HARNESS_OBSERVATION_STAGES,
+  HARNESS_OBSERVATION_STAGE_TIMEOUT_MS,
   type AgentRun,
   type AgentRunCreateInput,
+  type AgentRunLogRecord,
   type DaemonHealth,
   type DaemonInfo,
   type DaemonReady,
@@ -9,12 +13,16 @@ import {
   type DatabaseQueryResponse,
   type GatewayApi,
   type GatewayEvent,
+  type HarnessDetailsRequest,
+  type HarnessDetailsResponse,
   type MarkThreadsDoneResult,
   type ResolveWorktreeCwdRequest,
   type ResolveWorktreeCwdResult,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type SessionSearchRequest,
+  type SessionSearchResult,
   type SessionStateRow,
   type UseWorktreeRequest,
   type UseWorktreeResult,
@@ -26,6 +34,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const FAST_REQUEST_MS = 2_000;
 const MUTATION_REQUEST_MS = 10_000;
 const LONG_OPERATION_MS = 60_000;
+// Harnesses are observed concurrently in the daemon, each through every bounded stage and cleanup,
+// so the request may take all of them plus one ordinary request allowance. A shorter bound would
+// abort a slow but valid selection the daemon is still confirming.
+export const HARNESS_DETAILS_REQUEST_TIMEOUT_MS =
+  HARNESS_OBSERVATION_STAGES * HARNESS_OBSERVATION_STAGE_TIMEOUT_MS + HARNESS_OBSERVATION_CLEANUP_MS + FAST_REQUEST_MS;
 let memo: Promise<GatewayApi> | null = null;
 
 export interface GatewayProbe {
@@ -50,6 +63,15 @@ function adoptDiscoveredTarget(target: GatewayTarget, requested: DaemonInfo, dis
   if (!daemonIdentityOrCredentialChanged(target.info, requested)
     || !daemonIdentityOrCredentialChanged(target.info, discovered)) {
     target.info = discovered;
+  }
+}
+
+/** A non-accepted Gateway response. `body` is the route's JSON error payload, kept verbatim. */
+export class GatewayRequestError extends Error {
+  constructor(readonly path: string, readonly status: number, readonly body: unknown) {
+    const error = (body as { error?: unknown } | null)?.error;
+    super(`gateway ${path}: ${status}${typeof error === "string" && error.trim() ? ` ${error.trim()}` : ""}`);
+    this.name = "GatewayRequestError";
   }
 }
 
@@ -111,12 +133,9 @@ async function gatewayJson<T>(
     }
   }
   if (!accepted(response)) {
-    let detail = "";
-    try {
-      const body = await response.json() as { error?: unknown };
-      if (typeof body.error === "string" && body.error.trim()) detail = ` ${body.error.trim()}`;
-    } catch { /* an empty/non-JSON response still reports its route and status */ }
-    throw new Error(`gateway ${path}: ${response.status}${detail}`);
+    let body: unknown = null;
+    try { body = await response.json(); } catch { /* an empty/non-JSON response still reports its route and status */ }
+    throw new GatewayRequestError(path, response.status, body);
   }
   return await response.json() as T;
 }
@@ -169,9 +188,7 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       `/schedules/${encodeURIComponent(id)}`,
       { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
     ),
-    deleteSchedule: async (id: string) => {
-      await json(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
-    },
+    deleteSchedule: (id: string) => json<{ ok: true }>(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }),
     runSchedule: (id: string) => post<ScheduleRun>(`/schedules/${encodeURIComponent(id)}/run`, {}),
     agentState: (parentThreadId?: string) => json<ParentAgentStateView>(
       `/agent-state${parentThreadId ? `?parentThreadId=${encodeURIComponent(parentThreadId)}` : ""}`,
@@ -192,8 +209,56 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       { timeoutSeconds },
       Math.max(LONG_OPERATION_MS, (timeoutSeconds + 5) * 1_000),
     ),
+    async *agentRunLog(id, options = {}) {
+      const query = new URLSearchParams({
+        ...(options.after ? { after: String(options.after) } : {}),
+        ...(options.follow === false ? { follow: "0" } : {}),
+      });
+      const path = `/agent-runs/${encodeURIComponent(id)}/events${query.size ? `?${query}` : ""}`;
+      const response = await fetch(`http://127.0.0.1:${target.info.port}${path}`, {
+        headers: { authorization: `Bearer ${target.info.authToken}` },
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      if (!response.ok) {
+        let body: unknown = null;
+        try { body = await response.json(); } catch { /* status alone still identifies the failure */ }
+        throw new GatewayRequestError(path, response.status, body);
+      }
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) return;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          let seq: number | null = null;
+          let data: string | null = null;
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("id: ")) seq = Number(line.slice(4));
+            else if (line.startsWith("data: ")) data = line.slice(6);
+          }
+          if (data !== null) yield { seq, record: JSON.parse(data) as AgentRunLogRecord };
+          boundary = buffer.indexOf("\n\n");
+        }
+      }
+    },
     queryDatabase: (request: DatabaseQueryRequest) => post<DatabaseQueryResponse>(
       "/query-database",
+      request,
+      LONG_OPERATION_MS,
+    ),
+    harnessDetails: (request: HarnessDetailsRequest) => post<HarnessDetailsResponse>(
+      "/harness-details",
+      request,
+      HARNESS_DETAILS_REQUEST_TIMEOUT_MS,
+    ),
+    sessionSearch: (request: SessionSearchRequest) => post<SessionSearchResult>(
+      "/session-search",
       request,
       LONG_OPERATION_MS,
     ),

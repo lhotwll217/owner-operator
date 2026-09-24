@@ -11,7 +11,7 @@ if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status !== 0) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SEARCH = join(here, "..", "src/agent/skills/session-search/scripts/session-search.mjs");
+const SEARCH = join(here, "..", "src/session-search/session-search.mjs");
 const SESSION_ID = "01a06c11-58bd-7938-a429-ef77a510bd7e";
 const OTHER_SESSION_ID = "01a06c11-58bd-7938-a429-ef77a510bd7f";
 const NEEDLE = "ZZCURRENTOWNEROPERATORSESSIONZZ";

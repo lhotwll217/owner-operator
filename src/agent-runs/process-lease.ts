@@ -12,10 +12,11 @@ import { join } from "node:path";
 import { ownerOperatorHome } from "../shared/paths";
 
 const LEASE_VERSION = 1;
-const PROCESS_LIST_TIMEOUT_MS = 2_000;
+export const PROCESS_LIST_TIMEOUT_MS = 2_000;
 const PROCESS_LIST_MAX_BYTES = 8 * 1024 * 1024;
-const TERMINATION_VERIFY_ATTEMPTS = 5;
-const TERMINATION_VERIFY_INTERVAL_MS = 250;
+export const TERMINATION_VERIFY_ATTEMPTS = 5;
+export const TERMINATION_VERIFY_INTERVAL_MS = 250;
+export const TERMINATION_KILL_GRACE_MS = 750;
 const LEASE_ARG = "--oo-agent-run-lease";
 
 interface AgentRunProcessLease {
@@ -295,7 +296,7 @@ async function terminatePids(
     }
   }
   if (!terminated.length) return terminated;
-  await sleep(750);
+  await sleep(TERMINATION_KILL_GRACE_MS);
   for (const pid of terminated) {
     if (deps?.killProcess || processAlive(pid)) {
       try {

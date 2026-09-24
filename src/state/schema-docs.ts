@@ -131,6 +131,25 @@ export const SCHEMA_DOCS: TableDoc[] = [
     ],
   },
   {
+    name: "agent_run_events",
+    description: "Durable per-run event log: every child ACP event in order, closed by one terminal result record. Stream it with GET /agent-runs/:id/events.",
+    columns: [
+      { name: "run_id", description: "References agent_runs.id." },
+      { name: "seq", description: "Per-run monotonic sequence; part of the primary key and the SSE event id." },
+      { name: "at", description: "ISO time the record was stored." },
+      { name: "record", description: "JSON: an ACPX AcpRuntimeEvent verbatim, or the terminal {type:'result', runId, status, error?}." },
+      { name: "bytes", description: "Stored record size, counted against the per-run retention budget." },
+    ],
+  },
+  {
+    name: "agent_run_event_sequences",
+    description: "Last event sequence number issued per run, kept apart from retained agent_run_events rows so numbering stays monotonic after eviction.",
+    columns: [
+      { name: "run_id", description: "References agent_runs.id." },
+      { name: "last_seq", description: "Highest agent_run_events.seq ever issued for the run." },
+    ],
+  },
+  {
     name: "worktrees",
     description: "Owner Operator-created Git worktrees. Row presence is creation provenance; mutable Git facts remain live-only.",
     columns: [

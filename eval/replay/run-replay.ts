@@ -120,7 +120,7 @@ try {
     uncommitted: execFileSync("git", ["status", "--porcelain"], { cwd: armRoot, encoding: "utf8" })
       .trim().split("\n").filter(Boolean),
     ooBinary: join(armRoot, "src", "cli", "oo.ts"),
-    searchHelper: join(armRoot, "src", "agent", "skills", "session-search", "scripts", "session-search.mjs"),
+    searchHelper: join(armRoot, "src", "session-search", "session-search.mjs"),
     core: coreEntry,
     coreInsideArm: coreEntry.startsWith(armRoot + "/"),
     model: MODEL,
@@ -290,9 +290,9 @@ try {
         if (!newest) continue;
         try {
           const read = execFileSync(process.execPath, [
-            join(armRoot, "src", "agent", "skills", "session-search", "scripts", "session-search.mjs"),
+            join(armRoot, "src", "session-search", "session-search.mjs"),
             "--session", session.id, "--at", String(newest.bookmark_index), "--include-tools", "--before", "0", "--after", "0", "--max-chars", "1200",
-          ], { encoding: "utf8", env: { ...process.env, OO_INSTALL_ROOT: armRoot } });
+          ], { encoding: "utf8" });
           session.bookmarkRead = {
             index: newest.bookmark_index,
             header: read.split("\n", 1)[0],
@@ -486,7 +486,7 @@ try {
       const trace = join(out, `${id}.trace.ndjson`);
       const started = Date.now();
       const result = spawnSync(process.execPath, [
-        "--import", "tsx", join(armRoot, "src", "cli", "oo.ts"), question,
+        "--import", "tsx", join(armRoot, "src", "cli", "oo.ts"), "--prompt", question,
       ], {
         cwd: armRoot,
         encoding: "utf8",

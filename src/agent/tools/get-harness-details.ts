@@ -1,11 +1,9 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { AGENT_RUN_EFFORTS, AgentRunHarness } from "@owner-operator/core";
-import {
-  readHarnessDetails,
-  type HarnessDetailsSnapshot,
-  type ReadHarnessDetailsOptions,
-} from "../../agent-runs/harness-details";
+import type { HarnessDetailsRequest } from "@owner-operator/core";
+import type { HarnessDetailsSnapshot } from "../../agent-runs/harness-details";
+import { resolveBackend } from "../../gateway/client";
 
 const HarnessSchema = Type.Union(
   Object.values(AgentRunHarness).map((harness) => Type.Literal(harness)),
@@ -21,11 +19,13 @@ const EffortSchema = Type.Union([
 export type GetHarnessDetailsResult = HarnessDetailsSnapshot;
 
 export interface GetHarnessDetailsToolOptions {
-  read?: (input: ReadHarnessDetailsOptions) => Promise<HarnessDetailsSnapshot>;
+  read?: (input: HarnessDetailsRequest) => Promise<HarnessDetailsSnapshot>;
 }
 
 export function createGetHarnessDetailsTool(options: GetHarnessDetailsToolOptions = {}) {
-  const read = options.read ?? readHarnessDetails;
+  // The daemon observes: probe sessions are its child processes, reaped at its startup.
+  const read = options.read
+    ?? (async (input: HarnessDetailsRequest) => await (await resolveBackend()).harnessDetails(input) as HarnessDetailsSnapshot);
   return defineTool({
     name: "get_harness_details",
     label: "Get harness details",

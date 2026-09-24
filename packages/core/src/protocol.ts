@@ -1,4 +1,4 @@
-import type { AgentRun, AgentRunCreateInput } from "./agent-runs";
+import type { AgentRun, AgentRunCreateInput, AgentRunEffort, AgentRunHarness, AgentRunLogRecord } from "./agent-runs";
 import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
@@ -92,6 +92,33 @@ export type DatabaseQueryRequest =
 
 export type DatabaseQueryResponse = unknown;
 
+/** Inputs of one harness-details observation; the daemon runs it and returns the snapshot. */
+export interface HarnessDetailsRequest {
+  harnesses?: AgentRunHarness[];
+  inspect?: Array<{ harness: AgentRunHarness; model: string; effort: AgentRunEffort | null }>;
+  includeBaselineCandidates?: boolean;
+}
+
+export type HarnessDetailsResponse = unknown;
+
+/** One privacy-aware transcript search, run by the daemon through the session-search wrapper. */
+export interface SessionSearchRequest {
+  /** The wrapper's own flags, forwarded unchanged. */
+  args: string[];
+  /** External coding session that is asking; excluded from open-ended discovery. */
+  callerSessionId?: string | null;
+  /** The Owner Operator session that is asking; excluded from open-ended discovery. */
+  currentSessionId?: string | null;
+  /** Absolute caller working directory; relative wrapper paths resolve from it. */
+  cwd?: string;
+}
+
+export interface SessionSearchResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
 export interface GatewayApi {
   health(): Promise<DaemonHealth>;
   ready(): Promise<DaemonReady>;
@@ -102,7 +129,7 @@ export interface GatewayApi {
   listSchedules(): Promise<ScheduleDefinition[]>;
   createSchedule(input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;
-  deleteSchedule(id: string): Promise<void>;
+  deleteSchedule(id: string): Promise<{ ok: true }>;
   runSchedule(id: string): Promise<ScheduleRun>;
   /** Shared, surface-independent delegated-run presentation derived from durable rows. */
   agentState(parentThreadId?: string): Promise<ParentAgentStateView>;
@@ -113,7 +140,16 @@ export interface GatewayApi {
   retryAgentRun(id: string): Promise<AgentRun>;
   resumeAgentRun(id: string, task: string): Promise<AgentRun>;
   waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
+  /** A run's durable event log from GET /agent-runs/:id/events: replayed after `after`, then
+   * tailed until the terminal record unless `follow` is false. Ends early if the stream drops. */
+  agentRunLog(
+    id: string,
+    options?: { after?: number; follow?: boolean; signal?: AbortSignal },
+  ): AsyncIterable<{ seq: number | null; record: AgentRunLogRecord }>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
+  /** One ephemeral harness observation, run by the daemon that owns probe processes. */
+  harnessDetails(request: HarnessDetailsRequest): Promise<HarnessDetailsResponse>;
+  sessionSearch(request: SessionSearchRequest): Promise<SessionSearchResult>;
   useWorktree(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
   resolveWorktreeCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
   /** Connection callbacks bracket each live SSE stream, including replacement reconnects. */

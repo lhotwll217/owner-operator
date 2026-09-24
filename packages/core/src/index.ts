@@ -57,7 +57,15 @@ export type { SessionHost, SessionHostDescriptor, SessionHostId, SessionIdentity
 // Owner settings — scalar knobs (today the active-thread window) from settings.json, later set
 // in onboarding. The window grammar (parseWindowMs) is shared so the scan's cutoff and the
 // settings validator can't drift. See settings.mjs.
-export { loadActiveWindow, parseWindowMs, isWindowSpec, DEFAULT_ACTIVE_WINDOW } from "./settings.mjs";
+export {
+  loadActiveWindow,
+  parseWindowMs,
+  isWindowSpec,
+  DEFAULT_ACTIVE_WINDOW,
+  DEFAULT_AGENT_RUN_EVENT_LOG_MAX_BYTES,
+  isEventLogMaxBytes,
+  loadAgentRunEventLogMaxBytes,
+} from "./settings.mjs";
 
 export {
   DEFAULT_PERMISSION_MODE,

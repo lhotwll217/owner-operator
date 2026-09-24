@@ -1,6 +1,6 @@
 // Opt-in paid/live acceptance for issue #69. It drives the pinned acpx runtime through a real
 // Claude Code child, hard-kills the daemon mid-turn, then verifies durable interruption and
-// same-session resume. Never discovered by npm test; run with OO_RUN_LIVE_ACP_TEST=1.
+// same-session retry. Never discovered by npm test; run with OO_RUN_LIVE_ACP_TEST=1.
 import assert from "node:assert";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -147,17 +147,17 @@ try {
   assert.equal(interrupted.status, AgentRunStatus.Interrupted);
   assert.match(interrupted.error ?? "", /daemon restarted/);
 
-  const resumed = await request<AgentRun>(`/agent-runs/${launched.id}/resume`, {});
+  const retried = await request<AgentRun>(`/agent-runs/${launched.id}/retry`, {});
   const finished = await waitFor(async () => {
-    const row = await request<AgentRun>(`/agent-runs/${resumed.id}`);
+    const row = await request<AgentRun>(`/agent-runs/${retried.id}`);
     return isTerminalAgentRunStatus(row.status) ? row : undefined;
-  }, "resumed Claude turn", 300_000);
+  }, "retried Claude turn", 300_000);
   assert.equal(finished.status, AgentRunStatus.Completed);
   assert.equal(finished.error, null);
-  assert.equal(finished.childSessionId, originalChildSessionId, "resume preserves native child identity");
+  assert.equal(finished.childSessionId, originalChildSessionId, "retry preserves native child identity");
   assert.match(finished.resultTail ?? "", /OO_ACP_LIVE_OK/);
 
-  process.stdout.write("ok — real Claude ACP turn survives daemon kill through interrupted → resume\n");
+  process.stdout.write("ok — real Claude ACP turn survives daemon kill through interrupted → retry\n");
 } finally {
   await stopDaemon("SIGTERM").catch(() => {});
   rmSync(ooHome, { recursive: true, force: true });

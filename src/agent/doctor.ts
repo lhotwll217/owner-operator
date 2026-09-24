@@ -8,6 +8,7 @@ import {
   loadSessionHosts,
   loadTranscriptStores,
 } from "@owner-operator/core";
+import { skillLinkStatus } from "../shared/skill-links";
 import { repoRoot } from "../shared/repo-root";
 
 export interface HarnessDoctorOptions {
@@ -80,6 +81,9 @@ export function formatHarnessDoctor(options: HarnessDoctorOptions = {}): string 
     `Session host roots: ${hostRoots}`,
     `Tool posture: ${settings.toolPosture.join(", ")}`,
     `Permission mode: ${permissionMode}`,
+    "Outside-agent skill (oo skill status):",
+    ...skillLinkStatus({ userHome, ooHome: paths.home, ...(options.installRoot ? { checkoutRoot: options.installRoot } : {}) })
+      .map((link) => `  ${link.label}: ${link.state} ${link.path}${link.linkTarget ? ` -> ${link.linkTarget}` : ""}`),
     "Reload: new headless/scheduled sessions reload workspace resources; interactive uses /reload or a new session; extension changes require restart.",
   ].join("\n") + "\n";
 }

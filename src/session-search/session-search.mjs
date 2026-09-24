@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS } from "./flags.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src/blacklist.mjs";
 import {
   loadSessionSources,
@@ -44,7 +45,7 @@ for (let index = 0; index < input.length; index += 1) {
   else if (arg === "--target-root") targetRoot = takeValue(arg, ++index);
   else if (arg === "--limit") limit = Number(takeValue(arg, ++index));
   else if (arg === "--max-chars") maxChars = Number(takeValue(arg, ++index));
-  else if (["--query", "--skim", "--session", "--at", "--since", "--until", "--sort", "--before", "--after", "--role", "--focus"].includes(arg)) {
+  else if (SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS.includes(arg)) {
     if (arg === "--query") hasQuery = true;
     if (arg === "--session") hasSession = true;
     if (arg === "--skim") hasSkim = true;
@@ -196,14 +197,15 @@ try {
       let blacklistedDropped = 0;
       const entries = candidates ? output.candidates ?? [] : output.matches ?? [];
       for (const entry of entries) {
-        if (fileBlacklisted(entry.path)) {
+        const file = transcriptFileFor(entry);
+        if (!file || fileBlacklisted(file)) {
           blacklistedDropped += 1;
           continue;
         }
-        const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(entry.path) };
+        const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(file) };
         if (candidates) {
           let repo = null;
-          try { repo = resolveRepo(searchCwdFromFile(entry.path)); } catch { /* best effort label */ }
+          try { repo = resolveRepo(searchCwdFromFile(file)); } catch { /* best effort label */ }
           allowed.push({ ...identified, repo });
         } else {
           allowed.push(identified);
@@ -231,8 +233,9 @@ try {
           : { applied: false, reason: "current OO and external caller session ids unavailable" };
       if (blacklistedDropped) output.blacklistedDropped = blacklistedDropped;
 
-      if (json) process.stdout.write(`${JSON.stringify(output)}\n`);
-      else renderText(output, { targetType, blacklistedDropped });
+      process.stdout.write(withinBudget(output, (fitted) => json
+        ? `${JSON.stringify(fitted)}\n`
+        : renderText(fitted, { targetType, blacklistedDropped })));
     }
   }
 } finally {
@@ -247,9 +250,106 @@ function runPrimitive(args) {
   });
 }
 
+/** The primitive budgets its own JSON, but the wrapper then adds namespace, app, repo, and
+ * exclusion fields and renders its own text. Hold the final output to --max-chars the way the
+ * primitive does — evidence outranks metadata, and a hit outranks its context: drop trailing
+ * entries (counted as omitted), then shrink the last hit (context, then path, then the match text
+ * around its matching span), then trim metadata; the hit is dropped only if nothing else fits. */
+function withinBudget(output, render) {
+  const key = candidates ? "candidates" : "matches";
+  const over = () => Buffer.byteLength(rendered) - maxChars;
+  let rendered = render(output);
+  const refresh = () => { rendered = render(output); };
+  const omitted = (count) => {
+    output.omittedByBudget = (output.omittedByBudget ?? 0) + count;
+    output.note = `... ${output.omittedByBudget} more matching ${candidates ? "sessions" : "messages"} omitted by the ${maxChars}-byte output budget — narrow the search or raise --max-chars`;
+  };
+  while (over() > 0 && output[key].length > 1) {
+    output[key].pop();
+    output.shown = output[key].length;
+    omitted(1);
+    refresh();
+  }
+  const [hit] = output[key];
+  if (hit && over() > 0 && (hit.before?.length || hit.after?.length)) {
+    hit.before = [];
+    hit.after = [];
+    refresh();
+  }
+  if (hit && over() > 0 && typeof hit.path === "string") {
+    // The id names the session; the path's tail (its file) is the part worth keeping.
+    hit.path = keepTail(hit.path, Buffer.byteLength(hit.path) - over());
+    refresh();
+  }
+  if (hit?.match && over() > 0) {
+    hit.match.text = keepSpan(String(hit.match.text ?? ""), queryTerms(output), Buffer.byteLength(String(hit.match.text ?? "")) - over());
+    refresh();
+  }
+  // Metadata goes before the last piece of evidence.
+  const trims = [
+    () => { delete output.wordHits; delete output.messagesScanned; },
+    () => { delete output.hint; },
+    () => { if (output.note) output.note = `${output.omittedByBudget ?? 0} omitted by the output budget`; },
+    () => {
+      const exclusions = output.discoverySessionExclusions;
+      if (exclusions?.sessionIds?.length) {
+        exclusions.sessionIdsOmitted = exclusions.sessionIds.length;
+        exclusions.sessionIds = [];
+      }
+    },
+    () => { if (typeof output.query === "string") output.query = keepTail(output.query, Math.max(8, Buffer.byteLength(output.query) - over())); },
+  ];
+  for (const trim of trims) {
+    if (over() <= 0) break;
+    trim();
+    refresh();
+  }
+  if (over() > 0 && output[key].length) {
+    output[key] = [];
+    output.shown = 0;
+    omitted(1);
+    refresh();
+    for (const trim of trims) {
+      if (over() <= 0) break;
+      trim();
+      refresh();
+    }
+  }
+  return rendered;
+}
+
+function queryTerms(output) {
+  const query = String(output.query ?? "");
+  return (output.any ? query.split(/[\s|]+/) : [query]).map((term) => term.trim()).filter(Boolean);
+}
+
+/** Keep at most `maxBytes` of `value`, from its end. */
+function keepTail(value, maxBytes) {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return value;
+  return `...${bytes.subarray(bytes.length - Math.max(0, maxBytes - 3)).toString().replace(/^\uFFFD/, "")}`;
+}
+
+/** Keep at most `maxBytes` of `text`, centred on the first query term it contains. */
+function keepSpan(text, terms, maxBytes) {
+  const bytes = Buffer.from(text);
+  if (bytes.length <= maxBytes) return text;
+  const lower = text.toLowerCase();
+  const at = terms.map((term) => lower.indexOf(term.toLowerCase())).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0;
+  const budget = Math.max(0, maxBytes - 6);
+  const center = Buffer.byteLength(text.slice(0, at));
+  const start = Math.max(0, Math.min(center - Math.floor(budget / 3), bytes.length - budget));
+  const kept = bytes.subarray(start, start + budget).toString().replace(/^\uFFFD|\uFFFD$/g, "");
+  return `${start > 0 ? "..." : ""}${kept}${start + budget < bytes.length ? "..." : ""}`;
+}
+
 function renderText(output, context) {
+  const lines = [];
+  const say = (line) => lines.push(line);
   const sessionExclusions = output.discoverySessionExclusions?.applied
-    ? `applied:${output.discoverySessionExclusions.sessionIds.join(",")}`
+    ? output.discoverySessionExclusions.sessionIdsOmitted
+      ? `applied:${output.discoverySessionExclusions.sessionIdsOmitted}-ids-omitted-by-budget`
+      : `applied:${output.discoverySessionExclusions.sessionIds.join(",")}`
     : output.discoverySessionExclusions?.reason?.startsWith("explicit stable-session scope")
       ? "not-needed:explicit-session-scope"
       : "unavailable";
@@ -259,7 +359,7 @@ function renderText(output, context) {
       ? ` candidate_sessions=${output.totalCandidateSessions}`
       : ` candidate_sessions_at_least=${output.candidateSessionsAfterPolicyAtLeast ?? output.candidates.length}` +
         ` pre_policy_candidate_sessions=${output.totalCandidateSessionsBeforePolicy ?? "unknown"}`;
-  console.log(
+  say(
     `query=${JSON.stringify(output.query ?? "")} total_message_matches=${output.totalMatches ?? 0} ` +
     `files_with_matches=${output.filesWithMatches ?? 0} shown=${output.shown ?? 0}` +
     `${output.session ? ` session=${output.session}` : ""}${output.any ? " any=true" : ""}` +
@@ -272,37 +372,47 @@ function renderText(output, context) {
     `discovery_session_exclusions=${sessionExclusions}`,
   );
   if (output.wordHits) {
-    console.log(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")}` +
+    say(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")}` +
       `${output.messagesScanned != null ? ` (of ${output.messagesScanned} messages searched after filters)` : ""}` +
       " (high-count words are low-signal; prefer the rare ones)");
   }
-  if (output.note) console.log(`note: ${output.note}`);
-  if (output.hint) console.log(`hint: ${output.hint}`);
+  if (output.note) say(`note: ${output.note}`);
+  if (output.hint) say(`hint: ${output.hint}`);
   for (const [index, candidate] of (output.candidates ?? []).entries()) {
     const rank = candidate.matchedWords?.length
       ? ` matched=[${candidate.matchedWords.join(",")}] best_score=${candidate.score}`
       : "";
     const forks = candidate.forkCopies ? ` +${candidate.forkCopies} forked copies` : "";
-    console.log(
+    say(
       `\n[${index + 1}] namespace=${candidate.namespace} source=${candidate.source} id=${candidate.id} repo=${candidate.repo ?? "unknown"} ` +
       `best_idx=${candidate.index} ts=${candidate.timestamp ?? ""} hits=${candidate.hitCount}${rank}${forks}`,
     );
-    console.log(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
+    say(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
   }
   for (const [index, match] of (output.matches ?? []).entries()) {
     const rank = match.matchedWords ? ` matched=[${match.matchedWords.join(",")}] score=${match.score}` : "";
     const forks = match.forkCopies ? ` +${match.forkCopies} forked copies` : "";
-    console.log(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}${forks}`);
-    for (const before of match.before ?? []) console.log(`  before ${before.role}: ${before.text}`);
-    console.log(`  MATCH ${match.match.role}: ${match.match.text}`);
-    for (const after of match.after ?? []) console.log(`  after  ${after.role}: ${after.text}`);
+    say(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}${forks}`);
+    for (const before of match.before ?? []) say(`  before ${before.role}: ${before.text}`);
+    say(`  MATCH ${match.match.role}: ${match.match.text}`);
+    for (const after of match.after ?? []) say(`  after  ${after.role}: ${after.text}`);
   }
   if ((output.matches ?? []).some((match) => String(match.match?.text ?? "").endsWith("..."))) {
-    console.log("\nhint: a match preview was truncated; use --session ID --at IDX for fuller context around that hit");
+    say("\nhint: a match preview was truncated; use --session ID --at IDX for fuller context around that hit");
   }
   if (output.candidates?.length) {
-    console.log("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
+    say("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
   }
+  return `${lines.join("\n")}\n`;
+}
+
+/** The transcript file behind a primitive hit. Under a tight --max-chars the primitive shortens a
+ * hit's `path` for display, so a path that is not a file is found again by its session id within
+ * the configured sources. Null when it cannot be found; callers then drop the hit (fail closed). */
+function transcriptFileFor(entry) {
+  if (typeof entry.path === "string" && fs.existsSync(entry.path)) return entry.path;
+  transcriptFileFor.index ??= new Map(sources.flatMap(({ root }) => walk(root)).map((file) => [path.basename(file, ".jsonl"), file]));
+  return transcriptFileFor.index.get(entry.id) ?? null;
 }
 
 function sourceIdentity(file) {
@@ -365,7 +475,7 @@ function takeValue(flag, index, { allowLeadingDashes = false } = {}) {
 
 function printHelp() {
   process.stdout.write(
-    "Usage: session-search.mjs (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
+    "Usage: oo search (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
     "Default discovery searches configured coding-agent stores plus Owner Operator history.\n" +
     "  --owner-operator              search Owner Operator history only\n" +
     "  --target-type claude|codex|pi search that coding transcript format only\n" +
@@ -374,6 +484,8 @@ function printHelp() {
     "  --include-skill-bodies    include injected skill documentation, excluded by default\n" +
     "  --until TIME              close a --since time window\n" +
     "  --focus TEXT              center an anchored window on text inside a long message\n" +
+    "  --json                    machine-readable query results\n" +
+    "  --from-session ID         (oo search) the calling coding session, excluded from discovery\n" +
     "  --help, -h                 show this help\n",
   );
 }

@@ -158,8 +158,10 @@ function shellQuote(value: string): string {
 }
 
 export function addOwnerOperatorBashEnvironment(command: string, opts: PrivacyToolGuardOptions = {}): string {
+  // The checkout's own `oo` launcher comes first on PATH, so skills reach this installation's
+  // daemon operations (e.g. `oo search`) whatever else the shell has installed.
   const assignments = [
-    `OO_INSTALL_ROOT=${shellQuote(repoRoot)}`,
+    `PATH=${shellQuote(repoRoot)}:"$PATH"`,
     `OO_HOME=${shellQuote(ooHome())}`,
   ];
   if (opts.callerSessionId) assignments.push(`OO_CALLER_SESSION_ID=${shellQuote(opts.callerSessionId)}`);

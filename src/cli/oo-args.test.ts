@@ -1,53 +1,50 @@
-// Unit: oo argv parsing. Free-form prompt, a few known flags. No model, no disk.
+// Unit: oo argv grammar. Reserved nouns, -p prompt, removed spellings. No model, no disk.
 import assert from "node:assert";
-import { parseOoArgs } from "./oo-args";
+import { OPERATION_NOUNS, parseOoArgs } from "./oo-args";
 
-// --help / -h anywhere (so the caller can exit before building a session).
-assert.equal(parseOoArgs(["--help"]).help, true, "--help");
-assert.equal(parseOoArgs(["what's up", "-h"]).help, true, "-h after prompt");
-assert.equal(parseOoArgs(["hello"]).help, false, "no help flag");
-
-// `daemon` is a subcommand only as the FIRST token.
-assert.equal(parseOoArgs(["daemon"]).daemon, true, "daemon subcommand");
-assert.equal(parseOoArgs(["what about the daemon"]).daemon, false, "daemon only at argv[0]");
-assert.equal(parseOoArgs(["doctor"]).doctor, true, "doctor is a model-free subcommand");
-assert.equal(parseOoArgs(["status"]).doctor, true, "status aliases the harness doctor");
-assert.equal(parseOoArgs(["what about status"]).doctor, false, "status is a subcommand only at argv[0]");
-
-// --session-state is recognized and stripped from the prompt; old --json fails fast elsewhere.
-const st = parseOoArgs(["--session-state", "what", "needs", "me"]);
-assert.deepEqual([st.sessionState, st.prompt], [true, "what needs me"], "--session-state flag stripped from prompt");
-assert.equal(parseOoArgs(["--json"]).removedJson, true, "old --json spelling is recognized for a rename error");
-for (const spelling of [["one", "shot"].join("-"), ["one", "shot"].join("")]) {
-  assert.equal(parseOoArgs([spelling, "what"]).removedHeadlessSubcommand, true, "removed headless subcommand is recognized for a removal error");
+assert.deepEqual(parseOoArgs([]), { kind: "interactive" }, "bare oo is interactive");
+assert.deepEqual(parseOoArgs(["-i"]), { kind: "interactive" }, "-i alias");
+assert.deepEqual(parseOoArgs(["--help"]), { kind: "help" });
+assert.deepEqual(parseOoArgs(["-p", "hi", "-h"]), { kind: "help" }, "help anywhere outside an operation");
+assert.deepEqual(parseOoArgs(["doctor"]), { kind: "doctor" });
+assert.deepEqual(parseOoArgs(["status"]), { kind: "doctor" }, "status aliases doctor");
+assert.deepEqual(parseOoArgs(["daemon"]), { kind: "daemon" });
+for (const argv of [["daemon", "--help"], ["daemon", "-h"], ["doctor", "--help"], ["status", "-h"]]) {
+  assert.deepEqual(parseOoArgs(argv), { kind: "help" }, `${argv.join(" ")} prints help instead of running`);
 }
 
-const c = parseOoArgs(["--continue", "and", "the", "tests?"]);
-assert.deepEqual([c.continue, c.prompt], [true, "and the tests?"], "--continue stripped from prompt");
-assert.equal(parseOoArgs(["-c", "more"]).continue, true, "-c alias");
-assert.equal(parseOoArgs(["--continue", "-i"]).interactive, true, "-i recognized anywhere");
-assert.deepEqual([parseOoArgs(["--interactive"]).interactive, parseOoArgs(["--interactive"]).prompt], [true, ""], "--interactive stripped from prompt");
+// Every reserved noun is an operation; its argv (including --help/--json) belongs to the noun.
+for (const noun of OPERATION_NOUNS) {
+  assert.deepEqual(parseOoArgs([noun, "list", "--json", "--help"]), { kind: "operation", noun, argv: ["list", "--json", "--help"] });
+}
 
-const s = parseOoArgs(["--session", "abc123", "what", "next"]);
-assert.deepEqual([s.session, s.prompt], ["abc123", "what next"], "--session takes the next token");
-assert.equal(parseOoArgs(["hi", "--session"]).missingSession, true, "--session with no value is tracked");
-assert.equal(parseOoArgs(["hi", "--session", "--continue"]).missingSession, true, "--session before another flag is tracked as missing");
+// -p carries the prompt; resume flags compose beside it.
+assert.deepEqual(parseOoArgs(["-p", "what changed"]), { kind: "chat", continue: false, prompt: "what changed" });
+assert.deepEqual(
+  parseOoArgs(["--from-session", "sess-9", "--continue", "--prompt", "status?"]),
+  { kind: "chat", continue: true, prompt: "status?", fromSession: "sess-9" },
+);
+assert.deepEqual(parseOoArgs(["--session", "abc", "-p", "next"]), { kind: "chat", continue: false, session: "abc", prompt: "next" });
+assert.deepEqual(parseOoArgs(["-c"]), { kind: "chat", continue: true }, "resume without -p opens the REPL");
 
-const f = parseOoArgs(["--from-session", "sess-9", "--continue", "status?"]);
-assert.deepEqual([f.fromSession, f.continue, f.prompt], ["sess-9", true, "status?"], "--from-session composes with resume flags");
-assert.equal(parseOoArgs(["--from-session"]).missingFromSession, true, "--from-session with no value is tracked");
+const usage = (argv: string[]): string => {
+  const parsed = parseOoArgs(argv);
+  assert.equal(parsed.kind, "usage-error", `${argv.join(" ")} is a usage error`);
+  return (parsed as { message: string }).message;
+};
+assert.match(usage(["what", "changed"]), /unknown command "what".*oo -p "what changed"/, "bare prompt names -p");
+assert.match(usage(["--since", "today"]), /Unknown option '--since'/, "unknown flag is an error, not prompt text");
+assert.match(usage(["--session-state"]), /oo session-state list/);
+assert.match(usage(["--done", "id-1"]), /oo session-state done <id\.\.\.>/);
+assert.match(usage(["--json"]), /operation verb.*oo session-state list --json/);
+for (const spelling of [["one", "shot"].join("-"), ["one", "shot"].join("")]) {
+  assert.match(usage([spelling, "what"]), /oo -p/, `${spelling} names -p`);
+}
+assert.equal(usage(["-p", "hi", "--session"]), "--session needs an id or path");
+assert.equal(usage(["--session", "--continue"]), "--session needs an id or path", "a flag is not a session value");
+assert.equal(usage(["--from-session"]), "--from-session needs an id");
+assert.equal(usage(["-p"]), "-p/--prompt needs the prompt text");
+assert.equal(usage(["-p", "  "]), "-p/--prompt needs the prompt text");
+assert.match(usage(["--continue", "-i"]), /only valid by itself/);
 
-// --done collects ids up to the next flag; empty = ids missing (caller errors with usage).
-const d = parseOoArgs(["--done", "id-1", "id-2"]);
-assert.deepEqual(d.done, ["id-1", "id-2"], "--done collects multiple ids");
-assert.deepEqual(parseOoArgs(["--done"]).done, [], "--done with no ids → empty array for the usage error");
-assert.deepEqual(parseOoArgs(["--done", "--continue"]).done, [], "--done stops at the next flag");
-assert.equal(parseOoArgs(["what", "needs", "me"]).done, undefined, "no --done → undefined");
-
-// Unknown option-like tokens stay in the free-form prompt (the P2 regression codex caught).
-assert.equal(parseOoArgs(["what", "changed", "--since", "today"]).prompt, "what changed --since today", "unknown flags preserved in prompt");
-
-// No args → empty prompt (interactive REPL).
-assert.equal(parseOoArgs([]).prompt, "", "no args → empty prompt");
-
-process.stdout.write("ok — oo args: help/-h, daemon, fail-fast removals, --session-state, resume flags, free-form flags preserved\n");
+process.stdout.write("ok — oo args: reserved nouns, -p prompt, resume flags, removed spellings name replacements\n");

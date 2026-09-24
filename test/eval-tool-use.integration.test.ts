@@ -150,7 +150,7 @@ const tracedOwnerOperatorHistory = toolUseAssertion("", {
       toolExecutions: [{
         name: "bash",
         input: {
-          command: "node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'recurring feedback' --any --since 7d --owner-operator",
+          command: "oo search --query 'recurring feedback' --any --since 7d --owner-operator",
         },
         isError: false,
         resultChars: 100,

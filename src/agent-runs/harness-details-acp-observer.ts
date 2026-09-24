@@ -9,6 +9,7 @@ import {
   AGENT_RUN_CAPABILITIES,
   AgentRunHarness,
   type AgentRunEffort,
+  HARNESS_OBSERVATION_STAGE_TIMEOUT_MS,
 } from "@owner-operator/core";
 import { createAgentRegistry, type AcpRuntimeStatus } from "acpx/runtime";
 import { ownerOperatorHome } from "../shared/paths";
@@ -21,13 +22,14 @@ import {
   agentRunStateDir,
   createLeasedAcpRuntime,
   cursorAgentBinaryPath,
+  openCodeAcpAgentCommand,
   resolveOpenCodeRuntime,
   type LeasedAcpRuntime,
 } from "./acp-launcher";
 
-const OBSERVATION_TIMEOUT_MS = 90_000;
-const CLOSE_TIMEOUT_MS = 2_000;
-const VERSION_TIMEOUT_MS = 5_000;
+const OBSERVATION_TIMEOUT_MS = HARNESS_OBSERVATION_STAGE_TIMEOUT_MS;
+export const CLOSE_TIMEOUT_MS = 2_000;
+export const VERSION_TIMEOUT_MS = 5_000;
 const MAX_VERSION_BYTES = 64 * 1024;
 
 export interface AcpRuntimeProvenance {
@@ -76,6 +78,7 @@ export interface AcpObservationDeps {
     harness: AgentRunHarness;
     leaseKey: string;
     stateDir: string;
+    resolveAgentCommand?: (acpAgent: string) => string;
   }) => LeasedAcpRuntime;
   readRuntimeProvenance?: (harness: AgentRunHarness) => Promise<AcpRuntimeProvenance>;
   timeoutMs?: number;
@@ -189,7 +192,15 @@ export async function observeAcpHarness(
   let handle: Awaited<ReturnType<LeasedAcpRuntime["runtime"]["ensureSession"]>> | undefined;
   let observation: HarnessCapabilityObservation = { ...base(), runtime: provenance };
   try {
-    leased = (deps.createRuntime ?? createLeasedAcpRuntime)({ harness, leaseKey: probeKey, stateDir: probeStateDir });
+    // OpenCode's executable was already identified (and version-checked) for provenance; launching
+    // that same path keeps the observation to one version check and one backend identity.
+    const identifiedPath = harness === AgentRunHarness.OpenCode ? provenance.backend.executablePath : undefined;
+    leased = (deps.createRuntime ?? createLeasedAcpRuntime)({
+      harness,
+      leaseKey: probeKey,
+      stateDir: probeStateDir,
+      ...(identifiedPath ? { resolveAgentCommand: () => openCodeAcpAgentCommand(identifiedPath) } : {}),
+    });
     session = leased.runtime.ensureSession({
       sessionKey: probeKey,
       agent: acpxAgent,

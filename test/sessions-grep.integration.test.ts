@@ -16,7 +16,7 @@ if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status !== 0) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const GREP = join(here, "..", "src/agent/skills/session-search/scripts/session-search.mjs");
+const GREP = join(here, "..", "src/session-search/session-search.mjs");
 const VENDORED_GREP = join(here, "..", "src/session-search/vendor/session-grep/session-grep.mjs");
 
 const primitiveSelfTest = spawnSync(process.execPath, [VENDORED_GREP, "--self-test"], { encoding: "utf8" });

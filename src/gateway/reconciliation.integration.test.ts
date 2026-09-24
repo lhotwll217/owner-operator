@@ -20,7 +20,7 @@ const gateway = await startGateway({
   authToken: "test-token", state, monitor, port: 0,
   health: () => ({ ok: true, port: gateway.port, pid: process.pid, startedAt: "now", fingerprint: "test", stale: false }),
   ready: () => ({ ready: true, setupRequired: false, modules: { state: true, sessionMonitor: true, scheduler: true, gateway: true } }),
-  scheduler: {} as never, agentRuns: {} as never, worktrees: {} as never, query: {} as never,
+  scheduler: {} as never, agentRuns: {} as never, worktrees: {} as never, query: {} as never, harness: {} as never, search: {} as never,
 });
 const endpoint = `http://127.0.0.1:${gateway.port}`;
 async function post(body: unknown, token = "test-token") {

@@ -30,7 +30,7 @@ const backend = {
     updated = { id, input };
     return { ...schedule, ...input, revision: 4, nextRunAt: null };
   },
-  async deleteSchedule(id: string) { deletedId = id; },
+  async deleteSchedule(id: string) { deletedId = id; return { ok: true as const }; },
 } as Pick<GatewayApi, "listSchedules" | "updateSchedule" | "deleteSchedule">;
 
 const disabled = await manageSchedule(backend, { action: "disable", id: schedule.id });

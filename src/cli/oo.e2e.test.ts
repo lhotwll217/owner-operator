@@ -28,32 +28,61 @@ const runOo = async (args: readonly string[]): Promise<{ status: number | null; 
 try {
   const help = spawnSync(ooBin, ["--help"], opts);
   assert.equal(help.status, 0, `oo --help exits 0 (got ${help.status}; stderr: ${help.stderr})`);
-  assert.match(help.stdout, /oo --continue "and then\?"/, "top-level help advertises --continue");
-  assert.match(help.stdout, /oo --session <id> "more"/, "top-level help advertises --session");
-  assert.match(help.stdout, /oo --session-state/, "top-level help advertises --session-state");
-  assert.doesNotMatch(help.stdout, /oo --json/, "top-level help does not advertise old --json name");
+  assert.match(help.stdout, /oo -p \| --prompt/, "top-level help advertises -p");
+  assert.match(help.stdout, /oo --continue/, "top-level help advertises --continue");
+  for (const noun of ["session-state", "runs", "schedules", "db", "harness", "search", "skill"]) {
+    assert.match(help.stdout, new RegExp(`^  oo ${noun}(\\s|$)`, "m"), `top-level help lists the ${noun} noun`);
+  }
+  assert.match(help.stdout, /oo search +flags only, no verbs/, "top-level help says search has flags, not verbs");
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
   assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
-  const setupRequired = spawnSync(ooBin, ["what is happening?"], opts);
+  for (const argv of [["daemon", "--help"], ["doctor", "-h"]]) {
+    const help = spawnSync(ooBin, argv, opts);
+    assert.equal(help.status, 0, `${argv.join(" ")} exits 0`);
+    assert.match(help.stdout, /Owner Operator \(oo\)/, `${argv.join(" ")} prints usage`);
+  }
+  assert.equal(existsSync(join(ooHome, "daemon.json")), false, "`oo daemon --help` starts no daemon");
+
+  // Bare `oo` without a terminal points at the current headless spelling.
+  const notTty = spawnSync(ooBin, [], { ...opts, stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(notTty.status, 1);
+  assert.match(notTty.stderr, /`oo -p "question"`/, "the non-TTY hint names -p");
+  assert.doesNotMatch(notTty.stderr, /oo "question"/, "the removed bare-prompt spelling is gone");
+
+  const nounHelp = spawnSync(ooBin, ["session-state", "--help"], opts);
+  assert.equal(nounHelp.status, 0, `noun help exits 0 (stderr: ${nounHelp.stderr})`);
+  assert.match(nounHelp.stdout, /^\s+list\s/m, "noun help lists list");
+  assert.match(nounHelp.stdout, /^\s+done <id\.\.\.>\s/m, "noun help lists done");
+  const unknownVerb = spawnSync(ooBin, ["session-state", "nope"], opts);
+  assert.equal(unknownVerb.status, 2, "unknown verb exits 2");
+  assert.match(unknownVerb.stderr, /unknown verb "nope"/);
+
+  const setupRequired = spawnSync(ooBin, ["-p", "what is happening?"], opts);
   assert.equal(setupRequired.status, 2, "fresh headless runs fail closed before model or daemon work");
   assert.match(setupRequired.stderr, /setup required.*run `oo`/is);
   assert.equal(setupRequired.stdout, "");
   markOnboarded(ooHome, { via: "e2e" });
 
-  const oldJson = spawnSync(ooBin, ["--json"], opts);
-  assert.equal(oldJson.status, 2, `old --json exits 2 (got ${oldJson.status}; stderr: ${oldJson.stderr})`);
-  assert.match(oldJson.stderr, /renamed to --session-state/, "old --json points to the explicit state flag");
-  assert.equal(oldJson.stdout, "", "old --json does not build a model session");
+  const barePrompt = spawnSync(ooBin, ["what", "changed"], opts);
+  assert.equal(barePrompt.status, 2, `bare prompt exits 2 (got ${barePrompt.status}; stderr: ${barePrompt.stderr})`);
+  assert.match(barePrompt.stderr, /unknown command "what".*oo -p "what changed"/, "bare prompt names -p");
+  assert.equal(barePrompt.stdout, "", "bare prompt does not build a model session");
 
-  for (const spelling of [["one", "shot"].join("-"), ["one", "shot"].join("")]) {
-    const removed = spawnSync(ooBin, [spelling, "what changed?"], opts);
-    assert.equal(removed.status, 2, `${spelling} exits 2 (got ${removed.status}; stderr: ${removed.stderr})`);
-    assert.match(removed.stderr, /has been removed/, `${spelling} is a removal error`);
-    assert.equal(removed.stdout, "", `${spelling} does not build a model session`);
+  for (const [argv, replacement] of [
+    [["--json"], /oo session-state list --json/],
+    [["--session-state"], /oo session-state list/],
+    [["--done", "x"], /oo session-state done <id\.\.\.>/],
+    [[["one", "shot"].join("-"), "what changed?"], /oo -p/],
+    [[["one", "shot"].join(""), "what changed?"], /oo -p/],
+  ] as const) {
+    const removed = spawnSync(ooBin, [...argv], opts);
+    assert.equal(removed.status, 2, `${argv.join(" ")} exits 2 (got ${removed.status}; stderr: ${removed.stderr})`);
+    assert.match(removed.stderr, replacement, `${argv.join(" ")} names its replacement`);
+    assert.equal(removed.stdout, "", `${argv.join(" ")} does not build a model session`);
   }
 
-  const trailingSession = spawnSync(ooBin, ["hi", "--session"], opts);
+  const trailingSession = spawnSync(ooBin, ["-p", "hi", "--session"], opts);
   assert.equal(trailingSession.status, 2, `trailing --session exits 2 (got ${trailingSession.status}; stderr: ${trailingSession.stderr})`);
   assert.match(trailingSession.stderr, /--session needs an id or path/, "trailing --session names the missing value");
   assert.equal(trailingSession.stdout, "", "trailing --session exits before stdout/model work");
@@ -63,7 +92,7 @@ try {
   assert.match(mixedInteractive.stderr, /only valid by itself/, "-i with resume is rejected before agent setup");
   assert.equal(mixedInteractive.stdout, "", "mixed -i exits before stdout/model work");
 
-  const missingSession = spawnSync(ooBin, ["--session", "nope123", "hi"], opts);
+  const missingSession = spawnSync(ooBin, ["--session", "nope123", "-p", "hi"], opts);
   assert.equal(missingSession.status, 2, `unknown --session exits 2 (got ${missingSession.status}; stderr: ${missingSession.stderr})`);
   assert.match(missingSession.stderr, /no oo session matching "nope123"/, "names the unmatched session ref");
   assert.equal(missingSession.stdout, "", "nothing on stdout for a bad session ref");
@@ -78,22 +107,33 @@ try {
     monitor: { scan: async () => [], intervalMs: 60_000 },
     scheduler: { tickMs: 60_000 },
   });
+  const recent = new Date(Date.now() - 5 * 60_000).toISOString();
   daemon.state.recordObservation({
     id: "e2e-done-1", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
     lastRole: "user", working: false, secondsSinceLastMessage: 30, secondsSinceActivity: 30,
-    createdAt: "2026-07-07T09:00:00.000Z", lastMessageAt: "2026-07-07T09:55:00.000Z",
+    createdAt: recent, lastMessageAt: recent,
   });
-  const noIds = spawnSync(ooBin, ["--done"], opts);
-  assert.equal(noIds.status, 2, `bare --done exits 2 (got ${noIds.status}; stderr: ${noIds.stderr})`);
-  assert.match(noIds.stderr, /--done needs one or more thread ids/, "bare --done names the missing ids");
-  const done = await runOo(["--done", "e2e-done-1", "ghost-id"]);
-  assert.equal(done.status, 1, `--done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);
-  const doneOut = JSON.parse(done.stdout) as { marked: Array<{ id: string; state: string }>; missingIds: string[] };
-  assert.deepEqual(doneOut.marked.map((m) => [m.id, m.state]), [["e2e-done-1", "done"]], "seeded thread marked done (prior state lives in the details ledger)");
-  assert.deepEqual(doneOut.missingIds, ["ghost-id"], "unknown id reported, not silently dropped");
+  const noIds = spawnSync(ooBin, ["session-state", "done"], opts);
+  assert.equal(noIds.status, 2, `bare done exits 2 (got ${noIds.status}; stderr: ${noIds.stderr})`);
+  assert.match(noIds.stderr, /expected <id\.\.\.>/, "bare done names the missing ids");
+
+  const list = await runOo(["session-state", "list", "--json"]);
+  assert.equal(list.status, 0, `session-state list exits 0 (stderr: ${list.stderr})`);
+  const listed = JSON.parse(list.stdout) as Array<{ id: string }>;
+  assert.deepEqual(listed.map((row) => row.id), ["e2e-done-1"], "the seeded row is current");
+  assert.deepEqual(listed, daemon.state.listCurrentSessionState(), "list --json returns the GET /session-state rows");
+  const listText = await runOo(["session-state", "list"]);
+  assert.match(listText.stdout, /1\. .*e2e-done-1/, "text list shows a numbered row with its id");
+
+  const done = await runOo(["session-state", "done", "e2e-done-1", "ghost-id"]);
+  assert.equal(done.status, 1, `done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);
+  const doneOut = JSON.parse((await runOo(["session-state", "done", "e2e-done-1", "--json"])).stdout) as { alreadyDoneIds: string[] };
+  assert.deepEqual(doneOut.alreadyDoneIds, ["e2e-done-1"], "done --json returns the POST /done result");
+  assert.match(done.stdout, /done\s+e2e-done-1/, "seeded thread marked done");
+  assert.match(done.stdout, /missing\s+ghost-id/, "unknown id reported, not silently dropped");
 } finally {
   await daemon?.close();
   rmSync(ooHome, { recursive: true, force: true });
 }
 
-process.stdout.write("ok — regular oo help/session-state/resume contract; removed flags and bad resume args exit 2\n");
+process.stdout.write("ok — oo grammar: help, nouns, -p, session-state list/done over the Gateway; removed spellings and bad resume args exit 2\n");

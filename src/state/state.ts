@@ -5,11 +5,13 @@ import {
   isBlacklisted,
   loadBlacklist,
   loadActiveWindow,
+  loadAgentRunEventLogMaxBytes,
   parseWindowMs,
   resolveState,
   type AgentRun,
   type AgentRunActivityUpdate,
   type AgentRunOutcome,
+  type AgentRunStreamEvent,
   type DomainEvent,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -23,7 +25,7 @@ import {
   type RegisteredWorktree,
 } from "@owner-operator/core";
 import { randomUUID } from "node:crypto";
-import { ThreadDb, type AgentRunInsert, type SessionStateRow } from "./database";
+import { PartialAgentRunSweepError, ThreadDb, type AgentRunInsert, type AgentRunLogEntry, type SessionStateRow } from "./database";
 import { InMemoryEventBus } from "./event-bus";
 import { ownerOperatorHome } from "../shared/paths";
 
@@ -31,11 +33,14 @@ export interface StateOptions {
   bus?: InMemoryEventBus;
   now?: () => string;
   activeWindow?: string;
+  /** Per-run event-log retention; defaults to the owner's `agentRunEventLogMaxBytes` setting. */
+  eventLogMaxBytes?: number;
 }
 
 /** The daemon's sole durable-state seam. All writes commit before events are published. */
 export class State {
   readonly bus: InMemoryEventBus;
+  private readonly runLogListeners = new Set<(runId: string) => void>();
   private readonly db: ThreadDb;
   private readonly now: () => string;
   private readonly activeWindow: string;
@@ -46,7 +51,16 @@ export class State {
     this.now = options.now ?? (() => new Date().toISOString());
     this.activeWindow = options.activeWindow ?? loadActiveWindow(ownerOperatorHome());
     this.blacklist = () => loadBlacklist(ownerOperatorHome());
-    this.db = new ThreadDb(dbPath, { now: this.now });
+    const eventLogMaxBytes = options.eventLogMaxBytes ?? loadAgentRunEventLogMaxBytes(ownerOperatorHome(), (value) => {
+      process.stderr.write(`${JSON.stringify({
+        component: "state",
+        event: "setting-rejected",
+        setting: "agentRunEventLogMaxBytes",
+        value,
+        reason: "must be a positive integer byte count; using the default",
+      })}\n`);
+    });
+    this.db = new ThreadDb(dbPath, { now: this.now, eventLogMaxBytes });
     this.db.purgeBlacklisted(this.blacklist());
   }
 
@@ -337,24 +351,72 @@ export class State {
 
   finishAgentRun(id: string, outcome: AgentRunOutcome): AgentRun | null {
     const run = this.db.finishAgentRun(id, outcome);
-    if (run) this.publishAgentRun(run);
+    if (run) {
+      this.publishAgentRun(run);
+      this.notifyRunLog(id);
+    }
     return run;
+  }
+
+  /** Persist one child stream event of a running run, then wake its log tailers. */
+  appendAgentRunEvent(id: string, event: AgentRunStreamEvent): number | null {
+    const seq = this.db.appendAgentRunEvent(id, event);
+    if (seq !== null) this.notifyRunLog(id);
+    return seq;
+  }
+
+  agentRunEvents(id: string, afterSeq = 0): AgentRunLogEntry[] {
+    return this.db.agentRunEvents(id, afterSeq);
+  }
+
+  iterateAgentRunEvents(id: string, afterSeq = 0): Iterable<AgentRunLogEntry> {
+    return this.db.iterateAgentRunEvents(id, afterSeq);
+  }
+
+  agentRunLastSeq(id: string): number | null {
+    return this.db.agentRunLastSeq(id);
+  }
+
+  /** Process-local wake-up for run-log tailers, separate from the domain bus so the Gateway's
+   * invalidation stream never carries per-event traffic. SQLite remains the log's truth. */
+  subscribeAgentRunLog(listener: (runId: string) => void): () => void {
+    this.runLogListeners.add(listener);
+    return () => this.runLogListeners.delete(listener);
+  }
+
+  private notifyRunLog(runId: string): void {
+    for (const listener of this.runLogListeners) {
+      queueMicrotask(() => {
+        try { listener(runId); } catch { /* one tailer cannot fail the write or its peers */ }
+      });
+    }
   }
 
   markRunningAgentRunsInterrupted(reason: string): string[] {
     const ids = this.db.markRunningAgentRunsInterrupted(reason);
     for (const id of ids) {
       this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Interrupted });
+      this.notifyRunLog(id);
     }
     return ids;
   }
 
   markAgentRunsLost(liveRunIds: readonly string[], activityCutoffIso: string): string[] {
-    const ids = this.db.markAgentRunsLost(liveRunIds, activityCutoffIso);
-    for (const id of ids) {
-      this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Lost });
+    const announce = (ids: readonly string[]): void => {
+      for (const id of ids) {
+        this.publish({ kind: DomainEventKind.AgentRunChanged, runId: id, status: AgentRunStatus.Lost });
+        this.notifyRunLog(id);
+      }
+    };
+    try {
+      const ids = this.db.markAgentRunsLost(liveRunIds, activityCutoffIso);
+      announce(ids);
+      return ids;
+    } catch (error) {
+      // Runs finalized before the failure are committed; their followers must still hear it.
+      if (error instanceof PartialAgentRunSweepError) announce(error.committed);
+      throw error;
     }
-    return ids;
   }
 
   agentRunById(id: string): AgentRun | undefined {

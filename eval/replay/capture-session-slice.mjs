@@ -35,15 +35,14 @@ import { isBlacklisted, loadBlacklist, loadMonitoredTranscriptStores } from "@ow
 import { scanCredentials } from "./credentials.mjs";
 import { ThreadDb } from "../../src/state/database.ts";
 
-const SEARCH_HELPER = fileURLToPath(new URL("../../src/agent/skills/session-search/scripts/session-search.mjs", import.meta.url));
-const INSTALL_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const SEARCH_HELPER = fileURLToPath(new URL("../../src/session-search/session-search.mjs", import.meta.url));
 
 /** Ask the approved helper whether this session may be read, and which file it resolves to. */
 function authorizeSession(id, home) {
   try {
     const header = execFileSync(process.execPath, [SEARCH_HELPER, "--skim", id, "--max-chars", "500"], {
       encoding: "utf8", maxBuffer: 1024 * 1024,
-      env: { ...process.env, OO_HOME: home, OO_INSTALL_ROOT: INSTALL_ROOT },
+      env: { ...process.env, OO_HOME: home },
     }).split("\n", 1)[0];
     const path = /\spath=(.+)$/.exec(header)?.[1];
     return path && header.startsWith(`skim id=${id} `)

@@ -162,7 +162,7 @@ function truncate(value: string, max: number): string {
 // ---- Silent start --------------------------------------------------------------------
 // Decision §5: no auto model turn. The interactive surface opens fully silent — no
 // `initialMessage`. The owner asks; the ranked thread list lives in the widget (and
-// `oo --session-state`), so there's no canned brief to re-narrate that deterministic state.
+// `oo session-state list`), so there's no canned brief to re-narrate that deterministic state.
 export function ooInteractiveOptions(): InteractiveModeOptions {
   return {};
 }

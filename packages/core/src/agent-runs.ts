@@ -160,7 +160,34 @@ export interface AgentRunCreateInput {
   /** Reasoning effort requested for the child; omission uses the baseline, explicit null clears it. */
   effort?: AgentRunEffort | null;
   timeoutSeconds?: number;
+  /** What an omitted model does when the harness has no approved baseline. `ask` (the default)
+   * rejects the launch so the Operator asks the owner; `harness-choice` launches unpinned and
+   * records the identity the harness confirms. */
+  onMissingBaseline?: AgentRunMissingBaseline;
 }
+
+export enum AgentRunMissingBaseline {
+  Ask = "ask",
+  HarnessChoice = "harness-choice",
+}
+
+/** One event from a run's child stream, stored verbatim as ACPX's `AcpRuntimeEvent`
+ * (`text_delta`, `status`, `tool_call`, ...). */
+export type AgentRunStreamEvent = { type: string } & Record<string, unknown>;
+
+/** The terminal record closing a run's event log, shaped like ACPX's `AcpRuntimeTurnResult`
+ * with the run's own terminal status (which also covers interrupted and lost). */
+export interface AgentRunResultRecord {
+  type: "result";
+  runId: string;
+  status: AgentRunStatus;
+  error?: { message: string };
+}
+
+export type AgentRunLogRecord = AgentRunStreamEvent | AgentRunResultRecord;
+
+export const isAgentRunResultRecord = (record: AgentRunLogRecord): record is AgentRunResultRecord =>
+  record.type === "result";
 
 export interface AgentRun {
   id: string;
@@ -336,6 +363,8 @@ export interface AgentRunLaunchRequest {
   signal: AbortSignal;
   /** Explicit-activity channel: the launcher reports progress and identity as soon as known. */
   onActivity(update: AgentRunActivityUpdate): void;
+  /** Every child stream event, in order, for the run's durable event log. */
+  onEvent?(event: AgentRunStreamEvent): void;
 }
 
 /** Protocol-level outcome. A turn result finalizes a run — never process exit alone. */
@@ -359,3 +388,13 @@ export interface AgentRunOutcome extends ChildIdentity {
   resultTail: string | null;
   error: string | null;
 }
+
+/** One disposable harness observation runs up to three bounded stages — session initialization,
+ * status read, and candidate inspection — each within this bound, then bounded cleanup. */
+export const HARNESS_OBSERVATION_STAGE_TIMEOUT_MS = 90_000;
+export const HARNESS_OBSERVATION_STAGES = 3;
+/** Worst case of an observation's work outside its stages: the 5 s runtime version probe, a 2 s
+ * process-tree snapshot, the 2 s graceful close, and lease termination (a 2 s process list, a
+ * 750 ms kill grace, then up to 5 verification lists of 2 s, 250 ms apart). A unit test keeps this
+ * equal to the observer's and process lease's own constants. */
+export const HARNESS_OBSERVATION_CLEANUP_MS = 5_000 + 2_000 + 2_000 + (2_000 + 750 + 5 * 2_000 + 4 * 250);

@@ -104,18 +104,18 @@ try {
       sessionManager: { getSessionId: () => currentSessionId },
     }), undefined);
     const command = (bash.input as { command: string }).command;
-    return execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s|%s|%s' "$OO_INSTALL_ROOT" "$OO_CALLER_SESSION_ID" "$OO_CURRENT_SESSION_ID" "$OO_HOME"`], {
+    return execFileSync("/bin/sh", ["-c", `${command}; printf '|%s|%s|%s|%s' "$(command -v oo)" "$OO_CALLER_SESSION_ID" "$OO_CURRENT_SESSION_ID" "$OO_HOME"`], {
       encoding: "utf8",
     });
   };
   assert.equal(
     injectedEnvironment("current-session-one"),
-    `command-ok|${process.cwd()}|caller'id|current-session-one|${ooHome}`,
+    `command-ok|${join(process.cwd(), "oo")}|caller'id|current-session-one|${ooHome}`,
     "the guard injects the authoritative non-default OO_HOME with shell-safe caller provenance",
   );
   assert.equal(
     injectedEnvironment("current-session-two"),
-    `command-ok|${process.cwd()}|caller'id|current-session-two|${ooHome}`,
+    `command-ok|${join(process.cwd(), "oo")}|caller'id|current-session-two|${ooHome}`,
     "the same extension reads a changed current session ID live on every tool call",
   );
 

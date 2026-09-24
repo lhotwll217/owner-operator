@@ -37,7 +37,7 @@ const gateway = await startGateway({
   monitor: { poll: async () => undefined },
   scheduler: {} as never,
   agentRuns: {} as never,
-  query: {} as never,
+  query: {} as never, harness: {} as never, search: {} as never,
   worktrees: {
     async use(request): Promise<UseWorktreeResult> {
       calls.push(request);

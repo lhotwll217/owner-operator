@@ -29,7 +29,7 @@ knows. Fix that boundary before adding strategy prose.
 
 ## Evaluation seam
 
-The QA subject is always the shipped headless harness (`./oo "question"`): model, Owner
+The QA subject is always the shipped headless harness (`./oo -p "question"`): model, Owner
 Operator prompt, state/DB tools, session-search skill and wrapper, and the vendored retrieval
 primitive together. Direct `session-grep` invocations are useful deterministic mechanism
 probes, but they are not end-to-end product evidence and should not replace a headless run.

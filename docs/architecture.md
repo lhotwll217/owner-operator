@@ -31,7 +31,7 @@ widget · oo agent/tools · Pi extension · oo CLI
 | `packages/core` | Shared enums, types, pure state rules, wire contract, dependency-light filesystem config readers; browser-safe presentation/protocol contracts use dedicated subpath exports | SQLite, network, timers, processes, model calls |
 | `src/state` | SQLite schema, transactions, projections, post-commit events, read-only query docs | Polling, HTTP, model calls |
 | `src/session-monitor` | Transcript scan/watch and its private async enrichment worker | HTTP, scheduling |
-| `src/session-search` | Privacy-aware transcript search and its pinned search primitive, shared by the monitor and agent skill | State writes, model calls |
+| `src/session-search` | Privacy-aware transcript search and its pinned search primitive, shared by the monitor and `POST /session-search` (`oo search`) | State writes, model calls |
 | `src/scheduler` | Typed jobs, Croner calendar math, execution, run history, needs-you dedupe | HTTP, SQLite access outside `State` |
 | `src/agent-runs` | Delegated-run executor, ACP launcher over `acpx`, and client-side parent-fleet reconciliation adapters | SQLite access outside `State`, HTTP |
 | `src/worktrees` | Argv-safe Git worktree inspection/creation and create/list/select orchestration | SQLite writes, runtime cwd binding, cleanup |

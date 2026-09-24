@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness } from "@owner-operator/core";
 import { openCodeBinaryPath } from "./acp-launcher";
+import { readHarnessDetails } from "./harness-details";
 import { createGetHarnessDetailsTool } from "../agent/tools/get-harness-details";
 import { startDaemon } from "../daemon/runtime";
 import { connectGateway } from "../gateway/client";
@@ -25,7 +26,7 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, existsSync } from 'node:fs';
 const identity = __IDENTITY__;
 if (process.env.OPENCODE_BIN_PATH) process.exit(91);
-if (process.argv[2] === '--version') { console.log('1.18.31'); process.exit(0); }
+if (process.argv[2] === '--version') { appendFileSync(${JSON.stringify(join(root, "versions.log"))}, 'v\\n'); console.log('1.18.31'); process.exit(0); }
 if (process.argv[2] !== 'acp') process.exit(92);
 let effort = 'high';
 let pending;
@@ -62,7 +63,8 @@ for await (const line of createInterface({input:process.stdin})) {
 try {
   const harness = AgentRunHarness.OpenCode;
   writeFileSync(join(bin, harness), fixture.replace("__IDENTITY__", JSON.stringify(harness)), { mode: 0o755 });
-  const tool = createGetHarnessDetailsTool();
+  // Observes the fixture binary in this process; the Gateway transport is covered by oo-harness.e2e.
+  const tool = createGetHarnessDetailsTool({ read: readHarnessDetails });
   const context = {} as Parameters<typeof tool.execute>[4];
   {
     assert.equal(openCodeBinaryPath(), join(bin, harness));
@@ -90,6 +92,10 @@ try {
     }, undefined, undefined, context);
     assert.ok(invalid.details.capabilities.harnesses[0]!.error, "unadvertised model is refused before any turn");
     assert.equal(invalid.details.capabilities.harnesses[0]!.confirmation, null);
+    // Each observation identifies the OpenCode executable once; the launch reuses that identity,
+    // so the client's harness-details budget of one version check per observation holds.
+    const versionCalls = readFileSync(join(root, "versions.log"), "utf8").trim().split("\n").length;
+    assert.equal(versionCalls, 4, `four observations ran ${versionCalls} version checks`);
   }
   const requests = readFileSync(join(root, "requests.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   for (const harness of ["opencode"]) {

@@ -51,9 +51,11 @@ else
   ENTRY="$DIR/src/cli/interactive.ts"
 fi
 
-# Prefer the checkout's tsx (workspace-hoisted to repo root); fall back to npx.
-if [ -x "$DIR/node_modules/.bin/tsx" ]; then
-  exec "$DIR/node_modules/.bin/tsx" "$ENTRY" "$@"
+# Prefer the checkout's tsx loader (workspace-hoisted to repo root) through Node's --import, not
+# the tsx CLI: the CLI opens an IPC socket under TMPDIR, and beneath a long disposable TMPDIR
+# (agent and eval sandboxes) that path overflows the socket limit (listen EINVAL). Fall back to npx.
+if [ -f "$DIR/node_modules/tsx/dist/loader.mjs" ]; then
+  exec node --import "$DIR/node_modules/tsx/dist/loader.mjs" "$ENTRY" "$@"
 else
   exec npx tsx "$ENTRY" "$@"
 fi

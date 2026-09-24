@@ -1,9 +1,7 @@
 import assert from "node:assert";
 import { AgentRunHarness } from "@owner-operator/core";
-import type {
-  HarnessDetailsSnapshot,
-  ReadHarnessDetailsOptions,
-} from "../../agent-runs/harness-details";
+import type { HarnessDetailsRequest } from "@owner-operator/core";
+import type { HarnessDetailsSnapshot } from "../../agent-runs/harness-details";
 import { createGetHarnessDetailsTool } from "./get-harness-details";
 
 const OBSERVED_AT = "2026-08-25T00:00:00.000Z";
@@ -23,7 +21,7 @@ const snapshot: HarnessDetailsSnapshot = {
   unknowns: [],
 };
 
-const calls: ReadHarnessDetailsOptions[] = [];
+const calls: HarnessDetailsRequest[] = [];
 const tool = createGetHarnessDetailsTool({
   read: async (input) => {
     calls.push(input);

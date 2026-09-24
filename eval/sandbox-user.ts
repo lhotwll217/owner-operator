@@ -30,6 +30,7 @@ import type { OwnerOperatorHarnessAdapters } from "../src/agent/tools";
 import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
 import { repoRoot } from "../src/shared/repo-root";
 import { absoluteTsxLoaderPath } from "../src/shared/tsx-loader";
+import { isOperationNoun } from "../src/cli/oo-args";
 import {
   evalSandboxUserPaths,
   sanitizeEvalDiagnosticValue,
@@ -428,8 +429,7 @@ function runCli(
 }
 
 function isModelFreeCliInvocation(args: string[]): boolean {
-  return args.includes("--session-state")
-    || args.includes("--done")
+  return isOperationNoun(args[0])
     || args.includes("--help")
     || args.includes("-h")
     || args[0] === "doctor"

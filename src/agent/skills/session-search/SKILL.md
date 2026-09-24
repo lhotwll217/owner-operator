@@ -5,10 +5,10 @@ description: Search coding-agent or Owner Operator session transcripts through O
 
 # Session search
 
-Run the bundled privacy-aware helper through `bash`. `OO_INSTALL_ROOT` points at the active Owner Operator installation. Do not read transcript files directly or call the vendored primitive.
+Run the privacy-aware search through `bash` with `oo search`. Do not read transcript files directly or call the vendored primitive.
 
 ```json
-{"command":"node \"$OO_INSTALL_ROOT/src/agent/skills/session-search/scripts/session-search.mjs\" --query 'TEXT' --since 7d"}
+{"command":"oo search --query 'TEXT' --since 7d"}
 ```
 
 Every mode below runs through this command with different flags; `--help` lists them all.

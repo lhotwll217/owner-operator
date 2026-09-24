@@ -75,10 +75,12 @@ try {
   assert.ok(!selectedNames.includes("mail"), "unselected personal skill stays absent");
 
   writeSkill(personalSkills, "writing-for-agents");
+  writeSkill(personalSkills, "owner-operator");
   saveHarnessSettings(ooHome, { skillPolicy: { mode: "all-personal", allowlist: [] } });
   const allPersonal = await load();
   const allNames = allPersonal.getSkills().skills.map((skill) => skill.name);
   assert.ok(allNames.includes("calendar") && allNames.includes("mail"), "all personal skills require explicit policy");
+  assert.ok(!allNames.includes("owner-operator"), "the outside-agent skill is never loaded into the product agent");
   assert.equal(allPersonal.getSkills().skills.find((skill) => skill.name === "writing-for-agents")?.filePath,
     writingSkill.filePath, "the OO-owned writing skill takes precedence over a personal copy");
 
