@@ -308,7 +308,7 @@ try {
     },
   });
   const codex = await readAcpRuntimeProvenance(AgentRunHarness.Codex);
-  assert.equal(codex.backend.version, "0.153.2", "backend resolves relative to the adapter, not Promptfoo");
+  assert.equal(codex.backend.version, "0.156.1", "backend resolves relative to the adapter, not Promptfoo");
   const cursor = await readAcpRuntimeProvenance(AgentRunHarness.Cursor, {
     resolveCursorCommand: () => "/fixture/cursor-agent",
     readCommandVersion: async (command) => {
