@@ -21,7 +21,8 @@ transcript by a poll cycle. Rows are an index over sessions, not the sessions th
   filter with `state` for exact-state questions.
 - `query_database` — read-only SQL over the whole DB, history included. Run `list_tables`
   then `describe_table` before unfamiliar SQL. The DB's `project` is a coding cwd, not a
-  transcript source root.
+  transcript source root. To find which session handled something, match its words against
+  `thread_details.topic` and `status_summary` before searching transcripts.
 
 **Session Search** — the `session-search` Agent Skill reads actual transcripts. Load and
 follow it for every transcript operation; it owns command mechanics, source namespaces, and
