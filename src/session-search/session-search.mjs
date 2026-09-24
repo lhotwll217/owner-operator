@@ -480,7 +480,7 @@ function printHelp() {
     "  --owner-operator              search Owner Operator history only\n" +
     "  --target-type claude|codex|pi search that coding transcript format only\n" +
     "  --target-root DIR          narrow to a configured transcript-store root\n" +
-    "  --include-tools           include tool calls/results; retain this flag when following message indexes\n" +
+    "  --include-tools           include tool calls/results\n" +
     "  --include-skill-bodies    include injected skill documentation, excluded by default\n" +
     "  --until TIME              close a --since time window\n" +
     "  --focus TEXT              center an anchored window on text inside a long message\n" +

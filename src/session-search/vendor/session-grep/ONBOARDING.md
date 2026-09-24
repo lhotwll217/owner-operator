@@ -26,6 +26,41 @@ Hosts and launchers are not transcript formats. Roots are keyed by adapter `type
 (`claude`, `codex`, `pi`) and directory. Quick existence check:
 `ls -d ~/.claude/projects ~/.codex/sessions 2>/dev/null`.
 
+## First run on a machine
+
+A search prints `sources=defaults` when no source config is in effect. That field is the
+switch. It has one on position and two off positions, and nothing to judge:
+
+- **on** — no config exists. Every search prints the field. Do the steps below.
+- **off** — a config exists and lists the roots this machine should search.
+- **off** — a config exists and lists exactly the built-in roots, which records that the
+  defaults were checked and are right.
+
+Writing the file flips it and the field never appears again. There is no per-session
+check, no second condition, and no state kept beyond that one file. Do not judge whether
+this machine "needs" it: if the field prints, it has not been done.
+
+```bash
+node session-grep.mjs --list-roots                     # note origin= and every root
+find ~ -maxdepth 4 -name '*.jsonl' -not -path '*/node_modules/*' 2>/dev/null \
+  | sed 's|/[^/]*$||' | sort -u | head -40             # directories holding transcripts
+```
+
+Compare the two. A directory in the second list that no root in the first covers is a
+store this machine will never search. If it is a supported format, add it to a config
+file, not to the skill. An agent reading this can do all of it: run both commands, show
+the user what is uncovered, and write the file.
+
+Write a JSON array of `{ type, root }` somewhere outside the skill directory, list
+**every** root you want because the file replaces the defaults rather than extending
+them, then point `$SESSION_GREP_SOURCES_FILE` at it and confirm `origin=config`.
+
+Set that variable in the host's own configuration, not a shell profile. An agent's
+tool-shell frequently never sources a login profile, so an export in `~/.zshrc` is
+simply absent and the search quietly falls back. In Claude Code the place is the `env`
+block of `~/.claude/settings.json`. Other hosts have their own equivalent; a harness
+that wraps this skill can pass `--sources-file` instead and skip the variable.
+
 ## Searching somewhere else
 
 Four ways, in order of precedence:
@@ -35,9 +70,11 @@ Four ways, in order of precedence:
    the directory does not reveal the parser type.
 3. `$SESSION_GREP_SOURCES_FILE` env path to the same JSON array, for a global/npx
    install or CI.
-4. Edit `DEFAULT_SOURCES` in `session-grep.mjs`. The skill is vendored into your repo
-   via `npx skills add`, so this file is yours. Adding a bespoke tool means dropping an
-   adapter in `adapters/` and adding a line here; commit both.
+4. Edit `DEFAULT_SOURCES` in `session-grep.mjs`. Only for a copy you own and update by
+   hand. A skill installed globally is reinstalled in place by `npx skills update`, which
+   overwrites this file and reverts the edit with no warning, after which searches use the
+   defaults and look fine. Supporting a new tool is different: that is an adapter plus a
+   line here, and belongs upstream in the repo rather than in one machine's copy.
 
 `--sources-file` and `$SESSION_GREP_SOURCES_FILE` both *replace* the defaults for that
 run. `--root` is an untyped one-off override; to narrow configured typed roots use

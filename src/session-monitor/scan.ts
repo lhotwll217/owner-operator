@@ -35,7 +35,7 @@ export async function sampleTranscript(threadId: string, source: string, maxChar
 /**
  * One privacy-aware read of a session, and the position it reached. The helper reports the
  * message count of the view it returned; the last index of that view is the position a
- * status summary written from it can be returned to with `--session <id> --at <index> --include-tools`.
+ * status summary written from it can be returned to with `--session <id> --at <index>`.
  */
 async function skim(threadId: string, maxChars: number): Promise<{ stdout: string; position: number | null }> {
   const { stdout } = await execFileAsync(process.execPath, [
