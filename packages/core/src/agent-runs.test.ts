@@ -14,6 +14,32 @@ const completed = run("completed", AgentRunStatus.Completed, {
   acpxRecordId: "acpx-record",
 });
 
+const cancelled = { ...completed, id: "cancelled", status: AgentRunStatus.Cancelled };
+assert.equal(
+  agentRunResumeError(cancelled, { existingResumeRunId: null, activeRunId: null }),
+  null,
+  "a cancelled run with both identities can resume its child conversation",
+);
+assert.deepEqual(agentRunTurnIntent({
+  ...cancelled, id: "continued", status: AgentRunStatus.Pending, resumeOfRunId: cancelled.id,
+}, undefined, cancelled), {
+  kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record",
+});
+for (const status of [AgentRunStatus.Pending, AgentRunStatus.Running, AgentRunStatus.Failed,
+  AgentRunStatus.Interrupted, AgentRunStatus.Lost]) {
+  assert.match(agentRunResumeError({ ...completed, status }, {
+    existingResumeRunId: null, activeRunId: null,
+  }) ?? "", /can only be resumed/);
+}
+assert.match(agentRunRetryError(cancelled, {
+  existingRetryRunId: null, activeRunId: null,
+}) ?? "", /not retryable/);
+for (const identity of [{ childSessionId: null }, { acpxRecordId: null }]) {
+  assert.match(agentRunResumeError({ ...cancelled, ...identity }, {
+    existingResumeRunId: null, activeRunId: null,
+  }) ?? "", /no .*identity to resume/);
+}
+
 const failedForRetry = run("failed-for-retry", AgentRunStatus.Failed, {
   childSessionId: "retry-child",
 });

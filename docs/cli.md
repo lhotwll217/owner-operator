@@ -52,6 +52,9 @@ search wrapper's own flags, which are its contract.
 guessing, so parallel agents in one repo cannot mark each other. A harness that knows its own
 session id (e.g. a session-end hook) can self-mark.
 
+For continuing a cancelled delegated run, use `oo runs resume <id> "<task>"` by default.
+The [delegated-run lifecycle](delegated-runs.md#lifecycle) owns eligibility and harness limits.
+
 ## Interactive tool display
 
 The pinned `pi-tool-display` extension owns compact OpenCode-style calls and results for Pi's

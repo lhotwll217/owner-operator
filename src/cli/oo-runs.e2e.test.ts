@@ -18,8 +18,9 @@ const launched: AgentRunLaunchRequest[] = [];
 const held = new Map<string, () => void>();
 const launcher = async (request: AgentRunLaunchRequest) => {
   launched.push(request);
-  const childSessionId = `child-${request.run.id}`;
-  request.onActivity({ childSessionId, acpxRecordId: `acpx-${request.run.id}` });
+  const childSessionId = request.turnIntent.kind === "fresh" ? `child-${request.run.id}` : request.turnIntent.childSessionId;
+  const acpxRecordId = request.run.acpxRecordId ?? `acpx-${request.run.id}`;
+  request.onActivity({ childSessionId, acpxRecordId });
   request.onActivity({ harnessIdentity: { observed: true, model: request.run.model ?? "harness-picked", effort: "high" } });
   request.onEvent?.({ type: "text_delta", stream: "thought", text: "planning" });
   request.onEvent?.({ type: "tool_call", text: "read", title: "Read README", toolCallId: "t1", status: "pending" });
@@ -27,7 +28,7 @@ const launcher = async (request: AgentRunLaunchRequest) => {
   request.onEvent?.({ type: "text_delta", stream: "output", text: "OO_STREAM" });
   if (request.run.task.includes("HOLD")) await new Promise<void>((release) => held.set(request.run.id, release));
   request.onEvent?.({ type: "text_delta", stream: "output", text: "_OK" });
-  return { status: AgentRunStatus.Completed as const, resultText: "OO_STREAM_OK", error: null, childSessionId, acpxRecordId: `acpx-${request.run.id}` };
+  return { status: AgentRunStatus.Completed as const, resultText: "OO_STREAM_OK", error: null, childSessionId, acpxRecordId };
 };
 
 const spawnOo = (args: readonly string[], env: NodeJS.ProcessEnv = {}): ChildProcess & { out: { stdout: string; stderr: string } } => {
@@ -149,6 +150,17 @@ try {
     const current = state.agentRunById(cancelId)!;
     return current.status === AgentRunStatus.Running ? undefined : current;
   }, "cancelled")).status, AgentRunStatus.Cancelled, `cancel finalizes the run (returned ${cancelRow.status})`);
+  const continued = await runOo(["runs", "resume", cancelId, "continue the cancelled task", "--json"]);
+  assert.equal(continued.status, 0, continued.stderr);
+  const continuedRun = JSON.parse(continued.stdout) as AgentRun;
+  assert.equal(continuedRun.resumeOfRunId, cancelId);
+  assert.equal(continuedRun.childSessionId, state.agentRunById(cancelId)?.childSessionId);
+  assert.equal(continuedRun.acpxRecordId, state.agentRunById(cancelId)?.acpxRecordId);
+  assert.equal(continuedRun.task, "continue the cancelled task");
+  assert.equal(state.agentRunById(cancelId)?.status, AgentRunStatus.Cancelled);
+  const resumeHelp = await runOo(["runs", "resume", "--help"]);
+  assert.match(resumeHelp.stdout, /completed or cancelled/);
+  assert.match(resumeHelp.stdout, /default after cancellation/);
   // A log far larger than the pipe buffer, read only after a pause, arrives whole with its
   // terminal record: the CLI waits on backpressure and drains stdout before exiting.
   const big = state.createAgentRun({ harness: "claude-code" as never, task: "HOLD big log", cwd: repoRoot, depth: 1, timeoutSeconds: 60 });

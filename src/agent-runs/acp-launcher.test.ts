@@ -662,7 +662,7 @@ await assert.rejects(
     signal: new AbortController().signal,
     onActivity: () => undefined,
   }),
-  /ACP resume failed.*(?:identity mismatch|fresh session)/i,
+  /ACP resume failed for codex session .*?(?:identity mismatch|fresh session)/i,
   "a valid pre-check cannot authorize a fresh handle returned by ensureSession",
 );
 assert.equal(fallbackTurnCalls, 0, "a fresh fallback never receives the follow-up turn");
@@ -691,7 +691,7 @@ await assert.rejects(
     onActivity: () => undefined,
   }),
   (error: unknown) => error instanceof Error
-    && error.message.includes("ACP turn failed for resumed-run")
+    && error.message.includes("ACP turn failed for codex run resumed-run")
     && error.message.includes("ordinary failure after validated resume identity")
     && !error.message.includes("ACP resume failed"),
   "a post-identity turn failure is not misclassified as a Resume load failure",

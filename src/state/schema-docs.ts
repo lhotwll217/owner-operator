@@ -126,7 +126,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "result_tail", description: "Bounded tail of the child's final report." },
       { name: "error", description: "Terminal failure/interruption/loss explanation." },
       { name: "retry_of_run_id", description: "Exact failed, interrupted, or lost run whose task this row retries; mutually exclusive with resume_of_run_id." },
-      { name: "resume_of_run_id", description: "Exact completed run after which this row sends a required new task; mutually exclusive with retry_of_run_id." },
+      { name: "resume_of_run_id", description: "Exact completed or cancelled run after which this row sends a required new task; mutually exclusive with retry_of_run_id." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
     ],
   },

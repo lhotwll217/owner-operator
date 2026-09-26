@@ -10,6 +10,14 @@ the execution identity: harness, model, and effort. `effort: null` is an explici
 owner choice bypasses this workflow and passes through unchanged. Preserve every supplied harness,
 model, and effort value—including `effort: null`—while selecting only omitted fields.
 
+## Continue existing work
+
+To continue a cancelled delegated run, default to `manage_agent_run` with `action: "resume"`,
+the latest run id, and a new task describing what to do next. Resume also accepts completed runs.
+It preserves the child conversation and recorded harness, model, effort, and cwd, so selection is
+unnecessary. If continuation fails, report the error before deciding on a fresh delegate.
+The [continuation contract](../../../../docs/delegated-runs.md#lifecycle) owns eligibility and limits.
+
 ## Select
 
 1. **Observe.** Call `get_harness_details` once with every plausible harness.

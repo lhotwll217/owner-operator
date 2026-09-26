@@ -236,7 +236,7 @@ export class AgentRunExecutor {
     return retried;
   }
 
-  /** Resume = one required new task after a completed run, using the same child conversation. */
+  /** Resume = one required new task after a completed or cancelled run, using the same child conversation. */
   resume(id: string, task: string): AgentRun {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);

@@ -40,3 +40,10 @@ stdout until it finishes; the exit code is 0 only when the run completed. The da
 child, so to run it in the background use `--no-wait`, which prints the run row immediately, then
 `oo runs logs --follow <id>` to attach. Interrupting either command detaches without stopping the
 run, and `logs --follow` replays from the start when you reattach.
+
+To continue cancelled work, default to `oo runs resume <id> "<task>"`. Supply instructions to
+continue or revise the work. Resume also accepts completed runs and preserves the same child
+conversation in a new run row. Use the latest run id in that conversation. Cancellation before
+session creation cannot be resumed. If the harness cannot reload the saved conversation, report
+the error; a fresh delegate requires an explicit decision. See the
+[continuation contract](../../docs/delegated-runs.md#lifecycle) for eligibility and harness limits.

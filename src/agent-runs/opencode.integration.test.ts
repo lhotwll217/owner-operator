@@ -146,15 +146,26 @@ try {
       const cancelled = await gateway.cancelAgentRun(held.id);
       assert.equal(cancelled.status, "cancelled");
       assert.equal((await gateway.waitAgentRun(held.id, 5)).status, "cancelled");
+      const continued = await gateway.resumeAgentRun(held.id, "continue after cancellation");
+      const continuedDone = await gateway.waitAgentRun(continued.id, 20);
+      assert.equal(continuedDone.status, "completed", continuedDone.error ?? "");
+      assert.equal(continuedDone.childSessionId, cancelled.childSessionId);
+      assert.equal(continuedDone.acpxRecordId, cancelled.acpxRecordId);
+      assert.equal(continuedDone.resumeOfRunId, held.id);
     }
     // An observed absence of both continuation methods must prevent a doomed row and UI control.
     // Conversely, ACP session/resume works without legacy loadSession and must remain available.
     for (const harness of [AgentRunHarness.OpenCode]) {
       for (const capabilities of [{ loadSession: false }, {}, { loadSession: false, sessionCapabilities: { resume: {} } }]) {
         writeFileSync(join(root, "capabilities.json"), JSON.stringify(capabilities));
-        const launched = await gateway.delegateAgent({ harness, model, effort: null, cwd: root, task: "capabilities", timeoutSeconds: 20 });
-        const done = await gateway.waitAgentRun(launched.id, 20);
-        assert.equal(done.status, "completed", done.error ?? "");
+        const launched = await gateway.delegateAgent({ harness, model, effort: null, cwd: root, task: "hold", timeoutSeconds: 20 });
+        const deadline = Date.now() + 10_000;
+        while (!(await gateway.agentRun(launched.id)).activity) {
+          assert.ok(Date.now() < deadline, "capability fixture reaches its turn");
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const done = await gateway.cancelAgentRun(launched.id);
+        assert.equal(done.status, "cancelled");
         const supported = "sessionCapabilities" in capabilities;
         assert.equal((await gateway.agentState()).runs.find(({ id }) => id === done.id)?.canResume, supported);
         const before: number = (await gateway.listAgentRuns()).length;

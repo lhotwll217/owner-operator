@@ -71,6 +71,11 @@ export const AGENT_RUN_RETRYABLE_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Failed,
 ];
 
+export const AGENT_RUN_RESUMABLE_STATUSES: readonly AgentRunStatus[] = [
+  AgentRunStatus.Completed,
+  AgentRunStatus.Cancelled,
+];
+
 export const AGENT_RUN_RESUME_TASK_ERROR = "resume follow-up task is required";
 
 /** Preserve the owner's task bytes while applying one validation rule at every public boundary. */
@@ -220,7 +225,7 @@ export interface AgentRun {
   error: string | null;
   /** Exact unsuccessful run whose task this row retries. */
   retryOfRunId: string | null;
-  /** Exact completed run after which this row sends a required new task. */
+  /** Exact completed or cancelled run after which this row sends a required new task. */
   resumeOfRunId: string | null;
   timeoutSeconds: number;
 }
@@ -262,14 +267,14 @@ export function agentRunResumeError(
   run: AgentRun,
   context: AgentRunResumeContext,
 ): string | null {
-  if (run.status !== AgentRunStatus.Completed) {
-    return `agent run ${run.id} can only be resumed from completed status, not ${run.status}`;
+  if (!AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)) {
+    return `agent run ${run.id} can only be resumed from completed or cancelled status, not ${run.status}`;
   }
   if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
     return `harness ${run.harness} does not support loading an existing session`;
   }
-  if (!run.childSessionId) return `completed agent run ${run.id} has no child session identity to resume`;
-  if (!run.acpxRecordId) return `completed agent run ${run.id} has no acpx session-record identity to resume`;
+  if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
+  if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
   if (context.existingResumeRunId) {
     return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
   }
@@ -323,7 +328,7 @@ export function agentRunTurnIntent(
   if (resumedRun.id !== run.resumeOfRunId) {
     throw new Error(`agent run ${run.id} resume identity mismatch: expected ${run.resumeOfRunId}, found ${resumedRun.id}`);
   }
-  if (resumedRun.status !== AgentRunStatus.Completed) {
+  if (!AGENT_RUN_RESUMABLE_STATUSES.includes(resumedRun.status)) {
     throw new Error(`agent run ${run.id} cannot resume run ${resumedRun.id} from status ${resumedRun.status}`);
   }
   if (!run.childSessionId || run.childSessionId !== resumedRun.childSessionId) {
@@ -358,7 +363,7 @@ export interface AgentRunActivityUpdate extends ChildIdentity {
 /** Runtime request passed from the executor to the injected launcher seam. */
 export interface AgentRunLaunchRequest {
   run: AgentRun;
-  /** Fresh launch, same-task retry, or exact completed-session resume. */
+  /** Fresh launch, same-task retry, or same-conversation resume. */
   turnIntent: AgentRunTurnIntent;
   signal: AbortSignal;
   /** Explicit-activity channel: the launcher reports progress and identity as soon as known. */

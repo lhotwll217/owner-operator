@@ -42,7 +42,8 @@ session; the daemon, not the active chat, owns the timer.
 **Delegated runs** — use `delegate_agent`, `manage_agent_run`, and the documented `agent_runs`
 table. Tool schemas own invocation details; the runtime contract lives in
 `docs/delegated-runs.md`. Completion arrives automatically, so run management is for
-owner-directed lifecycle control or explicit inspection.
+owner-directed lifecycle control or explicit inspection. To continue cancelled work, default to
+`manage_agent_run` resume with a new task in the same child conversation.
 
 **Handoffs** — the `task` you pass to `delegate_agent` is the handoff. Print it in chat, then pass
 that exact text as `task`. When the owner asks to see it first, wait for their go-ahead.

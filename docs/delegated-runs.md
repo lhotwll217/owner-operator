@@ -63,15 +63,20 @@ owns transcript identity and discovery.
 
 - **Terminal states are monotonic.** Retry and resume each create a new row; reopening a terminal
   row would erase one paid turn's history. Retry links the new row to the unsuccessful run whose
-  task it reruns; resume links the new row to the completed run after which it sends a new task.
+  task it reruns; resume links the new row to the completed or cancelled run after which it sends a new task.
   The exact ledger-column contract lives in
   [schema docs](../src/state/schema-docs.ts). The
   [domain contract](../packages/core/src/agent-runs.ts) derives runtime turn intent from those
   relationships and fails closed when either is inconsistent.
 - **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
-  `interrupted`, or `lost`; resume requires a new task after `completed`. The
+  `interrupted`, or `lost`; resume requires a new task after `completed` or `cancelled`. The
   [tool schema](../src/agent/tools/manage-agent-run.ts) owns their inputs, while the
   [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
+- **Resume is the default way to continue cancelled work.** Supply a new task, including an
+  instruction to continue when the goal is unchanged. Both saved conversation identities and the
+  original workspace must still be available. A cancellation before session creation cannot be
+  resumed. Use the latest run in the conversation; an already resumed run cannot branch it.
+  A reload failure stays explicit. Starting a fresh delegate is a separate decision.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
 - **`interrupted`** is retryable: a graceful daemon shutdown mid-run, or a restart reconciling a
@@ -80,6 +85,27 @@ owns transcript identity and discovery.
   in-process turn and no activity inside the grace window. Liveness is the executor's active-turn
   set plus durable rows — persisted metadata alone never keeps a run alive, and a live turn is
   never reclaimed.
+
+### Harness continuation
+
+Cancellation ends the current turn and retains the saved conversation. Resume uses the same
+ACP loading path as a follow-up after completion. OO checks both conversation identities after
+loading and fails with the harness and session in the error if loading fails. It never sends the
+new task to a replacement conversation.
+
+| Harness | Cancellation and continuation |
+| --- | --- |
+| Claude Code | The pinned adapter [interrupts the turn](https://github.com/agentclientprotocol/claude-agent-acp/blob/d571358e267ed21ed0ec9ec2622fda8935535d57/src/acp-agent.ts#L6398-L6413) and [loads or resumes the saved session](https://github.com/agentclientprotocol/claude-agent-acp/blob/d571358e267ed21ed0ec9ec2622fda8935535d57/src/acp-agent.ts#L2201-L2225). Exact model confirmation still applies after loading. |
+| Codex | The pinned adapter [interrupts the session's active turn](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L3376-L3385) and [restores the session](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L791-L834). |
+| Cursor | Its native [ACP interface](https://prod.cursor.com/docs/cli/acp) supports `session/cancel` and `session/load`. Authentication must remain available. |
+| OpenCode | The v1 service [aborts the active turn](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L351-L354) and [loads saved messages](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L211-L236). OO also requires the saved session's continuation capabilities, as described [below](#opencode). |
+
+The opt-in [live cancellation test](../src/agent-runs/resume-cancelled.live.test.ts) drives
+`oo runs delegate`, `cancel`, and `resume` through a separate daemon and temporary `OO_HOME`.
+It uses the selected harness's existing authentication and an empty task directory. It cancels
+a sleep tool call, then requires recall of a random token omitted from the resume prompt.
+The test also checks both identities and the original cancelled row, and closes only its own
+daemon. Run it with the explicit harness and model variables in [testing.md](testing.md).
 
 ## Live state and clients
 

@@ -487,7 +487,7 @@ export class ThreadDb {
        FROM agent_runs AS run
        LEFT JOIN agent_runs AS referenced ON referenced.id = run.resume_of_run_id
        WHERE run.resume_of_run_id IS NOT NULL
-         AND (referenced.id IS NULL OR referenced.status NOT IN ('completed','failed','interrupted','lost'))
+         AND (referenced.id IS NULL OR referenced.status NOT IN ('completed','cancelled','failed','interrupted','lost'))
        LIMIT 1`,
     ).get() as { id: string; referencedRunId: string; status: string | null } | undefined;
     if (invalid) {
@@ -511,7 +511,7 @@ export class ThreadDb {
           run.depth, run.status, run.created_at, run.started_at, run.finished_at, run.activity,
           run.last_activity_at, run.child_session_id, run.acpx_record_id, run.result_tail, run.error,
           CASE WHEN referenced.status IN ('failed','interrupted','lost') THEN run.resume_of_run_id END,
-          CASE WHEN referenced.status = 'completed' THEN run.resume_of_run_id END,
+          CASE WHEN referenced.status IN ('completed','cancelled') THEN run.resume_of_run_id END,
           run.timeout_seconds
         FROM ${priorTable} AS run
         LEFT JOIN ${priorTable} AS referenced ON referenced.id = run.resume_of_run_id
