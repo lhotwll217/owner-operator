@@ -46,7 +46,10 @@ export type GatewayProbe =
   | { kind: "unreachable"; info: DaemonInfo; cause: unknown };
 
 function readDaemonInfo(): DaemonInfo | null {
-  try { return JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
+  try {
+    const info = JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo | null;
+    return info && Number.isInteger(info.pid) && info.pid > 0 && info.pid <= 0x7fffffff ? info : null;
+  } catch { return null; }
 }
 
 function daemonIdentityOrCredentialChanged(current: DaemonInfo, next: DaemonInfo): boolean {

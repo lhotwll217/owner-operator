@@ -93,9 +93,11 @@ export async function ensureDaemon(): Promise<void> {
   let startRequested = false;
   if (existing?.kind === "unreachable") {
     const { pid, port } = existing.info;
-    if (!Number.isSafeInteger(pid) || pid <= 0) {
-      throw new Error("could not verify daemon liveness: discovery has an invalid PID", { cause: existing.cause });
+    const causes: Error[] = [];
+    for (let cause = existing.cause; cause instanceof Error && !causes.includes(cause); cause = cause.cause) {
+      causes.push(cause);
     }
+    const codes = causes.map((cause) => (cause as NodeJS.ErrnoException).code);
     let running = true;
     try {
       process.kill(pid, 0);
@@ -106,11 +108,22 @@ export async function ensureDaemon(): Promise<void> {
         throw new Error(`could not verify whether daemon pid ${pid} is running`, { cause: error });
       }
     }
-    if (running) {
+    if (running && !codes.includes("ECONNREFUSED") && !await loopbackPortIsFree(port)) {
+      const detail = causes.map((cause) => {
+        const code = (cause as NodeJS.ErrnoException).code;
+        return `${cause.name}${typeof code === "string" ? ` (${code})` : ""}: ${cause.message}`;
+      }).join("; ") || String(existing.cause);
+      const permissionHint = codes.some((code) => code === "EPERM" || code === "EACCES")
+        ? " Check this process's sandbox or network permissions."
+        : "";
+      const recovery = launchdOwnsDaemon
+        ? `launchctl kickstart -k gui/${process.getuid?.()}/${DAEMON_LABEL}`
+        : `kill ${pid}`;
       throw new Error(
         `Owner Operator daemon pid ${pid} is running but this process cannot reach 127.0.0.1:${port} ` +
-          `as an authenticated Gateway. Check this process's sandbox or network permissions. ` +
-          `The daemon was not restarted.`,
+          `as an authenticated Gateway. Probe failed: ${detail}.${permissionHint} ` +
+          `The daemon was not restarted. After verifying the daemon's identity, recover manually with ` +
+          `\`${recovery}\` from an unrestricted terminal, then retry oo.`,
         { cause: existing.cause },
       );
     }
