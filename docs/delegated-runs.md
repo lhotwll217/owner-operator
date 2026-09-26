@@ -74,9 +74,12 @@ owns transcript identity and discovery.
   [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
 - **Resume is the default way to continue cancelled work.** Supply a new task, including an
   instruction to continue when the goal is unchanged. Both saved conversation identities and the
-  original workspace must still be available. A cancelled run also requires confirmed prompt
-  submission, recorded from ACPX `promptStarted`. Session creation alone is insufficient.
-  Startup cancellations and legacy cancellations without submission evidence cannot be resumed.
+  original workspace must still be available. A cancelled run requires either its own confirmed
+  prompt submission, recorded from ACPX `promptStarted`, or a `resume_of_run_id` relationship to
+  an existing conversation. A resume successor cancelled while queued or loading can itself be
+  resumed even though its new prompt was never submitted. Its `prompt_submitted` stays false.
+  Fresh startup cancellations and legacy cancellations without either form of evidence cannot
+  be resumed. Session creation alone is insufficient.
   Use the latest run in the conversation; an already resumed run cannot branch it.
   A reload failure stays explicit. Starting a fresh delegate is a separate decision.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
@@ -90,7 +93,7 @@ owns transcript identity and discovery.
 
 ### Harness continuation
 
-Resume attempts to load the saved conversation after a submitted prompt is cancelled.
+Resume attempts to load the saved conversation after an eligible run is cancelled.
 Conversation retention has the harness-specific proof levels below. Resume uses the same
 ACP loading path as a follow-up after completion. OO checks both conversation identities after
 loading and fails with the harness and session in the error if loading fails. It never sends the

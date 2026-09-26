@@ -44,7 +44,8 @@ run, and `logs --follow` replays from the start when you reattach.
 To continue cancelled work, default to `oo runs resume <id> "<task>"`. Supply instructions to
 continue or revise the work. Resume also accepts completed runs and preserves the same child
 conversation in a new run row. Use the latest run id in that conversation. Cancelled runs require
-confirmed prompt submission and a reloadable session. Startup cancellations and older cancellations
-without submission evidence cannot be resumed. If the harness cannot reload the saved conversation,
-report the error; a fresh delegate requires an explicit decision. See the
+a submitted prompt or an existing resume relationship, plus a reloadable session. Resume successors
+cancelled while queued or loading can still be resumed. Fresh startup cancellations and older
+cancellations without either form of evidence cannot be resumed. If the harness cannot reload the
+saved conversation, report the error; a fresh delegate requires an explicit decision. See the
 [continuation contract](https://github.com/lhotwll217/owner-operator/blob/main/docs/delegated-runs.md#lifecycle) for eligibility and harness limits.

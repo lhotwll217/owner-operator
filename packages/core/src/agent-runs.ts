@@ -277,7 +277,7 @@ export function agentRunResumeError(
   }
   if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
   if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
-  if (run.status === AgentRunStatus.Cancelled && !run.promptSubmitted) {
+  if (run.status === AgentRunStatus.Cancelled && !run.promptSubmitted && !run.resumeOfRunId) {
     return `cancelled agent run ${run.id} has no confirmed prompt submission; cannot resume`;
   }
   if (context.existingResumeRunId) {
@@ -336,7 +336,7 @@ export function agentRunTurnIntent(
   if (!AGENT_RUN_RESUMABLE_STATUSES.includes(resumedRun.status)) {
     throw new Error(`agent run ${run.id} cannot resume run ${resumedRun.id} from status ${resumedRun.status}`);
   }
-  if (resumedRun.status === AgentRunStatus.Cancelled && !resumedRun.promptSubmitted) {
+  if (resumedRun.status === AgentRunStatus.Cancelled && !resumedRun.promptSubmitted && !resumedRun.resumeOfRunId) {
     throw new Error(`cancelled agent run ${resumedRun.id} has no confirmed prompt submission; cannot resume`);
   }
   if (!run.childSessionId || run.childSessionId !== resumedRun.childSessionId) {

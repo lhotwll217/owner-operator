@@ -53,7 +53,7 @@ guessing, so parallel agents in one repo cannot mark each other. A harness that 
 session id (e.g. a session-end hook) can self-mark.
 
 For continuing a cancelled delegated run, use `oo runs resume <id> "<task>"` by default
-after confirmed prompt submission, subject to session reload support.
+when the run submitted a prompt or is itself a resume successor, subject to session reload support.
 The [delegated-run lifecycle](delegated-runs.md#lifecycle) owns eligibility and harness limits.
 
 ## Interactive tool display
