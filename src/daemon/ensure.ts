@@ -91,7 +91,54 @@ export async function ensureDaemon(): Promise<void> {
   const existing = await probeGateway();
   const launchdOwnsDaemon = launchdCanManageCurrentHome() && existsSync(daemonLaunchAgentPath());
   let startRequested = false;
-  if (existing) {
+  if (existing?.kind === "unreachable") {
+    const { pid, port } = existing.info;
+    const causes: Error[] = [];
+    for (let cause = existing.cause; cause instanceof Error && !causes.includes(cause); cause = cause.cause) {
+      causes.push(cause);
+    }
+    const codes = causes.map((cause) => (cause as NodeJS.ErrnoException).code);
+    let running = true;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ESRCH") running = false;
+      else if (code !== "EPERM") {
+        throw new Error(`could not verify whether daemon pid ${pid} is running`, { cause: error });
+      }
+    }
+    if (running && !codes.includes("ECONNREFUSED") && !await loopbackPortIsFree(port)) {
+      const rawDetail = causes.map((cause) => {
+        const code = (cause as NodeJS.ErrnoException).code;
+        return `${cause.name}${typeof code === "string" ? ` (${code})` : ""}: ${cause.message}`;
+      }).join("; ") || String(existing.cause);
+      let detail = rawDetail;
+      if (typeof existing.info.authToken === "string") {
+        for (const token of [existing.info.authToken, existing.info.authToken.trim()]) {
+          if (token) detail = detail.replaceAll(token, "[redacted]");
+        }
+      }
+      const permissionHint = codes.some((code) => code === "EPERM" || code === "EACCES")
+        ? " Check this process's sandbox or network permissions."
+        : "";
+      const ownership = launchdOwnsDaemon ? await launchdPidOwnership(pid) : LaunchdPidOwnership.NotOwned;
+      const restart = `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LABEL}\``;
+      const stop = `\`kill ${pid}\`; if it does not exit, use \`kill -9 ${pid}\``;
+      const recovery = ownership === LaunchdPidOwnership.Owned
+        ? `Run ${restart}`
+        : ownership === LaunchdPidOwnership.NotOwned
+          ? `Run ${stop}`
+          : `Launchd ownership is unknown. If launchd owns this PID, run ${restart}; otherwise run ${stop}`;
+      throw new Error(
+        `Owner Operator daemon pid ${pid} is running but this process cannot reach 127.0.0.1:${port} ` +
+          `as an authenticated Gateway. Probe failed: ${detail}.${permissionHint} ` +
+          `The daemon was not restarted. For manual recovery from an unrestricted terminal, ` +
+          `verify the daemon's identity first. ${recovery}. Then retry oo.`,
+        { cause: detail === rawDetail ? existing.cause : new Error(detail) },
+      );
+    }
+  } else if (existing) {
     if (existing.health.fingerprint === expected && !existing.health.stale && existing.ready.ready) return;
     const ownership = launchdOwnsDaemon
       ? await launchdPidOwnership(existing.health.pid)
@@ -108,10 +155,10 @@ export async function ensureDaemon(): Promise<void> {
       for (let attempt = 0; attempt < 40; attempt++) {
         const current = await probeGateway();
         if (
-          current && current.health.pid !== existing.health.pid &&
+          current?.kind === "reachable" && current.health.pid !== existing.health.pid &&
           current.health.fingerprint === expected && !current.health.stale && current.ready.ready
         ) return;
-        if (!current && await loopbackPortIsFree(existing.info.port)) {
+        if (current?.kind !== "reachable" && await loopbackPortIsFree(existing.info.port)) {
           released = true;
           break;
         }
