@@ -91,7 +91,30 @@ export async function ensureDaemon(): Promise<void> {
   const existing = await probeGateway();
   const launchdOwnsDaemon = launchdCanManageCurrentHome() && existsSync(daemonLaunchAgentPath());
   let startRequested = false;
-  if (existing) {
+  if (existing?.kind === "unreachable") {
+    const { pid, port } = existing.info;
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      throw new Error("could not verify daemon liveness: discovery has an invalid PID", { cause: existing.cause });
+    }
+    let running = true;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ESRCH") running = false;
+      else if (code !== "EPERM") {
+        throw new Error(`could not verify whether daemon pid ${pid} is running`, { cause: error });
+      }
+    }
+    if (running) {
+      throw new Error(
+        `Owner Operator daemon pid ${pid} is running but this process cannot reach 127.0.0.1:${port} ` +
+          `as an authenticated Gateway. Check this process's sandbox or network permissions. ` +
+          `The daemon was not restarted.`,
+        { cause: existing.cause },
+      );
+    }
+  } else if (existing) {
     if (existing.health.fingerprint === expected && !existing.health.stale && existing.ready.ready) return;
     const ownership = launchdOwnsDaemon
       ? await launchdPidOwnership(existing.health.pid)
@@ -108,10 +131,10 @@ export async function ensureDaemon(): Promise<void> {
       for (let attempt = 0; attempt < 40; attempt++) {
         const current = await probeGateway();
         if (
-          current && current.health.pid !== existing.health.pid &&
+          current?.kind === "reachable" && current.health.pid !== existing.health.pid &&
           current.health.fingerprint === expected && !current.health.stale && current.ready.ready
         ) return;
-        if (!current && await loopbackPortIsFree(existing.info.port)) {
+        if (current?.kind !== "reachable" && await loopbackPortIsFree(existing.info.port)) {
           released = true;
           break;
         }

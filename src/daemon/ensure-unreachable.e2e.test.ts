@@ -5,6 +5,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mock } from "node:test";
+import { connectGateway } from "../gateway/client";
 import { ensureDaemon } from "./ensure";
 import { runtimeFingerprint } from "./fingerprint";
 
@@ -60,9 +62,64 @@ try {
   assert.equal(existsSync(launchLog), false, "an unreachable live PID never reaches launchctl");
   process.kill(child.pid, 0);
   console.log("ok - running but unreachable daemon reports its PID and address without restart");
-} finally {
+
+  const kill = mock.method(process, "kill", () => {
+    throw Object.assign(new Error("Operation not permitted"), { code: "EPERM" });
+  });
+  try {
+    await assert.rejects(ensureDaemon(), /is running but this process cannot reach/);
+    assert.equal(existsSync(launchLog), false, "EPERM is not evidence that the daemon exited");
+  } finally {
+    kill.mock.restore();
+  }
+  console.log("ok - a denied PID check does not authorize restart");
+
+  for (const cause of [
+    new TypeError("fetch failed", { cause: Object.assign(new Error("connect EPERM"), { code: "EPERM" }) }),
+    new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+  ]) {
+    const fetch = mock.method(globalThis, "fetch", async () => { throw cause; });
+    try {
+      await assert.rejects(ensureDaemon(), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /is running but this process cannot reach/);
+        assert.equal(error.cause, cause, "the original probe failure survives the lifecycle error");
+        return true;
+      });
+      assert.equal(await connectGateway(), null, "ordinary connection failure still returns null");
+      assert.equal(existsSync(launchLog), false);
+    } finally {
+      fetch.mock.restore();
+    }
+  }
+  console.log("ok - sandbox and timeout failures retain their original cause");
+
+  const fetch = mock.method(globalThis, "fetch", async () => Response.json({ error: "unauthorized" }, { status: 401 }));
+  try {
+    await assert.rejects(ensureDaemon(), (error: unknown) => {
+      assert.ok(error instanceof Error && error.cause instanceof Error);
+      assert.match(error.message, /is running but this process cannot reach/);
+      assert.match(error.cause.message, /gateway \/health: 401/);
+      return true;
+    });
+    assert.equal(existsSync(launchLog), false, "authentication failure cannot authorize restart");
+  } finally {
+    fetch.mock.restore();
+  }
+  console.log("ok - authentication failure leaves the live process running");
+
+  const exited = once(child, "exit");
   child.kill("SIGTERM");
-  await once(child, "exit");
+  await exited;
+  await assert.rejects(ensureDaemon(), /Command failed: launchctl kickstart -k/);
+  assert.equal(existsSync(launchLog), true, "a truly exited PID still requests startup");
+  console.log("ok - a truly exited PID still requests daemon startup");
+} finally {
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = once(child, "exit");
+    child.kill("SIGTERM");
+    await exited;
+  }
   for (const [key, value] of Object.entries(oldEnv)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;

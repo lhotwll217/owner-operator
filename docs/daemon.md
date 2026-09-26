@@ -30,6 +30,11 @@ unready daemon identity and waits for it to release the Gateway; it never signal
 LaunchAgent ownership is verified against `launchctl print`; if an authenticated detached daemon
 predates installation, the client stops it and waits for the port before handing ownership to launchd.
 An ambiguous launchctl result fails closed and never authorizes direct signaling.
+An unsuccessful Gateway probe does not establish that the daemon has exited. If the discovered
+PID still exists, including when the client lacks permission to signal it, the client reports
+the PID and loopback address and leaves the daemon running. Sandbox or network restrictions
+on a client cannot authorize replacement. Only a missing process permits startup after a failed
+probe; an authenticated stale or unready daemon still follows the replacement path above.
 Long-lived Node clients invalidate cached discovery after authentication or connection failure.
 After a 401, an ordinary Gateway request rereads discovery and replays once only when the daemon
 identity or credential changed. SSE subscriptions reread `daemon.json` before reconnecting.

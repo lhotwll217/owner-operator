@@ -41,11 +41,9 @@ export const HARNESS_DETAILS_REQUEST_TIMEOUT_MS =
   HARNESS_OBSERVATION_STAGES * HARNESS_OBSERVATION_STAGE_TIMEOUT_MS + HARNESS_OBSERVATION_CLEANUP_MS + FAST_REQUEST_MS;
 let memo: Promise<GatewayApi> | null = null;
 
-export interface GatewayProbe {
-  info: DaemonInfo;
-  health: DaemonHealth;
-  ready: DaemonReady;
-}
+export type GatewayProbe =
+  | { kind: "reachable"; info: DaemonInfo; health: DaemonHealth; ready: DaemonReady }
+  | { kind: "unreachable"; info: DaemonInfo; cause: unknown };
 
 function readDaemonInfo(): DaemonInfo | null {
   try { return JSON.parse(readFileSync(daemonInfoPath(), "utf8")) as DaemonInfo; } catch { return null; }
@@ -140,25 +138,28 @@ async function gatewayJson<T>(
   return await response.json() as T;
 }
 
-/** Authenticated identity probe, including a daemon that is alive but not ready. */
+/** Keep failed discovery separate from absence; only the lifecycle owner can establish death. */
 export async function probeGateway(): Promise<GatewayProbe | null> {
   const info = readDaemonInfo();
-  if (!info?.authToken) return null;
+  if (!info) return null;
   const target = { info };
   try {
+    if (!info.authToken) throw new Error("daemon discovery has no authentication token");
     const health = await gatewayJson<DaemonHealth>(target, "/health");
     const ready = await gatewayJson<DaemonReady>(target, "/ready", { acceptStatuses: [503] });
-    if (health.pid !== target.info.pid || health.fingerprint !== target.info.fingerprint) return null;
-    return { info: target.info, health, ready };
-  } catch {
-    return null;
+    if (health.pid !== target.info.pid || health.fingerprint !== target.info.fingerprint) {
+      throw new Error("gateway identity does not match daemon discovery");
+    }
+    return { kind: "reachable", info: target.info, health, ready };
+  } catch (cause) {
+    return { kind: "unreachable", info: target.info, cause };
   }
 }
 
 /** Connect only to a ready daemon whose discovery file and health response agree. */
 export async function connectGateway(onUnavailable: () => void = () => undefined): Promise<GatewayApi | null> {
   const probe = await probeGateway();
-  if (!probe?.ready.ready) return null;
+  if (probe?.kind !== "reachable" || !probe.ready.ready) return null;
   const target = { info: probe.info };
 
   const json = <T>(path: string, init?: RequestInit, timeoutMs = FAST_REQUEST_MS): Promise<T> =>
