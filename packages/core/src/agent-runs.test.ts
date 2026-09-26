@@ -14,7 +14,7 @@ const completed = run("completed", AgentRunStatus.Completed, {
   acpxRecordId: "acpx-record",
 });
 
-const cancelled = { ...completed, id: "cancelled", status: AgentRunStatus.Cancelled };
+const cancelled = { ...completed, id: "cancelled", status: AgentRunStatus.Cancelled, promptSubmitted: true };
 assert.equal(
   agentRunResumeError(cancelled, { existingResumeRunId: null, activeRunId: null }),
   null,
@@ -34,6 +34,11 @@ for (const status of [AgentRunStatus.Pending, AgentRunStatus.Running, AgentRunSt
 assert.match(agentRunRetryError(cancelled, {
   existingRetryRunId: null, activeRunId: null,
 }) ?? "", /not retryable/);
+const unsubmitted = { ...cancelled, promptSubmitted: false };
+assert.match(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activeRunId: null }) ?? "",
+  /no confirmed prompt submission/);
+assert.throws(() => agentRunTurnIntent({ ...unsubmitted, id: "invalid", resumeOfRunId: cancelled.id },
+  undefined, unsubmitted), /no confirmed prompt submission/);
 for (const identity of [{ childSessionId: null }, { acpxRecordId: null }]) {
   assert.match(agentRunResumeError({ ...cancelled, ...identity }, {
     existingResumeRunId: null, activeRunId: null,

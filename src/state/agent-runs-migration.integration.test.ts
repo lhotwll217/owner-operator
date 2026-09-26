@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { AgentRunHarness } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus, agentRunResumeError } from "@owner-operator/core";
 import { ThreadDb } from "./database";
 
 const legacyDir = mkdtempSync(join(tmpdir(), "oo-agent-run-effort-migration-"));
@@ -127,8 +127,6 @@ try {
       ('lost-retry','codex','lost','/tmp/repo',1,'completed','2026-07-01T00:01:40.000Z','child-lost','acpx-lost','lost-run',3600),
       ('completed-run','codex','completed','/tmp/repo',1,'completed','2026-07-01T00:02:00.000Z','child-completed','acpx-completed',NULL,3600),
       ('completed-resume','codex','follow up','/tmp/repo',1,'completed','2026-07-01T00:03:00.000Z','child-completed','acpx-completed','completed-run',3600),
-      ('cancelled-run','codex','cancelled','/tmp/repo',1,'cancelled','2026-07-01T00:03:10.000Z','child-cancelled','acpx-cancelled',NULL,3600),
-      ('cancelled-resume','codex','continue','/tmp/repo',1,'completed','2026-07-01T00:03:20.000Z','child-cancelled','acpx-cancelled','cancelled-run',3600),
       ('completed-self','codex','self','/tmp/repo',1,'completed','2026-07-01T00:04:00.000Z','child-self','acpx-self','completed-self',3600);
   `);
   prior.close();
@@ -141,9 +139,7 @@ try {
   assert.equal(upgraded.agentRunById("completed-resume")?.retryOfRunId, null);
   assert.equal(upgraded.agentRunById("completed-resume")?.resumeOfRunId, "completed-run");
   assert.equal(upgraded.agentRunById("completed-self")?.resumeOfRunId, "completed-self");
-  assert.equal(upgraded.agentRunById("cancelled-resume")?.retryOfRunId, null);
-  assert.equal(upgraded.agentRunById("cancelled-resume")?.resumeOfRunId, "cancelled-run");
-  assert.equal(upgraded.listAgentRuns().length, 11, "relationship migration preserves every row");
+  assert.equal(upgraded.listAgentRuns().length, 9, "relationship migration preserves every row");
   upgraded.close();
 
   const inspect = new DatabaseSync(dbPath);
@@ -239,3 +235,28 @@ try {
 }
 
 process.stdout.write("ok — failed agent_runs rebuild rolls back schema, data, and indexes\n");
+
+const submissionDir = mkdtempSync(join(tmpdir(), "oo-agent-run-submission-migration-"));
+try {
+  const path = join(submissionDir, "state.db");
+  const before = new ThreadDb(path);
+  before.createAgentRun({ id: "legacy-cancelled", harness: AgentRunHarness.Codex, task: "task",
+    cwd: submissionDir, depth: 1, timeoutSeconds: 60, childSessionId: "child", acpxRecordId: "record" });
+  before.claimNextPendingAgentRun(1);
+  before.recordAgentRunActivity("legacy-cancelled", { promptSubmitted: true });
+  before.finishAgentRun("legacy-cancelled", { status: AgentRunStatus.Cancelled, resultTail: null, error: null });
+  before.close();
+  const legacy = new DatabaseSync(path);
+  legacy.exec("ALTER TABLE agent_runs DROP COLUMN prompt_submitted");
+  legacy.close();
+  const after = new ThreadDb(path);
+  const migrated = after.agentRunById("legacy-cancelled")!;
+  assert.equal(migrated.promptSubmitted, false, "migration cannot infer submission from child identity");
+  assert.equal(migrated.childSessionId, "child");
+  assert.match(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }) ?? "",
+    /no confirmed prompt submission/);
+  after.close();
+} finally {
+  rmSync(submissionDir, { recursive: true, force: true });
+}
+process.stdout.write("ok - legacy cancelled runs retain identity without invented submission evidence\n");

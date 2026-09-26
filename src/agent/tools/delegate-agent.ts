@@ -41,7 +41,8 @@ export function createDelegateAgentTool(options: DelegateAgentToolOptions = {}) 
       "select-harness-for-delegation skill; omission must not bypass current harness details. " +
       "Use waitSeconds only when the owner explicitly requests a blocking wait; use manage_agent_run " +
       "for cancel, retry, resume, or an explicit owner-requested inspection. " +
-      "To continue cancelled work, default to manage_agent_run resume with a new task in the same conversation.",
+      "To continue cancelled work after confirmed prompt submission, default to manage_agent_run resume " +
+      "with a new task in the same conversation; the saved session must support reloading.",
     parameters: Type.Object({
       harness: HarnessSchema,
       task: Type.String({

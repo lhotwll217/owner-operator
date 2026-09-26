@@ -19,6 +19,7 @@ export function agentRunFixture(
     model: null,
     effort: null,
     effortApplied: false,
+    promptSubmitted: false,
     harnessIdentity: { observed: false },
     depth: 1,
     status,

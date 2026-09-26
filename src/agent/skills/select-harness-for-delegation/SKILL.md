@@ -13,7 +13,8 @@ model, and effort value—including `effort: null`—while selecting only omitte
 ## Continue existing work
 
 To continue a cancelled delegated run, default to `manage_agent_run` with `action: "resume"`,
-the latest run id, and a new task describing what to do next. Resume also accepts completed runs.
+the latest run id, and a new task describing what to do next. Resume requires confirmed prompt
+submission for cancelled runs and a reloadable session. Resume also accepts completed runs.
 It preserves the child conversation and recorded harness, model, effort, and cwd, so selection is
 unnecessary. If continuation fails, report the error before deciding on a fresh delegate.
 The [continuation contract](../../../../docs/delegated-runs.md#lifecycle) owns eligibility and limits.

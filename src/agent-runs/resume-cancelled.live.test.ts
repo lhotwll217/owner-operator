@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus, isTerminalAgentRunStatus, type AgentRun } from "@owner-operator/core";
@@ -79,7 +79,8 @@ try {
     expectedToken: nonce, result: finished.resultTail?.trim() }) + "\n");
 } finally {
   await daemon.close();
-  const leases = readdirSync(join(root, "oo", "agent-runs", "process-leases"));
+  const leaseDir = join(root, "oo", "agent-runs", "process-leases");
+  const leases = existsSync(leaseDir) ? readdirSync(leaseDir) : [];
   assert.equal(leases.length, 0, "isolated child process leases must be released");
   if (priorHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorHome;

@@ -48,7 +48,8 @@ export const manageAgentRunTool = defineTool({
     "inspection: status (read the current row), cancel (abort a running or queued run), retry " +
     "(rerun the same task after interrupted/lost/failed), resume (send a required new follow-up task " +
     "after a completed or cancelled run, using the same child conversation). Resume is the default " +
-    "way to continue cancelled work; keep any failure explicit instead of silently launching fresh. Use " +
+    "way to continue cancelled work after confirmed prompt submission, when the session can reload. " +
+    "Startup cancellations and older cancellations without submission evidence cannot resume. Report reload failures. Use " +
     "query_database on agent_runs to find ids.",
   parameters: Type.Union([
     Type.Object({

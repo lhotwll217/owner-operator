@@ -42,7 +42,7 @@ const runtime = {
       : new Promise<{ status: string }>((resolve) => {
           signal.addEventListener("abort", () => resolve({ status: "cancelled" }), { once: true });
         });
-    return { promptStarted, result, events: (async function* () { await result; })() };
+    return { promptStarted, result, events: (async function* () { await result; yield* []; })() };
   },
 } as unknown as AcpRuntime;
 const executor = new AgentRunExecutor(state, {

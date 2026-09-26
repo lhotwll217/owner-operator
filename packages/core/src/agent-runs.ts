@@ -209,6 +209,8 @@ export interface AgentRun {
   harnessIdentity: HarnessIdentityObservation;
   depth: number;
   status: AgentRunStatus;
+  /** True only after ACPX confirms submission of this run's prompt. */
+  promptSubmitted: boolean;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -275,6 +277,9 @@ export function agentRunResumeError(
   }
   if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
   if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
+  if (run.status === AgentRunStatus.Cancelled && !run.promptSubmitted) {
+    return `cancelled agent run ${run.id} has no confirmed prompt submission; cannot resume`;
+  }
   if (context.existingResumeRunId) {
     return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
   }
@@ -331,6 +336,9 @@ export function agentRunTurnIntent(
   if (!AGENT_RUN_RESUMABLE_STATUSES.includes(resumedRun.status)) {
     throw new Error(`agent run ${run.id} cannot resume run ${resumedRun.id} from status ${resumedRun.status}`);
   }
+  if (resumedRun.status === AgentRunStatus.Cancelled && !resumedRun.promptSubmitted) {
+    throw new Error(`cancelled agent run ${resumedRun.id} has no confirmed prompt submission; cannot resume`);
+  }
   if (!run.childSessionId || run.childSessionId !== resumedRun.childSessionId) {
     throw new Error(`agent run ${run.id} child identity mismatch with resumed run ${resumedRun.id}`);
   }
@@ -354,6 +362,7 @@ export interface ChildIdentity {
 
 /** An explicit activity update from the child's runtime: a progress line and/or its identity. */
 export interface AgentRunActivityUpdate extends ChildIdentity {
+  promptSubmitted?: true;
   activity?: string;
   /** Confirmed readback that the resolved effort was applied. */
   effortApplied?: boolean;

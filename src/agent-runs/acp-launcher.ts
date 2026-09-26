@@ -335,6 +335,11 @@ async function runAcpTurn(
     signal: request.signal,
   });
 
+  await turn.promptStarted.then(
+    () => request.onActivity({ promptSubmitted: true }),
+    () => undefined,
+  );
+
   // Bound daemon memory: a verbose child could emit unbounded output, but only a tail is ever
   // persisted (the executor truncates to RESULT_TAIL_BYTES). Keep a rolling byte-bounded window
   // of the newest chunks — sized to cover that persisted tail — evicting the oldest.

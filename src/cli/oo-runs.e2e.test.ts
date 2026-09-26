@@ -21,6 +21,7 @@ const launcher = async (request: AgentRunLaunchRequest) => {
   const childSessionId = request.turnIntent.kind === "fresh" ? `child-${request.run.id}` : request.turnIntent.childSessionId;
   const acpxRecordId = request.run.acpxRecordId ?? `acpx-${request.run.id}`;
   request.onActivity({ childSessionId, acpxRecordId });
+  request.onActivity({ promptSubmitted: true });
   request.onActivity({ harnessIdentity: { observed: true, model: request.run.model ?? "harness-picked", effort: "high" } });
   request.onEvent?.({ type: "text_delta", stream: "thought", text: "planning" });
   request.onEvent?.({ type: "tool_call", text: "read", title: "Read README", toolCallId: "t1", status: "pending" });

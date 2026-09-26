@@ -24,6 +24,7 @@ const run: AgentRun = {
   model: null,
   effort: null,
   effortApplied: false,
+  promptSubmitted: false,
   harnessIdentity: { observed: false },
   depth: 1,
   status: AgentRunStatus.Running,

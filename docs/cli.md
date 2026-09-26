@@ -52,7 +52,8 @@ search wrapper's own flags, which are its contract.
 guessing, so parallel agents in one repo cannot mark each other. A harness that knows its own
 session id (e.g. a session-end hook) can self-mark.
 
-For continuing a cancelled delegated run, use `oo runs resume <id> "<task>"` by default.
+For continuing a cancelled delegated run, use `oo runs resume <id> "<task>"` by default
+after confirmed prompt submission, subject to session reload support.
 The [delegated-run lifecycle](delegated-runs.md#lifecycle) owns eligibility and harness limits.
 
 ## Interactive tool display

@@ -110,6 +110,7 @@ const runtime = {
     runtimeCalls.push("turn");
     turnTexts.push(text);
     return {
+      promptStarted: Promise.resolve(),
       events: (async function* () {
         yield { type: "text_delta", stream: "output", text: oversized };
       })(),
@@ -127,6 +128,7 @@ const run: AgentRun = {
   model: "harness-resolved-model",
   effort: "ultra",
   effortApplied: false,
+  promptSubmitted: false,
   harnessIdentity: { observed: false },
   depth: 1,
   status: AgentRunStatus.Running,
@@ -186,6 +188,7 @@ const unpinnedRuntime = {
   ...runtime,
   setConfigOption: async ({ key, value }: { key: string; value: string }) => { unpinnedOptions.push({ key, value }); },
   startTurn: () => ({
+    promptStarted: Promise.resolve(),
     events: (async function* () { yield* streamed; })(),
     result: Promise.resolve({ status: "completed" }),
   }),
@@ -218,6 +221,7 @@ const cursorErrorRuntime = {
   ensureSession: async () => handle,
   getStatus: cursorStatus,
   startTurn: () => ({
+    promptStarted: Promise.resolve(),
     events: (async function* () {
       yield { type: "text_delta", stream: "output", text: `\n\n${cursorTerminalError}` };
     })(),
@@ -239,6 +243,7 @@ assert.equal(cursorErrorResult.resultText, `\n\n${cursorTerminalError}`,
 const cursorRecoveredRuntime = {
   ...cursorErrorRuntime,
   startTurn: () => ({
+    promptStarted: Promise.resolve(),
     events: (async function* () {
       yield { type: "text_delta", stream: "output", text: `${cursorTerminalError}\nRecovered and completed successfully.` };
     })(),
@@ -269,6 +274,7 @@ const unadvertisedRuntime = {
   startTurn: () => {
     unadvertisedTurns += 1;
     return {
+      promptStarted: Promise.resolve(),
       events: (async function* () {})(),
       result: Promise.resolve({ status: "completed" }),
     };
@@ -293,6 +299,7 @@ const backendOnlyRuntime = {
     details: { configOptions: [] },
   }),
   startTurn: () => ({
+    promptStarted: Promise.resolve(),
     events: (async function* () {})(),
     result: Promise.resolve({ status: "completed" }),
   }),
@@ -365,6 +372,7 @@ const resumeRuntime = {
     details: { configOptions: [] },
   }),
   startTurn: () => ({
+    promptStarted: Promise.resolve(),
     events: (async function* () {})(),
     result: Promise.resolve({ status: "completed" }),
   }),
@@ -510,6 +518,7 @@ for (const identityCase of identityCases) {
     startTurn: () => {
       retryTurnCalls += 1;
       return {
+        promptStarted: Promise.resolve(),
         events: (async function* () {})(),
         result: Promise.resolve({ status: "completed" }),
       };
@@ -554,6 +563,7 @@ for (const identityCase of identityCases) {
     startTurn: () => {
       retryTurnCalls += 1;
       return {
+        promptStarted: Promise.resolve(),
         events: (async function* () {})(),
         result: Promise.resolve({ status: "completed" }),
       };
@@ -598,6 +608,7 @@ await createAcpLauncher({
       startTurn: () => {
         legacyRetryTurnCalls += 1;
         return {
+          promptStarted: Promise.resolve(),
           events: (async function* () {})(),
           result: Promise.resolve({ status: "completed" }),
         };
@@ -637,6 +648,7 @@ const freshFallbackRuntime = {
   startTurn: () => {
     fallbackTurnCalls += 1;
     return {
+      promptStarted: Promise.resolve(),
       events: (async function* () {})(),
       result: Promise.resolve({ status: "completed" }),
     };

@@ -166,7 +166,7 @@ export const runs: Noun = {
     retry: rowVerb("rerun the same task after failed, interrupted, or lost", async (id) => (await gateway()).retryAgentRun(id)),
     resume: {
       args: "<id> <task>",
-      summary: "continue a completed or cancelled run's child conversation (default after cancellation)",
+      summary: "continue a completed or cancelled run's child conversation (default after cancellation with confirmed prompt submission; requires session reload support)",
       minPositionals: 2,
       async run({ positionals: [id, task], json }) {
         const run = await (await gateway()).resumeAgentRun(id!, task!);
