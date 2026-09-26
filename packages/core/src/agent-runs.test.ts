@@ -39,6 +39,11 @@ assert.match(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activ
   /no confirmed prompt submission/);
 assert.throws(() => agentRunTurnIntent({ ...unsubmitted, id: "invalid", resumeOfRunId: cancelled.id },
   undefined, unsubmitted), /no confirmed prompt submission/);
+const unsubmittedSuccessor = { ...unsubmitted, id: "successor", resumeOfRunId: cancelled.id };
+assert.equal(agentRunResumeError(unsubmittedSuccessor, { existingResumeRunId: null, activeRunId: null }), null,
+  "a cancelled resume successor retains the submitted conversation before its own prompt");
+assert.deepEqual(agentRunTurnIntent({ ...unsubmittedSuccessor, id: "next", resumeOfRunId: unsubmittedSuccessor.id },
+  undefined, unsubmittedSuccessor), { kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record" });
 for (const identity of [{ childSessionId: null }, { acpxRecordId: null }]) {
   assert.match(agentRunResumeError({ ...cancelled, ...identity }, {
     existingResumeRunId: null, activeRunId: null,

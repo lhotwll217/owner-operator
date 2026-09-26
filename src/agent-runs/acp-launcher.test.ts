@@ -154,6 +154,9 @@ const result = await createAcpLauncher({ runtimeFactory: () => runtime })({
   onActivity: (update) => activity.push(update),
 });
 
+assert.equal(activity.filter((update) => update.promptSubmitted === true).length, 1,
+  "launcher records prompt submission when promptStarted resolves");
+
 assert.equal(result.status, AgentRunStatus.Completed);
 assert.equal(result.childSessionId, handle.agentSessionId);
 assert.equal(result.acpxRecordId, handle.acpxRecordId);
@@ -746,3 +749,39 @@ for (const [label, record, expected] of [
 }
 
 process.stdout.write("ok — ACP launcher maps native/backend identity, outcome, and bounded output\n");
+
+for (const outcome of ["submitted", "cancelled-while-connecting"] as const) {
+  const controller = new AbortController();
+  const updates: AgentRunActivityUpdate[] = [];
+  let started!: () => void;
+  const connecting = new Promise<void>((resolve) => { started = resolve; });
+  let submit!: () => void;
+  let rejectSubmission!: (error: Error) => void;
+  const promptStarted = new Promise<void>((resolve, reject) => { submit = resolve; rejectSubmission = reject; });
+  void promptStarted.catch(() => {});
+  const connectingRuntime = {
+    ...runtime,
+    startTurn: ({ signal }: { signal: AbortSignal }) => {
+      assert.equal(signal.aborted, false, "turn starts connecting before cancellation");
+      const result = promptStarted.then(() => ({ status: "completed" }), () => ({ status: "cancelled" }));
+      started();
+      return { promptStarted, result, events: (async function* () { await result; yield* []; })() };
+    },
+  } as unknown as AcpRuntime;
+  const launched = createAcpLauncher({ runtimeFactory: () => connectingRuntime })({
+    run, turnIntent: { kind: "fresh" }, signal: controller.signal,
+    onActivity: (update) => updates.push(update),
+  });
+  await connecting;
+  assert.equal(updates.some((update) => update.promptSubmitted), false, "connecting does not confirm submission");
+  if (outcome === "submitted") {
+    submit();
+  } else {
+    controller.abort();
+    rejectSubmission(new Error("ACP turn cancelled before prompt submission."));
+  }
+  assert.equal((await launched).status, outcome === "submitted" ? AgentRunStatus.Completed : AgentRunStatus.Cancelled);
+  assert.equal(updates.filter((update) => update.promptSubmitted === true).length, outcome === "submitted" ? 1 : 0,
+    "only resolved promptStarted confirms submission; cancellation during connection does not");
+}
+process.stdout.write("ok - prompt submission follows resolution; cancellation while connecting remains unsubmitted\n");

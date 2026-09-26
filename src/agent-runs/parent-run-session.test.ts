@@ -228,6 +228,17 @@ await assert.rejects(
   /cannot be resumed/,
 );
 
+adapter.rows.push(run("cancelled-successor", AgentRunStatus.Cancelled, {
+  cwd: process.cwd(), childSessionId: "successor-child", acpxRecordId: "successor-record",
+  resumeOfRunId: "earlier-submitted-run", promptSubmitted: false,
+}));
+adapter.invalidate();
+await session.settled();
+assert.equal(session.view.runs.find(({ id }) => id === "cancelled-successor")?.canResume, true,
+  "parent controls offer resume for a successor cancelled before its prompt");
+await session.resume("cancelled-successor", "continue the conversation");
+assert.deepEqual(adapter.resumed.at(-1), { id: "cancelled-successor", task: "continue the conversation" });
+
 session.stop();
 assert.equal(adapter.unsubscriptions, 1);
 assert.ok(observed.length >= 3, "consumers receive one parent view rather than per-run watchers");
