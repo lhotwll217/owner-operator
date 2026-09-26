@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
 import {
@@ -153,9 +153,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   modules.gateway = true;
 
   const info: DaemonInfo = { port: gateway.port, pid: process.pid, startedAt, fingerprint, authToken };
-  mkdirSync(dirname(daemonInfoPath()), { recursive: true });
-  writeFileSync(daemonInfoPath(), JSON.stringify(info, null, 2), { mode: 0o600 });
-  chmodSync(daemonInfoPath(), 0o600);
+  const discoveryPath = daemonInfoPath();
+  mkdirSync(dirname(discoveryPath), { recursive: true });
+  writeFileSync(discoveryPath, JSON.stringify(info, null, 2), { mode: 0o600 });
+  chmodSync(discoveryPath, 0o600);
 
   scheduler.start();
   agentRuns.start();
@@ -187,7 +188,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       await agentRuns.stop();
       await gateway.close();
       state.close();
-      try { rmSync(daemonInfoPath(), { force: true }); } catch { /* best effort */ }
+      try {
+        const current = JSON.parse(readFileSync(discoveryPath, "utf8")) as DaemonInfo | null;
+        if (current?.pid === info.pid && current.startedAt === info.startedAt) {
+          rmSync(discoveryPath, { force: true });
+        }
+      } catch { /* missing or unrecognized discovery is not ours to remove */ }
     },
   };
 }

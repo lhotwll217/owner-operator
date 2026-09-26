@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock } from "node:test";
+import { inspect } from "node:util";
 import { reportFailure } from "../cli/operations/operation";
 import { connectGateway } from "../gateway/client";
 import { ensureDaemon } from "./ensure";
@@ -17,6 +18,7 @@ const home = join(root, "home");
 const ooHome = join(home, ".owner-operator");
 const bin = join(root, "bin");
 const launchLog = join(root, "launchctl.log");
+const ownershipFile = join(root, "ownership.json");
 const oldEnv = { HOME: process.env.HOME, OO_HOME: process.env.OO_HOME, PATH: process.env.PATH };
 mkdirSync(ooHome, { recursive: true });
 mkdirSync(bin);
@@ -27,6 +29,11 @@ writeFileSync(launchAgent, "installed\n");
 const launchctl = join(bin, "launchctl");
 writeFileSync(launchctl, `#!/usr/bin/env node
 require("node:fs").appendFileSync(${JSON.stringify(launchLog)}, process.argv.slice(2).join(" ") + "\\n");
+if (process.argv[2] === "print") {
+  const owner = JSON.parse(require("node:fs").readFileSync(${JSON.stringify(ownershipFile)}, "utf8"));
+  if (owner.pid) process.stdout.write("pid = " + owner.pid + "\\n");
+  process.exit(owner.error ?? 0);
+}
 if (process.argv[2] === "enable") process.exit(0);
 process.stderr.write("unexpected launchctl call\\n");
 process.exit(99);
@@ -51,12 +58,20 @@ function assertReportedFailure(error: unknown, cause: RegExp, command = recovery
     assert.match(message, /is running but this process cannot reach/);
     assert.match(message, cause);
     assert.ok(message.includes(command), "the CLI reports the applicable manual recovery command");
+    if (command.startsWith("kill ")) {
+      assert.ok(message.includes(`if it does not exit, use \`kill -9 ${child.pid}\``));
+    }
   }
-  assert.equal(existsSync(launchLog), false, "failure leaves the process running without supervisor calls");
+  if (existsSync(launchLog)) {
+    assert.ok(readFileSync(launchLog, "utf8").trim().split("\n").every((line) => line.startsWith("print gui/")),
+      "failure permits only read-only supervisor queries");
+    rmSync(launchLog);
+  }
   return true;
 }
 try {
   await once(child.stdout, "data");
+  writeFileSync(ownershipFile, JSON.stringify({ pid: child.pid }));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -182,6 +197,41 @@ try {
     }
   }
   console.log("ok - identity mismatches report their cause and the applicable manual recovery command");
+
+  const ownershipFetch = mock.method(globalThis, "fetch", async () => { throw denied; });
+  try {
+    for (const owner of [{ pid: child.pid }, { pid: child.pid + 1 }, { error: 113 }, {}, { error: 1 }]) {
+      writeFileSync(ownershipFile, JSON.stringify(owner));
+      await assert.rejects(ensureDaemon(), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        const owned = "pid" in owner && owner.pid === child.pid;
+        const detached = ("pid" in owner && owner.pid !== child.pid) || ("error" in owner && owner.error === 113);
+        assertReportedFailure(error, /EPERM/, owned ? recovery : `kill ${child.pid}`);
+        if (owned) assert.doesNotMatch(error.message, /kill -9/);
+        else if (detached) assert.doesNotMatch(error.message, /launchctl kickstart/);
+        else {
+          assert.match(error.message, /Launchd ownership is unknown/);
+          assert.ok(error.message.includes(recovery));
+        }
+        return true;
+      });
+    }
+  } finally {
+    ownershipFetch.mock.restore();
+    writeFileSync(ownershipFile, JSON.stringify({ pid: child.pid }));
+  }
+  console.log("ok - verified ownership selects recovery; unknown ownership explains both options");
+
+  for (const authToken of ["private-left\rprivate-right", "private-left\nprivate-right", "private-left\0private-right", "  private-left\rprivate-right  "]) {
+    writeFileSync(discovery, JSON.stringify({ ...info, authToken }));
+    await assert.rejects(ensureDaemon(), (error: unknown) => {
+      assertReportedFailure(error, /Headers.set.*\[redacted\].*invalid header value/);
+      assert.doesNotMatch(inspect(error), /private-left|private-right/, "neither the message nor retained cause exposes the token");
+      return true;
+    });
+  }
+  writeFileSync(discovery, JSON.stringify(info));
+  console.log("ok - CR, LF, NUL, and trimmed bearer tokens are redacted from CLI diagnostics and causes");
 
   for (const pid of [undefined, null, 0, -1, 1.5, "1", 2 ** 31, Number.MAX_SAFE_INTEGER]) {
     writeFileSync(discovery, JSON.stringify({ pid }));

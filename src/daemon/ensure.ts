@@ -109,22 +109,33 @@ export async function ensureDaemon(): Promise<void> {
       }
     }
     if (running && !codes.includes("ECONNREFUSED") && !await loopbackPortIsFree(port)) {
-      const detail = causes.map((cause) => {
+      const rawDetail = causes.map((cause) => {
         const code = (cause as NodeJS.ErrnoException).code;
         return `${cause.name}${typeof code === "string" ? ` (${code})` : ""}: ${cause.message}`;
       }).join("; ") || String(existing.cause);
+      let detail = rawDetail;
+      if (typeof existing.info.authToken === "string") {
+        for (const token of [existing.info.authToken, existing.info.authToken.trim()]) {
+          if (token) detail = detail.replaceAll(token, "[redacted]");
+        }
+      }
       const permissionHint = codes.some((code) => code === "EPERM" || code === "EACCES")
         ? " Check this process's sandbox or network permissions."
         : "";
-      const recovery = launchdOwnsDaemon
-        ? `launchctl kickstart -k gui/${process.getuid?.()}/${DAEMON_LABEL}`
-        : `kill ${pid}`;
+      const ownership = launchdOwnsDaemon ? await launchdPidOwnership(pid) : LaunchdPidOwnership.NotOwned;
+      const restart = `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LABEL}\``;
+      const stop = `\`kill ${pid}\`; if it does not exit, use \`kill -9 ${pid}\``;
+      const recovery = ownership === LaunchdPidOwnership.Owned
+        ? `Run ${restart}`
+        : ownership === LaunchdPidOwnership.NotOwned
+          ? `Run ${stop}`
+          : `Launchd ownership is unknown. If launchd owns this PID, run ${restart}; otherwise run ${stop}`;
       throw new Error(
         `Owner Operator daemon pid ${pid} is running but this process cannot reach 127.0.0.1:${port} ` +
           `as an authenticated Gateway. Probe failed: ${detail}.${permissionHint} ` +
-          `The daemon was not restarted. After verifying the daemon's identity, recover manually with ` +
-          `\`${recovery}\` from an unrestricted terminal, then retry oo.`,
-        { cause: existing.cause },
+          `The daemon was not restarted. For manual recovery from an unrestricted terminal, ` +
+          `verify the daemon's identity first. ${recovery}. Then retry oo.`,
+        { cause: detail === rawDetail ? existing.cause : new Error(detail) },
       );
     }
   } else if (existing) {

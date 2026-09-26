@@ -36,8 +36,10 @@ authorizes replacement. Once authenticated, a stale or unready daemon, or one wi
 different from the client's runtime, follows the replacement path above. A health response that
 disagrees with discovery is an identity failure, not authorization to replace that process.
 
-`daemon.json` is removed on clean shutdown but can survive a crash or reboot. Missing or invalid
-PIDs count as no discovery. After a failed probe, an exited PID, `ECONNREFUSED`, or a successful
+Clean shutdown removes `daemon.json` only if its PID and start time still match the closing
+daemon. A replacement can publish discovery while the old Gateway drains requests; the old
+daemon leaves that replacement record intact. Discovery can survive a crash or reboot.
+Missing or invalid PIDs count as no discovery. After a failed probe, an exited PID, `ECONNREFUSED`, or a successful
 bind to the discovered loopback port permits startup. This lets a client recover from stale
 discovery even if another process has reused the recorded PID. A denied connect or bind does
 not establish that the port is free; a denied PID check does not establish that the PID exited.
@@ -45,10 +47,14 @@ not establish that the port is free; a denied PID check does not establish that 
 If the PID still exists and the port cannot be established as free, the client leaves the process
 running. The error includes the PID, address, underlying probe failure, and a manual recovery
 command. Only permission errors suggest sandbox or network restrictions. Timeouts, HTTP 401,
-and identity failures retain their own cause in both text and JSON CLI output.
+and identity failures retain their own cause in both text and JSON CLI output. Discovery bearer
+tokens are redacted from those diagnostics and any retained cause that contains the token.
 For a hung or otherwise unreachable daemon, verify its identity before running the displayed
-recovery command from an unrestricted terminal. An installed LaunchAgent uses
-`launchctl kickstart -k gui/<uid>/com.owner-operator.daemon`; a detached daemon uses `kill <pid>`.
+recovery command from an unrestricted terminal. Verified launchd ownership uses
+`launchctl kickstart -k gui/<uid>/com.owner-operator.daemon`. A detached daemon uses `kill <pid>`;
+if it does not exit, use `kill -9 <pid>` because a hung event loop cannot run its SIGTERM handler.
+An installed LaunchAgent alone does not establish PID ownership. When ownership cannot be
+verified, the error gives both recovery options and asks the operator to establish which applies.
 Then retry `oo`. Manual recovery can interrupt running children, so a probe failure alone never
 authorizes the client to stop an unverified process.
 
