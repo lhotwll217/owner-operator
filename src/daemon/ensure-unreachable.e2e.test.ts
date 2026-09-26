@@ -57,11 +57,13 @@ try {
 
   await assert.rejects(
     ensureDaemon(),
-    new RegExp(`daemon pid ${child.pid} is running but this process cannot reach 127\\.0\\.0\\.1:${port}.*sandbox`),
+    /Command failed: launchctl kickstart -k/,
+    "stale discovery with a reused live PID and no listener still requests startup",
   );
-  assert.equal(existsSync(launchLog), false, "an unreachable live PID never reaches launchctl");
+  assert.equal(existsSync(launchLog), true, "a free port permits startup despite the live PID");
+  rmSync(launchLog);
   process.kill(child.pid, 0);
-  console.log("ok - running but unreachable daemon reports its PID and address without restart");
+  console.log("ok - stale discovery with a reused live PID and no listener requests startup");
 
   const kill = mock.method(process, "kill", () => {
     throw Object.assign(new Error("Operation not permitted"), { code: "EPERM" });
