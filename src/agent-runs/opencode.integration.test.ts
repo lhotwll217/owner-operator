@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness } from "@owner-operator/core";
+import { AgentRunHarness, type AgentRun } from "@owner-operator/core";
 import { openCodeBinaryPath } from "./acp-launcher";
 import { readHarnessDetails } from "./harness-details";
 import { createGetHarnessDetailsTool } from "../agent/tools/get-harness-details";
@@ -146,30 +146,45 @@ try {
       const cancelled = await gateway.cancelAgentRun(held.id);
       assert.equal(cancelled.status, "cancelled");
       assert.equal((await gateway.waitAgentRun(held.id, 5)).status, "cancelled");
+      const continued = await gateway.resumeAgentRun(held.id, "continue after cancellation");
+      const continuedDone = await gateway.waitAgentRun(continued.id, 20);
+      assert.equal(continuedDone.status, "completed", continuedDone.error ?? "");
+      assert.equal(continuedDone.childSessionId, cancelled.childSessionId);
+      assert.equal(continuedDone.acpxRecordId, cancelled.acpxRecordId);
+      assert.equal(continuedDone.resumeOfRunId, held.id);
     }
     // An observed absence of both continuation methods must prevent a doomed row and UI control.
     // Conversely, ACP session/resume works without legacy loadSession and must remain available.
     for (const harness of [AgentRunHarness.OpenCode]) {
       for (const capabilities of [{ loadSession: false }, {}, { loadSession: false, sessionCapabilities: { resume: {} } }]) {
         writeFileSync(join(root, "capabilities.json"), JSON.stringify(capabilities));
-        const launched = await gateway.delegateAgent({ harness, model, effort: null, cwd: root, task: "capabilities", timeoutSeconds: 20 });
-        const done = await gateway.waitAgentRun(launched.id, 20);
-        assert.equal(done.status, "completed", done.error ?? "");
-        const supported = "sessionCapabilities" in capabilities;
-        assert.equal((await gateway.agentState()).runs.find(({ id }) => id === done.id)?.canResume, supported);
-        const before: number = (await gateway.listAgentRuns()).length;
-        if (supported) {
-          const resumed = await gateway.resumeAgentRun(done.id, "follow up");
-          assert.equal((await gateway.waitAgentRun(resumed.id, 20)).status, "completed");
-        } else {
-          await assert.rejects(gateway.resumeAgentRun(done.id, "never sent"), /did not advertise session\/load or session\/resume/);
-          assert.equal((await gateway.listAgentRuns()).length, before, "refused continuation creates no linked row");
-          const invalid = await gateway.delegateAgent({ harness, model, effort: "ultra", cwd: root, task: "never sent", timeoutSeconds: 20 });
-          const failed = await gateway.waitAgentRun(invalid.id, 20);
-          assert.equal(failed.status, "failed");
-          assert.equal((await gateway.agentState()).runs.find(({ id }) => id === failed.id)?.canRetry, false);
-          await assert.rejects(gateway.retryAgentRun(failed.id), /did not advertise session\/load or session\/resume/);
-          assert.equal((await gateway.listAgentRuns()).length, before + 1, "refused retry creates no linked row");
+        for (const terminalStatus of ["completed", "cancelled"]) {
+          const launched = await gateway.delegateAgent({ harness, model, effort: null, cwd: root, task: terminalStatus === "cancelled" ? "hold" : "capabilities", timeoutSeconds: 20 });
+          const deadline = Date.now() + 10_000;
+          while (!(await gateway.agentRun(launched.id)).activity) {
+            assert.ok(Date.now() < deadline, "capability fixture reaches its turn");
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          const done: AgentRun = terminalStatus === "cancelled"
+            ? await gateway.cancelAgentRun(launched.id)
+            : await gateway.waitAgentRun(launched.id, 20);
+          assert.equal(done.status, terminalStatus);
+          const supported = "sessionCapabilities" in capabilities;
+          assert.equal((await gateway.agentState()).runs.find(({ id }) => id === done.id)?.canResume, supported);
+          const before: number = (await gateway.listAgentRuns()).length;
+          if (supported) {
+            const resumed = await gateway.resumeAgentRun(done.id, "follow up");
+            assert.equal((await gateway.waitAgentRun(resumed.id, 20)).status, "completed");
+          } else {
+            await assert.rejects(gateway.resumeAgentRun(done.id, "never sent"), /did not advertise session\/load or session\/resume/);
+            assert.equal((await gateway.listAgentRuns()).length, before, "refused continuation creates no linked row");
+            const invalid = await gateway.delegateAgent({ harness, model, effort: "ultra", cwd: root, task: "never sent", timeoutSeconds: 20 });
+            const failed = await gateway.waitAgentRun(invalid.id, 20);
+            assert.equal(failed.status, "failed");
+            assert.equal((await gateway.agentState()).runs.find(({ id }) => id === failed.id)?.canRetry, false);
+            await assert.rejects(gateway.retryAgentRun(failed.id), /did not advertise session\/load or session\/resume/);
+            assert.equal((await gateway.listAgentRuns()).length, before + 1, "refused retry creates no linked row");
+          }
         }
       }
     }

@@ -21,6 +21,7 @@ const input = (id: string, overrides: Record<string, unknown> = {}) => ({
 
 // --- create → pending, fields persisted -------------------------------------------------
 const created = db.createAgentRun(input("run-1"));
+assert.equal(created.promptSubmitted, false);
 assert.equal(created.status, AgentRunStatus.Pending, "new runs are pending");
 assert.equal(created.harness, AgentRunHarness.ClaudeCode);
 assert.equal(created.parentThreadId, "parent-thread");
@@ -49,6 +50,10 @@ assert.equal(active?.activity, "reading src/state");
 assert.equal(active?.childSessionId, "child-session-1");
 assert.equal(active?.acpxRecordId, "acpx-rec-1");
 assert.equal(active?.lastActivityAt, nowIso, "activity stamps last_activity_at");
+
+assert.equal(active?.promptSubmitted, false, "session creation is not prompt submission");
+assert.equal(db.recordAgentRunActivity("run-1", { promptSubmitted: true })?.promptSubmitted, true);
+assert.equal(db.recordAgentRunActivity("run-1", { activity: "later" })?.promptSubmitted, true);
 
 const modelObserved = db.recordAgentRunActivity("run-1", {
   harnessIdentity: { observed: true, model: " observed-model " },

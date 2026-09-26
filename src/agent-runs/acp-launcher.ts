@@ -192,14 +192,14 @@ export function createAcpLauncher(options: AcpLauncherOptions = {}): AgentRunLau
         if (request.turnIntent.kind === "fresh") throw error;
         const message = error instanceof Error ? error.message : String(error);
         const identity = request.turnIntent.acpxRecordId ?? request.turnIntent.childSessionId;
-        throw new Error(`ACP ${request.turnIntent.kind} failed for ${identity}: ${message}`, { cause: error });
+        throw new Error(`ACP ${request.turnIntent.kind} failed for ${request.run.harness} session ${identity}: ${message}`, { cause: error });
       }
       try {
         return await runAcpTurn(leased.runtime, request, handle);
       } catch (error) {
         if (request.turnIntent.kind === "fresh") throw error;
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`ACP turn failed for ${request.run.id}: ${message}`, { cause: error });
+        throw new Error(`ACP turn failed for ${request.run.harness} run ${request.run.id}: ${message}`, { cause: error });
       }
     } finally {
       if (handle) {
@@ -334,6 +334,11 @@ async function runAcpTurn(
     requestId: request.run.id,
     signal: request.signal,
   });
+
+  await turn.promptStarted.then(
+    () => request.onActivity({ promptSubmitted: true }),
+    () => undefined,
+  );
 
   // Bound daemon memory: a verbose child could emit unbounded output, but only a tail is ever
   // persisted (the executor truncates to RESULT_TAIL_BYTES). Keep a rolling byte-bounded window

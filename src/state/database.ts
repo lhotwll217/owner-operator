@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   last_activity_at TEXT,
   child_session_id TEXT,
   acpx_record_id TEXT,
+  prompt_submitted INTEGER NOT NULL DEFAULT 0 CHECK (prompt_submitted IN (0, 1)),
   result_tail TEXT,
   error TEXT,
   retry_of_run_id TEXT REFERENCES agent_runs(id),
@@ -299,7 +300,7 @@ const AGENT_RUN_COLUMNS = `
   depth, status,
   created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt,
   activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
-  acpx_record_id AS acpxRecordId, result_tail AS resultTail, error,
+  acpx_record_id AS acpxRecordId, prompt_submitted AS promptSubmitted, result_tail AS resultTail, error,
   retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
 
@@ -333,8 +334,9 @@ export interface AgentRunInsert {
   acpxRecordId?: string | null;
 }
 
-type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity"> & {
+type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted"> & {
   effortApplied: number;
+  promptSubmitted: number;
   harnessModel: string | null;
   harnessEffort: AgentRunEffort | null;
   harnessIdentityObserved: number;
@@ -348,6 +350,7 @@ function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
   return {
     ...run,
     effortApplied: Boolean(row.effortApplied),
+    promptSubmitted: Boolean(row.promptSubmitted),
     harnessIdentity,
   };
 }
@@ -380,6 +383,7 @@ export class ThreadDb {
     this.db.exec(SCHEMA);
     this.migrateSessionSummaries();
     this.migrateAgentRunEffort();
+    this.migrateAgentRunPromptSubmission();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -421,6 +425,14 @@ export class ThreadDb {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private migrateAgentRunPromptSubmission(): void {
+    const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "prompt_submitted")) {
+      this.db.exec("ALTER TABLE agent_runs ADD COLUMN prompt_submitted INTEGER NOT NULL DEFAULT 0 "
+        + "CHECK (prompt_submitted IN (0, 1))");
     }
   }
 
@@ -1160,6 +1172,7 @@ export class ThreadDb {
          child_session_id = COALESCE(?, child_session_id),
          acpx_record_id = COALESCE(?, acpx_record_id),
          effort_applied = COALESCE(?, effort_applied),
+         prompt_submitted = MAX(prompt_submitted, ?),
          harness_model = CASE WHEN ? IS NULL THEN harness_model ELSE ? END,
          harness_effort = CASE WHEN ? IS NULL THEN harness_effort ELSE ? END,
          harness_identity_observed = COALESCE(?, harness_identity_observed)
@@ -1168,6 +1181,7 @@ export class ThreadDb {
       update.activity ?? null, this.now(), update.childSessionId ?? null,
       update.acpxRecordId ?? null,
       update.effortApplied === undefined ? null : Number(update.effortApplied),
+      Number(update.promptSubmitted === true),
       identity === undefined ? null : Number(identity.observed), identity?.observed ? identity.model ?? null : null,
       identity === undefined ? null : Number(identity.observed), identity?.observed ? identity.effort ?? null : null,
       identity === undefined ? null : Number(identity.observed),

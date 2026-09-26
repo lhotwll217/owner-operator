@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { AgentRunHarness } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus, agentRunResumeError } from "@owner-operator/core";
 import { ThreadDb } from "./database";
 
 const legacyDir = mkdtempSync(join(tmpdir(), "oo-agent-run-effort-migration-"));
@@ -235,3 +235,28 @@ try {
 }
 
 process.stdout.write("ok — failed agent_runs rebuild rolls back schema, data, and indexes\n");
+
+const submissionDir = mkdtempSync(join(tmpdir(), "oo-agent-run-submission-migration-"));
+try {
+  const path = join(submissionDir, "state.db");
+  const before = new ThreadDb(path);
+  before.createAgentRun({ id: "legacy-cancelled", harness: AgentRunHarness.Codex, task: "task",
+    cwd: submissionDir, depth: 1, timeoutSeconds: 60, childSessionId: "child", acpxRecordId: "record" });
+  before.claimNextPendingAgentRun(1);
+  before.recordAgentRunActivity("legacy-cancelled", { promptSubmitted: true });
+  before.finishAgentRun("legacy-cancelled", { status: AgentRunStatus.Cancelled, resultTail: null, error: null });
+  before.close();
+  const legacy = new DatabaseSync(path);
+  legacy.exec("ALTER TABLE agent_runs DROP COLUMN prompt_submitted");
+  legacy.close();
+  const after = new ThreadDb(path);
+  const migrated = after.agentRunById("legacy-cancelled")!;
+  assert.equal(migrated.promptSubmitted, false, "migration cannot infer submission from child identity");
+  assert.equal(migrated.childSessionId, "child");
+  assert.match(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }) ?? "",
+    /no confirmed prompt submission/);
+  after.close();
+} finally {
+  rmSync(submissionDir, { recursive: true, force: true });
+}
+process.stdout.write("ok - legacy cancelled runs retain identity without invented submission evidence\n");

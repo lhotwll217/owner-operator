@@ -14,6 +14,42 @@ const completed = run("completed", AgentRunStatus.Completed, {
   acpxRecordId: "acpx-record",
 });
 
+const cancelled = { ...completed, id: "cancelled", status: AgentRunStatus.Cancelled, promptSubmitted: true };
+assert.equal(
+  agentRunResumeError(cancelled, { existingResumeRunId: null, activeRunId: null }),
+  null,
+  "a cancelled run with both identities can resume its child conversation",
+);
+assert.deepEqual(agentRunTurnIntent({
+  ...cancelled, id: "continued", status: AgentRunStatus.Pending, resumeOfRunId: cancelled.id,
+}, undefined, cancelled), {
+  kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record",
+});
+for (const status of [AgentRunStatus.Pending, AgentRunStatus.Running, AgentRunStatus.Failed,
+  AgentRunStatus.Interrupted, AgentRunStatus.Lost]) {
+  assert.match(agentRunResumeError({ ...completed, status }, {
+    existingResumeRunId: null, activeRunId: null,
+  }) ?? "", /can only be resumed/);
+}
+assert.match(agentRunRetryError(cancelled, {
+  existingRetryRunId: null, activeRunId: null,
+}) ?? "", /not retryable/);
+const unsubmitted = { ...cancelled, promptSubmitted: false };
+assert.match(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activeRunId: null }) ?? "",
+  /no confirmed prompt submission/);
+assert.throws(() => agentRunTurnIntent({ ...unsubmitted, id: "invalid", resumeOfRunId: cancelled.id },
+  undefined, unsubmitted), /no confirmed prompt submission/);
+const unsubmittedSuccessor = { ...unsubmitted, id: "successor", resumeOfRunId: cancelled.id };
+assert.equal(agentRunResumeError(unsubmittedSuccessor, { existingResumeRunId: null, activeRunId: null }), null,
+  "a cancelled resume successor retains the submitted conversation before its own prompt");
+assert.deepEqual(agentRunTurnIntent({ ...unsubmittedSuccessor, id: "next", resumeOfRunId: unsubmittedSuccessor.id },
+  undefined, unsubmittedSuccessor), { kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record" });
+for (const identity of [{ childSessionId: null }, { acpxRecordId: null }]) {
+  assert.match(agentRunResumeError({ ...cancelled, ...identity }, {
+    existingResumeRunId: null, activeRunId: null,
+  }) ?? "", /no .*identity to resume/);
+}
+
 const failedForRetry = run("failed-for-retry", AgentRunStatus.Failed, {
   childSessionId: "retry-child",
 });

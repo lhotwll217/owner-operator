@@ -47,7 +47,10 @@ export const manageAgentRunTool = defineTool({
     "tool is not for monitoring or polling. Use status only when the owner explicitly requests an " +
     "inspection: status (read the current row), cancel (abort a running or queued run), retry " +
     "(rerun the same task after interrupted/lost/failed), resume (send a required new follow-up task " +
-    "after a completed run, using the same child conversation). Use " +
+    "after a completed or cancelled run, using the same child conversation). Resume is the default " +
+    "way to continue cancelled work when the run submitted a prompt or is itself a resume successor, " +
+    "and the session can reload. Resume successors cancelled while queued or loading can still resume. " +
+    "Fresh startup cancellations without submission evidence cannot resume. Report reload failures. Use " +
     "query_database on agent_runs to find ids.",
   parameters: Type.Union([
     Type.Object({
@@ -59,8 +62,8 @@ export const manageAgentRunTool = defineTool({
     }),
     Type.Object({
       action: Type.Literal("resume"),
-      id: Type.String({ minLength: 1, description: "Exact completed run id from the agent_runs table." }),
-      task: Type.String({ minLength: 1, description: "New follow-up task for the completed child session." }),
+      id: Type.String({ minLength: 1, description: "Exact completed or cancelled run id from the agent_runs table." }),
+      task: Type.String({ minLength: 1, description: "New task for the existing child conversation, including instructions to continue cancelled work." }),
     }),
   ]),
   async execute(_id, params) {

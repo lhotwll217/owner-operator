@@ -12,7 +12,8 @@ assert.match(manageAgentRunTool.description, /not for monitoring/i, "the tool re
 assert.ok(!manageAgentRunTool.description.includes("wait"), "no blocking wait affordance: completions arrive as events");
 assert.match(manageAgentRunTool.description, /retry.*same task/i);
 assert.match(manageAgentRunTool.description, /resume.*new follow-up task/i);
-assert.ok(!manageAgentRunTool.description.includes("continue"));
+assert.match(manageAgentRunTool.description, /completed or cancelled/);
+assert.match(manageAgentRunTool.description, /Resume is the default way to continue cancelled work/);
 
 const run: AgentRun = {
   id: "run-1",
@@ -23,6 +24,7 @@ const run: AgentRun = {
   model: null,
   effort: null,
   effortApplied: false,
+  promptSubmitted: false,
   harnessIdentity: { observed: false },
   depth: 1,
   status: AgentRunStatus.Running,
