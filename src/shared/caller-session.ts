@@ -5,10 +5,13 @@ export function callerSessionId(explicit?: string): string | undefined {
     .find((value) => typeof value === "string" && value.trim())?.trim();
 }
 
-/** The session a delegated run belongs to and reports back to: an explicit id, then the Operator
- * session whose own bash is running `oo` (`OO_CURRENT_SESSION_ID`, exported by the privacy guard in
- * src/agent/privacy-tools.ts), then the calling coding session. `callerSessionId` stays separate
- * because search keeps the current Operator session and its caller apart. */
+/** The session a delegated run belongs to and reports back to. Inside the Operator's own bash the
+ * privacy guard (src/agent/privacy-tools.ts) exports `OO_CURRENT_SESSION_ID`, and it wins over any
+ * `--from-session` the model passes: lineage comes from the session, never model arguments, or a
+ * spoofed parent could redirect completion delivery or reset the depth guard (as delegate_agent
+ * guarantees). Outside an Operator, the explicit flag, then the calling coding session.
+ * `callerSessionId` stays separate because search keeps the current Operator session and its
+ * caller apart. */
 export function parentSessionId(explicit?: string): string | undefined {
-  return explicit?.trim() || process.env.OO_CURRENT_SESSION_ID?.trim() || callerSessionId();
+  return process.env.OO_CURRENT_SESSION_ID?.trim() || explicit?.trim() || callerSessionId();
 }

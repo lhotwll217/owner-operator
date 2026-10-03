@@ -24,11 +24,13 @@ assert.equal(withEnv({ OO_CURRENT_SESSION_ID: " operator " }, () => parentSessio
   "the Operator's own bash names its session as the parent");
 assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator" }, () => callerSessionId()), undefined,
   "the caller id never reads the Operator's current session");
-assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator", OO_FROM_SESSION: "coder" }, () => parentSessionId("flag")), "flag",
-  "an explicit --from-session wins");
+assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator", OO_FROM_SESSION: "coder" }, () => parentSessionId("spoofed")), "operator",
+  "inside an Operator, a model-supplied --from-session cannot replace the session's own lineage");
+assert.equal(withEnv({ OO_FROM_SESSION: "coder" }, () => parentSessionId("flag")), "flag",
+  "outside an Operator, an explicit --from-session wins");
 assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator", OO_FROM_SESSION: "coder" }, () => parentSessionId()), "operator",
   "the current Operator session outranks the coding session that called it");
 assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "  ", CODEX_THREAD_ID: "codex" }, () => parentSessionId()), "codex",
   "outside an Operator, the caller session is the parent");
 
-process.stdout.write("ok — caller session: explicit, then the current Operator session, then the caller\n");
+process.stdout.write("ok — parent session: the current Operator session, then explicit, then the caller\n");

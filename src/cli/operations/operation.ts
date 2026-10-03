@@ -158,12 +158,28 @@ export async function gateway(): Promise<GatewayApi> {
     try {
       return await resolveBackend();
     } catch (cause) {
-      throw new Error(
-        "the Owner Operator daemon is not running; agents do not start it. Ask the owner to start it (`oo status` shows its state).",
-        { cause },
-      );
+      throw new Error(await agentConnectFailure(), { cause });
     }
   }
   await (await import("../../daemon/ensure")).ensureDaemon();
   return resolveBackend();
+}
+
+/** Why an agent could not connect, so it asks the owner for the right thing: a dead daemon, one
+ * still starting, or a live one this shell cannot reach (a sandbox, a stale token). */
+async function agentConnectFailure(): Promise<string> {
+  const probe = await (await import("../../gateway/client")).probeGateway();
+  const notRunning = "the Owner Operator daemon is not running; agents do not start it. Ask the owner to start it (`oo status` shows its state).";
+  if (!probe) return notRunning;
+  const { pid, port, authToken } = probe.info;
+  if (probe.kind === "reachable") return `the Owner Operator daemon (pid ${pid}) is still starting; retry shortly.`;
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return notRunning;
+  }
+  let detail = probe.cause instanceof Error ? probe.cause.message : String(probe.cause);
+  const token = typeof authToken === "string" ? authToken.trim() : "";
+  if (token) detail = detail.replaceAll(token, "[redacted]");
+  return `the Owner Operator daemon (pid ${pid}, port ${port}) is running but unreachable from this shell: ${detail}. Agents do not restart it; ask the owner (\`oo status\` shows its state).`;
 }

@@ -27,21 +27,28 @@ missing from `oo`, where anyone can see it. This ADR makes the same reversal her
   the prompt, skills, and evals onto `oo` commands, and deletes the tool. `use_worktree` moves
   too, so the interactive runtime learns of a worktree change without a tool result.
 - The Operator's bash identifies its own session: the privacy guard exports
-  `OO_CURRENT_SESSION_ID`, and `oo runs delegate` records it as the run's parent, so completion
-  delivery and the depth guard behave as they did for `delegate_agent`.
-- The privacy guard exports `OO_AGENT=1`, and `oo` verbs then connect to the running daemon
-  without starting or replacing one. An agent call must never restart the daemon that hosts it.
+  `OO_CURRENT_SESSION_ID`, and `oo runs delegate` records it as the run's parent ahead of any
+  `--from-session` the model passes. Like `delegate_agent`, lineage comes from the session, not
+  model arguments, so completion delivery and the depth guard cannot be redirected.
+- The privacy guard exports `OO_AGENT=1`. `oo` verbs then connect to the running daemon without
+  starting or replacing one, and the forms that would start a daemon or a nested Operator
+  (`oo`, `oo -p`, `oo --continue`, `oo --session`, `oo daemon`) refuse to run. An agent call must
+  never restart the daemon that hosts it.
 - Every permission mode writes allow rules for `oo` and `oo *` in the bash surface
   (`packages/core/src/permissions.mjs`). Owner bash rules come after them and the last match
   wins, so an owner rule can still narrow a verb. `read-only` is not a supported product mode:
   it denies bash, the permission extension then hides bash entirely, and the `oo` rules never
-  apply.
+  apply. Allowing `oo` in `ask` mode also lets headless runs, which cannot answer an approval,
+  create, run, and delegate through `oo` where the matching native tool would ask; a command
+  schedule can run any program. This is deliberate: native tools and `oo` verbs are product
+  actions the Operator may take without approval.
 - Guidance lives in `oo` help, nested by level, with examples on every verb. The system prompt
   embeds the generated root help rather than restating it, so the Operator and an outside agent
   read the same text, and what an eval proves for one holds for the other.
 - `src/cli/conventions.test.ts` requires an `oo` verb for every agent-facing Gateway route. Its
-  `PENDING` table lists the routes a native tool still covers; each retirement PR empties its
-  rows, and the migration ends when the table is empty.
+  `PENDING` table lists the routes a native tool still covers, and each retirement PR empties its
+  rows. A tool with no route (`manage_delegated_baseline` runs in-process) gains one when its
+  family retires. The migration ends when `createOwnerOperatorCustomTools` returns no tools.
 - Evals grade `oo` bash commands instead of native tool calls, as `eval/asserts/tool-use.mjs`
   already does for `oo search`. Schedules that store retired tool ids in `toolsAllow` are
   migrated when their family retires.
