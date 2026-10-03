@@ -69,6 +69,11 @@ mode during onboarding and changes it later with `/permissions`.
 Known read surfaces are always allowed. Bounded Owner Operator state cleanup through
 `mark_thread_done` is allowed in Ask and Allow modes but denied in Read-only mode; generic file,
 shell, scheduling, and unclassified mutations keep the selected mode's allow/ask/deny default.
+Bash commands `oo` and `oo *` are allowed in every mode because the agent reaches Owner Operator
+through its own CLI ([ADR 0001](adr/0001-agent-uses-its-own-cli.md)); owner rules come after them, so
+a rule such as `"oo schedules *": "deny"` narrows them (`CLI_BASH_RULES` in
+[`permissions.mjs`](../packages/core/src/permissions.mjs)). Read-only mode hides bash, and with it
+`oo`, entirely; it is not a supported product mode.
 
 Permission gating is
 [`@gotgenes/pi-permission-system`](https://pi.dev/packages/pi-permission-system), not local code. It already provides deterministic allow/ask/deny rules, Bash

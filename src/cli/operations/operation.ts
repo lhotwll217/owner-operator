@@ -22,12 +22,16 @@ export interface Verb {
   /** Number of required positionals; extra positionals are an error unless `variadic`. */
   minPositionals?: number;
   variadic?: boolean;
+  /** Complete invocations, each starting `oo <noun> <verb>`; help shows them under Examples. */
+  examples: string[];
   /** Returns the process exit code. */
   run(input: VerbInput): Promise<number>;
 }
 
 export interface Noun {
   summary: string;
+  /** The questions this noun answers; root help routes by it. */
+  useWhen: string;
   verbs: Record<string, Verb>;
 }
 
@@ -45,12 +49,12 @@ function optionLabel(name: string, option: ParseArgsOptionsConfig[string]): stri
 
 export function verbHelp(nounName: string, verbName: string, verb: Verb): string {
   const lines = [`oo ${nounName} ${verbName}${verb.args ? ` ${verb.args}` : ""} [--json]`, "", `  ${verb.summary}`];
-  const options = Object.entries(verb.options ?? {});
-  if (options.length) {
-    lines.push("", "Flags:");
-    for (const [name, option] of options) lines.push(`  ${optionLabel(name, option).padEnd(28)} ${option.help}`);
+  lines.push("", "Flags:");
+  for (const [name, option] of Object.entries(verb.options ?? {})) {
+    lines.push(`  ${optionLabel(name, option).padEnd(28)} ${option.help}`);
   }
   lines.push("  --json                       machine-readable output");
+  lines.push("", "Examples:", ...verb.examples.map((example) => `  ${example}`));
   return lines.join("\n");
 }
 
@@ -60,10 +64,12 @@ export function nounHelp(nounName: string, noun: Noun): string {
   return [
     `oo ${nounName} — ${noun.summary}`,
     "",
+    `Use when: ${noun.useWhen}`,
+    "",
     "Verbs:",
     ...rows,
     "",
-    `Every verb accepts --json. \`oo ${nounName} <verb> --help\` shows its flags.`,
+    `Every verb accepts --json. \`oo ${nounName} <verb> --help\` shows its flags and examples.`,
   ].join("\n");
 }
 
@@ -143,9 +149,21 @@ export async function flushStdio(): Promise<void> {
 }
 
 /** The ready daemon's Gateway, starting the daemon when needed. The daemon owns every state
- * read and write; the CLI never opens the store. */
+ * read and write; the CLI never opens the store. Under `OO_AGENT=1` (an Owner Operator agent's
+ * bash) it only connects: ensureDaemon may replace a daemon whose fingerprint differs, and the
+ * agent may be running inside that daemon (a scheduled run) or depend on it. */
 export async function gateway(): Promise<GatewayApi> {
-  await (await import("../../daemon/ensure")).ensureDaemon();
   const { resolveBackend } = await import("../../gateway/client");
+  if (process.env.OO_AGENT === "1") {
+    try {
+      return await resolveBackend();
+    } catch (cause) {
+      throw new Error(
+        "the Owner Operator daemon is not running; agents do not start it. Ask the owner to start it (`oo status` shows its state).",
+        { cause },
+      );
+    }
+  }
+  await (await import("../../daemon/ensure")).ensureDaemon();
   return resolveBackend();
 }

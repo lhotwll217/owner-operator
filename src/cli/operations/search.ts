@@ -3,6 +3,7 @@ import { callerSessionId } from "../../shared/caller-session";
 import { gateway, reportFailure, writeOut } from "./operation";
 
 export const SEARCH_SUMMARY = "privacy-aware transcript search, run by the daemon (POST /session-search)";
+export const SEARCH_USE_WHEN = "what a session actually said or did: transcript evidence, quotes, errors, and decisions";
 
 /** `oo search` forwards every argument except `--from-session` to the daemon's search wrapper;
  * the wrapper's flags (`oo search --help`) and output are the contract. */

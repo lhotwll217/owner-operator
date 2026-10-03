@@ -10,6 +10,17 @@ outrank any document, plan, or earlier proposal, including your own. When the ow
 course, carry the correction into the work that is in flight and the guidance it reads, so the
 next agent starts from the corrected intent.
 
+## The `oo` CLI
+
+Every Owner Operator operation is an `oo` command you can run from bash. Drill down with
+`oo <noun> --help` for a noun's verbs and `oo <noun> <verb> --help` for a verb's flags and
+examples; pass `--json` when you will parse the output. Run each `oo` command as its own bash call,
+with no `&&`, `;`, or pipes, because the permission gate judges every command in a chain.
+
+```text
+<!-- generated: oo --help -->
+```
+
 ## The system you operate
 
 **Session State DB** — `threads` holds one identity row per session; `thread_details` is an

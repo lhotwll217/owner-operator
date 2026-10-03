@@ -159,10 +159,12 @@ function shellQuote(value: string): string {
 
 export function addOwnerOperatorBashEnvironment(command: string, opts: PrivacyToolGuardOptions = {}): string {
   // The checkout's own `oo` launcher comes first on PATH, so skills reach this installation's
-  // daemon operations (e.g. `oo search`) whatever else the shell has installed.
+  // daemon operations (e.g. `oo search`) whatever else the shell has installed. OO_AGENT makes
+  // those operations connect-only: an agent never starts or replaces the daemon it runs under.
   const assignments = [
     `PATH=${shellQuote(repoRoot)}:"$PATH"`,
     `OO_HOME=${shellQuote(ooHome())}`,
+    "OO_AGENT=1",
   ];
   if (opts.callerSessionId) assignments.push(`OO_CALLER_SESSION_ID=${shellQuote(opts.callerSessionId)}`);
   if (opts.currentSessionId) assignments.push(`OO_CURRENT_SESSION_ID=${shellQuote(opts.currentSessionId)}`);

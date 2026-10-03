@@ -6,9 +6,11 @@ const rowLine = (row: SessionStateRow, index: number): string =>
 
 export const sessionState: Noun = {
   summary: "the owner's current session rows, as the widget shows them",
+  useWhen: "what is active right now, what needs the owner, or marking finished sessions done",
   verbs: {
     list: {
       summary: "current session-state rows (GET /session-state)",
+      examples: ["oo session-state list", "oo session-state list --json"],
       async run({ json }) {
         const rows = await (await gateway()).sessionState();
         await emit(json, rows, () => rows.length ? rows.map(rowLine).join("\n") : "no sessions");
@@ -20,6 +22,7 @@ export const sessionState: Noun = {
       summary: "mark sessions done by exact id (POST /done); ids come from `list`",
       minPositionals: 1,
       variadic: true,
+      examples: ["oo session-state done <id>", "oo session-state done <id> <id> --json"],
       async run({ positionals, json }) {
         const result: MarkThreadsDoneResult = await (await gateway()).markDone(positionals);
         await emit(json, result, () => [

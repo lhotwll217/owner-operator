@@ -88,6 +88,7 @@ try {
       bash: {
         "gh issue create *": "deny",
         "*": "allow",
+        "oo schedules *": "deny",
       },
       path: Object.fromEntries(pathIdentities(globalPrivatePath).map((path) => [path, "allow"])),
     },
@@ -178,6 +179,13 @@ try {
     "a specific global Pi rule remains stronger than the managed wildcard default",
   );
   assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "deny", "task project rules refine global defaults");
+  assert.equal(permissions.checkPermission("bash", "oo db query x").state, "allow", "the agent's own CLI is allowed in ask mode");
+  assert.equal(permissions.checkPermission("bash", "oo").state, "allow");
+  assert.equal(
+    permissions.checkPermission("bash", "oo schedules delete x").state,
+    "deny",
+    "an owner rule after the generated `oo` rules narrows them",
+  );
   assert.equal(
     permissions.checkPermission("path", globalPrivatePath).state,
     "allow",
@@ -227,6 +235,7 @@ try {
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "allow");
   assert.equal(permissions.checkPermission("bash", "gh issue create --title test").state, "deny");
   assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "deny", "project-specific denies survive global mode changes");
+  assert.equal(permissions.checkPermission("bash", "oo schedules delete x").state, "deny", "owner `oo` narrowing survives mode changes");
 
   savePermissionMode(ooHome, "read-only");
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "deny");
