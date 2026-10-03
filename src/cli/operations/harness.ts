@@ -44,6 +44,10 @@ function renderSnapshot(snapshot: HarnessDetailsSnapshot): string {
       lines.push(`  current model: ${models.currentModelId ?? "unknown"}`);
       lines.push(`  models: ${models.availableModelIds?.join(", ") ?? "unknown"}`);
     }
+    const candidate = row.baselineCandidate;
+    if (candidate) {
+      lines.push(`  baseline candidate: ${candidate.model ?? "unknown"} effort=${candidate.effort ?? "null"}${candidate.availableEfforts ? ` (efforts: ${candidate.availableEfforts.join(", ")})` : ""}`);
+    }
     if (row.requestedInspection) {
       lines.push(`  inspected ${row.requestedInspection.model} effort=${row.requestedInspection.effort ?? "null"}: ${row.confirmation ? "confirmed" : "not confirmed"}`);
     }

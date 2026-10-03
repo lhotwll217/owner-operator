@@ -194,6 +194,9 @@ try {
   assert.equal(agentRow.timeoutSeconds, 90, "--timeout reaches the run");
   assert.equal(agentRow.effort, null, "--effort none launches with an explicit null effort");
   assert.equal(agentRow.cwd, repoRoot, "no --cwd and no selected worktree: the parent's resolved cwd falls back to the shell cwd");
+  const agentText = await runOo(["runs", "delegate", "--harness", "codex", "--model", "m1", "--effort", "high", "text row"], agent);
+  assert.equal(agentText.status, 0, agentText.stderr);
+  assert.match(agentText.stdout, / codex m1\/high  text row/, "the pending text row shows the requested model and effort");
   assert.equal((await runOo(["runs", "delegate", "--harness", "codex", "--timeout", "1.5", "t"])).status, 2, "--timeout takes whole seconds");
   const refused = await runOo(["runs", "delegate", "--harness", "codex", "t"], agent);
   assert.equal(refused.status, 1, "the Operator cannot launch unpinned without an approved baseline");
