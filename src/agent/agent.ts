@@ -45,10 +45,8 @@ export { repoRoot };
 export {
   configuredOwnerOperatorTools,
   createOwnerOperatorCustomTools,
-  manageScheduleTool,
   ownerOperatorCustomTools,
   ownerOperatorTools,
-  schedulePromptTool,
   useWorktreeTool,
 } from "./tools";
 

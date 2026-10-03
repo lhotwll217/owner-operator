@@ -11,14 +11,12 @@ import {
   type GatewayEvent,
   type ScheduleExecutionResult,
 } from "@owner-operator/core";
-import { manageScheduleTool } from "../agent/tools/manage-schedule";
 import { connectGateway } from "../gateway/client";
 import { repoRoot } from "../shared/repo-root";
 import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { startDaemon } from "./runtime";
 
 const { dir, cleanup } = tempOoHome("oo-daemon-e2e");
-const toolContext = {} as Parameters<typeof manageScheduleTool.execute>[4];
 let releaseSlowRun: () => void = () => undefined;
 const slowRunRelease = new Promise<void>((resolve) => { releaseSlowRun = resolve; });
 const daemon = await startDaemon({
@@ -74,22 +72,25 @@ try {
 
   // The Operator's bash runs `oo` with OO_AGENT=1: connect to this daemon, never start one.
   // Async, because this process hosts the daemon that must answer.
-  const { stdout } = await promisify(execFile)(join(repoRoot, "oo"), [
-    "db", "query", "SELECT id FROM schedules WHERE name = 'check'", "--json",
-  ], { cwd: repoRoot, env: { ...process.env, OO_AGENT: "1" } });
-  const discovered = JSON.parse(stdout) as { rows: Array<{ id: string }> };
+  const agentOo = async (...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> => {
+    try {
+      const { stdout, stderr } = await promisify(execFile)(join(repoRoot, "oo"), args,
+        { cwd: repoRoot, env: { ...process.env, OO_AGENT: "1" } });
+      return { code: 0, stdout, stderr };
+    } catch (error) {
+      const failed = error as { code: number; stdout: string; stderr: string };
+      return { code: failed.code, stdout: failed.stdout, stderr: failed.stderr };
+    }
+  };
+  const discovery = await agentOo("db", "query", "SELECT id FROM schedules WHERE name = 'check'", "--json");
+  const discovered = JSON.parse(discovery.stdout) as { rows: Array<{ id: string }> };
   assert.equal(discovered.rows[0]?.id, schedule.id, "the Operator's `oo db query` identifies the stable schedule id");
   const discoveredScheduleId = discovered.rows[0].id;
 
-  const disabledResult = await manageScheduleTool.execute(
-    "disable-schedule",
-    { action: "disable", id: discoveredScheduleId },
-    undefined,
-    undefined,
-    toolContext,
-  );
-  assert.equal(disabledResult.details.action, "disable");
+  const disabledResult = await agentOo("schedules", "disable", discoveredScheduleId, "--json");
+  assert.equal(disabledResult.code, 0, disabledResult.stderr);
   const disabledSchedule = (await gateway!.listSchedules()).find(({ id }) => id === schedule.id);
+  assert.deepEqual(JSON.parse(disabledResult.stdout), disabledSchedule, "disable prints the stored record");
   assert.deepEqual(disabledSchedule && {
     id: disabledSchedule.id,
     name: disabledSchedule.name,
@@ -108,43 +109,21 @@ try {
     cwd: schedule.cwd,
     timeoutSeconds: schedule.timeoutSeconds,
     createdAt: schedule.createdAt,
-  }, "the public tool disables without replacing the schedule definition");
-  await assert.rejects(
-    () => manageScheduleTool.execute(
-      "disable-missing",
-      { action: "disable", id: "missing-schedule" },
-      undefined,
-      undefined,
-      toolContext,
-    ),
-    /schedule not found: missing-schedule/,
-    "an unknown stable id fails instead of selecting another schedule",
-  );
-  const deletedResult = await manageScheduleTool.execute(
-    "delete-schedule",
-    { action: "delete", id: discoveredScheduleId },
-    undefined,
-    undefined,
-    toolContext,
-  );
-  assert.deepEqual(deletedResult.details, { action: "delete", id: schedule.id, deleted: true });
+  }, "`oo schedules disable` disables without replacing the schedule definition");
+  const disableMissing = await agentOo("schedules", "disable", "missing-schedule");
+  assert.equal(disableMissing.code, 1, "an unknown stable id fails instead of selecting another schedule");
+  assert.match(disableMissing.stderr, /no such schedule: missing-schedule/);
+  const deletedResult = await agentOo("schedules", "delete", discoveredScheduleId, "--json");
+  assert.deepEqual(JSON.parse(deletedResult.stdout), { ok: true });
   assert.ok(!(await gateway!.listSchedules()).some(({ id }) => id === schedule.id));
   const preservedRuns = await gateway!.queryDatabase({
     action: DatabaseQueryAction.Query,
     sql: `SELECT COUNT(*) AS count FROM schedule_runs WHERE schedule_id = '${schedule.id}'`,
   }) as { rows: Array<{ count: number }> };
-  assert.equal(preservedRuns.rows[0]?.count, 1, "public-tool deletion preserves run history");
-  await assert.rejects(
-    () => manageScheduleTool.execute(
-      "delete-missing",
-      { action: "delete", id: "missing-schedule" },
-      undefined,
-      undefined,
-      toolContext,
-    ),
-    /gateway \/schedules\/missing-schedule: 404/,
-    "deleting an unknown stable id fails explicitly",
-  );
+  assert.equal(preservedRuns.rows[0]?.count, 1, "deletion through oo preserves run history");
+  const deleteMissing = await agentOo("schedules", "delete", "missing-schedule");
+  assert.equal(deleteMissing.code, 1, "deleting an unknown stable id fails explicitly");
+  assert.match(deleteMissing.stderr, /no such schedule: missing-schedule/);
 
   const slowSchedule = await gateway!.createSchedule({
     name: "slow check",

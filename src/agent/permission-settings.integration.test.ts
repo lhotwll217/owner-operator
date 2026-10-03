@@ -88,7 +88,7 @@ try {
       bash: {
         "gh issue create *": "deny",
         "*": "allow",
-        "oo schedules *": "deny",
+        "oo schedules delete *": "deny",
       },
       path: Object.fromEntries(pathIdentities(globalPrivatePath).map((path) => [path, "allow"])),
     },
@@ -158,20 +158,12 @@ try {
   assert.equal(approvalPrompts, 0, "marking done through oo does not open Pi's generic approval dialog");
   const scheduleGate = await session.extensionRunner.emitToolCall({
     type: "tool_call",
-    toolName: "schedule_prompt",
-    toolCallId: "schedule-remains-risky",
-    input: { name: "test" },
+    toolName: "bash",
+    toolCallId: "schedule-through-oo",
+    input: { command: "oo schedules create --name test --prompt 'Check CI.' --every 1h" },
   });
-  assert.equal(scheduleGate?.block, true, "risky native scheduling still asks and respects a denial");
-  assert.equal(approvalPrompts, 1, "risky native scheduling still opens Pi's approval dialog");
-  const manageScheduleGate = await session.extensionRunner.emitToolCall({
-    type: "tool_call",
-    toolName: "manage_schedule",
-    toolCallId: "schedule-management-remains-risky",
-    input: { action: "disable", id: "schedule-1" },
-  });
-  assert.equal(manageScheduleGate?.block, true, "schedule management asks and respects a denial");
-  assert.equal(approvalPrompts, 2, "schedule management opens Pi's generic approval dialog");
+  assert.equal(scheduleGate?.block, undefined, `scheduling through oo passes the interactive gate: ${JSON.stringify(scheduleGate)}`);
+  assert.equal(approvalPrompts, 0, "scheduling through oo does not open Pi's generic approval dialog");
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "ask");
   assert.equal(
     permissions.checkPermission("bash", "gh issue create --title test").state,
@@ -227,8 +219,6 @@ try {
       bash: "ask",
       edit: "ask",
       write: "ask",
-      schedule_prompt: "ask",
-      manage_schedule: "ask",
       delegate_agent: "ask",
       manage_agent_run: "ask",
       get_harness_details: "allow",

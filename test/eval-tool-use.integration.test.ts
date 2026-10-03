@@ -58,6 +58,13 @@ const readOnlyMutation = toolUseAssertion("", context([
 assert.equal(readOnlyMutation.pass, false);
 assert.match(readOnlyMutation.reason, /used forbidden \[oo session-state done\]/);
 
+const readOnlySchedule = toolUseAssertion("", context([
+  locator,
+  { ...locator, input: { command: "oo schedules create --name n --prompt p --every 1h" } },
+]));
+assert.equal(readOnlySchedule.pass, false);
+assert.match(readOnlySchedule.reason, /used forbidden \[oo schedules create\]/);
+
 const earlyDirect = toolUseAssertion("", context([
   search(["--skim", "session-1"]),
   locator,

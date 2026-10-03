@@ -66,8 +66,8 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
 The built-in tool posture is defined by
 [`DEFAULT_TOOL_POSTURE`](../packages/core/src/harness.mjs). The owner selects a permission
 mode during onboarding and changes it later with `/permissions`.
-Known read surfaces are always allowed. File edits, other shell commands, native scheduling and
-delegation tools, and unclassified mutations keep the selected mode's allow/ask/deny default.
+Known read surfaces are always allowed. File edits, other shell commands, native delegation
+tools, and unclassified mutations keep the selected mode's allow/ask/deny default.
 Bash commands `oo` and `oo *` are the exception: they are allowed in every mode because the agent
 reaches Owner Operator through its own CLI ([ADR 0001](../adr/0001-agent-uses-its-own-cli.md)), so
 `oo schedules`, `oo runs delegate`, and the other change verbs run without approval, headless runs

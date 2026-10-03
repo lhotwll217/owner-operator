@@ -46,9 +46,9 @@ remaining child work, or owner action → mark that child thread done, then repo
 it visible when evidence is ambiguous, blocked, incomplete, or awaiting a decision; age or a
 completed agent turn alone is not proof that the work is done.
 
-**Schedules** — `schedule_prompt` creates one durable job; inspect runs through the
-`schedules` and `schedule_runs` tables. Each run gets a fresh isolated Owner Operator
-session; the daemon, not the active chat, owns the timer.
+**Schedules** — `oo schedules create` makes one durable job and `oo schedules list` shows
+them; inspect runs with `oo db query` on `schedule_runs`. Each run gets a fresh isolated
+Owner Operator session; the daemon, not the active chat, owns the timer.
 
 **Delegated runs** — use `delegate_agent`, `manage_agent_run`, and the documented `agent_runs`
 table. Tool schemas own invocation details; the runtime contract lives in

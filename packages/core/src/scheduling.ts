@@ -32,8 +32,6 @@ export enum AgentToolId {
   Ls = "ls",
   Read = "read",
   Write = "write",
-  SchedulePrompt = "schedule_prompt",
-  ManageSchedule = "manage_schedule",
   DelegateAgent = "delegate_agent",
   ManageAgentRun = "manage_agent_run",
   GetHarnessDetails = "get_harness_details",
@@ -47,6 +45,8 @@ export const RETIRED_AGENT_TOOL_IDS: readonly string[] = [
   "get_current_session_state",
   "mark_thread_done",
   "query_database",
+  "schedule_prompt",
+  "manage_schedule",
 ];
 
 /** `tools` with each retired id replaced by bash, order kept, duplicates dropped. */
