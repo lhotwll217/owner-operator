@@ -27,6 +27,11 @@ const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_sessi
 const NATIVE_STATE_SURFACES = ["mark_thread_done"];
 const CHANGE_SURFACES = ["edit", "write", "schedule_prompt", "manage_schedule", "delegate_agent", "manage_agent_run", "manage_delegated_baseline", "use_worktree"];
 const MANAGED_SURFACES = [...READ_SURFACES, ...NATIVE_STATE_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
+// The agent reaches Owner Operator through its own CLI (docs/adr/0001-agent-uses-its-own-cli.md),
+// so `oo` is allowed in every mode. Owner rules follow these and win (last match wins), so a rule
+// such as "oo schedules *": "deny" still narrows them. Read-only mode hides bash entirely, because
+// the extension decides tool exposure from the "*" rule alone; read-only is not a supported mode.
+const CLI_BASH_RULES = { oo: "allow", "oo *": "allow" };
 const JSON_FORMAT = { insertSpaces: true, tabSize: 2, eol: "\n" };
 
 function readDocument(path) {
@@ -94,7 +99,7 @@ function permissionPolicy(existing, ooHome, mode) {
   }
   for (const surface of CHANGE_SURFACES) next[surface] = withDefault(existing[surface], action);
   next.external_directory = withDefault(existing.external_directory, "allow");
-  next.bash = withDefault(existing.bash, action);
+  next.bash = { "*": action, ...CLI_BASH_RULES, ...withDefault(existing.bash, action) };
 
   const currentPathRules = patternMap(existing.path);
   const ownerPathRules = {};
@@ -179,6 +184,14 @@ function reconcilePermissionDocument(text, existingPermission, nextPermission) {
     nextText = isPatternMap(existingPermission[surface])
       ? setJsoncDefaultFirst(nextText, ["permission", surface, "*"], nextPermission[surface]["*"])
       : setJsoncValue(nextText, ["permission", surface], nextPermission[surface]);
+  }
+  if (isPatternMap(existingPermission.bash)) {
+    // Inserted right after the default in reverse, so they keep their order ahead of owner rules.
+    for (const [pattern, value] of Object.entries(CLI_BASH_RULES).reverse()) {
+      if (!Object.hasOwn(existingPermission.bash, pattern)) {
+        nextText = setJsoncAfterDefault(nextText, ["permission", "bash", pattern], value);
+      }
+    }
   }
 
   const existingPath = existingPermission.path;

@@ -56,7 +56,8 @@ try {
   assert.equal(ask.debugLog, true, "unowned top-level extension config is preserved");
   assert.equal(ask.yoloMode, false, "commented JSONC config is parsed without losing runtime settings");
   assert.deepEqual(ask.permission.custom_surface, { "private:*": "deny" }, "custom surfaces are preserved");
-  assert.deepEqual(ask.permission.bash, { "*": "ask", "git status": "allow" });
+  assert.deepEqual(ask.permission.bash, { "*": "ask", oo: "allow", "oo *": "allow", "git status": "allow" },
+    "existing configs gain the agent's own-CLI rules ahead of owner rules");
   assert.deepEqual(ask.permission.edit, { "*": "ask", "*.md": "allow" });
   assert.deepEqual(ask.permission.mark_thread_done, { "*": "allow" });
   assert.deepEqual(ask.permission.schedule_prompt, { "*": "ask" });
@@ -70,7 +71,8 @@ try {
   assert.deepEqual(ask.permission.path[join(privateLink, "*")], { action: "deny", reason: generatedReason });
   assert.deepEqual(ask.permission.path[join(canonicalPrivateTarget, "*")], { action: "deny", reason: generatedReason });
   const parsedAsk = parse(reconciledText);
-  assert.equal(Object.keys(parsedAsk.permission.bash)[0], "*", "managed wildcard defaults precede specific Pi rules");
+  assert.deepEqual(Object.keys(parsedAsk.permission.bash), ["*", "oo", "oo *", "git status"],
+    "managed wildcard defaults precede the own-CLI rules, which precede owner rules");
   assert.equal(Object.keys(parsedAsk.permission.path)[0], "*", "the path wildcard remains the broadest rule");
   assert.ok(
     Object.keys(parsedAsk.permission.path).indexOf(join(privateLink, "*")) <
@@ -103,6 +105,23 @@ try {
   assert.equal(readOnly.permission.use_worktree["*"], "deny");
   assert.equal(readOnly.permission.bash["*"], "deny");
   assert.deepEqual(parse(readFileSync(paths.piPermissionConfig, "utf8")), readOnly);
+
+  for (const mode of ["allow", "ask"] as const) {
+    const freshHome = mkdtempSync(join(tmpdir(), `oo-permissions-fresh-${mode}-`));
+    try {
+      const fresh = savePermissionMode(freshHome, mode);
+      assert.deepEqual(fresh.permission.bash, { "*": mode, oo: "allow", "oo *": "allow" }, `fresh ${mode} mode allows the agent's own CLI`);
+      assert.deepEqual(parse(readFileSync(ownerOperatorPaths(freshHome).piPermissionConfig, "utf8")), fresh);
+    } finally {
+      rmSync(freshHome, { recursive: true, force: true });
+    }
+  }
+
+  writeFileSync(paths.piPermissionConfig, JSON.stringify({ permission: { bash: { "*": "ask", "oo schedules *": "deny" } } }));
+  const narrowed = savePermissionMode(ooHome, "ask");
+  assert.deepEqual(Object.keys(parse(readFileSync(paths.piPermissionConfig, "utf8")).permission.bash), ["*", "oo", "oo *", "oo schedules *"],
+    "an owner rule that narrows `oo` stays after the generated rules, so it wins");
+  assert.equal(narrowed.permission.bash["oo schedules *"], "deny");
 
   const invalidConfig = "{ invalid permission config";
   writeFileSync(paths.piPermissionConfig, invalidConfig);

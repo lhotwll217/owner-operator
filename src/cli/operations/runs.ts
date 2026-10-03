@@ -9,7 +9,7 @@ import {
   type AgentRun,
   type AgentRunLogRecord,
 } from "@owner-operator/core";
-import { callerSessionId } from "../../shared/caller-session";
+import { parentSessionId } from "../../shared/caller-session";
 import { emit, gateway, UsageError, writeOut, type Noun } from "./operation";
 
 const HARNESSES = Object.values(AgentRunHarness) as string[];
@@ -84,10 +84,11 @@ async function streamRunLog(id: string, json: boolean, follow: boolean): Promise
 
 const exitFor = (status: AgentRunStatus | null): number => status === AgentRunStatus.Completed ? 0 : 1;
 
-const rowVerb = (summary: string, act: (id: string) => Promise<AgentRun>) => ({
+const rowVerb = (summary: string, examples: string[], act: (id: string) => Promise<AgentRun>) => ({
   args: "<id>",
   summary,
   minPositionals: 1,
+  examples,
   async run({ positionals: [id], json }: { positionals: string[]; json: boolean }) {
     const run = await act(id!);
     await emit(json, run, () => runLine(run));
@@ -97,6 +98,7 @@ const rowVerb = (summary: string, act: (id: string) => Promise<AgentRun>) => ({
 
 export const runs: Noun = {
   summary: "delegated runs: daemon-owned child agents (/agent-runs)",
+  useWhen: "handing a task to a child coding agent, or checking, following, cancelling, retrying, or continuing a delegated run",
   verbs: {
     delegate: {
       args: "<task>",
@@ -107,9 +109,13 @@ export const runs: Noun = {
         model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice" },
         effort: { type: "string", help: `reasoning effort (${AGENT_RUN_EFFORTS.join(", ")}); omitted: resolved like --model` },
         cwd: { type: "string", help: "child working directory (default: current directory)" },
-        "from-session": { type: "string", help: "the calling coding session, recorded as the run's parent" },
+        "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
         "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow`" },
       },
+      examples: [
+        'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',
+        'oo runs delegate --harness claude-code --effort high --cwd ../other-repo --no-wait --json "Review the open diff against the repo standards"',
+      ],
       async run({ values, positionals: [task], json }) {
         const harness = values.harness;
         if (typeof harness !== "string" || !HARNESSES.includes(harness)) {
@@ -120,7 +126,7 @@ export const runs: Noun = {
           throw new UsageError(`--effort must be one of ${AGENT_RUN_EFFORTS.join(", ")}`);
         }
         const cwd = typeof values.cwd === "string" ? (isAbsolute(values.cwd) ? values.cwd : resolve(values.cwd)) : process.cwd();
-        const parentThreadId = callerSessionId(typeof values["from-session"] === "string" ? values["from-session"] : undefined) ?? null;
+        const parentThreadId = parentSessionId(typeof values["from-session"] === "string" ? values["from-session"] : undefined) ?? null;
         const run = await (await gateway()).delegateAgent({
           harness: harness as AgentRunHarness,
           task: task!,
@@ -145,6 +151,7 @@ export const runs: Noun = {
       options: {
         follow: { type: "boolean", short: "f", help: "stay attached until the terminal record" },
       },
+      examples: ["oo runs logs <id>", "oo runs logs --follow <id> --json"],
       async run({ values, positionals: [id], json }) {
         const status = await streamRunLog(id!, json, values.follow === true);
         return status === null ? 0 : exitFor(status);
@@ -155,19 +162,21 @@ export const runs: Noun = {
       options: {
         parent: { type: "string", help: "only runs launched by this parent session" },
       },
+      examples: ["oo runs list", "oo runs list --parent <session-id> --json"],
       async run({ values, json }) {
         const all = await (await gateway()).listAgentRuns(typeof values.parent === "string" ? values.parent : undefined);
         await emit(json, all, () => all.length ? all.map(runLine).join("\n") : "no runs");
         return 0;
       },
     },
-    get: rowVerb("the durable run row", async (id) => (await gateway()).agentRun(id)),
-    cancel: rowVerb("cancel a pending or running run", async (id) => (await gateway()).cancelAgentRun(id)),
-    retry: rowVerb("rerun the same task after failed, interrupted, or lost", async (id) => (await gateway()).retryAgentRun(id)),
+    get: rowVerb("the durable run row", ["oo runs get <id>", "oo runs get <id> --json"], async (id) => (await gateway()).agentRun(id)),
+    cancel: rowVerb("cancel a pending or running run", ["oo runs cancel <id>"], async (id) => (await gateway()).cancelAgentRun(id)),
+    retry: rowVerb("rerun the same task after failed, interrupted, or lost", ["oo runs retry <id>"], async (id) => (await gateway()).retryAgentRun(id)),
     resume: {
       args: "<id> <task>",
       summary: "continue a completed or cancelled run's child conversation (default after cancellation; cancelled runs need a submitted prompt or resume relationship; session must support reloading)",
       minPositionals: 2,
+      examples: ['oo runs resume <id> "Continue where you stopped and finish the remaining tests"'],
       async run({ positionals: [id, task], json }) {
         const run = await (await gateway()).resumeAgentRun(id!, task!);
         await emit(json, run, () => runLine(run));

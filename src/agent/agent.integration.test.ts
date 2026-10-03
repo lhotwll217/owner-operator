@@ -18,6 +18,7 @@ import {
   runScheduledPrompt,
 } from "./agent";
 import { AGENT_RUN_COMPLETION_MESSAGE_TYPE } from "../agent-runs/agent-run-completion";
+import { rootHelp } from "../cli/help";
 
 const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
 const priorOoHome = process.env.OO_HOME;
@@ -181,6 +182,8 @@ for (const t of ["get_current_session_state", "mark_thread_done", "query_databas
 assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === "search_sessions"), "session search is a skill, not a duplicate custom tool");
 
 const harnessPrompt = ownerOperatorPrompt();
+assert.ok(harnessPrompt.includes(`\`\`\`text\n${rootHelp().trimEnd()}\n\`\`\``), "the prompt embeds the generated `oo --help` verbatim");
+assert.ok(!harnessPrompt.includes("<!-- generated:"), "the generation marker never reaches the model");
 assert.match(harnessPrompt, /select-harness-for-delegation/);
 assert.match(harnessPrompt, /unless the owner explicitly supplied harness, model, and\s+effort/i);
 assert.match(harnessPrompt, /explicit owner choices win/i);
@@ -215,8 +218,10 @@ assert.doesNotMatch(delegationSelectionSkill, /\$OO_HOME\/workspace\/.*\.md/,
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
 }
+// The embedded `oo --help` names oo's own resume flag `--session`, not session-search mechanics.
+const authoredPrompt = harnessPrompt.replace(rootHelp().trimEnd(), "");
 for (const flag of ["--query", "--candidates", "--skim", "--session"]) {
-  assert.doesNotMatch(harnessPrompt, new RegExp(flag), `the harness delegates ${flag} mechanics to the skill`);
+  assert.doesNotMatch(authoredPrompt, new RegExp(flag), `the harness delegates ${flag} mechanics to the skill`);
   assert.match(sessionSearchSkill, new RegExp(flag), `the session-search skill owns ${flag} mechanics`);
 }
 assert.doesNotMatch(

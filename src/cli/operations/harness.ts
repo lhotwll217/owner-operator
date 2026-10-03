@@ -50,9 +50,15 @@ function renderSnapshot(snapshot: HarnessDetailsSnapshot): string {
 
 export const harness: Noun = {
   summary: "what each delegation harness offers right now (POST /harness-details)",
+  useWhen: "which harnesses, models, and efforts are available before delegating",
   verbs: {
     details: {
       summary: "one ephemeral snapshot: preferences, ACP capabilities, and account allowance",
+      examples: [
+        "oo harness details",
+        "oo harness details --harness codex --harness claude-code --json",
+        "oo harness details --harness codex --inspect codex:<model>:high",
+      ],
       options: {
         harness: { type: "string", multiple: true, help: `limit to a harness (repeatable): ${HARNESSES.join(", ")}` },
         inspect: { type: "string", multiple: true, help: "confirm <harness>:<model>[:<effort>] in a disposable session (repeatable)" },

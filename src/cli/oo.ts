@@ -12,23 +12,9 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { ensureOwnerOperatorWorkspace, isOnboarded } from "@owner-operator/core";
 import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { OPERATION_NOUNS, parseOoArgs } from "./oo-args";
+import { parseOoArgs } from "./oo-args";
 
-const USAGE = `Owner Operator (oo) — track and act on your local CLI agent sessions.
-
-  oo                              embedded Pi interactive mode
-  oo -p | --prompt "<text>"       one headless turn (prose on stdout, session id on stderr)
-  oo --continue [-p "<text>"]     resume the most recent oo thread
-  oo --session <id> [-p "<text>"] resume a specific oo thread
-  oo --from-session <id>          record which coding session is calling
-  oo doctor | status              effective workspace, resources, credentials, and gates
-  oo daemon                       run the state-owning daemon
-  oo --help | -h                  this help
-
-Operations (model-free; \`oo <noun> --help\` shows each noun's usage; --json gives machine-readable output):
-${OPERATION_NOUNS.map((noun) => `  oo ${noun}${noun === "search" ? "            flags only, no verbs; --help prints the search flags" : ""}`).join("\n")}
-
-Model: imported or configured under OO_HOME/pi/settings.json`;
+const usage = async (): Promise<string> => (await import("./help")).rootHelp();
 
 const cli = parseOoArgs(process.argv.slice(2));
 const harnessPaths = ensureOwnerOperatorWorkspace();
@@ -36,12 +22,12 @@ const harnessPaths = ensureOwnerOperatorWorkspace();
 // Help, usage errors, and operations exit BEFORE building a model session, so probing the CLI
 // never makes a paid call.
 if (cli.kind === "help") {
-  console.log(USAGE);
+  console.log(await usage());
   process.exit(0);
 }
 
 if (cli.kind === "usage-error") {
-  process.stderr.write(`oo: ${cli.message}\n\n${USAGE}\n`);
+  process.stderr.write(`oo: ${cli.message}\n\n${await usage()}\n`);
   process.exit(2);
 }
 
@@ -101,7 +87,7 @@ async function resolveSessionManager(): Promise<SessionManager> {
   const ref = chat.session;
   if (ref !== undefined) {
     if (!ref) {
-      process.stderr.write("--session needs an id or path\n" + USAGE + "\n");
+      process.stderr.write(`--session needs an id or path\n${await usage()}\n`);
       process.exit(2);
     }
     if (ref.includes("/") || ref.endsWith(".jsonl") || isAbsolute(ref)) return openOoSession(resolve(ref), provenance);

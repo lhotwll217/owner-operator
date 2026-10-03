@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
 import { markOnboarded } from "@owner-operator/core";
+import { rootHelp } from "./help";
 
 const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
@@ -33,7 +34,8 @@ try {
   for (const noun of ["session-state", "runs", "schedules", "db", "harness", "search", "skill"]) {
     assert.match(help.stdout, new RegExp(`^  oo ${noun}(\\s|$)`, "m"), `top-level help lists the ${noun} noun`);
   }
-  assert.match(help.stdout, /oo search +flags only, no verbs/, "top-level help says search has flags, not verbs");
+  assert.match(help.stdout, /^  oo search .*flags only, no verbs/m, "top-level help says search has flags, not verbs");
+  assert.equal(help.stdout, `${rootHelp()}\n`, "`oo --help` prints exactly the text the Operator prompt embeds");
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
   assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
@@ -43,6 +45,13 @@ try {
     assert.match(help.stdout, /Owner Operator \(oo\)/, `${argv.join(" ")} prints usage`);
   }
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "`oo daemon --help` starts no daemon");
+
+  // Inside an agent's bash, operations only connect: no daemon is started on the agent's behalf.
+  const agentWithoutDaemon = spawnSync(ooBin, ["session-state", "list"], { ...opts, env: { ...opts.env, OO_AGENT: "1" } });
+  assert.equal(agentWithoutDaemon.status, 1, `an agent verb without a daemon exits 1 (stderr: ${agentWithoutDaemon.stderr})`);
+  assert.match(agentWithoutDaemon.stderr, /daemon is not running; agents do not start it\. Ask the owner to start it \(`oo status`/);
+  assert.equal(existsSync(join(ooHome, "daemon.json")), false, "OO_AGENT=1 never spawns a daemon");
+  assert.equal(existsSync(join(ooHome, "daemon.log")), false, "OO_AGENT=1 never launches a daemon process");
 
   // Bare `oo` without a terminal points at the current headless spelling.
   const notTty = spawnSync(ooBin, [], { ...opts, stdio: ["ignore", "pipe", "pipe"] });
