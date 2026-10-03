@@ -14,8 +14,7 @@ Before exploring, read:
 - root [`CONTEXT.md`](../../CONTEXT.md); and
 - relevant ADRs under `adr/` when that directory exists.
 
-ADRs live in the root `adr/`, not under `docs/`: `docs/` holds only the current contract. Skills
-whose defaults name `docs/adr/` (such as domain-modeling) read and write `adr/` here.
+ADRs live in the root `adr/`, not under `docs/`: `docs/` holds only the current contract.
 
 Proceed silently when an expected document does not yet exist. Domain-modeling workflows create missing documentation when real terminology or decisions emerge.
 
