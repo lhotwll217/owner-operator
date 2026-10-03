@@ -6,6 +6,7 @@ import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import { basename, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { CALLER_SESSION_ENV } from "../shared/caller-session";
 
 process.env.OO_HOME = join(process.cwd(), ".oo-home-fixture"); // set before importing the module
 const { ooSessionsDir, ooProvenance, ownerOperatorTaskCwd, stampProvenance } = await import("./agent");
@@ -26,10 +27,8 @@ const p = ooProvenance("chat", "caller-session-123");
 assert.equal(p.origin, "agent", "--from-session marks the caller as an agent");
 assert.equal(p.fromSession, "caller-session-123", "--from-session lands in provenance");
 assert.equal(p.callerRepo, repo, "caller repo derived from the invoking git checkout");
-const inheritedClaudeSessionId = process.env.CLAUDE_CODE_SESSION_ID;
-delete process.env.CLAUDE_CODE_SESSION_ID;
-const inheritedCodexThreadId = process.env.CODEX_THREAD_ID;
-delete process.env.CODEX_THREAD_ID;
+const inheritedCallerEnv = Object.fromEntries(CALLER_SESSION_ENV.map((name) => [name, process.env[name]]));
+for (const name of CALLER_SESSION_ENV) delete process.env[name];
 assert.equal(ooProvenance("interactive").origin, "owner", "interactive without caller identity is an owner surface");
 process.env.CLAUDE_CODE_SESSION_ID = "auto-claude-session-456";
 assert.equal(ooProvenance("chat").fromSession, "auto-claude-session-456", "Claude Code session id lands in provenance");
@@ -43,10 +42,10 @@ assert.equal(
   "explicit-session",
   "--from-session takes precedence over ambient caller identity",
 );
-if (inheritedCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID;
-else process.env.CODEX_THREAD_ID = inheritedCodexThreadId;
-if (inheritedClaudeSessionId === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
-else process.env.CLAUDE_CODE_SESSION_ID = inheritedClaudeSessionId;
+for (const [name, value] of Object.entries(inheritedCallerEnv)) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 // Stamp in-memory (same append path as on disk): entry + human-readable session name.
 const sm = SessionManager.inMemory(process.cwd());
