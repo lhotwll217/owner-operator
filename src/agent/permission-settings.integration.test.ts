@@ -219,8 +219,6 @@ try {
       bash: "ask",
       edit: "ask",
       write: "ask",
-      delegate_agent: "ask",
-      manage_agent_run: "ask",
       get_harness_details: "allow",
       manage_delegated_baseline: "ask",
       use_worktree: "ask",

@@ -33,12 +33,7 @@ function configureToolDisplay(piAgentDir: string, customToolNames: readonly stri
       edit: true,
       write: true,
     },
-    customToolOverrides: Object.fromEntries(customToolNames.map((name) => [name, {
-      ...genericOverride,
-      // The durable tool result already contains the resolved run identity and task. Preview it
-      // in the package-owned block instead of appending a second launch component.
-      outputMode: name === "delegate_agent" ? "preview" : genericOverride.outputMode,
-    }])),
+    customToolOverrides: Object.fromEntries(customToolNames.map((name) => [name, genericOverride])),
     enableNativeUserMessageBox: false,
     readOutputMode: "summary",
     searchOutputMode: "count",

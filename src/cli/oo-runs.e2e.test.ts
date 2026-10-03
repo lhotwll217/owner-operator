@@ -183,6 +183,22 @@ try {
   assert.ok(slowLines.length > 400);
   assert.equal(slowLines.at(-1)?.type, "result", "the terminal record arrives");
 
+  // The Operator's bash (OO_AGENT=1): delegate returns the pending row without streaming, an
+  // omitted model with no approved baseline refuses so the owner is asked.
+  const agent = { OO_AGENT: "1", OO_FROM_SESSION: "operator-session" };
+  const agentDelegated = await runOo(["runs", "delegate", "--harness", "codex", "--model", "m1", "--effort", "none", "--timeout", "90", "reply", "--json"], agent);
+  assert.equal(agentDelegated.status, 0, agentDelegated.stderr);
+  const agentRow = JSON.parse(agentDelegated.stdout) as AgentRun;
+  assert.equal(agentRow.status, AgentRunStatus.Pending, "the Operator's delegate returns the pending row");
+  assert.equal(agentDelegated.stderr, "", "and streams nothing");
+  assert.equal(agentRow.timeoutSeconds, 90, "--timeout reaches the run");
+  assert.equal(agentRow.effort, null, "--effort none launches with an explicit null effort");
+  assert.equal(agentRow.cwd, repoRoot, "no --cwd and no selected worktree: the parent's resolved cwd falls back to the shell cwd");
+  assert.equal((await runOo(["runs", "delegate", "--harness", "codex", "--timeout", "1.5", "t"])).status, 2, "--timeout takes whole seconds");
+  const refused = await runOo(["runs", "delegate", "--harness", "codex", "t"], agent);
+  assert.equal(refused.status, 1, "the Operator cannot launch unpinned without an approved baseline");
+  assert.match(refused.stderr, /no approved delegated baseline for codex/);
+
   const missing = await runOo(["runs", "logs", "no-such-run", "--json"]);
   assert.equal(missing.status, 1);
   assert.deepEqual(JSON.parse(missing.stderr), { status: 404, error: "no such agent run" });
@@ -191,10 +207,20 @@ try {
   const frames = invalidations.join("").split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
   assert.ok(frames.length > 0, "the invalidation stream stayed live");
   assert.ok(frames.every((frame) => Object.keys(frame).join() === "kind"), "GET /events still carries only invalidation kinds");
+
+  // With the daemon gone, an agent's `logs --follow` reports it instead of reconnecting forever.
+  await daemon.close();
+  daemon = null;
+  const orphan = spawnOo(["runs", "logs", "--follow", id], agent);
+  const orphanTimer = setTimeout(() => orphan.kill("SIGKILL"), 10_000);
+  const orphanStatus = await new Promise<number | null>((resolve) => orphan.once("close", resolve));
+  clearTimeout(orphanTimer);
+  assert.equal(orphanStatus, 1, `an agent's follow exits when the daemon is gone (stderr: ${orphan.out.stderr})`);
+  assert.match(orphan.out.stderr, /daemon is not running; agents do not start it/);
 } finally {
   for (const release of held.values()) release();
   await daemon?.close();
   rmSync(ooHome, { recursive: true, force: true });
 }
 
-process.stdout.write("ok — oo runs: NDJSON stream to the terminal record, detach/reattach replay, lineage, harness choice, row verbs\n");
+process.stdout.write("ok — oo runs: NDJSON stream to the terminal record, detach/reattach replay, lineage, harness choice, row verbs, the Operator's pending-row delegate\n");

@@ -1,16 +1,12 @@
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
-import { delegateAgentTool } from "./delegate-agent";
 import { createGetHarnessDetailsTool, type GetHarnessDetailsToolOptions } from "./get-harness-details";
-import { manageAgentRunTool } from "./manage-agent-run";
 import {
   createManageDelegatedBaselineTool,
   type ManageDelegatedBaselineOptions,
 } from "./manage-delegated-baseline";
 import { createUseWorktreeTool } from "./use-worktree";
 
-export { delegateAgentTool } from "./delegate-agent";
 export { getHarnessDetailsTool } from "./get-harness-details";
-export { manageAgentRunTool } from "./manage-agent-run";
 export { manageDelegatedBaselineTool } from "./manage-delegated-baseline";
 export { useWorktreeTool } from "./use-worktree";
 
@@ -30,8 +26,6 @@ export function createOwnerOperatorCustomTools(
   runtimeAdapters: OwnerOperatorRuntimeAdapters = {},
 ) {
   return [
-    delegateAgentTool,
-    manageAgentRunTool,
     createGetHarnessDetailsTool({ read: adapters.readHarnessDetails }),
     createManageDelegatedBaselineTool({ propose: adapters.proposeDelegatedBaseline }),
     createUseWorktreeTool({ onSelection: runtimeAdapters.onWorktreeSelection }),
@@ -41,8 +35,6 @@ export function createOwnerOperatorCustomTools(
 export const ownerOperatorCustomTools = createOwnerOperatorCustomTools();
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
-  AgentToolId.DelegateAgent,
-  AgentToolId.ManageAgentRun,
   AgentToolId.GetHarnessDetails,
   AgentToolId.ManageDelegatedBaseline,
   AgentToolId.UseWorktree,

@@ -208,11 +208,6 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       `/agent-runs/${encodeURIComponent(id)}/resume`,
       { task },
     ),
-    waitAgentRun: (id: string, timeoutSeconds: number) => post<AgentRun>(
-      `/agent-runs/${encodeURIComponent(id)}/wait`,
-      { timeoutSeconds },
-      Math.max(LONG_OPERATION_MS, (timeoutSeconds + 5) * 1_000),
-    ),
     async *agentRunLog(id, options = {}) {
       const query = new URLSearchParams({
         ...(options.after ? { after: String(options.after) } : {}),

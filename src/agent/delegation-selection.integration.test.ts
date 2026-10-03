@@ -13,18 +13,13 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import {
   AgentRunHarness,
-  AgentRunStatus,
   approveDelegatedBaseline,
   ensureOwnerOperatorWorkspace,
   loadDelegatedBaseline,
-  type AgentRunCreateInput,
-  type GatewayApi,
 } from "@owner-operator/core";
-import { agentRunFixture } from "../../test/fixtures/agent-run";
 import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
 import { ownerOperatorPrompt, repoRoot } from "./agent";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import { createDelegateAgentTool } from "./tools/delegate-agent";
 import { createGetHarnessDetailsTool } from "./tools/get-harness-details";
 import { createManageDelegatedBaselineTool } from "./tools/manage-delegated-baseline";
 
@@ -45,21 +40,6 @@ const preferences = `# User harness preferences
 Use Codex model owner-custom-model with no reasoning effort.
 `;
 writeFileSync(paths.userHarnessPreferences, preferences);
-
-const launches: AgentRunCreateInput[] = [];
-const backend = {
-  async resolveWorktreeCwd() { throw new Error("explicit cwd must not resolve root selection"); },
-  async delegateAgent(input: AgentRunCreateInput) {
-    launches.push(input);
-    return agentRunFixture("implicit-run", AgentRunStatus.Pending, {
-      ...input,
-      parentThreadId: input.parentThreadId ?? null,
-      model: input.model ?? null,
-      effort: input.effort ?? null,
-    });
-  },
-  async waitAgentRun() { throw new Error("wait not expected"); },
-} as Pick<GatewayApi, "delegateAgent" | "resolveWorktreeCwd" | "waitAgentRun">;
 
 const detailsCalls: unknown[] = [];
 const detailsTool = createGetHarnessDetailsTool({
@@ -83,7 +63,6 @@ const detailsTool = createGetHarnessDetailsTool({
     };
   },
 });
-const delegateTool = createDelegateAgentTool({ resolveGateway: async () => backend });
 const baselineCandidate = { model: "harness-observed-model", effort: null, availableEfforts: null };
 const manageTool = createManageDelegatedBaselineTool({
   propose: (harness) => proposeDelegatedBaseline(harness, {
@@ -96,17 +75,6 @@ const skillPath = join(repoRoot, "src", "agent", "skills", "select-harness-for-d
 const baselinePath = join(paths.delegatedBaselines, `${AgentRunHarness.ClaudeCode}.json`);
 
 const faux = fauxProvider({ api: "delegation-selection", provider: "delegation-selection", tokensPerSecond: 0 });
-faux.setResponses([
-  fauxAssistantMessage(fauxToolCall("delegate_agent", {
-    harness: "codex",
-    model: "owner-explicit-model",
-    effort: null,
-    task: "Review the release notes directly; do not launch nested or background agents.",
-    cwd,
-  }), { stopReason: "toolUse" }),
-  fauxAssistantMessage("Delegated with codex / owner-explicit-model / effort null."),
-]);
-
 try {
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("delegation-selection", async () => ({ type: "api_key", key: "test-only" }));
@@ -151,8 +119,8 @@ try {
     resourceLoader: loader,
     sessionManager,
     settingsManager,
-    tools: ["read", "get_harness_details", "manage_delegated_baseline", "delegate_agent"],
-    customTools: [detailsTool, manageTool, delegateTool],
+    tools: ["read", "get_harness_details", "manage_delegated_baseline"],
+    customTools: [detailsTool, manageTool],
   });
   const calls: Array<{ name: string; args: unknown }> = [];
   const failedCalls: string[] = [];
@@ -160,21 +128,6 @@ try {
     if (event.type === "tool_execution_start") calls.push({ name: event.toolName, args: event.args });
     if (event.type === "tool_execution_end" && event.isError) failedCalls.push(event.toolName);
   });
-
-  await session.prompt(
-    "Delegate the release-note review with harness codex, model owner-explicit-model, and effort null.",
-  );
-  assert.deepEqual(calls.map(({ name }) => name), ["delegate_agent"],
-    "a complete explicit owner selection bypasses selection, details, and baseline management");
-  assert.deepEqual(launches[0], {
-    harness: AgentRunHarness.Codex,
-    model: "owner-explicit-model",
-    effort: null,
-    task: "Review the release notes directly; do not launch nested or background agents.",
-    cwd,
-    parentThreadId: sessionManager.getSessionId(),
-  });
-  assert.deepEqual(detailsCalls, []);
 
   const beforeProposal = calls.length;
   faux.setResponses([
@@ -192,7 +145,6 @@ try {
     "get_harness_details",
     "manage_delegated_baseline",
   ]);
-  assert.equal(launches.length, 1, "no implicit launch occurs before owner approval");
   assert.equal(existsSync(baselinePath), false, "proposing a baseline does not persist it");
   assert.equal(readFileSync(paths.userHarnessPreferences, "utf8"), preferences, "selection never edits owner preferences");
 
@@ -209,22 +161,14 @@ try {
       action: "propose",
       harness: "claude-code",
     }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("delegate_agent", {
-      harness: "claude-code",
-      model: baselineCandidate.model,
-      effort: null,
-      task: "Inventory the repository directly; do not launch nested or background agents.",
-      cwd,
-    }), { stopReason: "toolUse" }),
-    fauxAssistantMessage("Delegated with claude-code / harness-observed-model / effort null."),
+    fauxAssistantMessage("Approved claude-code / harness-observed-model / effort null."),
   ]);
   await session.prompt("I approve exactly claude-code / harness-observed-model / effort null.");
   assert.deepEqual(calls.slice(beforeApproval).map(({ name }) => name), [
     "manage_delegated_baseline",
     "get_harness_details",
     "manage_delegated_baseline",
-    "delegate_agent",
-  ], "approval persists before selection retries and launches");
+  ], "approval persists before selection retries");
   assert.deepEqual(loadDelegatedBaseline(AgentRunHarness.ClaudeCode, ooHome), {
     model: baselineCandidate.model,
     effort: null,
@@ -235,17 +179,9 @@ try {
     { harnesses: [AgentRunHarness.ClaudeCode] },
     { harnesses: [AgentRunHarness.ClaudeCode] },
   ], "unknown harness observations are consulted again without blocking an approved baseline");
-  assert.deepEqual(launches[1], {
-    harness: AgentRunHarness.ClaudeCode,
-    model: baselineCandidate.model,
-    effort: null,
-    task: "Inventory the repository directly; do not launch nested or background agents.",
-    cwd,
-    parentThreadId: sessionManager.getSessionId(),
-  });
-  assert.deepEqual(failedCalls, [], "the real management and delegation tools complete successfully");
+  assert.deepEqual(failedCalls, [], "the real management tools complete successfully");
   session.dispose();
-  process.stdout.write("ok — delegation selection preserves explicit nulls, approval boundaries, and unknown observations\n");
+  process.stdout.write("ok — delegation selection preserves approval boundaries and unknown observations\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

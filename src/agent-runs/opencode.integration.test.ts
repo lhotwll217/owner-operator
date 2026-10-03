@@ -10,6 +10,7 @@ import { readHarnessDetails } from "./harness-details";
 import { createGetHarnessDetailsTool } from "../agent/tools/get-harness-details";
 import { startDaemon } from "../daemon/runtime";
 import { connectGateway } from "../gateway/client";
+import { settledAgentRun } from "../gateway/test/helpers";
 
 const root = mkdtempSync(join(tmpdir(), "oo-opencode-"));
 const previousEnv = { ...process.env };
@@ -118,7 +119,7 @@ try {
   try {
     for (const harness of [AgentRunHarness.OpenCode]) {
       const launched = await gateway.delegateAgent({ harness, model, effort: "low", cwd: root, task: "answer", timeoutSeconds: 20 });
-      const done = await gateway.waitAgentRun(launched.id, 20);
+      const done = await settledAgentRun(gateway, launched.id, 20);
       assert.equal(done.status, "completed", done.error ?? "");
       assert.equal(done.harness, harness);
       assert.deepEqual(done.harnessIdentity, { observed: true, model, effort: "low" });
@@ -126,14 +127,14 @@ try {
       assert.ok(done.activity);
       assert.match(done.resultTail!, new RegExp(`${harness} fixture answer`));
       const resumed = await gateway.resumeAgentRun(done.id, "follow up");
-      const resumedDone = await gateway.waitAgentRun(resumed.id, 20);
+      const resumedDone = await settledAgentRun(gateway, resumed.id, 20);
       assert.equal(resumedDone.status, "completed", resumedDone.error ?? "");
       assert.equal(resumedDone.resumeOfRunId, done.id);
       assert.equal(resumedDone.childSessionId, done.childSessionId);
       assert.equal(resumedDone.cwd, done.cwd);
       assert.deepEqual(await gateway.agentRun(done.id), done, "resume preserves the original terminal row");
       const invalid = await gateway.delegateAgent({ harness, model, effort: "ultra", cwd: root, task: "never sent", timeoutSeconds: 20 });
-      const rejected = await gateway.waitAgentRun(invalid.id, 20);
+      const rejected = await settledAgentRun(gateway, invalid.id, 20);
       assert.equal(rejected.status, "failed");
       assert.equal(rejected.harness, harness);
       assert.match(rejected.error!, /ACP_SELECTION_EFFORT_UNAVAILABLE/);
@@ -145,9 +146,9 @@ try {
       }
       const cancelled = await gateway.cancelAgentRun(held.id);
       assert.equal(cancelled.status, "cancelled");
-      assert.equal((await gateway.waitAgentRun(held.id, 5)).status, "cancelled");
+      assert.equal((await settledAgentRun(gateway, held.id, 5)).status, "cancelled");
       const continued = await gateway.resumeAgentRun(held.id, "continue after cancellation");
-      const continuedDone = await gateway.waitAgentRun(continued.id, 20);
+      const continuedDone = await settledAgentRun(gateway, continued.id, 20);
       assert.equal(continuedDone.status, "completed", continuedDone.error ?? "");
       assert.equal(continuedDone.childSessionId, cancelled.childSessionId);
       assert.equal(continuedDone.acpxRecordId, cancelled.acpxRecordId);
@@ -167,19 +168,19 @@ try {
           }
           const done: AgentRun = terminalStatus === "cancelled"
             ? await gateway.cancelAgentRun(launched.id)
-            : await gateway.waitAgentRun(launched.id, 20);
+            : await settledAgentRun(gateway, launched.id, 20);
           assert.equal(done.status, terminalStatus);
           const supported = "sessionCapabilities" in capabilities;
           assert.equal((await gateway.agentState()).runs.find(({ id }) => id === done.id)?.canResume, supported);
           const before: number = (await gateway.listAgentRuns()).length;
           if (supported) {
             const resumed = await gateway.resumeAgentRun(done.id, "follow up");
-            assert.equal((await gateway.waitAgentRun(resumed.id, 20)).status, "completed");
+            assert.equal((await settledAgentRun(gateway, resumed.id, 20)).status, "completed");
           } else {
             await assert.rejects(gateway.resumeAgentRun(done.id, "never sent"), /did not advertise session\/load or session\/resume/);
             assert.equal((await gateway.listAgentRuns()).length, before, "refused continuation creates no linked row");
             const invalid = await gateway.delegateAgent({ harness, model, effort: "ultra", cwd: root, task: "never sent", timeoutSeconds: 20 });
-            const failed = await gateway.waitAgentRun(invalid.id, 20);
+            const failed = await settledAgentRun(gateway, invalid.id, 20);
             assert.equal(failed.status, "failed");
             assert.equal((await gateway.agentState()).runs.find(({ id }) => id === failed.id)?.canRetry, false);
             await assert.rejects(gateway.retryAgentRun(failed.id), /did not advertise session\/load or session\/resume/);
@@ -213,7 +214,7 @@ try {
       task: "never sent",
       timeoutSeconds: 20,
     });
-    const rejectedV2 = await gateway.waitAgentRun(launchedV2.id, 20);
+    const rejectedV2 = await settledAgentRun(gateway, launchedV2.id, 20);
     assert.equal(rejectedV2.status, "failed");
     assert.equal(rejectedV2.childSessionId, null);
     assert.match(rejectedV2.error!, /expected opencode v1/);

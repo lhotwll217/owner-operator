@@ -5,15 +5,16 @@ description: Select and report an exact harness, model, and reasoning effort bef
 
 # Select a harness for delegation
 
-Use this workflow before `delegate_agent` unless the owner explicitly supplied all three parts of
-the execution identity: harness, model, and effort. `effort: null` is an explicit effort. A complete
+Use this workflow before `oo runs delegate` unless the owner explicitly supplied all three parts of
+the execution identity: harness, model, and effort. `effort: null` is an explicit effort
+(`--effort none`). A complete
 owner choice bypasses this workflow and passes through unchanged. Preserve every supplied harness,
 model, and effort value—including `effort: null`—while selecting only omitted fields.
 
 ## Continue existing work
 
-To continue a cancelled delegated run, default to `manage_agent_run` with `action: "resume"`,
-the latest run id, and a new task describing what to do next. Cancelled runs require a submitted
+To continue a cancelled delegated run, default to `oo runs resume <id> "<task>"` with the latest
+run id and a new task describing what to do next. Cancelled runs require a submitted
 prompt or an existing resume relationship, plus a reloadable session. A resume successor cancelled
 while queued or loading can still be resumed. Resume also accepts completed runs.
 It preserves the child conversation and recorded harness, model, effort, and cwd, so selection is
@@ -35,8 +36,8 @@ The [continuation contract](../../../../docs/delegated-runs.md#lifecycle) owns e
    `get_harness_details`. An inspection succeeds only when its confirmation exactly matches the
    harness, model, and nullable effort. Reject failed or mismatched inspections; choose an
    equal-or-higher-quality candidate with its required evidence, or ask the owner.
-5. **Delegate.** Call `delegate_agent` with the selected harness, model, and effort. Keep the
-   owner's task and working directory intact. The delegated-run lifecycle is the execution record;
+5. **Delegate.** Run `oo runs delegate --harness <h> --model <m> --effort <e> "<task>"` (or
+   `--effort none`) with the selected identity. Keep the owner's task and working directory intact. The delegated-run lifecycle is the execution record;
    create no duplicate record and do not poll after launch.
 
 ## Constrained or rejected selections
@@ -45,7 +46,7 @@ Allowance pressure is pre-launch evidence, not merely a failure-recovery signal.
 allowance window is materially spent, consider another acceptable preference before launching.
 Do not treat an unknown window as unused or constrained.
 
-If `delegate_agent` rejects a choice for capacity, access, entitlement, an invalid harness/model
+If `oo runs delegate` rejects a choice for capacity, access, entitlement, an invalid harness/model
 pairing, or availability—or a delivered run-completion reports that rejection—reapply the matching
 preference and refresh `get_harness_details` after the rejection for both the rejected harness and every
 replacement harness under consideration before retrying. Inspect a replacement when step 3
@@ -78,7 +79,7 @@ baseline, get the owner's approval for a baseline, then delegate:
 3. After approval, call `manage_delegated_baseline` with `action: "approve"` and the exact accepted
    model and effort, including `effort: null` when that is the candidate.
 4. Retry selection: refresh `get_harness_details` for the approved harness after approval, then
-   call `delegate_agent` with the newly approved exact identity.
+   run `oo runs delegate` with the newly approved exact identity.
 
 ## Report
 

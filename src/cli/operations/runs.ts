@@ -4,16 +4,31 @@ import {
   AgentRunHarness,
   AgentRunMissingBaseline,
   AgentRunStatus,
+  DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   isAgentRunEffort,
   isAgentRunResultRecord,
+  MAX_AGENT_RUN_TIMEOUT_SECONDS,
   type AgentRun,
   type AgentRunLogRecord,
 } from "@owner-operator/core";
 import { parentSessionId } from "../../shared/caller-session";
-import { emit, gateway, UsageError, writeOut, type Noun } from "./operation";
+import { AgentConnectError, emit, gateway, UsageError, writeOut, type Noun } from "./operation";
 
 const HARNESSES = Object.values(AgentRunHarness) as string[];
 const RECONNECT_MS = 1_000; // the Gateway client's own SSE reconnect delay (src/gateway/client.ts)
+/** The Operator's bash (ADR 0001). Its completion events arrive on their own, so a delegation
+ * returns the pending row instead of streaming the child into the Operator's context. */
+const agentCaller = (): boolean => process.env.OO_AGENT === "1";
+
+/** A whole number of seconds in 1..max, or undefined when the flag is absent. */
+function secondsFlag(name: string, value: unknown, max: number): number | undefined {
+  if (value === undefined) return undefined;
+  const seconds = Number(value);
+  if (typeof value !== "string" || !/^\d+$/.test(value) || seconds < 1 || seconds > max) {
+    throw new UsageError(`--${name} must be a whole number of seconds in 1..${max}`);
+  }
+  return seconds;
+}
 
 const runLine = (run: AgentRun): string => {
   const identity = run.harnessIdentity.observed
@@ -75,7 +90,7 @@ async function streamRunLog(id: string, json: boolean, follow: boolean): Promise
       }
       if (!follow) return null;
     } catch (error) {
-      if ((error as { status?: number }).status !== undefined) throw error;
+      if ((error as { status?: number }).status !== undefined || error instanceof AgentConnectError) throw error;
       if (!follow) throw error;
     }
     await new Promise((done) => setTimeout(done, RECONNECT_MS));
@@ -102,15 +117,16 @@ export const runs: Noun = {
   verbs: {
     delegate: {
       args: "<task>",
-      summary: "launch a child agent and stream it to stdout until it finishes; model and effort resolve pin, then approved baseline, then harness choice",
+      summary: "launch a child agent and stream it until it finishes; the Operator's bash gets the pending row instead, since completion arrives on its own",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
-        model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice" },
-        effort: { type: "string", help: `reasoning effort (${AGENT_RUN_EFFORTS.join(", ")}); omitted: resolved like --model` },
-        cwd: { type: "string", help: "child working directory (default: current directory)" },
+        model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice (the Operator's bash refuses instead, so the owner is asked)" },
+        effort: { type: "string", help: `reasoning effort (${AGENT_RUN_EFFORTS.join(", ")}), or none to override the approved one; omitted: resolved like --model` },
+        cwd: { type: "string", help: "child working directory (default: the parent session's selected worktree, else the current directory)" },
+        timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },
         "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
-        "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow`" },
+        "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default in the Operator's bash)" },
       },
       examples: [
         'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',
@@ -121,22 +137,29 @@ export const runs: Noun = {
         if (typeof harness !== "string" || !HARNESSES.includes(harness)) {
           throw new UsageError(`--harness is required: ${HARNESSES.join(", ")}`);
         }
-        const effort = values.effort;
-        if (effort !== undefined && !isAgentRunEffort(effort)) {
-          throw new UsageError(`--effort must be one of ${AGENT_RUN_EFFORTS.join(", ")}`);
+        const effort = values.effort === "none" ? null : values.effort;
+        if (effort !== undefined && effort !== null && !isAgentRunEffort(effort)) {
+          throw new UsageError(`--effort must be one of ${AGENT_RUN_EFFORTS.join(", ")}, or none`);
         }
-        const cwd = typeof values.cwd === "string" ? (isAbsolute(values.cwd) ? values.cwd : resolve(values.cwd)) : process.cwd();
+        const timeoutSeconds = secondsFlag("timeout", values.timeout, MAX_AGENT_RUN_TIMEOUT_SECONDS);
         const parentThreadId = parentSessionId(typeof values["from-session"] === "string" ? values["from-session"] : undefined) ?? null;
-        const run = await (await gateway()).delegateAgent({
+        const api = await gateway();
+        const cwd = typeof values.cwd === "string"
+          ? (isAbsolute(values.cwd) ? values.cwd : resolve(values.cwd))
+          : parentThreadId
+            ? (await api.resolveWorktreeCwd({ threadId: parentThreadId, fallbackCwd: process.cwd() })).cwd
+            : process.cwd();
+        const run = await api.delegateAgent({
           harness: harness as AgentRunHarness,
           task: task!,
           cwd,
           parentThreadId,
           ...(typeof values.model === "string" ? { model: values.model } : {}),
           ...(effort !== undefined ? { effort } : {}),
-          onMissingBaseline: AgentRunMissingBaseline.HarnessChoice,
+          ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+          onMissingBaseline: agentCaller() ? AgentRunMissingBaseline.Ask : AgentRunMissingBaseline.HarnessChoice,
         });
-        if (values["no-wait"]) {
+        if (values["no-wait"] || agentCaller()) {
           await emit(json, run, () => runLine(run));
           return 0;
         }

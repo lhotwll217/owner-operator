@@ -4,11 +4,9 @@ import { isAbsolute } from "node:path";
 import {
   AgentRunHarness,
   DatabaseQueryAction,
-  DEFAULT_AGENT_RUN_WAIT_SECONDS,
   DEFAULT_DAEMON_PORT,
   DomainEventKind,
   GatewayEventKind,
-  MAX_AGENT_RUN_WAIT_SECONDS,
   isAgentRunEffort,
   isTerminalAgentRunStatus,
   validateAgentRunResumeTask,
@@ -59,7 +57,6 @@ export interface GatewayAgentRuns {
   cancel(id: string): Promise<AgentRun>;
   retry(id: string): AgentRun;
   resume(id: string, task: string): AgentRun;
-  wait(id: string, timeoutSeconds: number): Promise<AgentRun>;
   /** The run's durable log after `afterSeq`, in order, read lazily; the terminal record closes it. */
   events(id: string, afterSeq: number): Iterable<{ seq: number; record: AgentRunLogRecord }>;
   /** The last sequence number ever issued for the run; null for a run finalized before logs existed. */
@@ -303,16 +300,6 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           agentRunId,
           validateAgentRunResumeTask(body.task),
         ));
-      }
-      if (agentRunId && request.method === "POST" && url.pathname === `/agent-runs/${agentRunId}/wait`) {
-        const body = await readBody(request) as { timeoutSeconds?: unknown };
-        const raw = body.timeoutSeconds;
-        if (raw !== undefined &&
-            (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0 || raw > MAX_AGENT_RUN_WAIT_SECONDS)) {
-          return respond(400, { error: `timeoutSeconds must be an integer in 0..${MAX_AGENT_RUN_WAIT_SECONDS}` });
-        }
-        const timeoutSeconds = typeof raw === "number" ? raw : DEFAULT_AGENT_RUN_WAIT_SECONDS;
-        return respond(200, await options.agentRuns.wait(agentRunId, timeoutSeconds));
       }
 
       if (route === "POST /query-database") {

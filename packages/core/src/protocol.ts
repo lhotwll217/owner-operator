@@ -139,7 +139,6 @@ export interface GatewayApi {
   cancelAgentRun(id: string): Promise<AgentRun>;
   retryAgentRun(id: string): Promise<AgentRun>;
   resumeAgentRun(id: string, task: string): Promise<AgentRun>;
-  waitAgentRun(id: string, timeoutSeconds: number): Promise<AgentRun>;
   /** A run's durable event log from GET /agent-runs/:id/events: replayed after `after`, then
    * tailed until the terminal record unless `follow` is false. Ends early if the stream drops. */
   agentRunLog(

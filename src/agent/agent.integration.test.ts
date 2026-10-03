@@ -215,7 +215,7 @@ const delegationSelectionSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "select-harness-for-delegation", "SKILL.md"),
   "utf8",
 );
-for (const operation of ["get_harness_details", "manage_delegated_baseline", "delegate_agent"]) {
+for (const operation of ["get_harness_details", "manage_delegated_baseline", "oo runs delegate"]) {
   assert.match(delegationSelectionSkill, new RegExp(`\\b${operation}\\b`),
     `the selection workflow invokes ${operation}`);
 }

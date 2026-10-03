@@ -12,8 +12,9 @@ read_when:
 
 **Sub-agent** is the broad relationship: an agent launched to help another agent. Owner Operator
 uses the narrower term **delegated run** for a child execution its daemon issues and owns through
-the AgentRun launch path. `delegate_agent` is the Operator-facing route; authenticated Gateway
-clients can use the same path directly. The child is a session of its selected harness; the
+the AgentRun launch path. `oo runs delegate`, run from the Operator's own bash
+([ADR 0001](../adr/0001-agent-uses-its-own-cli.md)), is the Operator-facing route; authenticated
+Gateway clients can use the same path directly. The child is a session of its selected harness; the
 delegated run is OO's durable lifecycle record for that execution. The explicit supported roster
 lives in [`AgentRunHarness`](../packages/core/src/agent-runs.ts).
 
@@ -33,7 +34,7 @@ than adopting an orchestration framework. The child process is reached over the
 pinned [`acpx`](inspiration.md) — one protocol client for every harness.
 
 ```text
-Operator (delegate_agent / manage_agent_run tool)
+Operator bash (oo runs delegate / cancel / retry / resume)
         │  Gateway HTTP
    AgentRunExecutor ──── State (agent_runs ledger) ──── SSE agent-run.changed
         │
@@ -46,9 +47,9 @@ Run ownership, transcript observation, and widget visibility are separate:
 
 | Work | `agent_runs` ledger | `/session-state` | Widget |
 |---|---|---|---|
-| Child launched through OO's AgentRun path (`delegate_agent` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Normal session row when present in session state, nested beneath its visible parent |
+| Child launched through OO's AgentRun path (`oo runs delegate` or Gateway) | Always; this is the canonical OO-issued marker | When the scanner admits its harness transcript, joined by `child_session_id` | Normal session row when present in session state, nested beneath its visible parent |
 | Harness-native sub-agent | Never | Harness-dependent: it may be folded into its parent, excluded as automated work, or admitted as an ordinary session | Mirrors session state; it has no OO lineage |
-| Any agent launches a separate supported coding CLI | Only if the launch went through `delegate_agent` | Its transcript may be discovered and admitted normally | An ordinary row, without OO lineage |
+| Any agent launches a separate supported coding CLI | Only if the launch went through `oo runs delegate` | Its transcript may be discovered and admitted normally | An ordinary row, without OO lineage |
 | Owner-origin Owner Operator conversation | Not a child run; its id may be recorded as a run's parent | Admitted from the product-owned transcript store as an ordinary root | Ordinary root with observed delegated children nested beneath it |
 
 The ledger relationship is authoritative: a session is OO-delegated when its id matches an
@@ -70,7 +71,7 @@ owns transcript identity and discovery.
   relationships and fails closed when either is inconsistent.
 - **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
   `interrupted`, or `lost`; resume requires a new task after `completed` or `cancelled`. The
-  [tool schema](../src/agent/tools/manage-agent-run.ts) owns their inputs, while the
+  [`oo runs` verbs](../src/cli/operations/runs.ts) own their inputs, while the
   [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
 - **Resume is the default way to continue cancelled work.** Supply a new task, including an
   instruction to continue when the goal is unchanged. Both saved conversation identities and the
@@ -175,12 +176,12 @@ resource retains the run projection. Pi completion delivery uses the shared comp
 
 ## Execution
 
-- **Background by default.** `delegate_agent` records the durable `pending` row and returns
-  immediately; the parent session is never frozen. The result is carried by the ledger, not the
-  parent tool call, and completion arrives through the parent subscription. The Operator does not
-  poll after delegation. Status reads remain only for explicit
-  owner requests. The only blocking wait is `delegate_agent`'s opt-in `waitSeconds` at launch;
-  `manage_agent_run` has no wait action, so an in-flight run can never lock the parent turn.
+- **Background by default for the Operator.** Under `OO_AGENT=1`, `oo runs delegate` records the
+  durable `pending` row and returns immediately; the parent session is never frozen. The result is
+  carried by the ledger, not the parent bash call, and completion arrives through the parent
+  subscription. The Operator does not poll after delegation. Status reads remain only for explicit
+  owner requests. Owner and outside callers stream the child until it finishes unless they pass
+  `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
   [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
   [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available record/session identity
@@ -188,12 +189,12 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   [environmental projection](../src/agent-runs/agent-state-projection.ts) also prevents clients from
   offering a control for an unavailable workspace. Both controls fail closed rather than
   substituting a fresh context.
-- **Workspace follows the root's durable selection.** Immediately before an omitted-cwd launch,
-  `delegate_agent` resolves the exact parent thread through the Gateway, using Pi's active
-  tool-context cwd as the fallback. A worktree selected earlier in the same model turn therefore
-  wins before the post-turn runtime rebind; an unavailable or mismatched selection fails closed.
-  An explicit absolute child cwd remains exact, and an explicit relative cwd resolves from the
-  active tool-context cwd. The initial child row records the resolved absolute path, and
+- **Workspace follows the root's durable selection.** Immediately before an omitted-cwd launch
+  with a parent session, `oo runs delegate` resolves that parent's selection through the Gateway
+  (`GET /worktrees/resolve-cwd`), using the shell cwd as the fallback. A worktree selected earlier
+  in the same model turn therefore wins before the post-turn runtime rebind; an unavailable or
+  mismatched selection fails closed. An explicit absolute `--cwd` remains exact, and a relative
+  one resolves from the shell cwd. The initial child row records the resolved absolute path, and
   retry/resume copy that immutable cwd from the original run lineage.
 - **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
@@ -204,16 +205,17 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   thread is itself a delegated run's child (`AGENT_RUN_MAX_DEPTH`). Every child prompt also tells
   the child to complete the work directly without nested or background agents, including
   harness-native sub-agents.
-- **Model** is pinnable per run (`delegate_agent`'s `model`), threaded to the child through ACP
-  session options, and a caller pin always wins. When omitted, `delegate_agent` resolves the
+- **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
+  session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
-  before creating the durable row. With no approved baseline the Operator asks instead of
-  inheriting an ambient harness default or inventing a product default. A CLI caller
-  (`oo runs delegate`) resolves caller pin, then approved baseline, then the harness's own choice:
-  a missing baseline launches unpinned, and the launcher records the model and thought level the
-  harness confirms in `harnessIdentity`. The CLI never prints, accepts, or changes the baseline.
-- **Reasoning effort** is pinnable per run (`delegate_agent`'s `effort`), including explicit
-  `null`. Its canonical vocabulary lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts);
+  before creating the durable row. Under `OO_AGENT=1` a missing baseline refuses the launch
+  (`AgentRunMissingBaseline.Ask`), so the Operator asks instead of inheriting an ambient harness
+  default or inventing a product default. Any other caller resolves caller pin, then approved
+  baseline, then the harness's own choice: a missing baseline launches unpinned, and the launcher
+  records the model and thought level the harness confirms in `harnessIdentity`. The CLI never
+  prints, accepts, or changes the baseline.
+- **Reasoning effort** is pinnable per run (`--effort`), including explicit `null`
+  (`--effort none`). Its canonical vocabulary lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts);
   resolution follows the same caller pin then approved-baseline order as model and lands in the
   durable row before launch. Legacy rows retain `NULL`; clients omit unknown effort instead of
   displaying a placeholder.
@@ -240,7 +242,7 @@ Before an implicit delegation, the Operator loads the bundled
 skill. The skill owns preference interpretation, baseline and owner-defined task-role classification,
 current-details consultation, exact identity selection, approved-baseline consent, and concise
 identity reporting. A complete owner-supplied harness/model/effort choice—including explicit null
-effort—bypasses selection and reaches `delegate_agent` unchanged. The permanent product prompt owns
+effort—bypasses selection and reaches `oo runs delegate` unchanged. The permanent product prompt owns
 only that invocation and precedence rule.
 
 `get_harness_details` returns one namespaced snapshot: raw owner preferences, launch-authoritative
@@ -397,11 +399,10 @@ Summary enrichment continues during child work without changing the parent's wor
 Once all children are terminal, the transcript-derived root state applies again. The ledger record
 remains the canonical child provenance.
 
-In the terminal, `pi-tool-display` owns the compact `delegate_agent`/`manage_agent_run` call and
-result components, with raw results available through Pi's ordinary expansion. A successful
-delegation also persists one neutral launch line derived from the run row; the existing completion
-message persists the other inline lifecycle moment. Owner-directed inspection and lifecycle
-control remain available through `manage_agent_run` and the Gateway.
+In the terminal, a delegation renders as the Operator's ordinary bash call, whose output is the
+pending run line (`oo runs delegate` without `--json`); the completion message persists the other
+inline lifecycle moment. Owner-directed inspection and lifecycle control remain available through
+`oo runs` and the Gateway.
 
 Terminal completion behavior is defined at four linked seams: the browser-safe
 [completion envelope](../packages/core/src/agent-state.ts), parent-scoped

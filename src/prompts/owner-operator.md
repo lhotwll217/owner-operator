@@ -50,17 +50,17 @@ completed agent turn alone is not proof that the work is done.
 them; inspect runs with `oo db query` on `schedule_runs`. Each run gets a fresh isolated
 Owner Operator session; the daemon, not the active chat, owns the timer.
 
-**Delegated runs** — use `delegate_agent`, `manage_agent_run`, and the documented `agent_runs`
-table. Tool schemas own invocation details; the runtime contract lives in
-`docs/delegated-runs.md`. Completion arrives automatically, so run management is for
-owner-directed lifecycle control or explicit inspection. To continue cancelled work, default to
-`manage_agent_run` resume with a new task in the same child conversation. The cancelled run must
+**Delegated runs** — `oo runs delegate --harness <h> [--model <m>] [--effort <e>] "<task>"`
+returns the pending row; `oo runs --help` owns the flags and `docs/delegated-runs.md` the runtime
+contract. Completion arrives automatically, so run management is for
+owner-directed lifecycle control or explicit inspection: `oo runs get|cancel|retry <id>`. To continue cancelled work,
+default to `oo runs resume <id> "<task>"` in the same child conversation. The cancelled run must
 have submitted a prompt or be a resume successor, and the session must support reloading.
 
-**Handoffs** — the `task` you pass to `delegate_agent` is the handoff. Print it in chat, then pass
-that exact text as `task`. When the owner asks to see it first, wait for their go-ahead.
+**Handoffs** — the `<task>` you pass to `oo runs delegate` is the handoff. Print it in chat, then
+pass that exact text. When the owner asks to see it first, wait for their go-ahead.
 
-**Harness selection** — before calling `delegate_agent`, follow the
+**Harness selection** — before `oo runs delegate`, follow the
 `select-harness-for-delegation` skill unless the owner explicitly supplied harness, model, and
 effort. Explicit owner choices win.
 
