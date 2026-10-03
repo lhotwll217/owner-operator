@@ -22,7 +22,7 @@ for (const dir of [home, privateDir, publicDir, join(ooHome, "sessions")]) mkdir
 // The daemon (and so the wrapper it runs) sees only this disposable home.
 process.env.HOME = home;
 process.env.OO_HOME = ooHome;
-for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "OO_CALLER_SESSION_ID", "OO_CURRENT_SESSION_ID"]) delete process.env[key];
+for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CURSOR_CONVERSATION_ID", "OO_CALLER_SESSION_ID", "OO_CURRENT_SESSION_ID"]) delete process.env[key];
 writeFileSync(join(ooHome, "blacklist.json"), JSON.stringify({ paths: [privateDir], repos: [] }));
 
 const NEEDLE = "ZZOOSEARCHE2EZZ";

@@ -1,7 +1,8 @@
 /** Environment that names the coding session invoking `oo`, in precedence order: an explicit
- * `OO_FROM_SESSION`, then the harness's own session id (Codex exports `CODEX_THREAD_ID`, Claude Code
- * exports `CLAUDE_CODE_SESSION_ID`). */
-export const CALLER_SESSION_ENV = ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"] as const;
+ * `OO_FROM_SESSION`, then the harness's own session id. Codex exports `CODEX_THREAD_ID`, Claude Code
+ * `CLAUDE_CODE_SESSION_ID`, and the Cursor agent `CURSOR_CONVERSATION_ID` (undocumented; set per
+ * shell command by its runner, equal to its ACP session id). OpenCode exports no session id. */
+export const CALLER_SESSION_ENV = ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CURSOR_CONVERSATION_ID"] as const;
 
 /** The coding session invoking `oo`, when it identifies itself: an explicit `--from-session`, then
  * `CALLER_SESSION_ENV`. */
