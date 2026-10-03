@@ -21,12 +21,10 @@ import {
 
 const BLACKLIST_REASON = "Owner Operator privacy blacklist";
 // Keep these explicit defaults aligned with src/agent/tools/index.ts. Unlisted tools safely fall
-// back to the selected mode; the lists identify known reads, bounded OO state changes, and risky
-// generic changes separately.
-const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_current_session_state", "query_database", "get_harness_details"];
-const NATIVE_STATE_SURFACES = ["mark_thread_done"];
+// back to the selected mode; the lists identify known reads and risky generic changes separately.
+const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "get_harness_details"];
 const CHANGE_SURFACES = ["edit", "write", "schedule_prompt", "manage_schedule", "delegate_agent", "manage_agent_run", "manage_delegated_baseline", "use_worktree"];
-const MANAGED_SURFACES = [...READ_SURFACES, ...NATIVE_STATE_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
+const MANAGED_SURFACES = [...READ_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
 // The agent reaches Owner Operator through its own CLI (adr/0001-agent-uses-its-own-cli.md),
 // so `oo` is allowed in every mode. Owner rules follow these and win (last match wins), so a rule
 // such as "oo schedules *": "deny" still narrows them. Read-only mode hides bash entirely, because
@@ -86,17 +84,10 @@ function changeAction(mode) {
   return mode === "allow" ? "allow" : mode === "read-only" ? "deny" : "ask";
 }
 
-function nativeStateAction(mode) {
-  return mode === "read-only" ? "deny" : "allow";
-}
-
 function permissionPolicy(existing, ooHome, mode) {
   const action = changeAction(mode);
   const next = { ...existing, "*": action };
   for (const surface of READ_SURFACES) next[surface] = withDefault(existing[surface], "allow");
-  for (const surface of NATIVE_STATE_SURFACES) {
-    next[surface] = withDefault(existing[surface], nativeStateAction(mode));
-  }
   for (const surface of CHANGE_SURFACES) next[surface] = withDefault(existing[surface], action);
   next.external_directory = withDefault(existing.external_directory, "allow");
   next.bash = { "*": action, ...CLI_BASH_RULES, ...withDefault(existing.bash, action) };

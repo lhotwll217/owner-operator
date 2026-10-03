@@ -17,8 +17,8 @@ const search = (args: string[]): Execution => ({
   resultChars: 100,
 });
 const locator: Execution = {
-  name: "get_current_session_state",
-  input: {},
+  name: "bash",
+  input: { command: "oo session-state list --state needs-you" },
   isError: false,
   resultChars: 100,
 };
@@ -26,7 +26,7 @@ const context = (toolExecutions: Execution[]) => ({
   provider: { label: "owner-operator" },
   test: {
     metadata: {
-      expectToolAny: ["get_current_session_state"],
+      expectToolAny: ["oo db", "oo session-state list"],
       expectSessionSearch: true,
       requireLocatorBeforeSessionSearch: true,
     },
@@ -40,6 +40,23 @@ const progressive = toolUseAssertion("", context([
   search(["--session", "session-1", "--at", "3"]),
 ]));
 assert.equal(progressive.pass, true, progressive.reason);
+
+const sqlLocator = toolUseAssertion("", context([
+  { ...locator, input: { command: 'oo db query "SELECT id FROM threads"' } },
+  search(["--session", "session-1", "--at", "3"]),
+]));
+assert.equal(sqlLocator.pass, true, sqlLocator.reason);
+
+const noLocator = toolUseAssertion("", context([search(["--query", "event backbone"])]));
+assert.equal(noLocator.pass, false);
+assert.match(noLocator.reason, /expected one of \[oo db, oo session-state list\], got \[bash\]/);
+
+const readOnlyMutation = toolUseAssertion("", context([
+  locator,
+  { ...locator, input: { command: "oo session-state done session-1" } },
+]));
+assert.equal(readOnlyMutation.pass, false);
+assert.match(readOnlyMutation.reason, /used forbidden \[oo session-state done\]/);
 
 const earlyDirect = toolUseAssertion("", context([
   search(["--skim", "session-1"]),
@@ -201,8 +218,8 @@ const behavioralContext = ({
       traceProblems: [],
       harnessValid: true,
       completion: { outcome: "completed", childSessionId: "child-129" },
-      toolRoster: ["read", "bash", "mark_thread_done"],
-      configuredToolRoster: ["read", "bash", "mark_thread_done"],
+      toolRoster: ["read", "bash"],
+      configuredToolRoster: ["read", "bash"],
       toolExecutions: executions.map((execution, index) => ({ id: `call-${index}`, ...execution })),
       stateBefore: {
         rawThreadStates: { "child-129": "working", "sentinel-129": "needs-you" },
@@ -226,11 +243,11 @@ const behavioralContext = ({
 });
 
 const markDone = (ids: string[]) => ({
-  name: "mark_thread_done",
-  input: { ids },
+  name: "bash",
+  input: { command: `oo session-state done ${ids.join(" ")}` },
   isError: false,
   resultChars: 120,
-  result: { marked: ids.map((id) => ({ id })), alreadyDoneIds: [], missingIds: [] },
+  result: { content: [{ type: "text", text: `${ids.map((id) => `done     ${id}`).join("\n")}\n` }] },
 });
 
 const finishedChild = toolUseAssertion("", behavioralContext({
@@ -240,6 +257,27 @@ const finishedChild = toolUseAssertion("", behavioralContext({
   activeIds: ["sentinel-129"],
 }));
 assert.equal(finishedChild.pass, true, finishedChild.reason);
+
+const finishedChildJson = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: true,
+  executions: [{
+    ...markDone(["child-129"]),
+    input: { command: "oo session-state done child-129 --json" },
+    result: { content: [{ type: "text", text: JSON.stringify({ marked: [{ id: "child-129" }], alreadyDoneIds: [], missingIds: [] }) }] },
+  }],
+  childState: "done",
+  activeIds: ["sentinel-129"],
+}));
+assert.equal(finishedChildJson.pass, true, finishedChildJson.reason);
+
+const alreadyDone = toolUseAssertion("", behavioralContext({
+  shouldMarkDone: true,
+  executions: [{ ...markDone(["child-129"]), result: { content: [{ type: "text", text: "already  child-129\n" }] } }],
+  childState: "done",
+  activeIds: ["sentinel-129"],
+}));
+assert.equal(alreadyDone.pass, false);
+assert.match(alreadyDone.reason, /did not confirm a fresh exact-target mutation/);
 
 const wrongChild = toolUseAssertion("", behavioralContext({
   shouldMarkDone: true,
@@ -257,7 +295,7 @@ const duplicateMark = toolUseAssertion("", behavioralContext({
   activeIds: ["sentinel-129"],
 }));
 assert.equal(duplicateMark.pass, false);
-assert.match(duplicateMark.reason, /exactly one mark_thread_done call/);
+assert.match(duplicateMark.reason, /exactly one `oo session-state done` call/);
 
 const unresolvedChild = toolUseAssertion("", behavioralContext({
   shouldMarkDone: false,
@@ -274,7 +312,7 @@ const unresolvedButAttempted = toolUseAssertion("", behavioralContext({
   activeIds: ["sentinel-129"],
 }));
 assert.equal(unresolvedButAttempted.pass, false);
-assert.match(unresolvedButAttempted.reason, /must not call mark_thread_done/);
+assert.match(unresolvedButAttempted.reason, /must not run `oo session-state done`/);
 
 const brokenSandbox = behavioralContext({
   shouldMarkDone: false,
@@ -329,8 +367,8 @@ const delegationContext = (
       numTurns: 1,
       traceProblems: [],
       harnessValid: true,
-      toolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent", "mark_thread_done"],
-      configuredToolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent", "mark_thread_done"],
+      toolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent"],
+      configuredToolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent"],
       toolExecutions: executions.map((execution, index) => ({ id: `delegation-call-${index}`, ...execution })),
       stateBefore: before,
       stateAfter: after,

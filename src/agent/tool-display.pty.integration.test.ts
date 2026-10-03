@@ -6,16 +6,28 @@ import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
   createAgentSessionServices,
+  defineTool,
   initTheme,
   InteractiveMode,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
 import { getCapabilities } from "@earendil-works/pi-tui";
 import { renderInRealPty } from "../../test/fixtures/real-pty";
 import { buildOoTheme, ooPresentationExtension } from "../shared/oo-presentation";
-import { queryDatabaseTool } from "./tools";
 import { createOwnerOperatorToolDisplayExtension } from "./tool-display";
+
+// A stand-in custom tool, so the rendering check outlives any one Operator tool.
+const fixtureTool = defineTool({
+  name: "fixture_lookup",
+  label: "Fixture lookup",
+  description: "Tool display fixture.",
+  parameters: Type.Object({ action: Type.String(), limit: Type.Number() }),
+  async execute() {
+    return { content: [{ type: "text" as const, text: "unused" }], details: {} };
+  },
+});
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -32,14 +44,14 @@ if (process.env.OO_TOOL_DISPLAY_PTY_CHILD === "1") {
       outputPad: 0,
       defaultProjectTrust: "always",
     }));
-    const display = await createOwnerOperatorToolDisplayExtension(agentDir, [queryDatabaseTool]);
+    const display = await createOwnerOperatorToolDisplayExtension(agentDir, [fixtureTool]);
 
     const sessionManager = SessionManager.inMemory(root);
     sessionManager.appendMessage({
       role: "assistant",
       content: [
         { type: "toolCall", id: "read-call", name: "read", arguments: { path: "src/agent/agent.ts" } },
-        { type: "toolCall", id: "query-call", name: "query_database", arguments: { action: "threads", limit: 2 } },
+        { type: "toolCall", id: "query-call", name: "fixture_lookup", arguments: { action: "threads", limit: 2 } },
       ],
       api: "openai-codex-responses",
       provider: "openai-codex",
@@ -59,7 +71,7 @@ if (process.env.OO_TOOL_DISPLAY_PTY_CHILD === "1") {
     sessionManager.appendMessage({
       role: "toolResult",
       toolCallId: "query-call",
-      toolName: "query_database",
+      toolName: "fixture_lookup",
       content: [{ type: "text", text: "QUERY RAW RESULT" }],
       isError: false,
       timestamp: 300,
@@ -83,7 +95,7 @@ if (process.env.OO_TOOL_DISPLAY_PTY_CHILD === "1") {
       const created = await createAgentSessionFromServices({
         services,
         sessionManager: target,
-        tools: ["read", "query_database"],
+        tools: ["read", "fixture_lookup"],
       });
       return { ...created, services, diagnostics: services.diagnostics };
     };
@@ -128,12 +140,12 @@ async function render(width: number, expanded = false): Promise<string[]> {
 const normal = await render(80);
 const normalText = normal.join("\n");
 assert.match(normalText, /read src\/agent\/agent\.ts/);
-assert.match(normalText, /query_database \(2 args\)/);
+assert.match(normalText, /fixture_lookup \(2 args\)/);
 assert.doesNotMatch(normalText, /READ RAW RESULT|QUERY RAW RESULT/, "compact PTY hides raw results");
 
 const narrow = await render(34);
 assert.match(narrow.join("\n"), /read src\/agent\/agent\.ts/);
-assert.match(narrow.join("\n"), /query_database \(2 args\)/);
+assert.match(narrow.join("\n"), /fixture_lookup \(2 args\)/);
 for (const line of narrow) assert.ok([...line].length <= 34, `narrow tool row fits 34 columns: ${line}`);
 
 const expanded = (await render(80, true)).join("\n");

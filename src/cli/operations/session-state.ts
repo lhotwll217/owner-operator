@@ -1,19 +1,38 @@
-import type { MarkThreadsDoneResult, SessionStateRow } from "@owner-operator/core";
-import { emit, gateway, type Noun } from "./operation";
+import type { MarkThreadsDoneResult, SessionStateRow, ThreadState } from "@owner-operator/core";
+import { emit, gateway, UsageError, type Noun } from "./operation";
 
-const rowLine = (row: SessionStateRow, index: number): string =>
-  `${String(index + 1).padStart(3)}. ${row.state.padEnd(9)} ${row.app} · ${row.repo} · ${row.topic}  ${row.id}`;
+const STATES: readonly ThreadState[] = ["needs-you", "working", "idle", "done"];
+
+// Row numbers are widget positions, so a filtered list keeps the numbers the owner sees.
+const rowLine = (row: SessionStateRow, position: number): string =>
+  `${String(position).padStart(3)}. ${row.state.padEnd(9)} ${row.app} · ${row.repo} · ${row.topic}  ${row.id}`;
 
 export const sessionState: Noun = {
   summary: "the owner's current session rows, as the widget shows them",
   useWhen: "what is active right now, what needs the owner, or marking finished sessions done",
   verbs: {
     list: {
-      summary: "current session-state rows (GET /session-state)",
-      examples: ["oo session-state list", "oo session-state list --json"],
-      async run({ json }) {
-        const rows = await (await gateway()).sessionState();
-        await emit(json, rows, () => rows.length ? rows.map(rowLine).join("\n") : "no sessions");
+      summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "
+        + "index sessions: take an id to `oo search` for what changed, why, or proof",
+      options: {
+        state: { type: "string", help: `only rows in this exact state: ${STATES.join(", ")}` },
+      },
+      examples: [
+        "oo session-state list",
+        "oo session-state list --state needs-you",
+        "oo session-state list --json",
+      ],
+      async run({ values, json }) {
+        const state = values.state as string | undefined;
+        if (state !== undefined && !STATES.includes(state as ThreadState)) {
+          throw new UsageError(`--state must be one of ${STATES.join(", ")}`);
+        }
+        const rows = (await (await gateway()).sessionState())
+          .map((row, index) => ({ row, position: index + 1 }))
+          .filter(({ row }) => !state || row.state === state);
+        await emit(json, rows.map(({ row }) => row), () => rows.length
+          ? rows.map(({ row, position }) => rowLine(row, position)).join("\n")
+          : state ? `no sessions in state ${state}` : "no sessions");
         return 0;
       },
     },

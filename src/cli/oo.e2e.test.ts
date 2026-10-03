@@ -147,11 +147,21 @@ try {
 
   const list = await runOo(["session-state", "list", "--json"]);
   assert.equal(list.status, 0, `session-state list exits 0 (stderr: ${list.stderr})`);
-  const listed = JSON.parse(list.stdout) as Array<{ id: string }>;
+  const listed = JSON.parse(list.stdout) as Array<{ id: string; state: string }>;
   assert.deepEqual(listed.map((row) => row.id), ["e2e-done-1"], "the seeded row is current");
   assert.deepEqual(listed, daemon.state.listCurrentSessionState(), "list --json returns the GET /session-state rows");
   const listText = await runOo(["session-state", "list"]);
   assert.match(listText.stdout, /1\. .*e2e-done-1/, "text list shows a numbered row with its id");
+  const seededState = listed[0]!.state;
+  const otherState = seededState === "idle" ? "working" : "idle";
+  assert.deepEqual(JSON.parse((await runOo(["session-state", "list", "--state", seededState, "--json"])).stdout),
+    listed, "--state keeps rows in that exact state");
+  const filteredOut = await runOo(["session-state", "list", "--state", otherState]);
+  assert.equal(filteredOut.status, 0, `an empty filter is an answer, not a failure (stderr: ${filteredOut.stderr})`);
+  assert.equal(filteredOut.stdout, `no sessions in state ${otherState}\n`);
+  const badState = await runOo(["session-state", "list", "--state", "blocked"]);
+  assert.equal(badState.status, 2, `unknown --state exits 2 (got ${badState.status})`);
+  assert.match(badState.stderr, /needs-you, working, idle, done/, "names the valid states");
 
   const done = await runOo(["session-state", "done", "e2e-done-1", "ghost-id"]);
   assert.equal(done.status, 1, `done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);

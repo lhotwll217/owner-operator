@@ -4,11 +4,14 @@ import { DatabaseSync } from "node:sqlite";
 import {
   AGENT_RUN_EFFORTS,
   AgentRunStatus,
+  RETIRED_AGENT_TOOL_IDS,
+  ScheduledPayloadKind,
   ScheduleRunStatus,
   ScheduleRunTrigger,
   formatRelative,
   harnessIdentityObservation,
   isSessionBoilerplate,
+  withoutRetiredAgentTools,
   type AgentRun,
   type AgentRunActivityUpdate,
   type AgentRunHarness,
@@ -21,6 +24,7 @@ import {
   type ScheduleRun,
   type ScheduleTriggerContext,
   type ScheduledPayload,
+  type ScheduledPromptPayload,
   type ScheduleTrigger,
   type SessionStateRow,
   type ThreadDetails,
@@ -384,6 +388,7 @@ export class ThreadDb {
     this.migrateSessionSummaries();
     this.migrateAgentRunEffort();
     this.migrateAgentRunPromptSubmission();
+    this.migrateRetiredScheduleTools();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -425,6 +430,18 @@ export class ThreadDb {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private migrateRetiredScheduleTools(): void {
+    const rows = this.db.prepare(
+      `SELECT id, payload_json AS payloadJson FROM schedules WHERE payload_kind = '${ScheduledPayloadKind.Prompt}'`,
+    ).all() as Array<{ id: string; payloadJson: string }>;
+    const update = this.db.prepare("UPDATE schedules SET payload_json = ? WHERE id = ?");
+    for (const { id, payloadJson } of rows) {
+      const payload = JSON.parse(payloadJson) as ScheduledPromptPayload;
+      if (!payload.toolsAllow?.some((tool) => RETIRED_AGENT_TOOL_IDS.includes(tool))) continue;
+      update.run(JSON.stringify({ ...payload, toolsAllow: withoutRetiredAgentTools(payload.toolsAllow) }), id);
     }
   }
 

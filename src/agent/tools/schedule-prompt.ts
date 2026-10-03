@@ -30,7 +30,7 @@ export const schedulePromptTool = defineTool({
   label: "Schedule prompt",
   description:
     "Create a durable Owner Operator prompt job. Each run uses a fresh isolated session; " +
-    "use query_database on schedules and schedule_runs to inspect status or failures.",
+    "use `oo db query` on schedules and schedule_runs to inspect status or failures.",
   parameters: Type.Object({
     name: Type.String({ description: "Short human-readable job name." }),
     schedule: ScheduleTriggerSchema,

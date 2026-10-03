@@ -54,6 +54,6 @@ from coding-session monitoring, preventing automation loops.
   atomically. Roots with pending or running delegated children are excluded, and an agent-run
   transition reconciles the inputs so the transcript-derived handoff returns after termination.
 
-Failures and output are inspectable through the read-only `query_database` tool
+Failures and output are inspectable through read-only `oo db query`
 over `schedules` and `schedule_runs`. The table intent and columns live once in
 [`src/state/schema-docs.ts`](../src/state/schema-docs.ts).

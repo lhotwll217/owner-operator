@@ -51,7 +51,7 @@ export const manageAgentRunTool = defineTool({
     "way to continue cancelled work when the run submitted a prompt or is itself a resume successor, " +
     "and the session can reload. Resume successors cancelled while queued or loading can still resume. " +
     "Fresh startup cancellations without submission evidence cannot resume. Report reload failures. Use " +
-    "query_database on agent_runs to find ids.",
+    "`oo db query` on agent_runs to find ids.",
   parameters: Type.Union([
     Type.Object({
       action: Type.Union(

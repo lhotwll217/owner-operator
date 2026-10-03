@@ -4,7 +4,7 @@
 # is planted in fixtures/sessions.mjs — change a fact there, change its rubric here.
 #
 # qtype tags where the DB earns its keep: state/stale/audit/handoff cases are the ones OO
-# should locate via query_database before (if needed) reading transcripts with
+# should locate via `oo session-state list` or `oo db` before (if needed) reading transcripts with
 # the session-search skill. locator/evidence/summary/negative lean on search.
 
 # ── search-led: a fact only the transcript holds ────────────────────────────────────
@@ -195,7 +195,7 @@
     difficulty: hard
     session: fx-atlas-summary-helper-d444+fx-atlas-summary-final-e555
     corpus: synthetic-v2
-    expectToolAny: [query_database, get_current_session_state]
+    expectToolAny: [oo db, oo session-state list]
     expectSessionSearch: true
     requireLocatorBeforeSessionSearch: true
   assert:

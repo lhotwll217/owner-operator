@@ -7,8 +7,8 @@ const payload = {
   assistantText: "The child completed the checklist and validation passed.",
   modelLabel: "test-provider/test-model",
   sessionId: "parent-129",
-  toolRoster: ["read", "mark_thread_done"],
-  configuredToolRoster: ["read", "mark_thread_done"],
+  toolRoster: ["read", "bash"],
+  configuredToolRoster: ["read", "bash"],
   traceEvents: [
     { event: "turn", stopReason: "stop", usage: { input: 10, output: 5, cacheRead: 2, totalTokens: 17, cost: { total: 0.01 } } },
   ],
@@ -41,30 +41,30 @@ assert.equal(baselineFailure.metadata.harnessValid, true);
 const successfulTool = normalizeBehavioralTrialResult({
   ...payload,
   traceEvents: [
-    { event: "tool_call", id: "call-1", tool: "mark_thread_done", args: { ids: ["child-129"] } },
+    { event: "tool_call", id: "call-1", tool: "bash", args: { command: "oo session-state done child-129" } },
     {
       event: "tool_result",
       id: "call-1",
-      tool: "mark_thread_done",
+      tool: "bash",
       isError: false,
-      result: { details: { marked: [{ id: "child-129" }], alreadyDoneIds: [], missingIds: [] } },
+      result: { content: [{ type: "text", text: "done     child-129\n" }] },
     },
     ...payload.traceEvents,
   ],
 });
 assert.deepEqual(successfulTool.metadata.toolExecutions[0], {
   id: "call-1",
-  name: "mark_thread_done",
-  input: { ids: ["child-129"] },
+  name: "bash",
+  input: { command: "oo session-state done child-129" },
   index: null,
   isError: false,
-  resultChars: 79,
-  result: { details: { marked: [{ id: "child-129" }], alreadyDoneIds: [], missingIds: [] } },
+  resultChars: 59,
+  result: { content: [{ type: "text", text: "done     child-129\n" }] },
 });
 
 const brokenTrace = normalizeBehavioralTrialResult({
   ...payload,
-  traceEvents: [{ event: "tool_call", id: "call-1", tool: "mark_thread_done", args: { ids: ["child-129"] } }],
+  traceEvents: [{ event: "tool_call", id: "call-1", tool: "bash", args: { command: "oo session-state done child-129" } }],
 });
 assert.equal(brokenTrace.metadata.harnessValid, false);
 assert.match(brokenTrace.providerError!, /incomplete or malformed tool execution/);
@@ -86,7 +86,7 @@ assert.match(missingStateComponent.providerError!, /state evidence/);
 const unmatchedResult = normalizeBehavioralTrialResult({
   ...payload,
   traceEvents: [
-    { event: "tool_result", id: "missing-call", tool: "mark_thread_done", isError: false, result: {} },
+    { event: "tool_result", id: "missing-call", tool: "bash", isError: false, result: {} },
     ...payload.traceEvents,
   ],
 });

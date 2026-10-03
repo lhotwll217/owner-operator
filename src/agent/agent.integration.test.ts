@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness, ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
+import { AgentRunHarness, RETIRED_AGENT_TOOL_IDS, ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   createOwnerOperatorSession,
@@ -57,7 +57,7 @@ try {
 
   const restricted = await createOwnerOperatorSession("chat", { ephemeral: true, toolsAllow: [] });
   assert.equal(
-    restricted.session.extensionRunner.getToolDefinition("query_database"),
+    restricted.session.extensionRunner.getToolDefinition("schedule_prompt"),
     undefined,
     "an empty toolsAllow does not register excluded custom capabilities through tool display",
   );
@@ -169,14 +169,20 @@ assert.throws(
 );
 
 // Posture keeps every standard file/shell tool present; the permission mode decides each operation.
-for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule", "use_worktree"]) {
+for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "schedule_prompt", "manage_schedule", "use_worktree"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 
 // Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).
 // Built-in privacy enforcement is a tool_call guard, covered by privacy-tools.integration.test.
-for (const t of ["get_current_session_state", "mark_thread_done", "query_database", "schedule_prompt", "manage_schedule", "use_worktree"]) {
+for (const t of ["schedule_prompt", "manage_schedule", "use_worktree"]) {
   assert.ok(ownerOperatorCustomTools.some((tool) => tool.name === t), `owner custom tools must include ${t}`);
+}
+
+// Retired tools reach the Operator as `oo` verbs (adr/0001-agent-uses-its-own-cli.md).
+for (const t of RETIRED_AGENT_TOOL_IDS) {
+  assert.ok(!ownerOperatorTools.includes(t as never), `${t} is retired from the roster`);
+  assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === t), `${t} is retired from the custom tools`);
 }
 
 assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === "search_sessions"), "session search is a skill, not a duplicate custom tool");
@@ -226,16 +232,11 @@ for (const flag of ["--query", "--candidates", "--skim", "--session"]) {
 }
 assert.doesNotMatch(
   sessionSearchSkill,
-  /get_current_session_state|query_database/,
-  "the reusable transcript skill does not route between Owner Operator's other tools",
+  /oo session-state|oo db\b/,
+  "the reusable transcript skill does not route between Owner Operator's other surfaces",
 );
-
-const queryTool = ownerOperatorCustomTools.find((tool) => tool.name === "query_database");
-assert.doesNotMatch(
-  queryTool?.description ?? "",
-  /CREATE statement/,
-  "query_database describes the documented columns it returns, not raw SQLite DDL",
-);
+assert.match(authoredPrompt, /`oo session-state list --state needs-you`/, "what-needs-me reads the authoritative state filter");
+assert.match(authoredPrompt, /\*\*MUST\*\* run `oo session-state done <id>`/, "terminal work is marked done through oo");
 
 const session = (messages: unknown[]) => ({ state: { messages } }) as any;
 assert.equal(lastAssistantError(session([{ role: "assistant", stopReason: "stop", content: [] }])), null);
