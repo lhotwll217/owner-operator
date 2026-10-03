@@ -1,11 +1,13 @@
-// e2e: harness details run inside the daemon. The native tool and `oo harness details` send the
-// same request to POST /harness-details and return the same snapshot.
+// e2e: harness observation and baseline proposal run inside the daemon. `oo harness details`
+// prints the route's snapshot unchanged, `propose` never saves, and `approve` persists exactly the
+// model and effort (or explicit null) it was given.
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HarnessDetailsRequest } from "@owner-operator/core";
+import { AgentRunHarness, loadDelegatedBaseline, ownerOperatorPaths, type HarnessDetailsRequest } from "@owner-operator/core";
+import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
 import { repoRoot } from "../shared/repo-root";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-harness-e2e-"));
@@ -25,6 +27,7 @@ const runOo = async (args: readonly string[]): Promise<{ status: number | null; 
 
 try {
   const requests: HarnessDetailsRequest[] = [];
+  const proposals: string[] = [];
   const { startDaemon } = await import("../daemon/runtime");
   daemon = await startDaemon({
     port: 0,
@@ -38,12 +41,19 @@ try {
         requests.push(request);
         return { observedAt: "2026-09-23T00:00:00.000Z", ephemeral: true, echo: request, capabilities: { harnesses: [] }, account: [], unknowns: [] };
       },
+      propose: async (harness) => {
+        proposals.push(harness);
+        return await proposeDelegatedBaseline(harness, {
+          discover: async () => ({ model: "observed[1m]", effort: "high", availableEfforts: ["low", "high"] }),
+        });
+      },
     },
   });
 
   const cli = await runOo([
     "harness", "details", "--harness", "codex", "--harness", "cursor",
-    "--inspect", "claude-code:opus[1m]:high", "--inspect", "opencode:provider/model:with:colons", "--json",
+    "--inspect", "claude-code:opus[1m]:high", "--inspect", "opencode:provider/model:with:colons",
+    "--baseline-candidates", "--json",
   ]);
   assert.equal(cli.status, 0, cli.stderr);
   const input = {
@@ -52,18 +62,48 @@ try {
       { harness: "claude-code", model: "opus[1m]", effort: "high" },
       { harness: "opencode", model: "provider/model:with:colons", effort: null },
     ],
+    includeBaselineCandidates: true,
   } as HarnessDetailsRequest;
   assert.deepEqual(requests[0], input, "the CLI sends the parsed request; an omitted effort is null and model colons survive");
-
-  const { createGetHarnessDetailsTool } = await import("../agent/tools/get-harness-details");
-  const tool = createGetHarnessDetailsTool();
-  const native = await tool.execute("call", input as never, undefined, undefined, {} as never);
-  assert.deepEqual(requests[1], input, "the native tool sends the same request to the same route");
-  assert.deepEqual(JSON.parse(cli.stdout), native.details, "native tool and CLI return the same snapshot");
+  assert.deepEqual(JSON.parse(cli.stdout).echo, input, "--json prints the route's snapshot unchanged");
 
   const unknown = await runOo(["harness", "details", "--harness", "nope"]);
   assert.equal(unknown.status, 2, "an unknown harness is a usage error before any observation");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 1);
+
+  const baselinePath = join(ownerOperatorPaths(ooHome).delegatedBaselines, "codex.json");
+  const proposed = await runOo(["harness", "propose", "codex", "--json"]);
+  assert.equal(proposed.status, 0, proposed.stderr);
+  assert.deepEqual(JSON.parse(proposed.stdout), {
+    harness: "codex",
+    approved: null,
+    candidate: { model: "observed[1m]", effort: "high", availableEfforts: ["low", "high"] },
+    error: null,
+    differs: true,
+  });
+  assert.deepEqual(proposals, ["codex"]);
+  assert.equal(existsSync(baselinePath), false, "propose never saves");
+
+  for (const args of [
+    ["--effort", "high"],
+    ["--model", "observed[1m]"],
+    ["--model", "observed[1m]", "--effort", "extreme"],
+  ]) {
+    const refused = await runOo(["harness", "approve", "codex", ...args]);
+    assert.equal(refused.status, 2, `approve ${args.join(" ")} is a usage error`);
+  }
+  assert.equal(existsSync(baselinePath), false, "approve without an explicit model and effort-or-null saves nothing");
+
+  const approved = await runOo(["harness", "approve", "codex", "--model", "observed[1m]", "--effort", "high", "--json"]);
+  assert.equal(approved.status, 0, approved.stderr);
+  assert.deepEqual(loadDelegatedBaseline(AgentRunHarness.Codex, ooHome), JSON.parse(approved.stdout));
+  assert.equal(JSON.parse(approved.stdout).effort, "high");
+  const nulled = await runOo(["harness", "approve", "claude-code", "--model", "opus", "--effort", "none"]);
+  assert.equal(nulled.status, 0, nulled.stderr);
+  assert.match(nulled.stdout, /approved claude-code: opus effort=null/);
+  assert.equal(loadDelegatedBaseline(AgentRunHarness.ClaudeCode, ooHome)?.effort, null, "--effort none persists an explicit null");
+  const reproposed = await runOo(["harness", "propose", "codex"]);
+  assert.match(reproposed.stdout, /differs:\s+false/, "a proposal matching the approved baseline does not differ");
   const badRoute = await (await import("../gateway/client")).resolveBackend()
     .then((gateway) => gateway.harnessDetails({ harnesses: ["nope" as never] }))
     .then(() => null, (error: Error) => error.message);
@@ -74,4 +114,4 @@ try {
   rmSync(ooHome, { recursive: true, force: true });
 }
 
-process.stdout.write("ok — harness details: CLI and native tool share POST /harness-details and its snapshot\n");
+process.stdout.write("ok — oo harness: details snapshot, read-only propose, exact approve through the daemon\n");

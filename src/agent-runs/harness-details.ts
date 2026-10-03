@@ -239,7 +239,7 @@ function assertUniqueHarnessInspections(
   const seen = new Set<AgentRunHarness>();
   for (const inspection of inspections) {
     if (seen.has(inspection.harness)) {
-      throw new Error(`get_harness_details received duplicate inspection entries for harness ${inspection.harness}`);
+      throw new Error(`harness details received duplicate inspection entries for harness ${inspection.harness}`);
     }
     seen.add(inspection.harness);
   }

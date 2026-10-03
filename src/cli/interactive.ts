@@ -64,7 +64,7 @@ const interactiveTools = configuredOwnerOperatorTools(paths.home);
 const invocationCwd = ownerOperatorTaskCwd();
 const pendingCwdChanges = new PendingWorktreeCwdChanges();
 const sessionReplacement = new InteractiveSessionReplacement();
-const interactiveCustomTools = createOwnerOperatorCustomTools({}, {
+const interactiveCustomTools = createOwnerOperatorCustomTools({
   onWorktreeSelection: (threadId) => pendingCwdChanges.record(threadId),
 });
 const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayExtension(

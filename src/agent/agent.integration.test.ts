@@ -3,11 +3,10 @@ import assert from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunHarness, RETIRED_AGENT_TOOL_IDS, ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
+import { RETIRED_AGENT_TOOL_IDS, ScheduleKind, ScheduledPayloadKind } from "@owner-operator/core";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   createOwnerOperatorSession,
-  configuredOwnerOperatorTools,
   evalSettingsOverrides,
   lastAssistantError,
   ownerOperatorPrompt,
@@ -72,40 +71,6 @@ try {
     "in-memory production credentials do not recreate an agent-readable auth file");
   memoryBacked.session.dispose();
 
-  let controlledReads = 0;
-  const controlled = await createOwnerOperatorSession("chat", {
-    ephemeral: true,
-    piServices: injectedServices,
-    harnessAdapters: {
-      readHarnessDetails: async () => {
-        controlledReads += 1;
-        return {
-          observedAt: "2026-08-20T00:00:00.000Z",
-          ephemeral: true,
-          preferences: { path: "/fixture/preferences.md", source: null, content: null, error: null },
-          capabilities: {
-            registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
-            harnesses: [],
-          },
-          account: [],
-          unknowns: [],
-        };
-      },
-    },
-  });
-  assert.deepEqual(controlled.toolNames, configuredOwnerOperatorTools(ooHome),
-    "controlled external outcomes retain the exact production roster");
-  const controlledDetails = controlled.session.extensionRunner.getToolDefinition("get_harness_details");
-  assert.ok(controlledDetails, "the production details tool remains registered");
-  await controlledDetails.execute(
-    "controlled-details",
-    { harnesses: [AgentRunHarness.Codex] },
-    undefined,
-    undefined,
-    { sessionManager: { getSessionId: () => "controlled-parent" } } as never,
-  );
-  assert.equal(controlledReads, 1, "only the external observation adapter is controlled");
-  controlled.session.dispose();
 } finally {
   if (priorOoHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorOoHome;
@@ -195,8 +160,9 @@ assert.match(harnessPrompt, /unless the owner explicitly supplied harness, model
 assert.match(harnessPrompt, /explicit owner choices win/i);
 for (const mechanic of [
   "user-harness-preferences.md",
-  "get_harness_details",
-  "manage_delegated_baseline",
+  "oo harness details",
+  "oo harness propose",
+  "oo harness approve",
   "Task roles",
   "allowance",
 ]) {
@@ -215,7 +181,7 @@ const delegationSelectionSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "select-harness-for-delegation", "SKILL.md"),
   "utf8",
 );
-for (const operation of ["get_harness_details", "manage_delegated_baseline", "oo runs delegate"]) {
+for (const operation of ["oo harness details", "oo harness propose", "oo harness approve", "oo runs delegate"]) {
   assert.match(delegationSelectionSkill, new RegExp(`\\b${operation}\\b`),
     `the selection workflow invokes ${operation}`);
 }

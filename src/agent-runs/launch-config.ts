@@ -48,7 +48,7 @@ export function resolveAgentRunLaunch(
   if (!model) {
     throw new Error(
       `no approved delegated baseline for ${harness}: pin a model on this call, or discover a ` +
-      "candidate and have the owner approve it with manage_delegated_baseline",
+      "candidate with `oo harness propose` and have the owner approve it with `oo harness approve`",
     );
   }
   const effort = Object.hasOwn(pins, "effort") ? pins.effort ?? null : baseline?.effort ?? null;

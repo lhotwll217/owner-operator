@@ -5,6 +5,10 @@ import {
   HARNESS_OBSERVATION_STAGE_TIMEOUT_MS,
   type AgentRun,
   type AgentRunCreateInput,
+  type AgentRunHarness,
+  type DelegatedBaseline,
+  type DelegatedBaselineApproval,
+  type DelegatedBaselineProposalResponse,
   type AgentRunLogRecord,
   type DaemonHealth,
   type DaemonInfo,
@@ -255,6 +259,17 @@ export async function connectGateway(onUnavailable: () => void = () => undefined
       "/harness-details",
       request,
       HARNESS_DETAILS_REQUEST_TIMEOUT_MS,
+    ),
+    // Discovery opens one disposable harness session under the same bounded stages as details.
+    proposeBaseline: (harness: AgentRunHarness) => post<DelegatedBaselineProposalResponse>(
+      "/harness-baseline/propose",
+      { harness },
+      HARNESS_DETAILS_REQUEST_TIMEOUT_MS,
+    ),
+    approveBaseline: (harness: AgentRunHarness, approval: DelegatedBaselineApproval) => post<DelegatedBaseline>(
+      "/harness-baseline/approve",
+      { harness, ...approval },
+      MUTATION_REQUEST_MS,
     ),
     sessionSearch: (request: SessionSearchRequest) => post<SessionSearchResult>(
       "/session-search",

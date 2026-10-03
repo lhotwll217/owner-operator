@@ -47,8 +47,6 @@ try {
   assert.equal(config.expandedPreviewMaxLines, 0, "expanded results remain fully raw instead of truncating");
   assert.equal(config.customToolOverrides.use_worktree.kind, "generic");
   assert.deepEqual(Object.keys(config.customToolOverrides).sort(), [
-    "get_harness_details",
-    "manage_delegated_baseline",
     "use_worktree",
   ], "every OO custom tool opts into package-owned generic rendering");
 

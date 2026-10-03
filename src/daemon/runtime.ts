@@ -16,6 +16,7 @@ import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/ex
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
 import { deriveParentAgentStateWithEnvironment } from "../agent-runs/agent-state-projection";
 import { readHarnessDetails } from "../agent-runs/harness-details";
+import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
 import { runSessionSearch } from "../session-search/run";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
@@ -30,8 +31,8 @@ export interface DaemonOptions {
   monitor?: SessionMonitorOptions;
   scheduler?: SchedulerOptions;
   agentRuns?: AgentRunExecutorOptions;
-  /** Injectable for tests; production observes real harnesses in this process. */
-  harness?: GatewayHarness;
+  /** Injectable for tests and evals; each omitted operation observes real harnesses in this process. */
+  harness?: Partial<GatewayHarness>;
   watch?: boolean;
   fingerprintIntervalMs?: number;
   enableEnrichment?: boolean;
@@ -135,7 +136,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       subscribeLog: (listener) => state.subscribeAgentRunLog(listener),
     },
     // Probe sessions spawn here, under the same leased launcher seam whose orphans startup reaps.
-    harness: options.harness ?? { details: (request) => readHarnessDetails(request) },
+    harness: {
+      details: options.harness?.details ?? ((request) => readHarnessDetails(request)),
+      propose: options.harness?.propose ?? ((harness) => proposeDelegatedBaseline(harness)),
+    },
     search: { run: (request) => runSessionSearch(request) },
     worktrees: {
       use: (request) => worktrees.use(request),

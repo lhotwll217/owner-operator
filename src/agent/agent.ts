@@ -31,12 +31,7 @@ import {
   permissionSystemExtensionPath,
 } from "./permission-settings";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import {
-  configuredOwnerOperatorTools,
-  createOwnerOperatorCustomTools,
-  ownerOperatorCustomTools,
-  type OwnerOperatorHarnessAdapters,
-} from "./tools";
+import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
 import { createOwnerOperatorToolDisplayExtension } from "./tool-display";
 import { callerSessionId } from "../shared/caller-session";
 import { rootHelp } from "../cli/help";
@@ -64,7 +59,6 @@ export interface OwnerOperatorSessionOptions {
   toolsAllow?: readonly AgentToolId[];
   credentials?: CredentialStore;
   piServices?: OwnerOperatorPiServices;
-  harnessAdapters?: OwnerOperatorHarnessAdapters;
 }
 
 export interface OwnerOperatorPiServices {
@@ -149,11 +143,8 @@ export async function createOwnerOperatorSession(
     ?? await ownerOperatorPiServices(undefined, opts.credentials);
   configurePermissionSystemEnvironment(paths);
   const configuredTools = configuredOwnerOperatorTools(paths.home);
-  const productionCustomTools = opts.harnessAdapters
-    ? createOwnerOperatorCustomTools(opts.harnessAdapters)
-    : ownerOperatorCustomTools;
   // The read-only eval arm reads state through `oo` from bash; its grader forbids mutating verbs.
-  const customTools = baselinePrompt || evalReadOnly ? [] : productionCustomTools;
+  const customTools = baselinePrompt || evalReadOnly ? [] : ownerOperatorCustomTools;
   const tools = baselinePrompt
     ? ["read", "bash"]
     : opts.toolsAllow

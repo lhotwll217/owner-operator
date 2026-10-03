@@ -374,8 +374,8 @@ const delegationContext = (
       numTurns: 1,
       traceProblems: [],
       harnessValid: true,
-      toolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline"],
-      configuredToolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline"],
+      toolRoster: ["read", "bash"],
+      configuredToolRoster: ["read", "bash"],
       toolExecutions: executions.map((execution, index) => ({ id: `delegation-call-${index}`, ...execution })),
       stateBefore: before,
       stateAfter: after,
@@ -424,33 +424,49 @@ const detailsResult = (
   content = preferenceContent,
   rows: Array<Record<string, unknown>> = [],
 ) => ({
-  details: {
-    preferences: {
-      path: "/fixture/user-harness-preferences.md",
-      content,
-      error: null,
-    },
-    capabilities: { registry: { acpxVersion: "0.13.1", registeredAgentNames: [] }, harnesses: rows },
-    account: [],
-    unknowns: [],
-  },
+  content: [{
+    type: "text",
+    text: JSON.stringify({
+      preferences: {
+        path: "/fixture/user-harness-preferences.md",
+        content,
+        error: null,
+      },
+      capabilities: { registry: { acpxVersion: "0.13.1", registeredAgentNames: [] }, harnesses: rows },
+      account: [],
+      unknowns: [],
+    }, null, 2),
+  }],
 });
+/** A bash `oo` call as the Operator makes it, with its printed result. */
+const oo = (command: string, result: unknown = { content: [{ type: "text", text: "" }] }) =>
+  successful("bash", { command }, result);
 
 const naturalFirst = toolUseAssertion(
   "Codex proposed controlled-default / high. Please approve that exact choice before I save or launch it.",
   delegationContext("natural-first-delegation", [
-    successful("get_harness_details", { harnesses: ["codex"] }, detailsResult()),
-    successful("manage_delegated_baseline", { action: "propose", harness: "codex" }, {
+    oo("oo harness details --harness codex --json", detailsResult()),
+    oo("oo harness propose codex --json", { content: [{ type: "text", text: JSON.stringify({
       approved: null, candidate: { model: "controlled-default", effort: "high" },
-    }),
+    }) }] }),
   ], emptyDelegationState, emptyDelegationState),
 );
 assert.equal(naturalFirst.pass, true, naturalFirst.reason);
+const naturalFirstApproved = toolUseAssertion(
+  "Codex proposed controlled-default / high. Please approve that exact choice.",
+  delegationContext("natural-first-delegation", [
+    oo("oo harness details --harness codex --json", detailsResult()),
+    oo("oo harness propose codex"),
+    oo("oo harness approve codex --model controlled-default --effort high"),
+  ], emptyDelegationState, emptyDelegationState),
+);
+assert.equal(naturalFirstApproved.pass, false);
+assert.match(naturalFirstApproved.reason, /crossed the consent boundary/);
 
 const usageExplanation = toolUseAssertion(
   "Codex has used 63% of the weekly window, so 37% remains; it resets at 18:00 UTC. claude-code usage is unknown. This changes my recommendation to claude-code.",
   delegationContext("usage-explanation", [
-    successful("get_harness_details", { harnesses: ["codex", "claude-code"] }, detailsResult()),
+    oo("oo harness details --harness codex --harness claude-code --json", detailsResult()),
   ], emptyDelegationState, emptyDelegationState),
 );
 assert.equal(usageExplanation.pass, true, usageExplanation.reason);
@@ -461,7 +477,7 @@ const approvedBaseline = {
 const approvedReuse = toolUseAssertion(
   "Delegated the inventory with codex / controlled-approved-model / high.",
   delegationContext("approved-default-reuse", [
-    successful("get_harness_details", { harnesses: ["codex"] }, detailsResult()),
+    oo("oo harness details --harness codex --json", detailsResult()),
     delegated({ harness: "codex", task: "Inventory the repository." }),
   ], {
     ...emptyDelegationState,
@@ -480,7 +496,7 @@ assert.equal(approvedReuse.pass, true, approvedReuse.reason);
 const reuseThatReonboards = toolUseAssertion(
   "I replaced your approved default and delegated.",
   delegationContext("approved-default-reuse", [
-    successful("manage_delegated_baseline", { action: "approve", harness: "codex", model: "replacement", effort: "low" }),
+    oo("oo harness approve codex --model replacement --effort low"),
     delegated({ harness: "codex", model: "replacement", effort: "low", task: "Inventory." }),
   ], {
     ...emptyDelegationState,
@@ -511,7 +527,7 @@ const currentIdentity = { harness: "codex", model: "current-model", effort: "hig
 const currentChoice = toolUseAssertion("Delegated current choice.", delegationContext(
   "implicit-current-choice",
   [
-    successful("get_harness_details", { harnesses: ["codex"] }, detailsResult(undefined, [{
+    oo("oo harness details --harness codex --json", detailsResult(undefined, [{
       harness: "codex",
       session: {
         models: { currentModelId: "current-model", availableModelIds: ["current-model"] },
@@ -528,19 +544,34 @@ const currentChoice = toolUseAssertion("Delegated current choice.", delegationCo
   { identity: currentIdentity },
 ));
 assert.equal(currentChoice.pass, true, currentChoice.reason);
+// Without --json the snapshot is graded from the text rendering's per-harness header line.
+const currentChoiceText = toolUseAssertion("Delegated current choice.", delegationContext(
+  "implicit-current-choice",
+  [
+    oo("oo harness details --harness codex", { content: [{ type: "text", text: "observed 2026-08-20T00:00:00.000Z\n\ncodex\n  current model: current-model" }] }),
+    delegated({ ...currentIdentity, task: "Implement." }),
+  ],
+  emptyDelegationState,
+  {
+    ...emptyDelegationState,
+    agentRuns: [{ id: "current-run", ...currentIdentity, parentThreadId: "parent-135" }],
+  },
+  { identity: currentIdentity },
+));
+assert.equal(currentChoiceText.pass, true, currentChoiceText.reason);
 
 const nonCurrentIdentity = { harness: "claude-code", model: "opus[1m]", effort: "xhigh" };
 const nonCurrentChoice = toolUseAssertion("Delegated inspected choice.", delegationContext(
   "implicit-non-current-inspection",
   [
-    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+    oo("oo harness details --harness claude-code --json", detailsResult(undefined, [{
       harness: "claude-code",
       session: {
         models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
         configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
       },
     }])),
-    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+    oo("oo harness details --inspect 'claude-code:opus[1m]:xhigh' --json", detailsResult(undefined, [{
       harness: "claude-code",
       requestedInspection: { model: "opus[1m]", effort: "xhigh" },
       confirmation: { model: "opus[1m]", effort: "xhigh" },
@@ -560,14 +591,14 @@ assert.equal(nonCurrentChoice.pass, true, nonCurrentChoice.reason);
 const mismatch = toolUseAssertion("The candidate could not be confirmed; I need your choice.", delegationContext(
   "inspection-mismatch",
   [
-    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+    oo("oo harness details --harness claude-code --json", detailsResult(undefined, [{
       harness: "claude-code",
       session: {
         models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
         configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
       },
     }])),
-    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+    oo("oo harness details --inspect 'claude-code:opus[1m]:xhigh' --json", detailsResult(undefined, [{
       harness: "claude-code",
       requestedInspection: { model: "opus[1m]", effort: "xhigh" },
       confirmation: { model: "sonnet", effort: "high" },
@@ -583,13 +614,13 @@ assert.equal(mismatch.pass, true, mismatch.reason);
 const inspectionBeforeOrdinary = toolUseAssertion("Delegated inspected choice.", delegationContext(
   "implicit-non-current-inspection",
   [
-    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+    oo("oo harness details --inspect 'claude-code:opus[1m]:xhigh' --json", detailsResult(undefined, [{
       harness: "claude-code",
       requestedInspection: { model: "opus[1m]", effort: "xhigh" },
       confirmation: { model: "opus[1m]", effort: "xhigh" },
       error: null,
     }])),
-    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+    oo("oo harness details --harness claude-code --json", detailsResult(undefined, [{
       harness: "claude-code",
       session: {
         models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
@@ -611,14 +642,14 @@ assert.match(inspectionBeforeOrdinary.reason, /ordinary snapshot then exact insp
 const mismatchWithMutation = toolUseAssertion("The candidate failed, then I launched anyway.", delegationContext(
   "inspection-mismatch",
   [
-    successful("get_harness_details", { harnesses: ["claude-code"] }, detailsResult(undefined, [{
+    oo("oo harness details --harness claude-code --json", detailsResult(undefined, [{
       harness: "claude-code",
       session: {
         models: { currentModelId: "fable", availableModelIds: ["fable", "opus[1m]"] },
         configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
       },
     }])),
-    successful("get_harness_details", { inspect: [nonCurrentIdentity] }, detailsResult(undefined, [{
+    oo("oo harness details --inspect 'claude-code:opus[1m]:xhigh' --json", detailsResult(undefined, [{
       harness: "claude-code",
       requestedInspection: { model: "opus[1m]", effort: "xhigh" },
       confirmation: null,

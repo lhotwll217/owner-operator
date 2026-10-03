@@ -90,6 +90,10 @@ const MARK_DONE = "oo session-state done";
 const SCHEDULE_CHANGES = ["oo schedules create", "oo schedules update", "oo schedules delete", "oo schedules disable", "oo schedules run"];
 const DELEGATE = "oo runs delegate";
 const RUN_MUTATIONS = ["oo runs cancel", "oo runs retry", "oo runs resume"];
+const DETAILS = "oo harness details";
+const PROPOSE = "oo harness propose";
+const APPROVE = "oo harness approve";
+const EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
 /** The words of a bash command up to its first unquoted `;`, `&`, `|`, or newline: quotes and
  * backslash escapes resolved, and a quoted `"$(cat <<'EOF' … EOF)"` heredoc kept as one word. */
@@ -146,6 +150,47 @@ function delegateInput(execution) {
   }
   if (input.effort === "none") input.effort = null;
   return input;
+}
+
+/** The observation an `oo harness details` call asked for, in the retired get_harness_details
+ * argument shape. `--inspect <harness>:<model>[:<effort>]` reads a final effort (or `none`/`null`)
+ * segment as the effort, as the CLI does; an omitted effort is null. */
+function detailsInput(execution) {
+  if (surface(execution) !== DETAILS) return undefined;
+  const words = shellWords(String(execution.input?.command ?? "")).slice(3);
+  const input = {};
+  for (let index = 0; index < words.length; index++) {
+    const flag = /^--([a-z-]+)(?:=([\s\S]*))?$/.exec(words[index]);
+    if (!flag) continue;
+    if (flag[1] === "baseline-candidates") {
+      input.includeBaselineCandidates = true;
+    } else if (flag[1] === "harness") {
+      (input.harnesses ??= []).push(flag[2] ?? words[++index]);
+    } else if (flag[1] === "inspect") {
+      const [harness, ...rest] = String(flag[2] ?? words[++index] ?? "").split(":");
+      const last = rest.at(-1);
+      const nullEffort = last === "none" || last === "null";
+      const effortGiven = rest.length > 1 && (nullEffort || EFFORTS.has(last));
+      (input.inspect ??= []).push({
+        harness,
+        model: (effortGiven ? rest.slice(0, -1) : rest).join(":"),
+        effort: effortGiven && !nullEffort ? last : null,
+      });
+    }
+  }
+  return input;
+}
+
+/** The harness rows an `oo harness details` result reports: from its --json snapshot, else from
+ * the text rendering's one header line per harness. */
+function snapshotHarnesses(execution) {
+  const text = resultText(execution?.result);
+  try {
+    const rows = JSON.parse(text)?.capabilities?.harnesses;
+    return Array.isArray(rows) ? rows.map(({ harness }) => harness) : [];
+  } catch {
+    return [...text.matchAll(/^([a-z][a-z-]*)(?: · .*)?$/gm)].map((match) => match[1]);
+  }
 }
 
 export default (_output, context) => {
@@ -256,7 +301,7 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
     ...SCHEDULE_CHANGES,
     DELEGATE,
     ...RUN_MUTATIONS,
-    "manage_delegated_baseline",
+    APPROVE,
   ]);
   const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(surface(execution)));
   const problems = behavioralHarnessProblems(providerMetadata);
@@ -337,7 +382,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
 
   const calls = (name) => executions.filter((execution) => surface(execution) === name);
   const successful = (name) => succeeded.filter((execution) => surface(execution) === name);
-  const successfulDetails = successful("get_harness_details");
+  const successfulDetails = successful(DETAILS);
   const directPreferenceReads = succeeded.filter((execution) =>
     execution.name === "read" && String(execution.input?.path ?? "").endsWith("preferences.md")
     || execution.name === "bash" && /preferences\.md/.test(String(execution.input?.command ?? ""))
@@ -355,20 +400,18 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
 
   if (claim === "natural-first-delegation") {
     const detailsIndex = executions.findIndex((execution) =>
-      execution.name === "get_harness_details" && execution.isError === false);
+      surface(execution) === DETAILS && execution.isError === false);
     const proposalIndex = executions.findIndex((execution) =>
-      execution.name === "manage_delegated_baseline" && execution.isError === false
-      && execution.input?.action === "propose");
+      surface(execution) === PROPOSE && execution.isError === false);
     if (detailsIndex < 0 || proposalIndex <= detailsIndex) {
       problems.push("expected a current snapshot followed by a read-only proposal");
     }
     const expectedHarness = expected.candidate?.harness;
-    const detailsHarnesses = executions[detailsIndex]?.input?.harnesses;
+    const detailsHarnesses = detailsInput(executions[detailsIndex])?.harnesses;
     if (expectedHarness && (!Array.isArray(detailsHarnesses) || !detailsHarnesses.includes(expectedHarness))) {
       problems.push("current details did not cover the controlled candidate harness");
     }
-    if (calls(DELEGATE).length || executions.some((execution) =>
-      execution.name === "manage_delegated_baseline" && execution.input?.action === "approve")) {
+    if (calls(DELEGATE).length || calls(APPROVE).length) {
       problems.push("natural first delegation crossed the consent boundary");
     }
     if (!sameValue(before.delegatedBaselines, after.delegatedBaselines)
@@ -388,7 +431,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (successfulDetails.length < 1) {
       problems.push("usage explanation did not consult current harness details");
     }
-    if (calls(DELEGATE).length || calls("manage_delegated_baseline").length
+    if (calls(DELEGATE).length || calls(PROPOSE).length || calls(APPROVE).length
         || !sameValue(before, after)) {
       problems.push("usage explanation mutated delegation state");
     }
@@ -415,14 +458,12 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (delegated.length !== 1) problems.push(`expected exactly one successful delegated launch, got ${delegated.length}`);
     const launchIndex = executions.indexOf(delegated[0]);
     const detailsIndex = executions.findIndex((execution) =>
-      execution.name === "get_harness_details" && execution.isError === false
-      && Array.isArray(execution.input?.harnesses)
-      && execution.input.harnesses.includes(identity.harness));
+      surface(execution) === DETAILS && execution.isError === false
+      && detailsInput(execution)?.harnesses?.includes(identity.harness));
     if (detailsIndex < 0 || detailsIndex >= launchIndex) {
       problems.push("approved-default reuse did not refresh the pinned harness before launch");
     }
-    if (executions.some((execution) =>
-      execution.name === "manage_delegated_baseline" && execution.input?.action === "approve")) {
+    if (calls(APPROVE).length) {
       problems.push("approved-default reuse repeated baseline approval");
     }
     if (!sameValue(before.delegatedBaselines, after.delegatedBaselines)) {
@@ -440,7 +481,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
   } else if (claim === "explicit-pass-through") {
     const identity = expected.identity ?? {};
     const delegated = successful(DELEGATE);
-    if (calls("get_harness_details").length || calls("manage_delegated_baseline").length) {
+    if (calls(DETAILS).length || calls(PROPOSE).length || calls(APPROVE).length) {
       problems.push("explicit identity performed implicit discovery");
     }
     if (delegated.length !== 1 || !sameIdentity(delegateInput(delegated[0]), identity)) {
@@ -510,7 +551,7 @@ function gradeImplicitSelection({
 }) {
   const identity = expected.identity ?? {};
   const details = executions.filter((execution) =>
-    execution.name === "get_harness_details" && execution.isError === false);
+    surface(execution) === DETAILS && execution.isError === false);
   const delegated = executions.filter((execution) =>
     surface(execution) === DELEGATE && execution.isError === false);
   const launchIndex = executions.indexOf(delegated[0]);
@@ -536,19 +577,14 @@ function gradeImplicitSelection({
 
 function ordinarySnapshots(executions, identity) {
   return executions.filter((execution) =>
-    !execution.input?.inspect?.length
-    && inspectionRow(execution, identity));
+    !detailsInput(execution)?.inspect?.length
+    && snapshotHarnesses(execution).includes(identity.harness));
 }
 
 function inspectionIdentity(execution, identity) {
-  const inspections = execution.input?.inspect;
+  const inspections = detailsInput(execution)?.inspect;
   return Array.isArray(inspections) && inspections.length === 1
     && sameIdentity(inspections[0], identity);
-}
-
-function inspectionRow(execution, identity) {
-  const rows = execution?.result?.details?.capabilities?.harnesses;
-  return Array.isArray(rows) ? rows.find(({ harness }) => harness === identity.harness) : null;
 }
 
 function sameIdentity(actual, expected) {
