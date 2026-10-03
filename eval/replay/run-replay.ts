@@ -78,7 +78,7 @@ const liveOoHome = join(homedir(), ".owner-operator");
 // owner's live stores; the sandbox blacklist is what denies them.
 // Both arms answer on the same model at the same reasoning level, pinned here rather than
 // inherited, so a settings change between runs cannot masquerade as a code difference.
-const MODEL = { defaultProvider: "openai-codex", defaultModel: "gpt-5.6-sol", defaultThinkingLevel: "low" as const };
+const MODEL = { defaultProvider: "openai-codex", defaultModel: "gpt-6-sol", defaultThinkingLevel: "low" as const };
 const armRoot = resolve(join(import.meta.dirname, "..", ".."));
 const otherCheckouts = [join(homedir(), "Development", "owner-operator"), "/opt/homebrew/lib/node_modules"];
 
