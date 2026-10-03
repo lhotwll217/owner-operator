@@ -39,7 +39,10 @@ try {
     harness: {
       details: async (request) => {
         requests.push(request);
-        return { observedAt: "2026-09-23T00:00:00.000Z", ephemeral: true, echo: request, capabilities: { harnesses: [] }, account: [], unknowns: [] };
+        const harnesses = request.includeBaselineCandidates
+          ? [{ harness: "codex", baselineCandidate: { model: "cand-model", effort: null, availableEfforts: ["low", "high"] } }]
+          : [];
+        return { observedAt: "2026-09-23T00:00:00.000Z", ephemeral: true, echo: request, capabilities: { harnesses }, account: [], unknowns: [] };
       },
       propose: async (harness) => {
         proposals.push(harness);
@@ -66,10 +69,14 @@ try {
   } as HarnessDetailsRequest;
   assert.deepEqual(requests[0], input, "the CLI sends the parsed request; an omitted effort is null and model colons survive");
   assert.deepEqual(JSON.parse(cli.stdout).echo, input, "--json prints the route's snapshot unchanged");
+  const candidateText = await runOo(["harness", "details", "--harness", "codex", "--baseline-candidates"]);
+  assert.equal(candidateText.status, 0, candidateText.stderr);
+  assert.match(candidateText.stdout, /baseline candidate: cand-model effort=null \(efforts: low, high\)/,
+    "text output shows the candidate --baseline-candidates asked for");
 
   const unknown = await runOo(["harness", "details", "--harness", "nope"]);
   assert.equal(unknown.status, 2, "an unknown harness is a usage error before any observation");
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2, "the unknown harness made no request");
 
   const baselinePath = join(ownerOperatorPaths(ooHome).delegatedBaselines, "codex.json");
   const proposed = await runOo(["harness", "propose", "codex", "--json"]);

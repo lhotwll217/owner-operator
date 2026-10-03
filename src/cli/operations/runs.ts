@@ -33,7 +33,7 @@ function secondsFlag(name: string, value: unknown, max: number): number | undefi
 const runLine = (run: AgentRun): string => {
   const identity = run.harnessIdentity.observed
     ? `${run.harnessIdentity.model ?? "?"}${run.harnessIdentity.effort ? `/${run.harnessIdentity.effort}` : ""}`
-    : run.model ?? "harness default";
+    : `${run.model ?? "harness default"}${run.effort ? `/${run.effort}` : ""}`;
   return `${run.id}  ${run.status.padEnd(11)} ${run.harness} ${identity}  ${run.task.split("\n", 1)[0]!.slice(0, 80)}`;
 };
 
@@ -78,7 +78,10 @@ async function streamRunLog(id: string, json: boolean, follow: boolean): Promise
       await gateway();
       const { connectGateway } = await import("../../gateway/client");
       const connection = await connectGateway();
-      if (!connection) throw new Error("Owner Operator daemon is not ready");
+      if (!connection) {
+        const message = "Owner Operator daemon is not ready";
+        throw process.env.OO_AGENT === "1" ? new AgentConnectError(message) : new Error(message);
+      }
       try {
         for await (const { seq, record } of connection.agentRunLog(id, { after, follow })) {
           await render(record);
