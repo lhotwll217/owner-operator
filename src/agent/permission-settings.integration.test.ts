@@ -219,7 +219,6 @@ try {
       bash: "ask",
       edit: "ask",
       write: "ask",
-      use_worktree: "ask",
     },
     "every registered tool has an explicit permission classification",
   );

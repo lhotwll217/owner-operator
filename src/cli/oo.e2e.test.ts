@@ -2,11 +2,12 @@
 // model session is built, so this stays hermetic and fast.
 import assert from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
 import { markOnboarded } from "@owner-operator/core";
+import { CALLER_SESSION_ENV } from "../shared/caller-session";
 import { rootHelp } from "./help";
 
 const ooBin = join(repoRoot, "oo");
@@ -15,9 +16,12 @@ process.env.OO_HOME = ooHome; // in-process store seam (the --done seed) targets
 const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: { ...process.env, OO_HOME: ooHome } } as const;
 let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
 
-const runOo = async (args: readonly string[]): Promise<{ status: number | null; stdout: string; stderr: string }> =>
+const runOo = async (
+  args: readonly string[],
+  { cwd = repoRoot, env = process.env }: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> =>
   await new Promise((resolve, reject) => {
-    const child = spawn(ooBin, args, { cwd: repoRoot, env: { ...process.env, OO_HOME: ooHome } });
+    const child = spawn(ooBin, args, { cwd, env: { ...env, OO_HOME: ooHome } });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
@@ -31,7 +35,7 @@ try {
   assert.equal(help.status, 0, `oo --help exits 0 (got ${help.status}; stderr: ${help.stderr})`);
   assert.match(help.stdout, /oo -p \| --prompt/, "top-level help advertises -p");
   assert.match(help.stdout, /oo --continue/, "top-level help advertises --continue");
-  for (const noun of ["session-state", "runs", "schedules", "db", "harness", "search", "skill"]) {
+  for (const noun of ["session-state", "runs", "schedules", "db", "harness", "search", "skill", "worktrees"]) {
     assert.match(help.stdout, new RegExp(`^  oo ${noun}(\\s|$)`, "m"), `top-level help lists the ${noun} noun`);
   }
   assert.match(help.stdout, /^  oo search .*flags only, no verbs/m, "top-level help says search has flags, not verbs");
@@ -169,9 +173,35 @@ try {
   assert.deepEqual(doneOut.alreadyDoneIds, ["e2e-done-1"], "done --json returns the POST /done result");
   assert.match(done.stdout, /done\s+e2e-done-1/, "seeded thread marked done");
   assert.match(done.stdout, /missing\s+ghost-id/, "unknown id reported, not silently dropped");
+
+  // Worktree verbs act for a session: the Operator's own bash, then --from-session, else a usage error.
+  const repository = join(ooHome, "repo");
+  mkdirSync(repository);
+  for (const argv of [["init", "-q"], ["-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"]]) {
+    assert.equal(spawnSync("git", argv, { cwd: repository }).status, 0, `git ${argv.at(-1)}`);
+  }
+  const anonymous = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => name !== "OO_CURRENT_SESSION_ID" && !(CALLER_SESSION_ENV as readonly string[]).includes(name)));
+  const noSession = await runOo(["worktrees", "list"], { env: anonymous });
+  assert.equal(noSession.status, 2, `a worktree verb with no session exits 2 (stderr: ${noSession.stderr})`);
+  assert.match(noSession.stderr, /no session to act for: pass --from-session/);
+  const operatorBash = { ...anonymous, OO_CURRENT_SESSION_ID: "e2e-root" };
+  const created = await runOo(["worktrees", "create", "--repository", ".", "--name", "e2e-wt", "--json"], { cwd: repository, env: operatorBash });
+  assert.equal(created.status, 0, `worktrees create exits 0 (stderr: ${created.stderr})`);
+  const createdOut = JSON.parse(created.stdout) as { action: string; created: boolean; worktree: { id: string; path: string; selected: boolean } };
+  assert.equal(createdOut.action, "create", "create --json returns the POST /worktrees/use payload");
+  assert.equal(createdOut.worktree.selected, true, "create selects the worktree for the Operator session running the bash");
+  assert.equal(daemon.state.selectedWorktree("e2e-root")?.id, createdOut.worktree.id, "selection is durable under the session id");
+  const listedWorktrees = await runOo(["worktrees", "list", "--from-session", "e2e-other"], { env: anonymous });
+  assert.match(listedWorktrees.stdout, new RegExp(`^${createdOut.worktree.id}\\s+available\\s+repo\\s+${createdOut.worktree.path}$`, "m"),
+    "text list shows one line per worktree, unselected for another session");
+  const selected = await runOo(["worktrees", "select", createdOut.worktree.id, "--from-session", "e2e-other"], { env: operatorBash });
+  assert.equal(selected.status, 0, `worktrees select exits 0 (stderr: ${selected.stderr})`);
+  assert.match(selected.stdout, /\sselected\s/, "select reports the selected worktree");
+  assert.equal(daemon.state.selectedWorktree("e2e-other")?.id, createdOut.worktree.id, "--from-session wins over OO_CURRENT_SESSION_ID");
 } finally {
   await daemon?.close();
   rmSync(ooHome, { recursive: true, force: true });
 }
 
-process.stdout.write("ok — oo grammar: help, nouns, -p, session-state list/done over the Gateway; removed spellings and bad resume args exit 2\n");
+process.stdout.write("ok — oo grammar: help, nouns, -p, session-state list/done and worktrees create/list/select over the Gateway; removed spellings and bad resume args exit 2\n");

@@ -23,7 +23,7 @@ Code and agent state have separate roots:
 |---|---|---|
 | Install root | checkout/package | executable code and bundled prompt, tools, and skills |
 | Harness home | `OO_HOME` or `~/.owner-operator` | config, copied credentials/model settings, SQLite, transcripts, logs, daemon files |
-| OO worktrees | `OO_HOME/worktrees/<repository>/<name>` | Git linked worktrees created through `use_worktree` |
+| OO worktrees | `OO_HOME/worktrees/<repository>/<name>` | Git linked worktrees created through `oo worktrees create` |
 | Agent workspace | `OO_HOME/workspace` | persistent `AGENTS.md`, memory, artifacts, and workspace skills |
 | Task cwd | selected OO worktree, otherwise caller/scheduled-run cwd | file and command target for that run |
 
@@ -41,16 +41,18 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
   `tool_call` preflight guard enforces explicit path, repository-name, symlinked-path, and traversal
   blacklists without replacing Pi's built-ins. The same guard injects Owner Operator provenance
   into Bash; Pi still supplies the task cwd.
-- `use_worktree` creates, lists, and selects only worktrees created by Owner Operator. The tool
-  derives the selecting root from Pi's live session context; Git supplies mutable topology facts,
-  while State records creation provenance and one selection per root.
+- `oo worktrees` creates, lists, and selects only worktrees created by Owner Operator, for the
+  session resolved like a delegated run's parent ([cli.md](cli.md)); Git supplies mutable topology
+  facts, while State records creation provenance and one selection per root.
 - Before a root runtime is constructed, the stable OO session ID resolves its current State
   selection through the Gateway and validates the registered path against live Git identity. A
   missing or mismatched selection fails closed and stays recorded for diagnosis. With no selection,
   execution retains the invocation cwd.
 - Pi session headers remain rooted at the install identity used for cross-directory lookup; they do
-  not store task assignment. Interactive selection records a pending runtime change, then replaces
-  the same session and all cwd-bound services after Pi reports the agent run fully settled.
+  not store task assignment. Selection happens in bash, so no tool result signals it: each time Pi
+  reports an interactive agent run fully settled, the runtime resolves the session's selection and,
+  when that cwd differs from its own, replaces the same session and all cwd-bound services
+  (`createWorktreeRuntimeRebindExtension` in [`worktree-runtime.ts`](../src/agent/worktree-runtime.ts)).
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
 - `session-search` uses Pi's native `bash` to run `oo search`; the daemon runs the shared policy

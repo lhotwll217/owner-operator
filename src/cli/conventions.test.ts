@@ -111,7 +111,6 @@ const APP_ONLY: Record<string, string> = {
 
 /** Agent-facing routes with no verb yet; each names the native tool that still covers it. */
 const PENDING: Record<string, string> = {
-  "POST /worktrees/use": "use_worktree selects the Operator session's worktree",
 };
 
 for (const [table, entries] of [["APP_ONLY", APP_ONLY], ["PENDING", PENDING]] as const) {

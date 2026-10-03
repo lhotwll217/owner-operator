@@ -23,7 +23,7 @@ const BLACKLIST_REASON = "Owner Operator privacy blacklist";
 // Keep these explicit defaults aligned with src/agent/tools/index.ts. Unlisted tools safely fall
 // back to the selected mode; the lists identify known reads and risky generic changes separately.
 const READ_SURFACES = ["read", "grep", "find", "ls", "skill"];
-const CHANGE_SURFACES = ["edit", "write", "use_worktree"];
+const CHANGE_SURFACES = ["edit", "write"];
 const MANAGED_SURFACES = [...READ_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
 // The agent reaches Owner Operator through its own CLI (adr/0001-agent-uses-its-own-cli.md),
 // so `oo` is allowed in every mode. Owner rules follow these and win (last match wins), so a rule

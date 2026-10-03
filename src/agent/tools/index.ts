@@ -1,34 +1,12 @@
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { AgentToolId, DEFAULT_TOOL_POSTURE, loadHarnessSettings } from "@owner-operator/core";
-import { createUseWorktreeTool } from "./use-worktree";
 
-export { useWorktreeTool } from "./use-worktree";
+/** Native Operator tools. Every capability is an `oo` verb the Operator runs from bash; a native
+ * tool belongs here only when a UI renders its result (adr/0001-agent-uses-its-own-cli.md). */
+export const ownerOperatorCustomTools: ToolDefinition[] = [];
 
-export interface OwnerOperatorRuntimeAdapters {
-  onWorktreeSelection?: (threadId: string) => void;
-}
-
-export function createOwnerOperatorCustomTools(runtimeAdapters: OwnerOperatorRuntimeAdapters = {}) {
-  return [
-    createUseWorktreeTool({ onSelection: runtimeAdapters.onWorktreeSelection }),
-  ];
-}
-
-export const ownerOperatorCustomTools = createOwnerOperatorCustomTools();
-
-const ownerOperatorTypedTools: readonly AgentToolId[] = [
-  AgentToolId.UseWorktree,
-];
-
-// packages/core/src/permissions.mjs assigns explicit read/change defaults for these known tools.
-// A new tool remains safe if this list grows first: Pi falls back to the selected global mode.
-export const ownerOperatorTools: readonly AgentToolId[] = [
-  ...DEFAULT_TOOL_POSTURE as AgentToolId[],
-  ...ownerOperatorTypedTools,
-];
+export const ownerOperatorTools: readonly AgentToolId[] = [...DEFAULT_TOOL_POSTURE as AgentToolId[]];
 
 export function configuredOwnerOperatorTools(ooHome?: string): readonly AgentToolId[] {
-  return [
-    ...loadHarnessSettings(ooHome).toolPosture as AgentToolId[],
-    ...ownerOperatorTypedTools,
-  ];
+  return [...loadHarnessSettings(ooHome).toolPosture as AgentToolId[]];
 }
