@@ -24,8 +24,8 @@ assert.equal(withEnv({ OO_CURRENT_SESSION_ID: " operator " }, () => parentSessio
   "the Operator's own bash names its session as the parent");
 assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator" }, () => callerSessionId()), undefined,
   "the caller id never reads the Operator's current session");
-assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator", OO_FROM_SESSION: "coder" }, () => parentSessionId("spoofed")), "operator",
-  "inside an Operator, a model-supplied --from-session cannot replace the session's own lineage");
+assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator", OO_FROM_SESSION: "coder" }, () => parentSessionId("flag")), "operator",
+  "inside an Operator, runs follow the Operator session");
 assert.equal(withEnv({ OO_FROM_SESSION: "coder" }, () => parentSessionId("flag")), "flag",
   "outside an Operator, an explicit --from-session wins");
 assert.equal(withEnv({ OO_CURRENT_SESSION_ID: "operator", OO_FROM_SESSION: "coder" }, () => parentSessionId()), "operator",

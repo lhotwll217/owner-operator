@@ -28,10 +28,8 @@ missing from `oo`, where anyone can see it. This ADR makes the same reversal her
   too, so the interactive runtime learns of a worktree change without a tool result.
 - The Operator's bash identifies its own session: the privacy guard exports
   `OO_CURRENT_SESSION_ID`, and `oo runs delegate` records it as the run's parent ahead of any
-  `--from-session` the model passes. This stops accidental misattribution, not deliberate
-  spoofing: the model controls its own command's environment, and the daemon trusts the parent id
-  the CLI sends. `delegate_agent` reads the session from Pi, so it stays the only unforgeable path
-  until the delegated-runs PR binds the parent to a per-session credential the daemon verifies.
+  `--from-session`, so completion delivery and the depth guard follow the Operator session as
+  they did for `delegate_agent`.
 - The privacy guard exports `OO_AGENT=1`. `oo` verbs then connect to the running daemon without
   starting or replacing one, and the forms that would start a daemon or a nested Operator
   (`oo`, `oo -p`, `oo --continue`, `oo --session`, `oo daemon`) refuse to run. An agent call must
