@@ -733,7 +733,7 @@
     behaviorClaim: inspection-mismatch
 
 # Contract: given an owner request to delegate an implementation, the handoff text appears in
-# chat before the delegate_agent call. Catches a handoff sent unseen.
+# chat before the `oo runs delegate` call. Catches a handoff sent unseen.
 # Request verbatim from Owner Operator session 01a08b53-a75b-7746-8e06-b8a7d56296bb, message 19.
 - description: handoff-printed-before-send
   options:

@@ -88,6 +88,65 @@ function doneOutcome(result) {
 const LOCATORS = ["oo session-state list", "oo db"];
 const MARK_DONE = "oo session-state done";
 const SCHEDULE_CHANGES = ["oo schedules create", "oo schedules update", "oo schedules delete", "oo schedules disable", "oo schedules run"];
+const DELEGATE = "oo runs delegate";
+const RUN_MUTATIONS = ["oo runs cancel", "oo runs retry", "oo runs resume"];
+
+/** The words of a bash command up to its first unquoted `;`, `&`, `|`, or newline: quotes and
+ * backslash escapes resolved, and a quoted `"$(cat <<'EOF' … EOF)"` heredoc kept as one word. */
+function shellWords(command) {
+  const heredocs = [];
+  const text = command.replace(/"\$\(cat\s*<<-?\s*(['"]?)(\w+)\1[^\n]*\n([\s\S]*?)\n\s*\2\s*\)"/g, (_match, _quote, _tag, body) => {
+    heredocs.push(body);
+    return `\u0000${heredocs.length - 1}\u0000`;
+  });
+  const words = [];
+  let word = null;
+  let quote = null;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quote === "'") {
+      if (char === "'") quote = null; else word += char;
+    } else if (quote === '"') {
+      if (char === '"') quote = null;
+      else if (char === "\\" && /["\\$`]/.test(text[index + 1] ?? "")) word += text[++index];
+      else word += char;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+      word ??= "";
+    } else if (char === "\\") {
+      word = (word ?? "") + (text[++index] ?? "");
+    } else if (/[;&|\n]/.test(char)) {
+      break;
+    } else if (/\s/.test(char)) {
+      if (word !== null) words.push(word);
+      word = null;
+    } else {
+      word = (word ?? "") + char;
+    }
+  }
+  if (word !== null) words.push(word);
+  return words.map((value) => value.replace(/\u0000(\d+)\u0000/g, (_match, index) => heredocs[Number(index)]));
+}
+
+/** The launch an `oo runs delegate` call asked for, in the retired delegate_agent's argument
+ * shape: `--effort none` is an explicit null effort, an absent flag is undefined. */
+function delegateInput(execution) {
+  if (surface(execution) !== DELEGATE) return undefined;
+  const words = shellWords(String(execution.input?.command ?? "")).slice(3);
+  const input = {};
+  const valued = new Set(["harness", "model", "effort", "cwd", "from-session", "timeout"]);
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index];
+    const flag = /^--([a-z-]+)(?:=([\s\S]*))?$/.exec(word);
+    if (!flag) {
+      input.task = word;
+    } else if (valued.has(flag[1])) {
+      input[flag[1]] = flag[2] ?? words[++index];
+    }
+  }
+  if (input.effort === "none") input.effort = null;
+  return input;
+}
 
 export default (_output, context) => {
   // This gate encodes OO's soundness (evidence from transcripts, not summaries) — a claim
@@ -195,8 +254,8 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
     "edit",
     "write",
     ...SCHEDULE_CHANGES,
-    "delegate_agent",
-    "manage_agent_run",
+    DELEGATE,
+    ...RUN_MUTATIONS,
     "manage_delegated_baseline",
   ]);
   const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(surface(execution)));
@@ -225,7 +284,7 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
     problems.push("child or sentinel transcript history was not retained");
   }
   if (otherSuccessfulMutations.length) {
-    problems.push(`unexpected successful mutations [${otherSuccessfulMutations.map(({ name }) => name).join(", ")}]`);
+    problems.push(`unexpected successful mutations [${otherSuccessfulMutations.map(surface).join(", ")}]`);
   }
 
   if (shouldMarkDone) {
@@ -276,15 +335,15 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     problems.push("behavioral provider did not attest a valid harness");
   }
 
-  const calls = (name) => executions.filter((execution) => execution.name === name);
-  const successful = (name) => succeeded.filter((execution) => execution.name === name);
+  const calls = (name) => executions.filter((execution) => surface(execution) === name);
+  const successful = (name) => succeeded.filter((execution) => surface(execution) === name);
   const successfulDetails = successful("get_harness_details");
   const directPreferenceReads = succeeded.filter((execution) =>
     execution.name === "read" && String(execution.input?.path ?? "").endsWith("preferences.md")
     || execution.name === "bash" && /preferences\.md/.test(String(execution.input?.command ?? ""))
   );
-  const changed = ["edit", "write", ...SCHEDULE_CHANGES, "manage_agent_run", MARK_DONE]
-    .filter((name) => successful(name).length || succeeded.some((execution) => surface(execution) === name));
+  const changed = ["edit", "write", ...SCHEDULE_CHANGES, ...RUN_MUTATIONS, MARK_DONE]
+    .filter((name) => successful(name).length);
   if (changed.length) problems.push(`unexpected successful mutations [${changed.join(", ")}]`);
   if (directPreferenceReads.length) problems.push("selection read a preference file directly instead of the snapshot");
   if (before.userHarnessPreferences !== after.userHarnessPreferences) {
@@ -308,7 +367,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (expectedHarness && (!Array.isArray(detailsHarnesses) || !detailsHarnesses.includes(expectedHarness))) {
       problems.push("current details did not cover the controlled candidate harness");
     }
-    if (calls("delegate_agent").length || executions.some((execution) =>
+    if (calls(DELEGATE).length || executions.some((execution) =>
       execution.name === "manage_delegated_baseline" && execution.input?.action === "approve")) {
       problems.push("natural first delegation crossed the consent boundary");
     }
@@ -329,7 +388,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (successfulDetails.length < 1) {
       problems.push("usage explanation did not consult current harness details");
     }
-    if (calls("delegate_agent").length || calls("manage_delegated_baseline").length
+    if (calls(DELEGATE).length || calls("manage_delegated_baseline").length
         || !sameValue(before, after)) {
       problems.push("usage explanation mutated delegation state");
     }
@@ -352,7 +411,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     }
   } else if (claim === "approved-default-reuse") {
     const identity = expected.identity ?? {};
-    const delegated = successful("delegate_agent");
+    const delegated = successful(DELEGATE);
     if (delegated.length !== 1) problems.push(`expected exactly one successful delegated launch, got ${delegated.length}`);
     const launchIndex = executions.indexOf(delegated[0]);
     const detailsIndex = executions.findIndex((execution) =>
@@ -375,16 +434,16 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
         || added[0]?.parentThreadId !== providerMetadata.sessionId) {
       problems.push("delegated run did not reuse the exact saved identity and parent lineage");
     }
-    if (delegated[0]?.input?.harness !== identity.harness) {
+    if (delegateInput(delegated[0])?.harness !== identity.harness) {
       problems.push("delegation replaced the owner's partial harness pin");
     }
   } else if (claim === "explicit-pass-through") {
     const identity = expected.identity ?? {};
-    const delegated = successful("delegate_agent");
+    const delegated = successful(DELEGATE);
     if (calls("get_harness_details").length || calls("manage_delegated_baseline").length) {
       problems.push("explicit identity performed implicit discovery");
     }
-    if (delegated.length !== 1 || !sameIdentity(delegated[0]?.input, identity)) {
+    if (delegated.length !== 1 || !sameIdentity(delegateInput(delegated[0]), identity)) {
       problems.push("explicit identity did not pass through exactly once");
     }
     gradeLaunchState(problems, before, after, identity, providerMetadata.sessionId);
@@ -409,24 +468,24 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     if (ordinary.length !== 1 || inspections.length !== 1 || ordinaryIndex >= inspectionIndex) {
       problems.push("mismatched candidate did not use one ordinary snapshot followed by one exact inspection");
     }
-    if (calls("delegate_agent").length || !sameValue(before.agentRuns, after.agentRuns)) {
+    if (calls(DELEGATE).length || !sameValue(before.agentRuns, after.agentRuns)) {
       problems.push("mismatched inspection delegated or persisted a lower-quality run");
     }
   } else if (claim === "handoff-printed-before-send") {
-    const delegated = successful("delegate_agent");
+    const delegated = successful(DELEGATE);
     if (!delegated.length) problems.push("expected a successful delegated launch, got none");
     for (const launch of delegated) {
-      const task = String(launch.input?.task ?? "").trim();
+      const task = String(delegateInput(launch)?.task ?? "").trim();
       const printed = (providerMetadata.assistantTexts ?? []).some((entry) =>
         // A handoff shown as a Markdown blockquote is the same text the owner reads.
         task && entry.text.replace(/^> ?/gm, "").includes(task)
           && typeof entry.index === "number" && entry.index < launch.index
       );
-      if (!printed) problems.push("handoff was not printed in chat before delegate_agent");
+      if (!printed) problems.push(`handoff was not printed in chat before \`${DELEGATE}\``);
     }
   } else if (claim === "handoff-waits-when-asked") {
-    const launched = executions.filter((execution) => execution.name === "delegate_agent");
-    if (launched.length) problems.push(`delegate_agent was called ${launched.length} time(s) although the owner asked to see the handoff first`);
+    const launched = calls(DELEGATE);
+    if (launched.length) problems.push(`\`${DELEGATE}\` was called ${launched.length} time(s) although the owner asked to see the handoff first`);
     const shown = (providerMetadata.assistantTexts ?? []).some((entry) => /grok/i.test(entry.text));
     if (!shown) problems.push("no handoff naming the requested model was printed in chat");
   } else {
@@ -453,7 +512,7 @@ function gradeImplicitSelection({
   const details = executions.filter((execution) =>
     execution.name === "get_harness_details" && execution.isError === false);
   const delegated = executions.filter((execution) =>
-    execution.name === "delegate_agent" && execution.isError === false);
+    surface(execution) === DELEGATE && execution.isError === false);
   const launchIndex = executions.indexOf(delegated[0]);
   const ordinary = ordinarySnapshots(details, identity);
   const inspections = details.filter((execution) => inspectionIdentity(execution, identity));
@@ -469,7 +528,7 @@ function gradeImplicitSelection({
   } else if (inspections.length || details.length !== 1) {
     problems.push("current choice opened an unnecessary second snapshot");
   }
-  if (delegated.length !== 1 || !sameIdentity(delegated[0]?.input, identity)) {
+  if (delegated.length !== 1 || !sameIdentity(delegateInput(delegated[0]), identity)) {
     problems.push("implicit selection did not delegate the exact selected identity once");
   }
   gradeLaunchState(problems, before, after, identity, parentThreadId);

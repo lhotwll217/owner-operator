@@ -158,12 +158,16 @@ export async function gateway(): Promise<GatewayApi> {
     try {
       return await resolveBackend();
     } catch (cause) {
-      throw new Error(await agentConnectFailure(), { cause });
+      throw new AgentConnectError(await agentConnectFailure(), { cause });
     }
   }
   await (await import("../../daemon/ensure")).ensureDaemon();
   return resolveBackend();
 }
+
+/** An agent's `oo` could not reach the daemon. Agents never start or restart it, so retrying
+ * cannot help; callers that loop on connection drops let this one through. */
+export class AgentConnectError extends Error {}
 
 /** Why an agent could not connect, so it asks the owner for the right thing: a dead daemon, one
  * still starting, or a live one this shell cannot reach (a sandbox, a stale token). */

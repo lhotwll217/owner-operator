@@ -46,19 +46,14 @@ try {
   assert.equal(config.readOutputMode, "summary", "the compact preset keeps raw read output expandable");
   assert.equal(config.expandedPreviewMaxLines, 0, "expanded results remain fully raw instead of truncating");
   assert.equal(config.customToolOverrides.use_worktree.kind, "generic");
-  assert.equal(config.customToolOverrides.delegate_agent.outputMode, "preview",
-    "delegation shows its authoritative compact result in the package-owned block");
   assert.deepEqual(Object.keys(config.customToolOverrides).sort(), [
-    "delegate_agent",
     "get_harness_details",
-    "manage_agent_run",
     "manage_delegated_baseline",
     "use_worktree",
   ], "every OO custom tool opts into package-owned generic rendering");
 
   const read = session.extensionRunner.getToolDefinition("read");
   const query = session.extensionRunner.getToolDefinition("use_worktree");
-  const delegate = session.extensionRunner.getToolDefinition("delegate_agent");
   for (const name of ["read", "grep", "find", "ls", "bash", "edit", "write"]) {
     const tool = session.extensionRunner.getToolDefinition(name);
     assert.equal(typeof tool?.renderCall, "function", `tool-display owns ${name} call rendering`);
@@ -83,15 +78,6 @@ try {
   const expandedQuery = rendered(query!.renderResult!(result as never, { expanded: true, isPartial: false } as never, theme as never, {} as never) as never);
   assert.doesNotMatch(collapsedQuery, /first raw line/, "generic OO results stay compact");
   assert.match(expandedQuery, /first raw line/, "expanded generic OO results retain raw output");
-
-  const delegatedResult = {
-    content: [{ type: "text", text: "Run run-123 · Codex · gpt-5.6-sol · medium · review PR #121 · pending" }],
-  };
-  const collapsedDelegate = rendered(
-    delegate!.renderResult!(delegatedResult as never, { expanded: false, isPartial: false } as never, theme as never, {} as never) as never,
-  );
-  assert.match(collapsedDelegate, /Run run-123 · Codex · gpt-5\.6-sol · medium · review PR #121 · pending/,
-    "delegation renders once with the resolved run identity instead of a second launch component");
 
   const longRawResult = {
     content: [{

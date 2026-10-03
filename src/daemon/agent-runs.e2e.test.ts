@@ -1,13 +1,13 @@
 // End-to-end fixture for issues #69 and #131: drive a delegated run through the whole daemon HTTP
 // surface — launch, observe live state while the parent stays responsive, restart and
 // reconcile to a durable interrupted state, resume to the same child identity, receive the
-// durable result, and cancel a run. It also proves that the active root tool cwd, not the daemon
+// durable result, and cancel a run. It also proves that the Operator shell cwd, not the daemon
 // checkout, becomes the default child workspace and remains immutable across retry/resume.
 // The provider process itself is a controllable fake launcher;
 // the opt-in acp-launcher.live.test.ts drives the same path through real Claude/acpx. The
 // crash-vs-graceful reconciliation on start() is also covered in executor.integration.test.ts.
 import assert from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -21,10 +21,10 @@ import {
   type AgentRunLaunchResult,
   type GatewayEvent,
 } from "@owner-operator/core";
-import { delegateAgentTool } from "../agent/tools/delegate-agent";
 import type { AgentRunLauncher } from "../agent-runs/executor";
 import { connectGateway } from "../gateway/client";
-import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
+import { fakeScanRow, settledAgentRun, tempOoHome, waitFor } from "../gateway/test/helpers";
+import { repoRoot } from "../shared/repo-root";
 import { startDaemon } from "./runtime";
 
 const { dir: ooHome, cleanup } = tempOoHome("oo-agent-runs-e2e");
@@ -131,10 +131,19 @@ const startOnce = () => startDaemon({
 
 let daemon = await startOnce();
 type GatewayConn = NonNullable<Awaited<ReturnType<typeof connectGateway>>>;
+// The Operator's bash, as the privacy guard sets it up: its session id, connect-only `oo`, and the
+// selected worktree as the shell cwd.
 const toolContext = {
   cwd: selectedWorktree,
   sessionManager: { getSessionId: () => "operator-thread" },
-} as Parameters<typeof delegateAgentTool.execute>[4];
+};
+const ooDelegate = (args: string[]) => new Promise<AgentRun>((done, fail) => {
+  execFile(join(repoRoot, "oo"), ["runs", "delegate", "--json", ...args], {
+    cwd: toolContext.cwd,
+    env: { ...process.env, OO_AGENT: "1", OO_CURRENT_SESSION_ID: toolContext.sessionManager.getSessionId() },
+    encoding: "utf8",
+  }, (error, stdout, stderr) => error ? fail(new Error(`${error.message}\n${stderr}`)) : done(JSON.parse(stdout) as AgentRun));
+});
 let gateway: GatewayConn | undefined;
 let gateway2: GatewayConn | undefined;
 try {
@@ -169,20 +178,10 @@ try {
   }, "root execution and edits use the selected worktree");
 
   // --- omitted cwd: active Operator context supplies workspace and parent lineage ----------
-  const launchResult = await delegateAgentTool.execute(
-    "delegate-test",
-    {
-      harness: AgentRunHarness.ClaudeCode,
-      task: "research flaky test",
-    },
-    undefined,
-    undefined,
-    toolContext,
-  );
-  const launched = launchResult.details as AgentRun;
+  const launched = await ooDelegate(["--harness", AgentRunHarness.ClaudeCode, "research flaky test"]);
   assert.equal(launched.status, AgentRunStatus.Pending, "delegate returns before the child runs");
   assert.equal(launched.depth, 1);
-  assert.equal(launched.parentThreadId, "operator-thread", "the Operator tool binds trusted parent lineage");
+  assert.equal(launched.parentThreadId, "operator-thread", "the Operator's bash binds its own session as parent lineage");
   assert.equal(launched.cwd, selectedWorktree, "omitted cwd is recorded from the active root tool context");
   assert.notEqual(launched.cwd, process.cwd(), "omitted cwd never falls back to the daemon process cwd");
   await waitFor(
@@ -223,19 +222,8 @@ try {
   );
   assert.equal((await gateway.listAgentRuns("operator-thread")).length, 1, "runs list by parent thread");
 
-  // --- explicit cwd: the child override remains unchanged through tool → HTTP → ledger -----
-  const explicitResult = await delegateAgentTool.execute(
-    "delegate-explicit-cwd",
-    {
-      harness: AgentRunHarness.ClaudeCode,
-      task: "work in an explicit child directory",
-      cwd: explicitChildCwd,
-    },
-    undefined,
-    undefined,
-    toolContext,
-  );
-  const explicitRun = explicitResult.details as AgentRun;
+  // --- explicit cwd: the child override remains unchanged through oo → HTTP → ledger -------
+  const explicitRun = await ooDelegate(["--harness", AgentRunHarness.ClaudeCode, "--cwd", explicitChildCwd, "work in an explicit child directory"]);
   assert.equal(explicitRun.cwd, explicitChildCwd, "an explicit child cwd is recorded unchanged");
   assert.equal(explicitRun.parentThreadId, "operator-thread", "explicit cwd does not replace parent identity");
   await waitFor(() => parked.some(({ request }) => request.run.id === explicitRun.id), 3_000, "explicit child to start");
@@ -249,7 +237,7 @@ try {
     resultText: "explicit child done",
     error: null,
   });
-  assert.equal((await gateway.waitAgentRun(explicitRun.id, 5)).status, AgentRunStatus.Completed);
+  assert.equal((await settledAgentRun(gateway, explicitRun.id, 5)).status, AgentRunStatus.Completed);
 
   // --- graceful shutdown mid-run leaves a DURABLE interrupted row, never lost -------------
   unsubscribe();
@@ -289,7 +277,7 @@ try {
 
   // --- receive the durable result ---------------------------------------------------------
   parked[0].finish({ status: AgentRunStatus.Completed, resultText: "found the race", error: null });
-  const done = await gateway2.waitAgentRun(retried.id, 5);
+  const done = await settledAgentRun(gateway2, retried.id, 5);
   assert.equal(done.status, AgentRunStatus.Completed);
   assert.equal(done.resultTail, "found the race", "the durable result is delivered through the ledger");
 
@@ -328,7 +316,7 @@ try {
     acpxRecordId: done.acpxRecordId,
   });
   parked[0].finish({ status: AgentRunStatus.Completed, resultText: "owner impact explained", error: null });
-  const resumedDone = await gateway2.waitAgentRun(resumed.id, 5);
+  const resumedDone = await settledAgentRun(gateway2, resumed.id, 5);
   assert.equal(resumedDone.status, AgentRunStatus.Completed);
   assert.equal((await gateway2.agentRun(done.id)).resultTail, "found the race", "resume never mutates the completed run");
 

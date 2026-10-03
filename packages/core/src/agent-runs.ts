@@ -147,11 +147,6 @@ export const AGENT_RUN_MAX_DEPTH = 1;
 export const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 3_600;
 export const MAX_AGENT_RUN_TIMEOUT_SECONDS = 86_400;
 
-/** Bounds for a caller's optional blocking wait on a run (delegate_agent's waitSeconds,
- * manage_agent_run's wait, and the gateway wait route). */
-export const DEFAULT_AGENT_RUN_WAIT_SECONDS = 60;
-export const MAX_AGENT_RUN_WAIT_SECONDS = 3_600;
-
 export interface AgentRunCreateInput {
   harness: AgentRunHarness;
   /** The task the child agent is asked to carry out. */

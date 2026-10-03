@@ -374,8 +374,8 @@ const delegationContext = (
       numTurns: 1,
       traceProblems: [],
       harnessValid: true,
-      toolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent"],
-      configuredToolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline", "delegate_agent"],
+      toolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline"],
+      configuredToolRoster: ["read", "bash", "get_harness_details", "manage_delegated_baseline"],
       toolExecutions: executions.map((execution, index) => ({ id: `delegation-call-${index}`, ...execution })),
       stateBefore: before,
       stateAfter: after,
@@ -397,6 +397,28 @@ const emptyDelegationState = {
 };
 const successful = (name: string, input: Record<string, unknown>, result: unknown = {}) => ({
   name, input, result, isError: false, resultChars: 100,
+});
+/** A bash `oo runs delegate` call as the Operator makes it, answered with the pending row
+ * the CLI prints under OO_AGENT=1. `effort: null` is `--effort none`. */
+const delegated = (
+  { harness, model, effort, task }: { harness: string; model?: string; effort?: string | null; task: string },
+  isError = false,
+) => ({
+  name: "bash",
+  input: {
+    command: `oo runs delegate --harness ${harness}${model ? ` --model '${model}'` : ""}${
+      effort === null ? " --effort none" : effort ? ` --effort ${effort}` : ""} --json "${task}"`,
+  },
+  result: {
+    content: [{
+      type: "text",
+      text: isError
+        ? "oo: no approved delegated baseline"
+        : JSON.stringify({ id: "run-fixture", status: "pending", harness, model: model ?? null, effort: effort ?? null, task }),
+    }],
+  },
+  isError,
+  resultChars: 100,
 });
 const detailsResult = (
   content = preferenceContent,
@@ -440,9 +462,7 @@ const approvedReuse = toolUseAssertion(
   "Delegated the inventory with codex / controlled-approved-model / high.",
   delegationContext("approved-default-reuse", [
     successful("get_harness_details", { harnesses: ["codex"] }, detailsResult()),
-    successful("delegate_agent", {
-      harness: "codex", task: "Inventory the repository.",
-    }),
+    delegated({ harness: "codex", task: "Inventory the repository." }),
   ], {
     ...emptyDelegationState,
     delegatedBaselines: approvedBaseline,
@@ -461,7 +481,7 @@ const reuseThatReonboards = toolUseAssertion(
   "I replaced your approved default and delegated.",
   delegationContext("approved-default-reuse", [
     successful("manage_delegated_baseline", { action: "approve", harness: "codex", model: "replacement", effort: "low" }),
-    successful("delegate_agent", { harness: "codex", model: "replacement", effort: "low", task: "Inventory." }),
+    delegated({ harness: "codex", model: "replacement", effort: "low", task: "Inventory." }),
   ], {
     ...emptyDelegationState,
     delegatedBaselines: approvedBaseline,
@@ -477,7 +497,7 @@ assert.match(reuseThatReonboards.reason, /approved baseline|onboarding|exact sav
 const explicitIdentity = { harness: "codex", model: "owner-model", effort: null };
 const explicitPassThrough = toolUseAssertion("Delegated exactly as requested.", delegationContext(
   "explicit-pass-through",
-  [successful("delegate_agent", { ...explicitIdentity, task: "Review." })],
+  [delegated({ ...explicitIdentity, task: "Review." })],
   emptyDelegationState,
   {
     ...emptyDelegationState,
@@ -498,7 +518,7 @@ const currentChoice = toolUseAssertion("Delegated current choice.", delegationCo
         configOptions: [{ category: "thought_level", options: [{ value: "high" }] }],
       },
     }])),
-    successful("delegate_agent", { ...currentIdentity, task: "Implement." }),
+    delegated({ ...currentIdentity, task: "Implement." }),
   ],
   emptyDelegationState,
   {
@@ -526,7 +546,7 @@ const nonCurrentChoice = toolUseAssertion("Delegated inspected choice.", delegat
       confirmation: { model: "opus[1m]", effort: "xhigh" },
       error: null,
     }])),
-    successful("delegate_agent", { ...nonCurrentIdentity, task: "Review." }),
+    delegated({ ...nonCurrentIdentity, task: "Review." }),
   ],
   emptyDelegationState,
   {
@@ -576,7 +596,7 @@ const inspectionBeforeOrdinary = toolUseAssertion("Delegated inspected choice.",
         configOptions: [{ category: "thought_level", options: [{ value: "xhigh" }] }],
       },
     }])),
-    successful("delegate_agent", { ...nonCurrentIdentity, task: "Review." }),
+    delegated({ ...nonCurrentIdentity, task: "Review." }),
   ],
   emptyDelegationState,
   {
@@ -604,7 +624,7 @@ const mismatchWithMutation = toolUseAssertion("The candidate failed, then I laun
       confirmation: null,
       error: "mismatch",
     }])),
-    { name: "delegate_agent", input: { harness: "claude-code", model: "sonnet", effort: "high" }, isError: true, resultChars: 1 },
+    delegated({ harness: "claude-code", model: "sonnet", effort: "high", task: "Review." }, true),
   ],
   emptyDelegationState,
   { ...emptyDelegationState, delegatedBaselines: { codex: { model: "mutated", effort: "low" } } },
@@ -612,5 +632,22 @@ const mismatchWithMutation = toolUseAssertion("The candidate failed, then I laun
 ));
 assert.equal(mismatchWithMutation.pass, false);
 assert.match(mismatchWithMutation.reason, /baselines changed|delegated or persisted/i);
+
+// The handoff the Operator printed is the task it passed: shell quoting and a heredoc unwrap.
+const handoff = 'Fix the flaky retry test.\nCite the root cause as "file:line".';
+const handoffShown = (command: string) => {
+  const shown = delegationContext("handoff-printed-before-send", [
+    { name: "bash", input: { command }, isError: false, resultChars: 100, index: 2 } as Execution,
+  ], emptyDelegationState, emptyDelegationState);
+  Object.assign(shown.providerResponse.metadata, { assistantTexts: [{ index: 1, text: `Handoff:\n> ${handoff.replace("\n", "\n> ")}` }] });
+  return toolUseAssertion("Delegated.", shown);
+};
+const viaHeredoc = handoffShown(`oo runs delegate --harness codex --effort high "$(cat <<'EOF'\n${handoff}\nEOF\n)"`);
+assert.equal(viaHeredoc.pass, true, viaHeredoc.reason);
+const viaQuotes = handoffShown(`oo runs delegate --harness=codex "${handoff.replaceAll('"', '\\"')}" --json`);
+assert.equal(viaQuotes.pass, true, viaQuotes.reason);
+const reworded = handoffShown(`oo runs delegate --harness codex 'Fix the flaky test.'`);
+assert.equal(reworded.pass, false, "a task that differs from the printed handoff fails");
+assert.match(reworded.reason, /handoff was not printed/);
 
 process.stdout.write("ok — eval tool gate: retrieval policy plus behavioral trajectory/state profiles hold\n");

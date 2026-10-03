@@ -112,8 +112,6 @@ const APP_ONLY: Record<string, string> = {
 /** Agent-facing routes with no verb yet; each names the native tool that still covers it. */
 const PENDING: Record<string, string> = {
   "POST /worktrees/use": "use_worktree selects the Operator session's worktree",
-  "GET /worktrees/resolve-cwd": "delegate_agent resolves its default cwd to the session worktree; `oo runs delegate` defaults to the shell cwd",
-  "POST /agent-runs/:id/wait": "delegate_agent waitSeconds; `oo runs logs --follow` waits by streaming instead",
 };
 
 for (const [table, entries] of [["APP_ONLY", APP_ONLY], ["PENDING", PENDING]] as const) {

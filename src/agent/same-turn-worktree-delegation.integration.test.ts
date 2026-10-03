@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  AgentRunHarness,
   AgentRunStatus,
+  type AgentRun,
   type AgentRunCreateInput,
   type DaemonHealth,
   type DaemonReady,
@@ -16,7 +17,7 @@ import { startGateway } from "../gateway/server";
 import { State } from "../state/state";
 import { GitWorktreeAdapter, type GitRepositoryIdentity } from "../worktrees/git";
 import { WorktreeService } from "../worktrees/worktrees";
-import { createDelegateAgentTool } from "./tools/delegate-agent";
+import { repoRoot } from "../shared/repo-root";
 import { createUseWorktreeTool } from "./tools/use-worktree";
 
 const root = mkdtempSync(join(tmpdir(), "oo-same-turn-worktree-delegation-"));
@@ -86,7 +87,7 @@ const gateway = await startGateway({
   },
   agentRuns: {
     launch(input: AgentRunCreateInput) {
-      ordering.push("delegate_agent");
+      ordering.push("oo runs delegate");
       launches.push(input);
       return agentRunFixture(`run-${launches.length}`, AgentRunStatus.Pending, {
         ...input,
@@ -113,12 +114,22 @@ try {
   const client = await connectGateway();
   assert.ok(client);
   const useWorktree = createUseWorktreeTool({ resolveGateway: async () => client });
-  const delegateAgent = createDelegateAgentTool({ resolveGateway: async () => client });
   let threadId = "same-turn-root";
   const context = {
     cwd: fallbackCwd,
     sessionManager: { getSessionId: () => threadId },
-  } as Parameters<typeof delegateAgent.execute>[4];
+  } as Parameters<typeof useWorktree.execute>[4];
+  // The Operator's bash: the privacy guard exports its session id and OO_AGENT=1, and the shell's
+  // cwd is the turn's pre-selection cwd. Asynchronous, so this process's Gateway can answer.
+  const delegate = (task: string) => new Promise<{ status: number; stderr: string; run: AgentRun | null }>((done) => {
+    const env = { ...process.env, OO_HOME: ooHome, OO_AGENT: "1", OO_CURRENT_SESSION_ID: threadId };
+    execFile(join(repoRoot, "oo"), ["runs", "delegate", "--harness", "codex", "--json", task], {
+      cwd: fallbackCwd, env, encoding: "utf8",
+    }, (error, stdout, stderr) => {
+      const status = error ? Number(error.code ?? 1) : 0;
+      done({ status, stderr, run: status === 0 ? JSON.parse(stdout) as AgentRun : null });
+    });
+  });
 
   const created = await useWorktree.execute("create-worktree", {
     action: "create",
@@ -131,31 +142,25 @@ try {
     "use_worktree persists the exact root selection through Gateway and State");
   assert.equal(context.cwd, fallbackCwd, "the selecting turn still has its pre-selection Pi tool context");
 
-  const delegated = await delegateAgent.execute("delegate-same-turn", {
-    harness: AgentRunHarness.Codex,
-    task: "work in the just-selected checkout",
-  }, undefined, undefined, context);
-  assert.equal(delegated.details.cwd, selectedPath,
+  const delegated = await delegate("work in the just-selected checkout");
+  assert.equal(delegated.status, 0, delegated.stderr);
+  assert.equal(delegated.run?.cwd, selectedPath,
     "omitted child cwd observes the durable selection before post-turn runtime rebind");
   assert.equal(launches[0]?.parentThreadId, threadId, "selection resolution and launch use the exact root identity");
-  assert.deepEqual(ordering, ["use_worktree", "resolve_worktree_cwd", "delegate_agent"],
+  assert.deepEqual(ordering, ["use_worktree", "resolve_worktree_cwd", "oo runs delegate"],
     "selection resolution occurs immediately before same-turn delegation");
 
   git.mismatch = true;
-  await assert.rejects(() => delegateAgent.execute("delegate-mismatched", {
-    harness: AgentRunHarness.Codex,
-    task: "must not fall back after selection mismatch",
-  }, undefined, undefined, context), /selected worktree is unavailable or has changed Git identity/);
+  const mismatched = await delegate("must not fall back after selection mismatch");
+  assert.equal(mismatched.status, 1);
+  assert.match(mismatched.stderr, /selected worktree is unavailable or has changed Git identity/);
   assert.equal(launches.length, 1, "a mismatched durable selection fails closed before launch");
   assert.equal(state.selectedWorktree(threadId)?.path, selectedPath, "failed validation preserves selection for diagnosis");
 
   git.mismatch = false;
   threadId = "unselected-root";
-  const unselected = await delegateAgent.execute("delegate-unselected", {
-    harness: AgentRunHarness.Codex,
-    task: "use the active fallback when no selection exists",
-  }, undefined, undefined, context);
-  assert.equal(unselected.details.cwd, fallbackCwd, "a root without a selection retains ctx.cwd");
+  const unselected = await delegate("use the active fallback when no selection exists");
+  assert.equal(unselected.run?.cwd, realpathSync(fallbackCwd), "a root without a selection retains the shell cwd");
   client.close();
   process.stdout.write("ok — same-turn worktree selection wins for omitted delegated cwd\n");
 } finally {
