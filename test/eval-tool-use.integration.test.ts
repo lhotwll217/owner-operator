@@ -58,6 +58,13 @@ const readOnlyMutation = toolUseAssertion("", context([
 assert.equal(readOnlyMutation.pass, false);
 assert.match(readOnlyMutation.reason, /used forbidden \[oo session-state done\]/);
 
+const readingHelp = toolUseAssertion("", context([
+  locator,
+  { ...locator, input: { command: "oo session-state done --help" } },
+  search(["--query", "event backbone"]),
+]));
+assert.equal(readingHelp.pass, true, `reading a verb's help is not running it: ${readingHelp.reason}`);
+
 const readOnlySchedule = toolUseAssertion("", context([
   locator,
   { ...locator, input: { command: "oo schedules create --name n --prompt p --every 1h" } },

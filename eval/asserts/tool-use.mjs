@@ -46,11 +46,13 @@ function sessionSearchArgs(execution) {
 }
 
 // A bash `oo <noun> <verb>` call counts as that surface ("oo session-state done"), so cases
-// name what the Operator reached the same way they name a native tool.
+// name what the Operator reached the same way they name a native tool. Reading a verb's --help
+// runs nothing, so it stays plain bash.
 function surface(execution) {
   if (execution.name !== "bash") return execution.name;
-  const invocation = /^\s*oo\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(String(execution.input?.command ?? ""));
-  if (!invocation) return execution.name;
+  const command = String(execution.input?.command ?? "");
+  const invocation = /^\s*oo\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(command);
+  if (!invocation || /\s(?:--help|-h)(?=\s|$)/.test(command)) return execution.name;
   return invocation[2] ? `oo ${invocation[1]} ${invocation[2]}` : `oo ${invocation[1]}`;
 }
 

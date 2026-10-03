@@ -50,7 +50,7 @@ completed agent turn alone is not proof that the work is done.
 them; inspect runs with `oo db query` on `schedule_runs`. Each run gets a fresh isolated
 Owner Operator session; the daemon, not the active chat, owns the timer.
 
-**Delegated runs** — `oo runs delegate --harness <h> [--model <m>] [--effort <e>] "<task>"`
+**Delegated runs** — `oo runs delegate --harness <h> [--model <m>] [--effort <e|none>] "<task>"`
 returns the pending row; `oo runs --help` owns the flags and `docs/delegated-runs.md` the runtime
 contract. Completion arrives automatically, so run management is for
 owner-directed lifecycle control or explicit inspection: `oo runs get|cancel|retry <id>`. To continue cancelled work,
