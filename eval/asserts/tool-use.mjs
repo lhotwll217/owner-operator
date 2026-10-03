@@ -216,18 +216,19 @@ export default (_output, context) => {
     );
   }
   const called = new Set(executions.flatMap((execution) => [execution.name, surface(execution)]));
-  const succeeded = executions.filter((execution) => execution.isError === false).map(surface);
+  const succeeded = executions.filter((execution) => execution.isError === false)
+    .flatMap((execution) => [execution.name, surface(execution)]);
   const any = md.expectToolAny ?? [];
-  const forbid = new Set([
-    ...(md.forbidTool ?? []),
-    MARK_DONE,
-    ...SCHEDULE_CHANGES,
-    "edit",
-    "write",
-  ]);
+  // A case's own forbidTool fails on any attempt. State changes fail only when they succeed:
+  // the fixture home denies them, and a denied attempt leaves the shared fixture intact.
+  const stateChanges = [MARK_DONE, ...SCHEDULE_CHANGES, DELEGATE, ...RUN_MUTATIONS,
+    APPROVE, "oo worktrees create", "oo worktrees select", "edit", "write"];
 
   const missingAny = any.length > 0 && !any.some((expected) => succeeded.some((name) => reaches(name, expected)));
-  const usedForbidden = [...forbid].filter((tool) => called.has(tool));
+  const usedForbidden = [
+    ...(md.forbidTool ?? []).filter((tool) => called.has(tool)),
+    ...stateChanges.filter((tool) => succeeded.includes(tool)),
+  ];
   const sessionSearches = executions.flatMap((execution, executionIndex) => {
     if (execution.name !== "bash") return [];
     const args = sessionSearchArgs(execution);
