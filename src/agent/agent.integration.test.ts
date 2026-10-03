@@ -57,7 +57,7 @@ try {
 
   const restricted = await createOwnerOperatorSession("chat", { ephemeral: true, toolsAllow: [] });
   assert.equal(
-    restricted.session.extensionRunner.getToolDefinition("schedule_prompt"),
+    restricted.session.extensionRunner.getToolDefinition("use_worktree"),
     undefined,
     "an empty toolsAllow does not register excluded custom capabilities through tool display",
   );
@@ -169,13 +169,13 @@ assert.throws(
 );
 
 // Posture keeps every standard file/shell tool present; the permission mode decides each operation.
-for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "schedule_prompt", "manage_schedule", "use_worktree"]) {
+for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "use_worktree"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 
 // Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).
 // Built-in privacy enforcement is a tool_call guard, covered by privacy-tools.integration.test.
-for (const t of ["schedule_prompt", "manage_schedule", "use_worktree"]) {
+for (const t of ["use_worktree"]) {
   assert.ok(ownerOperatorCustomTools.some((tool) => tool.name === t), `owner custom tools must include ${t}`);
 }
 

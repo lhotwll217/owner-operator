@@ -6,12 +6,8 @@ import {
   createManageDelegatedBaselineTool,
   type ManageDelegatedBaselineOptions,
 } from "./manage-delegated-baseline";
-import { manageScheduleTool } from "./manage-schedule";
-import { schedulePromptTool } from "./schedule-prompt";
 import { createUseWorktreeTool } from "./use-worktree";
 
-export { manageScheduleTool } from "./manage-schedule";
-export { schedulePromptTool } from "./schedule-prompt";
 export { delegateAgentTool } from "./delegate-agent";
 export { getHarnessDetailsTool } from "./get-harness-details";
 export { manageAgentRunTool } from "./manage-agent-run";
@@ -34,8 +30,6 @@ export function createOwnerOperatorCustomTools(
   runtimeAdapters: OwnerOperatorRuntimeAdapters = {},
 ) {
   return [
-    schedulePromptTool,
-    manageScheduleTool,
     delegateAgentTool,
     manageAgentRunTool,
     createGetHarnessDetailsTool({ read: adapters.readHarnessDetails }),
@@ -47,8 +41,6 @@ export function createOwnerOperatorCustomTools(
 export const ownerOperatorCustomTools = createOwnerOperatorCustomTools();
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
-  AgentToolId.SchedulePrompt,
-  AgentToolId.ManageSchedule,
   AgentToolId.DelegateAgent,
   AgentToolId.ManageAgentRun,
   AgentToolId.GetHarnessDetails,

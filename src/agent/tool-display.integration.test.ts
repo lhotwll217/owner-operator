@@ -53,8 +53,6 @@ try {
     "get_harness_details",
     "manage_agent_run",
     "manage_delegated_baseline",
-    "manage_schedule",
-    "schedule_prompt",
     "use_worktree",
   ], "every OO custom tool opts into package-owned generic rendering");
 

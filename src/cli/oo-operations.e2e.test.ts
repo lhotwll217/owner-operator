@@ -2,7 +2,7 @@
 // its Gateway route returns, and Gateway validation errors must surface verbatim.
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DaemonInfo } from "@owner-operator/core";
@@ -157,7 +157,83 @@ try {
   assert.match(invalidCli.stderr, /everyMs must be an integer of at least 1000/);
 
   const noFrom = await runOo(["schedules", "create"]);
-  assert.equal(noFrom.status, 2, "create without --from is a usage error");
+  assert.equal(noFrom.status, 2, "create without --from or flags is a usage error");
+
+  // disable: the stored record comes back with enabled false and every other input field kept.
+  const toDisable = await cliJson(["schedules", "create", "--from", "-"], JSON.stringify({ ...input, name: "e2e disable" })) as { id: string };
+  const disabled = await cliJson(["schedules", "disable", toDisable.id]) as Record<string, unknown>;
+  const storedDisabled = ((await route("/schedules")).body as Array<Record<string, unknown>>).find((s) => s.id === toDisable.id);
+  assert.deepEqual(disabled, storedDisabled, "disable prints the stored record");
+  assert.equal(disabled.enabled, false);
+  for (const field of ["name", "trigger", "payload", "cwd", "timeoutSeconds"] as const) {
+    assert.deepEqual(disabled[field], field === "name" ? "e2e disable" : input[field], `disable keeps ${field}`);
+  }
+  const disabledText = await runOo(["schedules", "disable", toDisable.id]);
+  assert.equal(disabledText.status, 0, disabledText.stderr);
+  assert.deepEqual(parseRecord(disabledText.stdout),
+    ((await route("/schedules")).body as Array<{ id: string }>).find((s) => s.id === toDisable.id), "disable text parses back to the stored record");
+  const disableMissing = await runOo(["schedules", "disable", "no-such-id", "--json"]);
+  assert.equal(disableMissing.status, 1, "disabling an unknown id fails");
+  assert.deepEqual(JSON.parse(disableMissing.stderr), { error: "no such schedule: no-such-id" });
+  await cliJson(["schedules", "delete", toDisable.id]);
+
+  // create from flags: a prompt schedule without a JSON body, with the retired schedule tool's defaults
+  // (the caller's cwd, a 1800 s timeout, an every-anchor of now).
+  const callerCwd = realpathSync(repoRoot);
+  const stored = async (id: string) => ((await route("/schedules")).body as Array<{ id: string }>).find((s) => s.id === id);
+  const beforeEvery = Date.now();
+  const every = await cliJson(["schedules", "create", "--name", "e2e every", "--prompt", "Review the backlog.", "--every", "90m", "--tools", "read,bash"]) as {
+    id: string; trigger: { anchorMs: number };
+  };
+  assert.deepEqual(every, await stored(every.id), "flag create prints the stored record");
+  assert.ok(every.trigger.anchorMs >= beforeEvery && every.trigger.anchorMs <= Date.now(), "every anchors at creation time");
+  const { id: _id, revision: _revision, createdAt: _createdAt, updatedAt: _updatedAt, nextRunAt: _nextRunAt, ...everyInput } = every as unknown as Record<string, unknown>;
+  assert.deepEqual(everyInput, {
+    name: "e2e every",
+    enabled: true,
+    trigger: { kind: "every", everyMs: 5_400_000, anchorMs: every.trigger.anchorMs },
+    payload: { kind: "prompt", prompt: "Review the backlog.", toolsAllow: ["read", "bash"] },
+    cwd: callerCwd,
+    timeoutSeconds: 1_800,
+  }, "flag create sends the POST /schedules body the retired schedule tool sent");
+
+  const at = "2099-01-02T03:04:05.000Z";
+  const atText = await runOo(["schedules", "create", "--name", "e2e at", "--prompt", "p", "--at", at, "--cwd", "src", "--timeout", "60"]);
+  assert.equal(atText.status, 0, atText.stderr);
+  const atRecord = parseRecord(atText.stdout) as { id: string; trigger: unknown; cwd: string; timeoutSeconds: number; payload: unknown };
+  assert.deepEqual(atRecord, await stored(atRecord.id), "flag create text parses back to the stored record");
+  assert.deepEqual([atRecord.trigger, atRecord.cwd, atRecord.timeoutSeconds, atRecord.payload],
+    [{ kind: "at", at }, join(callerCwd, "src"), 60, { kind: "prompt", prompt: "p" }], "--cwd resolves against the caller's cwd; no --tools leaves toolsAllow unset");
+  const cron = await cliJson(["schedules", "create", "--name", "e2e cron", "--prompt", "p", "--cron", "0 9 * * 1-5", "--tz", "Europe/Helsinki"]) as { id: string; trigger: unknown };
+  assert.deepEqual(cron.trigger, { kind: "cron", expression: "0 9 * * 1-5", timeZone: "Europe/Helsinki" });
+  const needsYou = await cliJson(["schedules", "create", "--name", "e2e needs", "--prompt", "p", "--needs-you", "--tools", ""]) as { id: string; trigger: unknown; payload: unknown };
+  assert.deepEqual([needsYou.trigger, needsYou.payload], [{ kind: "needs-you" }, { kind: "prompt", prompt: "p", toolsAllow: [] }], "an empty --tools allows no tools");
+  for (const durationCase of [["90s", 90_000], ["2h", 7_200_000], ["1d", 86_400_000]] as const) {
+    const created = await cliJson(["schedules", "create", "--name", `e2e every ${durationCase[0]}`, "--prompt", "p", "--every", durationCase[0]]) as { id: string; trigger: { everyMs: number } };
+    assert.equal(created.trigger.everyMs, durationCase[1], `--every ${durationCase[0]}`);
+    await cliJson(["schedules", "delete", created.id]);
+  }
+  for (const id of [every.id, atRecord.id, cron.id, needsYou.id]) await cliJson(["schedules", "delete", id]);
+
+  const base = ["schedules", "create", "--name", "n", "--prompt", "p"];
+  for (const [args, why] of [
+    [[...base, "--every", "1h", "--from", inputFile], "--from with flags"],
+    [base, "no trigger"],
+    [[...base, "--every", "1h", "--at", at], "two triggers"],
+    [[...base, "--cron", "0 9 * * *"], "--cron without --tz"],
+    [[...base, "--every", "1h", "--tz", "Europe/Helsinki"], "--tz without --cron"],
+    [[...base, "--every", "5x"], "an unknown duration unit"],
+    [[...base, "--every", "1h", "--tools", "read,nope"], "an unknown tool id"],
+    [[...base, "--every", "1h", "--timeout", "0"], "a non-positive timeout"],
+    [["schedules", "create", "--name", "n", "--every", "1h"], "no --prompt"],
+    [["schedules", "create", "--prompt", "p", "--every", "1h"], "no --name"],
+  ] as const) {
+    const usage = await runOo(args);
+    assert.equal(usage.status, 2, `${why} is a usage error (stderr: ${usage.stderr})`);
+  }
+  const unknownTool = await runOo([...base, "--every", "1h", "--tools", "read,nope"]);
+  assert.match(unknownTool.stderr, /unknown tool "nope"/, "an unknown tool is named");
+  assert.deepEqual((await route("/schedules")).body, [], "no usage error created a schedule");
 } finally {
   await daemon?.close();
   rmSync(ooHome, { recursive: true, force: true });

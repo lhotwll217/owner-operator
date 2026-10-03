@@ -87,6 +87,7 @@ function doneOutcome(result) {
 
 const LOCATORS = ["oo session-state list", "oo db"];
 const MARK_DONE = "oo session-state done";
+const SCHEDULE_CHANGES = ["oo schedules create", "oo schedules update", "oo schedules delete", "oo schedules disable", "oo schedules run"];
 
 export default (_output, context) => {
   // This gate encodes OO's soundness (evidence from transcripts, not summaries) — a claim
@@ -114,7 +115,7 @@ export default (_output, context) => {
   const forbid = new Set([
     ...(md.forbidTool ?? []),
     MARK_DONE,
-    "schedule_prompt",
+    ...SCHEDULE_CHANGES,
     "edit",
     "write",
   ]);
@@ -193,13 +194,12 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
   const mutationTools = new Set([
     "edit",
     "write",
-    "schedule_prompt",
-    "manage_schedule",
+    ...SCHEDULE_CHANGES,
     "delegate_agent",
     "manage_agent_run",
     "manage_delegated_baseline",
   ]);
-  const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(execution.name));
+  const otherSuccessfulMutations = successful.filter((execution) => mutationTools.has(surface(execution)));
   const problems = behavioralHarnessProblems(providerMetadata);
   if (providerMetadata.harnessValid !== true) {
     problems.push("behavioral provider did not attest a valid harness");
@@ -283,7 +283,7 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     execution.name === "read" && String(execution.input?.path ?? "").endsWith("preferences.md")
     || execution.name === "bash" && /preferences\.md/.test(String(execution.input?.command ?? ""))
   );
-  const changed = ["edit", "write", "schedule_prompt", "manage_schedule", "manage_agent_run", MARK_DONE]
+  const changed = ["edit", "write", ...SCHEDULE_CHANGES, "manage_agent_run", MARK_DONE]
     .filter((name) => successful(name).length || succeeded.some((execution) => surface(execution) === name));
   if (changed.length) problems.push(`unexpected successful mutations [${changed.join(", ")}]`);
   if (directPreferenceReads.length) problems.push("selection read a preference file directly instead of the snapshot");
