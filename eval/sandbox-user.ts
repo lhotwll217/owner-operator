@@ -26,8 +26,7 @@ import {
   type OwnerOperatorPiServices,
   type OwnerOperatorSession,
 } from "../src/agent/agent";
-import type { OwnerOperatorHarnessAdapters } from "../src/agent/tools";
-import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
+import { startDaemon, type DaemonOptions, type RunningDaemon } from "../src/daemon/runtime";
 import { repoRoot } from "../src/shared/repo-root";
 import { absoluteTsxLoaderPath } from "../src/shared/tsx-loader";
 import { isOperationNoun } from "../src/cli/oo-args";
@@ -68,6 +67,9 @@ export interface SandboxUserOptions {
   modelSettings?: ModelSettings;
   allowLiveHarness?: boolean;
   liveHarness?: LiveHarnessConfiguration;
+  /** Controlled harness observations for the sandbox daemon, which the Operator's `oo harness`
+   * reaches from bash. Omitted operations observe real harnesses. */
+  harness?: DaemonOptions["harness"];
 }
 
 interface SandboxCloseResult {
@@ -103,7 +105,7 @@ export async function createSandboxUser(options: SandboxUserOptions) {
   let productionServices: OwnerOperatorPiServices | undefined;
   let closed = false;
   try {
-    daemon = await startDaemon(daemonOptions(options.profile));
+    daemon = await startDaemon({ ...daemonOptions(options.profile), harness: options.harness });
   } catch (error) {
     restoreProcessEnvironment(previousEnvironment);
     materialized.finalize({ teardownVerified: false, diagnostic: failureDiagnostic("daemon-start", error) });
@@ -130,7 +132,6 @@ export async function createSandboxUser(options: SandboxUserOptions) {
       surface?: "chat" | "interactive" | "schedule";
       parentContext?: string;
       callerSessionId?: string;
-      harnessAdapters?: OwnerOperatorHarnessAdapters;
     } = {}): Promise<ManagedSession> {
       if (options.profile === "fresh-onboarding") {
         throw new Error("fresh-onboarding profile cannot create a production session before consent");
@@ -154,7 +155,6 @@ export async function createSandboxUser(options: SandboxUserOptions) {
         sessionManager,
         callerSessionId: input.callerSessionId,
         piServices: productionServices,
-        harnessAdapters: input.harnessAdapters,
       });
       materialized.removeCredentialFiles();
       const managed = { ...created, sessionId: sessionManager.getSessionId() };
@@ -347,7 +347,7 @@ export async function closeSandboxUser(
   return { daemonStopped, leasesRemaining: remaining, teardownVerified, preservedDiagnostics };
 }
 
-function daemonOptions(profile: SandboxUserProfile): Parameters<typeof startDaemon>[0] {
+function daemonOptions(profile: SandboxUserProfile): DaemonOptions {
   const shared = {
     port: 0,
     watch: false,

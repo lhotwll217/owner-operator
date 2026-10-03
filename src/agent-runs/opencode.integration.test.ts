@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { AgentRunHarness, type AgentRun } from "@owner-operator/core";
 import { openCodeBinaryPath } from "./acp-launcher";
 import { readHarnessDetails } from "./harness-details";
-import { createGetHarnessDetailsTool } from "../agent/tools/get-harness-details";
 import { startDaemon } from "../daemon/runtime";
 import { connectGateway } from "../gateway/client";
 import { settledAgentRun } from "../gateway/test/helpers";
@@ -65,13 +64,11 @@ try {
   const harness = AgentRunHarness.OpenCode;
   writeFileSync(join(bin, harness), fixture.replace("__IDENTITY__", JSON.stringify(harness)), { mode: 0o755 });
   // Observes the fixture binary in this process; the Gateway transport is covered by oo-harness.e2e.
-  const tool = createGetHarnessDetailsTool({ read: readHarnessDetails });
-  const context = {} as Parameters<typeof tool.execute>[4];
   {
     assert.equal(openCodeBinaryPath(), join(bin, harness));
     for (const effort of ["low", null, "ultra"] as const) {
-      const result = await tool.execute("inspect", { inspect: [{ harness, model, effort }] }, undefined, undefined, context);
-      const row = result.details.capabilities.harnesses[0]!;
+      const result = await readHarnessDetails({ inspect: [{ harness, model, effort }] });
+      const row = result.capabilities.harnesses[0]!;
       assert.equal(row.harness, harness);
       assert.equal(row.acpxAgent, harness);
       assert.equal(row.runtime?.backend.name, harness);
@@ -85,14 +82,14 @@ try {
         assert.equal(row.error, null);
         assert.deepEqual(row.confirmation, { model, ...(effort === null ? {} : { effort }) });
       }
-      assert.equal(result.details.account[0]!.harness, harness);
-      assert.equal(result.details.account[0]!.source, null, "provider catalog is never account evidence");
+      assert.equal(result.account[0]!.harness, harness);
+      assert.equal(result.account[0]!.source, null, "provider catalog is never account evidence");
     }
-    const invalid = await tool.execute("invalid", {
+    const invalid = await readHarnessDetails({
       inspect: [{ harness, model: "provider/not-advertised", effort: null }],
-    }, undefined, undefined, context);
-    assert.ok(invalid.details.capabilities.harnesses[0]!.error, "unadvertised model is refused before any turn");
-    assert.equal(invalid.details.capabilities.harnesses[0]!.confirmation, null);
+    });
+    assert.ok(invalid.capabilities.harnesses[0]!.error, "unadvertised model is refused before any turn");
+    assert.equal(invalid.capabilities.harnesses[0]!.confirmation, null);
     // Each observation identifies the OpenCode executable once; the launch reuses that identity,
     // so the client's harness-details budget of one version check per observation holds.
     const versionCalls = readFileSync(join(root, "versions.log"), "utf8").trim().split("\n").length;
@@ -197,15 +194,9 @@ try {
         .replace("console.log('1.18.31')", "console.log('opencode v2.0.5')"),
       { mode: 0o755 },
     );
-    const inspectedV2 = await tool.execute(
-      "reject-v2",
-      { harnesses: [AgentRunHarness.OpenCode] },
-      undefined,
-      undefined,
-      context,
-    );
-    assert.equal(inspectedV2.details.capabilities.harnesses[0]!.runtime, null);
-    assert.match(inspectedV2.details.capabilities.harnesses[0]!.error!, /expected opencode v1/);
+    const inspectedV2 = await readHarnessDetails({ harnesses: [AgentRunHarness.OpenCode] });
+    assert.equal(inspectedV2.capabilities.harnesses[0]!.runtime, null);
+    assert.match(inspectedV2.capabilities.harnesses[0]!.error!, /expected opencode v1/);
     const launchedV2 = await gateway.delegateAgent({
       harness,
       model,

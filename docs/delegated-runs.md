@@ -245,23 +245,23 @@ identity reporting. A complete owner-supplied harness/model/effort choice—incl
 effort—bypasses selection and reaches `oo runs delegate` unchanged. The permanent product prompt owns
 only that invocation and precedence rule.
 
-`get_harness_details` returns one namespaced snapshot: raw owner preferences, launch-authoritative
+`oo harness details` returns one namespaced snapshot: raw owner preferences, launch-authoritative
 ACP capabilities, and provider account/allowance observations remain separate. The daemon observes
-through `POST /harness-details`; the native tool and `oo harness details` both call that route, so
-probe sessions are daemon children and daemon startup reaps a probe orphaned by a crash. Each
+through `POST /harness-details`, so probe sessions are daemon children and daemon startup reaps a
+probe orphaned by a crash. Each
 observation's initialization, status read, and inspection are bounded separately, and the client
 waits for all three plus cleanup (`HARNESS_OBSERVATION_*` in
 [`agent-runs.ts`](../packages/core/src/agent-runs.ts)), so a slow but valid selection is never cut
 off by the transport. A snapshot
-carries a `baselineCandidate` only when `includeBaselineCandidates` is requested, which the CLI never
-does. Every supported
+carries a `baselineCandidate` only when `includeBaselineCandidates` is requested
+(`--baseline-candidates`). Every supported
 harness capability row comes from a disposable session through the same leased ACPX launch seam as
 delegation and includes the complete advertised `SessionConfigOption[]` plus exact ACPX, adapter,
 backend, resolution-source, and observation-time provenance. Provider-specific model projections
 are not launch truth. [`src/agent-runs/harness-details.ts`](../src/agent-runs/harness-details.ts)
 joins the isolated sources; the private
 [ACP observer](../src/agent-runs/harness-details-acp-observer.ts) owns initialization, status
-validation, timeout, termination, and throwaway-store cleanup. The tool remains a thin adapter.
+validation, timeout, termination, and throwaway-store cleanup. The CLI verb is a thin adapter.
 
 Capability and account observation is read-only and ephemeral. Owner preferences live only at
 `$OO_HOME/workspace/user-harness-preferences.md`; workspace setup seeds that file when absent and
@@ -300,11 +300,14 @@ current model and thought-level option as a *candidate*. A candidate is never sa
 delegated default requires explicit owner approval and is owned by the
 [launch configuration](../src/agent-runs/launch-config.ts).
 
-`manage_delegated_baseline` is the narrow consent seam. `propose` performs initial discovery or a
-refresh and only compares the ephemeral candidate with the current approval. `approve` stores the
-exact owner-approved model and nullable effort in one atomically replaced file per harness under
-`delegated-baselines/`, separate from the owner-edited user harness preferences and the run ledger.
-Declining a proposal performs no write.
+`oo harness propose` and `oo harness approve` are the narrow consent seam, both run by the daemon.
+`propose <harness>` (`POST /harness-baseline/propose`) performs initial discovery or a refresh and
+only compares the ephemeral candidate with the current approval. `approve <harness> --model <m>
+--effort <e|none>` (`POST /harness-baseline/approve`) requires both values and stores exactly that
+model and nullable effort in one atomically replaced file per harness under `delegated-baselines/`,
+separate from the owner-edited user harness preferences and the run ledger. Declining a proposal
+performs no write. Like every `oo` verb, approve runs without a permission prompt
+([agent.md](agent.md#permissions)); the selection skill requires the owner's explicit approval first.
 
 The probe session runs from `OO_HOME`, never the caller's working directory, so project-local
 harness config cannot contaminate a global candidate. The active probe owns termination: timeout

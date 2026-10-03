@@ -7,6 +7,7 @@ import {
   DEFAULT_DAEMON_PORT,
   DomainEventKind,
   GatewayEventKind,
+  approveDelegatedBaseline,
   isAgentRunEffort,
   isTerminalAgentRunStatus,
   validateAgentRunResumeTask,
@@ -16,6 +17,7 @@ import {
   type DaemonHealth,
   type DaemonReady,
   type DatabaseQueryRequest,
+  type AgentRunEffort,
   type GatewayEvent,
   type HarnessDetailsRequest,
   type SessionSearchRequest,
@@ -67,6 +69,8 @@ export interface GatewayAgentRuns {
 
 export interface GatewayHarness {
   details(request: HarnessDetailsRequest): Promise<unknown>;
+  /** Read-only: discovers an unpinned candidate and compares it with the approved baseline. */
+  propose(harness: AgentRunHarness): Promise<unknown>;
 }
 
 export interface GatewaySessionSearch {
@@ -335,6 +339,31 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           return respond(400, { error: "includeBaselineCandidates must be a boolean" });
         }
         return respond(200, await options.harness.details(body as HarnessDetailsRequest));
+      }
+
+      if (route === "POST /harness-baseline/propose") {
+        const body = await readBody(request) as Record<string, unknown> | null;
+        if (!body || typeof body !== "object" || !Object.values(AgentRunHarness).includes(body.harness as AgentRunHarness)) {
+          return respond(400, { error: `harness must be one of: ${Object.values(AgentRunHarness).join(", ")}` });
+        }
+        return respond(200, await options.harness.propose(body.harness as AgentRunHarness));
+      }
+
+      if (route === "POST /harness-baseline/approve") {
+        const body = await readBody(request) as Record<string, unknown> | null;
+        if (!body || typeof body !== "object" || !Object.values(AgentRunHarness).includes(body.harness as AgentRunHarness)) {
+          return respond(400, { error: `harness must be one of: ${Object.values(AgentRunHarness).join(", ")}` });
+        }
+        if (typeof body.model !== "string" || !body.model.trim()) {
+          return respond(400, { error: "approve requires the exact owner-approved model" });
+        }
+        if (!Object.hasOwn(body, "effort") || (body.effort !== null && !isAgentRunEffort(body.effort))) {
+          return respond(400, { error: "approve requires an explicit effort or null" });
+        }
+        return respond(200, approveDelegatedBaseline(body.harness as AgentRunHarness, {
+          model: body.model,
+          effort: body.effort as AgentRunEffort | null,
+        }));
       }
 
       if (route === "POST /session-search") {

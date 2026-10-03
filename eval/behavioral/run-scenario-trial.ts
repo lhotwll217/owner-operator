@@ -19,7 +19,7 @@ import {
   lastAssistantError,
   lastAssistantText,
 } from "../../src/agent/agent";
-import type { RunningDaemon } from "../../src/daemon/runtime";
+import type { DaemonOptions, RunningDaemon } from "../../src/daemon/runtime";
 import { stateDatabasePath } from "../../src/shared/paths";
 import { createSandboxUser } from "../sandbox-user";
 import { materializeMarkDoneScenario } from "./scenario-operations";
@@ -87,6 +87,8 @@ type ManagedSession = Awaited<ReturnType<SandboxEnvironment["createProductionSes
 type ScenarioContext = Record<string, unknown>;
 
 type ScenarioAdapter = {
+  /** Controlled harness observations the sandbox daemon serves to the Operator's `oo harness`. */
+  daemonHarness?(): DaemonOptions["harness"];
   configureSandbox?(environment: SandboxEnvironment): void;
   sessionOptions(): Parameters<SandboxEnvironment["createProductionSession"]>[0];
   setup(environment: SandboxEnvironment, created: ManagedSession): Promise<ScenarioContext>;
@@ -112,14 +114,15 @@ if (process.env.OO_EVAL_READ_ONLY || process.env.OO_EVAL_BASELINE_PROMPT) {
   throw new Error("behavioral trial must use the production prompt and full configured roster");
 }
 
+const adapter = createScenarioAdapter(input, { root, ooHome, taskCwd });
 const sandboxEnvironment = await createSandboxUser({
   profile: "deterministic-harness",
   root,
   sourcePiAgentDir: input.sourcePiAgentDir,
   protectedOwnerPaths: input.protectedOwnerPaths,
   modelSettings: input.modelSettings,
+  harness: adapter.daemonHarness?.(),
 });
-const adapter = createScenarioAdapter(input, { root, ooHome, taskCwd });
 const traceEvents: Array<Record<string, unknown>> = [];
 let trialResult: Record<string, unknown> | undefined;
 let trialError: unknown;
@@ -267,51 +270,50 @@ function delegationAdapter(
         }
       }
     },
-    sessionOptions: () => ({
-      harnessAdapters: {
-        readHarnessDetails: async ({ harnesses, inspect }) => {
-          if (inspect?.length) {
-            if (inspect.length !== 1) {
-              throw new Error("controlled behavioral inspection requires exactly one candidate");
-            }
-            const fixture = scenario.harnessInspections?.find(({ request }) =>
-              sameInspectionRequest(request, inspect[0]));
-            if (!fixture) {
-              throw new Error(`no controlled inspection snapshot for ${inspectionLabel(inspect[0])}`);
-            }
-            return withPreferences(fixture.snapshot);
+    sessionOptions: () => ({}),
+    daemonHarness: () => ({
+      details: async ({ harnesses, inspect }) => {
+        if (inspect?.length) {
+          if (inspect.length !== 1) {
+            throw new Error("controlled behavioral inspection requires exactly one candidate");
           }
-          const selectedHarnesses = new Set(harnesses ?? []);
-          const snapshot = withPreferences(scenario.harnessDetails);
-          if (selectedHarnesses.size) {
-            snapshot.capabilities.harnesses = snapshot.capabilities.harnesses
-              .filter(({ harness }) => selectedHarnesses.has(harness));
-            snapshot.account = snapshot.account.filter(({ harness }) => selectedHarnesses.has(harness));
-            snapshot.unknowns = snapshot.unknowns
-              .filter(({ harness }) => harness === undefined || selectedHarnesses.has(harness));
+          const fixture = scenario.harnessInspections?.find(({ request }) =>
+            sameInspectionRequest(request, inspect[0]));
+          if (!fixture) {
+            throw new Error(`no controlled inspection snapshot for ${inspectionLabel(inspect[0])}`);
           }
-          return snapshot;
-        },
-        proposeDelegatedBaseline: async (harness) => {
-          const approved = loadDelegatedBaseline(harness, paths.ooHome);
-          const candidate = scenario.baselineCandidate?.harness === harness
-            ? {
-                model: scenario.baselineCandidate.model,
-                effort: scenario.baselineCandidate.effort,
-                availableEfforts: scenario.baselineCandidate.availableEfforts,
-              }
-            : null;
-          return {
-            harness,
-            approved,
-            candidate,
-            error: candidate ? null : `no controlled baseline candidate for ${harness}`,
-            differs: candidate !== null && (
-              candidate.model !== (approved?.model ?? null)
-              || candidate.effort !== (approved?.effort ?? null)
-            ),
-          };
-        },
+          return withPreferences(fixture.snapshot);
+        }
+        const selectedHarnesses = new Set(harnesses ?? []);
+        const snapshot = withPreferences(scenario.harnessDetails);
+        if (selectedHarnesses.size) {
+          snapshot.capabilities.harnesses = snapshot.capabilities.harnesses
+            .filter(({ harness }) => selectedHarnesses.has(harness));
+          snapshot.account = snapshot.account.filter(({ harness }) => selectedHarnesses.has(harness));
+          snapshot.unknowns = snapshot.unknowns
+            .filter(({ harness }) => harness === undefined || selectedHarnesses.has(harness));
+        }
+        return snapshot;
+      },
+      propose: async (harness) => {
+        const approved = loadDelegatedBaseline(harness, paths.ooHome);
+        const candidate = scenario.baselineCandidate?.harness === harness
+          ? {
+              model: scenario.baselineCandidate.model,
+              effort: scenario.baselineCandidate.effort,
+              availableEfforts: scenario.baselineCandidate.availableEfforts,
+            }
+          : null;
+        return {
+          harness,
+          approved,
+          candidate,
+          error: candidate ? null : `no controlled baseline candidate for ${harness}`,
+          differs: candidate !== null && (
+            candidate.model !== (approved?.model ?? null)
+            || candidate.effort !== (approved?.effort ?? null)
+          ),
+        };
       },
     }),
     async setup() {

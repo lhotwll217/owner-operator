@@ -13,15 +13,14 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import {
   AgentRunHarness,
-  approveDelegatedBaseline,
   ensureOwnerOperatorWorkspace,
   loadDelegatedBaseline,
+  type HarnessDetailsRequest,
 } from "@owner-operator/core";
 import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
+import { startDaemon } from "../daemon/runtime";
 import { ownerOperatorPrompt, repoRoot } from "./agent";
 import { ownerOperatorResourceLoaderOptions } from "./skills";
-import { createGetHarnessDetailsTool } from "./tools/get-harness-details";
-import { createManageDelegatedBaselineTool } from "./tools/manage-delegated-baseline";
 
 const root = mkdtempSync(join(tmpdir(), "oo-delegation-selection-"));
 const ooHome = join(root, "oo-home");
@@ -41,36 +40,46 @@ Use Codex model owner-custom-model with no reasoning effort.
 `;
 writeFileSync(paths.userHarnessPreferences, preferences);
 
-const detailsCalls: unknown[] = [];
-const detailsTool = createGetHarnessDetailsTool({
-  read: async (input) => {
-    detailsCalls.push(input);
-    assert.ok(input.harnesses?.[0]);
-    return {
-      observedAt: "2026-08-12T12:00:00.000Z",
-      ephemeral: true,
-      preferences: {
-        path: paths.userHarnessPreferences,
-        content: preferences,
-        error: null,
-      },
-      capabilities: {
-        registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
-        harnesses: [],
-      },
-      account: [],
-      unknowns: [],
-    };
+// The Operator's bash reaches the daemon through `oo` (adr/0001-agent-uses-its-own-cli.md); this
+// process hosts that daemon with only the external harness observations controlled.
+const priorEnv = { ...process.env };
+process.env.OO_HOME = ooHome;
+process.env.OO_AGENT = "1";
+process.env.PATH = `${repoRoot}:${process.env.PATH}`;
+const detailsCalls: HarnessDetailsRequest[] = [];
+const baselineCandidate = { model: "harness-observed-model", effort: null, availableEfforts: null };
+const daemon = await startDaemon({
+  port: 0,
+  watch: false,
+  enableEnrichment: false,
+  monitor: { scan: async () => [], intervalMs: 60_000 },
+  scheduler: { tickMs: 60_000 },
+  harness: {
+    details: async (input) => {
+      detailsCalls.push(input);
+      assert.ok(input.harnesses?.[0]);
+      return {
+        observedAt: "2026-08-12T12:00:00.000Z",
+        ephemeral: true,
+        preferences: {
+          path: paths.userHarnessPreferences,
+          content: preferences,
+          error: null,
+        },
+        capabilities: {
+          registry: { acpxVersion: "0.13.1", registeredAgentNames: ["codex"] },
+          harnesses: [],
+        },
+        account: [],
+        unknowns: [],
+      };
+    },
+    propose: (harness) => proposeDelegatedBaseline(harness, { discover: async () => baselineCandidate }),
   },
 });
-const baselineCandidate = { model: "harness-observed-model", effort: null, availableEfforts: null };
-const manageTool = createManageDelegatedBaselineTool({
-  propose: (harness) => proposeDelegatedBaseline(harness, {
-    ooHome,
-    discover: async () => baselineCandidate,
-  }),
-  approve: (harness, approval) => approveDelegatedBaseline(harness, approval, ooHome),
-});
+const DETAILS = "oo harness details --harness claude-code --json";
+const PROPOSE = "oo harness propose claude-code --json";
+const APPROVE = `oo harness approve claude-code --model ${baselineCandidate.model} --effort none`;
 const skillPath = join(repoRoot, "src", "agent", "skills", "select-harness-for-delegation", "SKILL.md");
 const baselinePath = join(paths.delegatedBaselines, `${AgentRunHarness.ClaudeCode}.json`);
 
@@ -119,10 +128,9 @@ try {
     resourceLoader: loader,
     sessionManager,
     settingsManager,
-    tools: ["read", "get_harness_details", "manage_delegated_baseline"],
-    customTools: [detailsTool, manageTool],
+    tools: ["read", "bash"],
   });
-  const calls: Array<{ name: string; args: unknown }> = [];
+  const calls: Array<{ name: string; args: { command?: string } }> = [];
   const failedCalls: string[] = [];
   session.subscribe((event) => {
     if (event.type === "tool_execution_start") calls.push({ name: event.toolName, args: event.args });
@@ -132,42 +140,31 @@ try {
   const beforeProposal = calls.length;
   faux.setResponses([
     fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("get_harness_details", { harnesses: ["claude-code"] }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("manage_delegated_baseline", {
-      action: "propose",
-      harness: "claude-code",
-    }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("bash", { command: DETAILS }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("bash", { command: PROPOSE }), { stopReason: "toolUse" }),
     fauxAssistantMessage("Please approve claude-code / harness-observed-model / effort null before I launch."),
   ]);
   await session.prompt("Delegate a routine repository inventory. Choose the execution identity for me.");
-  assert.deepEqual(calls.slice(beforeProposal).map(({ name }) => name), [
+  assert.deepEqual(calls.slice(beforeProposal).map(({ name, args }) => args.command ?? name), [
     "read",
-    "get_harness_details",
-    "manage_delegated_baseline",
+    DETAILS,
+    PROPOSE,
   ]);
   assert.equal(existsSync(baselinePath), false, "proposing a baseline does not persist it");
   assert.equal(readFileSync(paths.userHarnessPreferences, "utf8"), preferences, "selection never edits owner preferences");
 
   const beforeApproval = calls.length;
   faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("manage_delegated_baseline", {
-      action: "approve",
-      harness: "claude-code",
-      model: baselineCandidate.model,
-      effort: null,
-    }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("get_harness_details", { harnesses: ["claude-code"] }), { stopReason: "toolUse" }),
-    fauxAssistantMessage(fauxToolCall("manage_delegated_baseline", {
-      action: "propose",
-      harness: "claude-code",
-    }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("bash", { command: APPROVE }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("bash", { command: DETAILS }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("bash", { command: PROPOSE }), { stopReason: "toolUse" }),
     fauxAssistantMessage("Approved claude-code / harness-observed-model / effort null."),
   ]);
   await session.prompt("I approve exactly claude-code / harness-observed-model / effort null.");
-  assert.deepEqual(calls.slice(beforeApproval).map(({ name }) => name), [
-    "manage_delegated_baseline",
-    "get_harness_details",
-    "manage_delegated_baseline",
+  assert.deepEqual(calls.slice(beforeApproval).map(({ args }) => args.command), [
+    APPROVE,
+    DETAILS,
+    PROPOSE,
   ], "approval persists before selection retries");
   assert.deepEqual(loadDelegatedBaseline(AgentRunHarness.ClaudeCode, ooHome), {
     model: baselineCandidate.model,
@@ -179,9 +176,12 @@ try {
     { harnesses: [AgentRunHarness.ClaudeCode] },
     { harnesses: [AgentRunHarness.ClaudeCode] },
   ], "unknown harness observations are consulted again without blocking an approved baseline");
-  assert.deepEqual(failedCalls, [], "the real management tools complete successfully");
+  assert.deepEqual(failedCalls, [], "the real oo verbs complete successfully");
   session.dispose();
   process.stdout.write("ok — delegation selection preserves approval boundaries and unknown observations\n");
 } finally {
+  await daemon.close();
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, priorEnv);
   rmSync(root, { recursive: true, force: true });
 }

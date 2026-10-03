@@ -104,10 +104,10 @@ const delegationTrial = normalizeBehavioralTrialResult({
   stateAfter: { userHarnessPreferences: "# neutral\n", delegatedBaselines: {}, agentRuns: [] },
   traceEvents: [
     {
-      event: "tool_call", id: "details", tool: "get_harness_details",
-      args: { harnesses: ["codex", "claude-code"] },
+      event: "tool_call", id: "details", tool: "bash",
+      args: { command: "oo harness details --harness codex --harness claude-code --json" },
     },
-    { event: "tool_result", id: "details", tool: "get_harness_details", isError: false, result: { details: [] } },
+    { event: "tool_result", id: "details", tool: "bash", isError: false, result: { content: [{ type: "text", text: "{}" }] } },
     ...payload.traceEvents,
   ],
 });

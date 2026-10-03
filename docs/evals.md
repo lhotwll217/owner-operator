@@ -104,7 +104,8 @@ EOF
 Each Promptfoo case/repeat creates its own `deterministic-harness` sandbox and calls the production
 `createOwnerOperatorSession("chat", ...)` composition without `toolsAllow`, a baseline prompt, or a
 reduced custom-tool list. The daemon's delegated executor is disabled; case adapters may supply
-controlled harness observations, baseline candidates, requested-tool permission outcomes, and
+controlled harness observations and baseline candidates (through the sandbox daemon's `harness`
+option, which the Operator's `oo harness` reaches), requested-tool permission outcomes, and
 run/state evidence, but may not launch a child. The parent model loop, completion delivery,
 configured tool roster, extensions, production default-Allow posture, and real mutation tools stay
 production-real. Explicit project and user deny rules still refine that permissive baseline, and

@@ -23,17 +23,18 @@ The [continuation contract](../../../../docs/delegated-runs.md#lifecycle) owns e
 
 ## Select
 
-1. **Observe.** Call `get_harness_details` once with every plausible harness.
+1. **Observe.** Run `oo harness details --harness <h> [--harness <h>…] --json` once with every
+   plausible harness.
 2. **Apply owner preferences.** Read `snapshot.preferences.content` as owner-controlled routing
    guidance. Match the task by meaning against standard and owner-added roles, or establish that no
    task preference applies.
 3. **Fill omissions.** When no task preference applies, use that harness's owner-approved delegated
-   baseline only for missing execution-identity fields. Call `manage_delegated_baseline` with
-   `action: "propose"` to inspect its `approved` value; its unpinned candidate is only a proposal.
+   baseline only for missing execution-identity fields. Run `oo harness propose <h> --json` to
+   inspect its `approved` value; its unpinned candidate is only a proposal, and propose never saves.
 4. **Verify the candidate.** Use exact model IDs and reasoning values advertised by that harness.
    A current model whose reasoning choices are fully advertised needs no second observation;
    `effort: null` needs no separate selector. Otherwise inspect the exact candidate with
-   `get_harness_details`. An inspection succeeds only when its confirmation exactly matches the
+   `oo harness details --inspect <h>:<model>:<effort|none> --json`. An inspection succeeds only when its confirmation exactly matches the
    harness, model, and nullable effort. Reject failed or mismatched inspections; choose an
    equal-or-higher-quality candidate with its required evidence, or ask the owner.
 5. **Delegate.** Run `oo runs delegate --harness <h> --model <m> --effort <e> "<task>"` (or
@@ -48,7 +49,7 @@ Do not treat an unknown window as unused or constrained.
 
 If `oo runs delegate` rejects a choice for capacity, access, entitlement, an invalid harness/model
 pairing, or availability—or a delivered run-completion reports that rejection—reapply the matching
-preference and refresh `get_harness_details` after the rejection for both the rejected harness and every
+preference and refresh `oo harness details` after the rejection for both the rejected harness and every
 replacement harness under consideration before retrying. Inspect a replacement when step 3
 requires it. A stale advertisement can explain a rejection; never describe advertisement as
 demonstrated access.
@@ -68,17 +69,17 @@ exact identity.
 
 ## Missing delegated baseline
 
-When omitted identity fields require a default and `manage_delegated_baseline` reports no approved
+When omitted identity fields require a default and `oo harness propose` reports no approved
 baseline, get the owner's approval for a baseline, then delegate:
 
-1. Present the actual unpinned ACP candidate returned by `action: "propose"`, including its exact
+1. Present the actual unpinned ACP candidate returned by `oo harness propose`, including its exact
    harness, model, and effort. Do not invent or substitute a default. If discovery returned no
    candidate, ask the owner to choose.
-2. Ask the owner to explicitly approve that exact candidate. Do not call `action: "approve"` based
+2. Ask the owner to explicitly approve that exact candidate. Do not run `oo harness approve` based
    on silence, prior general preferences, or your own judgment.
-3. After approval, call `manage_delegated_baseline` with `action: "approve"` and the exact accepted
-   model and effort, including `effort: null` when that is the candidate.
-4. Retry selection: refresh `get_harness_details` for the approved harness after approval, then
+3. After approval, run `oo harness approve <h> --model <m> --effort <e>` with the exact accepted
+   model and effort, using `--effort none` when the candidate's effort is null.
+4. Retry selection: refresh `oo harness details` for the approved harness after approval, then
    run `oo runs delegate` with the newly approved exact identity.
 
 ## Report

@@ -1,4 +1,5 @@
 import type { AgentRun, AgentRunCreateInput, AgentRunEffort, AgentRunHarness, AgentRunLogRecord } from "./agent-runs";
+import type { DelegatedBaseline, DelegatedBaselineApproval } from "./delegated-baselines";
 import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
@@ -101,6 +102,10 @@ export interface HarnessDetailsRequest {
 
 export type HarnessDetailsResponse = unknown;
 
+/** A read-only baseline proposal: what is approved, what the harness would choose unpinned, and
+ * whether they differ. Its shape is src/agent-runs/launch-config.ts DelegatedBaselineProposal. */
+export type DelegatedBaselineProposalResponse = unknown;
+
 /** One privacy-aware transcript search, run by the daemon through the session-search wrapper. */
 export interface SessionSearchRequest {
   /** The wrapper's own flags, forwarded unchanged. */
@@ -148,6 +153,10 @@ export interface GatewayApi {
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
   /** One ephemeral harness observation, run by the daemon that owns probe processes. */
   harnessDetails(request: HarnessDetailsRequest): Promise<HarnessDetailsResponse>;
+  /** Discover the harness's unpinned candidate and compare it with the approved baseline; never saves. */
+  proposeBaseline(harness: AgentRunHarness): Promise<DelegatedBaselineProposalResponse>;
+  /** Persist exactly the owner-approved model and effort (null allowed) as the harness baseline. */
+  approveBaseline(harness: AgentRunHarness, approval: DelegatedBaselineApproval): Promise<DelegatedBaseline>;
   sessionSearch(request: SessionSearchRequest): Promise<SessionSearchResult>;
   useWorktree(request: UseWorktreeRequest): Promise<UseWorktreeResult>;
   resolveWorktreeCwd(request: ResolveWorktreeCwdRequest): Promise<ResolveWorktreeCwdResult>;
