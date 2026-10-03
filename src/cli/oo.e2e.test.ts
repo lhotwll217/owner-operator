@@ -2,7 +2,7 @@
 // model session is built, so this stays hermetic and fast.
 import assert from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
@@ -52,6 +52,25 @@ try {
   assert.match(agentWithoutDaemon.stderr, /daemon is not running; agents do not start it\. Ask the owner to start it \(`oo status`/);
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "OO_AGENT=1 never spawns a daemon");
   assert.equal(existsSync(join(ooHome, "daemon.log")), false, "OO_AGENT=1 never launches a daemon process");
+  for (const argv of [[], ["daemon"], ["-p", "hi"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
+    const refused = spawnSync(ooBin, argv, { ...opts, env: { ...opts.env, OO_AGENT: "1" } });
+    assert.equal(refused.status, 2, `OO_AGENT=1 refuses \`oo ${argv.join(" ")}\` (stderr: ${refused.stderr})`);
+    assert.match(refused.stderr, /agents reach Owner Operator through `oo <noun> <verb>`/);
+  }
+  assert.equal(existsSync(join(ooHome, "daemon.json")), false, "refused agent forms start no daemon");
+  // A discovery file the agent cannot reach names the cause instead of claiming no daemon runs.
+  const discovery = (pid: number) => writeFileSync(join(ooHome, "daemon.json"), JSON.stringify({
+    port: 9, pid, startedAt: new Date().toISOString(), fingerprint: "e2e", authToken: "e2e-secret-token",
+  }));
+  discovery(process.pid);
+  const unreachable = spawnSync(ooBin, ["session-state", "list"], { ...opts, env: { ...opts.env, OO_AGENT: "1" } });
+  assert.equal(unreachable.status, 1);
+  assert.match(unreachable.stderr, new RegExp(`daemon \\(pid ${process.pid}, port 9\\) is running but unreachable from this shell`));
+  assert.doesNotMatch(unreachable.stderr, /e2e-secret-token/, "the bearer token never reaches the agent");
+  discovery(0x7ffffffe);
+  const stale = spawnSync(ooBin, ["session-state", "list"], { ...opts, env: { ...opts.env, OO_AGENT: "1" } });
+  assert.match(stale.stderr, /daemon is not running; agents do not start it/, "a dead pid's discovery file means no daemon");
+  rmSync(join(ooHome, "daemon.json"));
 
   // Bare `oo` without a terminal points at the current headless spelling.
   const notTty = spawnSync(ooBin, [], { ...opts, stdio: ["ignore", "pipe", "pipe"] });

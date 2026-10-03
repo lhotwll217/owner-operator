@@ -1,6 +1,6 @@
 // Unit: CLI conventions that keep `oo` a complete, self-describing surface for agents. Every verb
 // documents itself with examples, and every agent-facing Gateway route is reachable through a verb
-// (docs/adr/0001-agent-uses-its-own-cli.md). Reads source text only; no daemon, no temp files.
+// (adr/0001-agent-uses-its-own-cli.md). Reads source text only; no daemon, no temp files.
 import assert from "node:assert";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

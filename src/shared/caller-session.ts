@@ -1,7 +1,12 @@
-/** The coding session invoking `oo`, when it identifies itself: an explicit `--from-session`,
- * then `OO_FROM_SESSION`, then the harness's own session env (Codex exports `CODEX_THREAD_ID`). */
+/** Environment that names the coding session invoking `oo`, in precedence order: an explicit
+ * `OO_FROM_SESSION`, then the harness's own session id (Codex exports `CODEX_THREAD_ID`, Claude Code
+ * exports `CLAUDE_CODE_SESSION_ID`). */
+export const CALLER_SESSION_ENV = ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"] as const;
+
+/** The coding session invoking `oo`, when it identifies itself: an explicit `--from-session`, then
+ * `CALLER_SESSION_ENV`. */
 export function callerSessionId(explicit?: string): string | undefined {
-  return [explicit, process.env.OO_FROM_SESSION, process.env.CODEX_THREAD_ID]
+  return [explicit, ...CALLER_SESSION_ENV.map((name) => process.env[name])]
     .find((value) => typeof value === "string" && value.trim())?.trim();
 }
 

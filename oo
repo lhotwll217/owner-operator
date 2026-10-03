@@ -45,6 +45,11 @@ if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
   shift
 fi
 
+if [ "$#" -eq 0 ] && [ "${OO_AGENT:-}" = "1" ]; then
+  echo "oo: agents reach Owner Operator through \`oo <noun> <verb>\`; this form starts a daemon or an Operator session" >&2
+  exit 2
+fi
+
 if [ "$#" -gt 0 ]; then
   ENTRY="$DIR/src/cli/oo.ts"
 else

@@ -12,4 +12,4 @@ The engineering skills use the canonical Matt Pocock triage vocabulary. See `doc
 
 ### Domain docs
 
-This repository uses a single-context domain layout rooted at `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+This repository uses a single-context domain layout rooted at `CONTEXT.md` and `adr/`. See `docs/agents/domain.md`.

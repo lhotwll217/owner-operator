@@ -21,8 +21,8 @@ child process; `oo` starts it when needed.
 
 Pass `--from-session <your session id>` on every call that accepts it, or export
 `OO_FROM_SESSION` once. Owner Operator records it as provenance, excludes your own transcript from
-searches, and records your session as the parent of runs you delegate. Codex sessions are
-identified automatically.
+searches, and records your session as the parent of runs you delegate. Codex and Claude Code
+sessions are identified automatically.
 
 ## Operations
 

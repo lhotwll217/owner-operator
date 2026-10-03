@@ -31,6 +31,14 @@ if (cli.kind === "usage-error") {
   process.exit(2);
 }
 
+// An agent's bash (OO_AGENT=1, set by the privacy guard) reaches Owner Operator through operations
+// only. These forms start or replace the daemon, which may be hosting the agent, or open a nested
+// paid Operator session.
+if (process.env.OO_AGENT === "1" && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
+  process.stderr.write("oo: agents reach Owner Operator through `oo <noun> <verb>`; this form starts a daemon or an Operator session\n");
+  process.exit(2);
+}
+
 if (cli.kind === "doctor") {
   const { formatHarnessDoctor } = await import("../agent/doctor");
   const output = formatHarnessDoctor();

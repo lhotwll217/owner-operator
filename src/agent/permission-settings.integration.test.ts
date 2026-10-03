@@ -180,6 +180,16 @@ try {
   );
   assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "deny", "task project rules refine global defaults");
   assert.equal(permissions.checkPermission("bash", "oo db query x").state, "allow", "the agent's own CLI is allowed in ask mode");
+  // The `oo *` allow rule covers one command, not a chain: the real gate judges every command.
+  for (const command of ["oo db query x; rm -rf build", "oo db query x && gh issue create --title t", "oo $(rm -rf build)"]) {
+    const chained = await session.extensionRunner.emitToolCall({
+      type: "tool_call",
+      toolName: "bash",
+      toolCallId: `chained-${command.length}`,
+      input: { command },
+    });
+    assert.equal(chained?.block, true, `\`${command}\` is judged by its other command, not the oo rule`);
+  }
   assert.equal(permissions.checkPermission("bash", "oo").state, "allow");
   assert.equal(
     permissions.checkPermission("bash", "oo schedules delete x").state,

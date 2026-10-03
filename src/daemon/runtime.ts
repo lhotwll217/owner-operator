@@ -19,6 +19,7 @@ import { readHarnessDetails } from "../agent-runs/harness-details";
 import { runSessionSearch } from "../session-search/run";
 import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
+import { CALLER_SESSION_ENV } from "../shared/caller-session";
 import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/paths";
 import { WorktreeService } from "../worktrees/worktrees";
 import { runtimeFingerprint } from "./fingerprint";
@@ -199,6 +200,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
 }
 
 export async function daemonMain(): Promise<void> {
+  // The daemon serves every session, so it must not carry the identity of the shell that started
+  // it: delegated children inherit its environment, and a child would read that stale id as its
+  // own parent.
+  for (const name of [...CALLER_SESSION_ENV, "OO_CALLER_SESSION_ID", "OO_CURRENT_SESSION_ID"]) delete process.env[name];
   let daemon: RunningDaemon;
   try {
     daemon = await startDaemon({ onStale: () => process.kill(process.pid, "SIGTERM") });

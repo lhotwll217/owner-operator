@@ -12,7 +12,9 @@ read_when:
 Before exploring, read:
 
 - root [`CONTEXT.md`](../../CONTEXT.md); and
-- relevant ADRs under `docs/adr/` when that directory exists.
+- relevant ADRs under `adr/` when that directory exists.
+
+ADRs live in the root `adr/`, not under `docs/`: `docs/` holds only the current contract.
 
 Proceed silently when an expected document does not yet exist. Domain-modeling workflows create missing documentation when real terminology or decisions emerge.
 
@@ -27,6 +29,6 @@ This repository uses one shared context:
 ```text
 /
 ├── CONTEXT.md
-├── docs/adr/
+├── adr/
 └── src/
 ```
