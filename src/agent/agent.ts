@@ -39,10 +39,8 @@ import { rootHelp } from "../cli/help";
 export { repoRoot };
 export {
   configuredOwnerOperatorTools,
-  createOwnerOperatorCustomTools,
   ownerOperatorCustomTools,
   ownerOperatorTools,
-  useWorktreeTool,
 } from "./tools";
 
 export interface OwnerOperatorSession {

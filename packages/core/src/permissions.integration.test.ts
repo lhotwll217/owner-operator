@@ -59,7 +59,6 @@ try {
   assert.deepEqual(ask.permission.bash, { "*": "ask", oo: "allow", "oo *": "allow", "git status": "allow" },
     "existing configs gain the agent's own-CLI rules ahead of owner rules");
   assert.deepEqual(ask.permission.edit, { "*": "ask", "*.md": "allow" });
-  assert.deepEqual(ask.permission.use_worktree, { "*": "ask" });
   assert.equal(ask.permission.path["*.env"], "deny", "owner-authored path rules are preserved");
   assert.equal(ask.permission.path["/previous/private"], undefined, "obsolete generated rules are removed");
   assert.equal(ask.permission.path["/previous/last"], undefined);
@@ -96,7 +95,6 @@ try {
   assert.equal(readOnly.permission.read["*"], "allow");
   assert.equal(readOnly.permission.edit["*"], "deny");
   assert.equal(readOnly.permission.edit["*.md"], "allow", "advanced project/user rules remain user-owned");
-  assert.equal(readOnly.permission.use_worktree["*"], "deny");
   assert.equal(readOnly.permission.bash["*"], "deny");
   assert.deepEqual(parse(readFileSync(paths.piPermissionConfig, "utf8")), readOnly);
 

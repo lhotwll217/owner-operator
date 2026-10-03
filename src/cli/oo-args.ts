@@ -3,7 +3,7 @@
 // the headless prompt, and any other positional or unknown flag is a usage error.
 import { parseArgs } from "node:util";
 
-export const OPERATION_NOUNS = ["session-state", "runs", "schedules", "db", "harness", "search", "skill"] as const;
+export const OPERATION_NOUNS = ["session-state", "runs", "schedules", "db", "harness", "search", "skill", "worktrees"] as const;
 export type OperationNoun = (typeof OPERATION_NOUNS)[number];
 
 export const isOperationNoun = (value: string | undefined): value is OperationNoun =>

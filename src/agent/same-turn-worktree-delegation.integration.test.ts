@@ -9,7 +9,6 @@ import {
   type AgentRunCreateInput,
   type DaemonHealth,
   type DaemonReady,
-  type UseWorktreeResult,
 } from "@owner-operator/core";
 import { agentRunFixture } from "../../test/fixtures/agent-run";
 import { connectGateway } from "../gateway/client";
@@ -18,7 +17,6 @@ import { State } from "../state/state";
 import { GitWorktreeAdapter, type GitRepositoryIdentity } from "../worktrees/git";
 import { WorktreeService } from "../worktrees/worktrees";
 import { repoRoot } from "../shared/repo-root";
-import { createUseWorktreeTool } from "./tools/use-worktree";
 
 const root = mkdtempSync(join(tmpdir(), "oo-same-turn-worktree-delegation-"));
 const previousOoHome = process.env.OO_HOME;
@@ -77,7 +75,7 @@ const gateway = await startGateway({
   query: {} as never, harness: {} as never, search: {} as never,
   worktrees: {
     use: async (request) => {
-      ordering.push("use_worktree");
+      ordering.push("use_worktree_route");
       return worktrees.use(request);
     },
     resolveCwd: async (request) => {
@@ -113,12 +111,7 @@ try {
   }));
   const client = await connectGateway();
   assert.ok(client);
-  const useWorktree = createUseWorktreeTool({ resolveGateway: async () => client });
   let threadId = "same-turn-root";
-  const context = {
-    cwd: fallbackCwd,
-    sessionManager: { getSessionId: () => threadId },
-  } as Parameters<typeof useWorktree.execute>[4];
   // The Operator's bash: the privacy guard exports its session id and OO_AGENT=1, and the shell's
   // cwd is the turn's pre-selection cwd. Asynchronous, so this process's Gateway can answer.
   const delegate = (task: string) => new Promise<{ status: number; stderr: string; run: AgentRun | null }>((done) => {
@@ -131,23 +124,21 @@ try {
     });
   });
 
-  const created = await useWorktree.execute("create-worktree", {
-    action: "create",
-    repository: repositoryPath,
-    name: "ticket-07",
-  }, undefined, undefined, context);
-  const createdDetails = created.details as UseWorktreeResult;
-  const selectedPath = createdDetails.action === "create" ? createdDetails.worktree.path : "";
+  // `oo worktrees create` from the turn's bash sends this request (src/cli/operations/worktrees.ts).
+  const created = await client.useWorktree({
+    threadId,
+    input: { action: "create", repository: repositoryPath, name: "ticket-07" },
+  });
+  const selectedPath = created.action === "create" ? created.worktree.path : "";
   assert.equal(state.selectedWorktree(threadId)?.path, selectedPath,
-    "use_worktree persists the exact root selection through Gateway and State");
-  assert.equal(context.cwd, fallbackCwd, "the selecting turn still has its pre-selection Pi tool context");
+    "worktree creation persists the exact root selection through Gateway and State");
 
   const delegated = await delegate("work in the just-selected checkout");
   assert.equal(delegated.status, 0, delegated.stderr);
   assert.equal(delegated.run?.cwd, selectedPath,
     "omitted child cwd observes the durable selection before post-turn runtime rebind");
   assert.equal(launches[0]?.parentThreadId, threadId, "selection resolution and launch use the exact root identity");
-  assert.deepEqual(ordering, ["use_worktree", "resolve_worktree_cwd", "oo runs delegate"],
+  assert.deepEqual(ordering, ["use_worktree_route", "resolve_worktree_cwd", "oo runs delegate"],
     "selection resolution occurs immediately before same-turn delegation");
 
   git.mismatch = true;

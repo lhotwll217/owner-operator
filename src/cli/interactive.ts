@@ -20,8 +20,8 @@ import {
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
   createOoSession,
-  createOwnerOperatorCustomTools,
   configuredOwnerOperatorTools,
+  ownerOperatorCustomTools,
   ooProvenance,
   ownerOperatorPiServices,
   ownerOperatorPrompt,
@@ -40,7 +40,6 @@ import { createOwnerOperatorToolDisplayExtension } from "../agent/tool-display";
 import {
   createWorktreeRuntimeRebindExtension,
   InteractiveSessionReplacement,
-  PendingWorktreeCwdChanges,
   resolveInteractiveRuntimeTarget,
   resolveOwnerOperatorTaskCwd,
 } from "../agent/worktree-runtime";
@@ -62,30 +61,25 @@ const { modelRuntime, paths } = await ownerOperatorPiServices();
 configurePermissionSystemEnvironment(paths);
 const interactiveTools = configuredOwnerOperatorTools(paths.home);
 const invocationCwd = ownerOperatorTaskCwd();
-const pendingCwdChanges = new PendingWorktreeCwdChanges();
 const sessionReplacement = new InteractiveSessionReplacement();
-const interactiveCustomTools = createOwnerOperatorCustomTools({
-  onWorktreeSelection: (threadId) => pendingCwdChanges.record(threadId),
-});
 const ownerOperatorToolDisplayExtension = await createOwnerOperatorToolDisplayExtension(
   paths.piAgentDir,
-  interactiveCustomTools,
+  ownerOperatorCustomTools,
 );
 let runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>> | undefined;
 const worktreeRuntimeRebindExtension = createWorktreeRuntimeRebindExtension({
-  pending: pendingCwdChanges,
   replacement: sessionReplacement,
+  resolveCwd: (manager) => resolveOwnerOperatorTaskCwd(manager, invocationCwd),
   rebind: async (threadId) => {
     if (!runtime) throw new Error("interactive runtime is not ready");
     const manager = runtime.session.sessionManager;
     if (manager.getSessionId() !== threadId) {
-      throw new Error(`pending cwd change belongs to inactive session ${threadId}`);
+      throw new Error(`worktree selection belongs to inactive session ${threadId}`);
     }
     const sessionFile = manager.getSessionFile();
     if (!sessionFile) throw new Error(`session ${threadId} has no persisted transcript`);
-    // Pi tears down the current runtime before calling its factory. Resolve once first so a
-    // missing or invalid selected worktree leaves the current session intact and usable.
-    await resolveOwnerOperatorTaskCwd(manager, invocationCwd);
+    // Pi tears down the current runtime before calling its factory; resolveCwd has already
+    // resolved the selection, so a missing or invalid worktree leaves this session intact.
     await runtime.switchSession(sessionFile);
   },
 });
@@ -99,8 +93,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
     provenance,
     invocationCwd,
   );
-  const replacedThreadId = sessionReplacement.complete();
-  if (replacedThreadId) pendingCwdChanges.discard(replacedThreadId);
+  sessionReplacement.complete();
   const { settingsManager } = await ownerOperatorPiServices(paths.home);
   const services = await createAgentSessionServices({
     cwd: target.cwd,

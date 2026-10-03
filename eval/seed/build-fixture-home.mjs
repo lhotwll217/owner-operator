@@ -117,9 +117,21 @@ for (const key of ["piAuth", "piSettings", "piModels"]) {
 }
 
 // The default permission mode is read-only, which denies shell commands; eval subjects
-// need bash for transcript search, and the sandbox is already read-only at the tool
-// roster and cwd level.
-savePermissionMode(HOME, "allow");
+// need bash for transcript search and `oo` reads. Bash also reaches `oo` verbs that change
+// state, and every case shares this fixture DB, so owner rules deny them (owner rules follow
+// the `oo` allow rules and win; adr/0001-agent-uses-its-own-cli.md).
+const permissions = savePermissionMode(HOME, "allow");
+const OO_STATE_CHANGES = [
+  "oo session-state done *",
+  "oo schedules create *", "oo schedules update *", "oo schedules delete *",
+  "oo schedules disable *", "oo schedules run *",
+  "oo runs delegate *", "oo runs cancel *", "oo runs retry *", "oo runs resume *",
+  "oo harness approve *",
+  "oo worktrees create *", "oo worktrees select *",
+  "oo skill install *", "oo skill uninstall *",
+];
+for (const rule of OO_STATE_CHANGES) permissions.permission.bash[rule] = "deny";
+writeFileSync(ownerOperatorPaths(HOME).piPermissionConfig, `${JSON.stringify(permissions, null, 2)}\n`);
 
 // Details history first (versions with real created_at spacing), then the final transcript
 // observation so current state matches the fixture.

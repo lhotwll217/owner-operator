@@ -58,6 +58,32 @@ const readOnlyMutation = toolUseAssertion("", context([
 assert.equal(readOnlyMutation.pass, false);
 assert.match(readOnlyMutation.reason, /used forbidden \[oo session-state done\]/);
 
+const readingHelp = toolUseAssertion("", context([
+  locator,
+  { ...locator, input: { command: "oo session-state done --help" } },
+  search(["--query", "event backbone"]),
+]));
+assert.equal(readingHelp.pass, true, `reading a verb's help is not running it: ${readingHelp.reason}`);
+
+const deniedMutation = toolUseAssertion("", context([
+  locator,
+  { ...locator, input: { command: "oo session-state done session-1" }, isError: true },
+  search(["--query", "event backbone"]),
+]));
+assert.equal(deniedMutation.pass, true, `a denied state change left the fixture untouched: ${deniedMutation.reason}`);
+
+const bashSearch = toolUseAssertion("", {
+  provider: { label: "owner-operator" },
+  test: { metadata: { expectToolAny: ["bash"], expectSessionSearch: true } },
+  providerResponse: { metadata: { toolExecutions: [{
+    name: "bash",
+    input: { command: "oo search --query 'flaky cache' --any" },
+    isError: false,
+    resultChars: 100,
+  }] } },
+});
+assert.equal(bashSearch.pass, true, `an \`oo\` call still counts as bash: ${bashSearch.reason}`);
+
 const readOnlySchedule = toolUseAssertion("", context([
   locator,
   { ...locator, input: { command: "oo schedules create --name n --prompt p --every 1h" } },

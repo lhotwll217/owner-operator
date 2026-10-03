@@ -45,30 +45,6 @@ export async function resolveInteractiveRuntimeTarget(
   };
 }
 
-/** Selection is recorded during tool execution; runtime replacement consumes it once the entire
- * agent run has settled. A set handles a session being selected more than once in one turn. */
-export class PendingWorktreeCwdChanges {
-  private readonly threadIds = new Set<string>();
-
-  record(threadId: string): void {
-    this.threadIds.add(threadId);
-  }
-
-  take(threadId: string): boolean {
-    if (!this.threadIds.has(threadId)) return false;
-    this.threadIds.delete(threadId);
-    return true;
-  }
-
-  has(threadId: string): boolean {
-    return this.threadIds.has(threadId);
-  }
-
-  discard(threadId: string): void {
-    this.threadIds.delete(threadId);
-  }
-}
-
 /** Prevents a settling outgoing turn from starting a nested replacement while Pi is already
  * replacing that session for /new, /resume, or /fork. */
 export class InteractiveSessionReplacement {
@@ -90,12 +66,16 @@ export class InteractiveSessionReplacement {
 }
 
 export interface WorktreeRuntimeRebindOptions {
-  pending: PendingWorktreeCwdChanges;
   replacement: InteractiveSessionReplacement;
+  /** The cwd the session's durable worktree selection resolves to now. */
+  resolveCwd: (sessionManager: ExtensionContext["sessionManager"]) => Promise<string>;
   rebind: (threadId: string) => Promise<void>;
 }
 
-/** Pi's agent_settled boundary runs after retries, compaction, and queued continuations. */
+/** `oo worktrees create|select` changes a session's selection from bash, out of band of Pi's tool
+ * results, so the runtime asks once per settled agent run and rebinds when the selection's cwd differs
+ * from its own. Pi's agent_settled boundary runs after retries, compaction, and queued continuations.
+ * A failed resolve leaves the current session usable and is reported. */
 export function createWorktreeRuntimeRebindExtension(
   options: WorktreeRuntimeRebindOptions,
 ): ExtensionFactory {
@@ -108,8 +88,8 @@ export function createWorktreeRuntimeRebindExtension(
     pi.on("agent_settled", async (_event, ctx: ExtensionContext) => {
       const threadId = ctx.sessionManager.getSessionId();
       if (options.replacement.includes(threadId)) return;
-      if (!options.pending.take(threadId)) return;
       try {
+        if (await options.resolveCwd(ctx.sessionManager) === ctx.cwd) return;
         await options.rebind(threadId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

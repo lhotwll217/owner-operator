@@ -7,6 +7,7 @@ import { runs } from "./runs";
 import { runSearch } from "./search";
 import { sessionState } from "./session-state";
 import { skill } from "./skill";
+import { worktrees } from "./worktrees";
 
 export const NOUNS: Record<Exclude<OperationNoun, "search">, Noun> = {
   "session-state": sessionState,
@@ -15,6 +16,7 @@ export const NOUNS: Record<Exclude<OperationNoun, "search">, Noun> = {
   db,
   harness,
   skill,
+  worktrees,
 };
 
 export async function runOperation(noun: OperationNoun, argv: readonly string[]): Promise<number> {

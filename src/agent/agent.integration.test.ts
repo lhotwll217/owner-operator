@@ -54,13 +54,6 @@ try {
   );
   headless.session.dispose();
 
-  const restricted = await createOwnerOperatorSession("chat", { ephemeral: true, toolsAllow: [] });
-  assert.equal(
-    restricted.session.extensionRunner.getToolDefinition("use_worktree"),
-    undefined,
-    "an empty toolsAllow does not register excluded custom capabilities through tool display",
-  );
-  restricted.session.dispose();
   rmSync(join(ooHome, "pi", "auth.json"));
   const memoryBacked = await createOwnerOperatorSession("chat", {
     ephemeral: true,
@@ -134,23 +127,15 @@ assert.throws(
 );
 
 // Posture keeps every standard file/shell tool present; the permission mode decides each operation.
-for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write", "use_worktree"]) {
+for (const t of ["bash", "read", "grep", "find", "ls", "edit", "write"]) {
   assert.ok(ownerOperatorTools.some((tool) => tool === t), `owner tools must include ${t}`);
 }
 
-// Every allowlisted custom tool ships (so the allowlist can't reference a missing tool).
-// Built-in privacy enforcement is a tool_call guard, covered by privacy-tools.integration.test.
-for (const t of ["use_worktree"]) {
-  assert.ok(ownerOperatorCustomTools.some((tool) => tool.name === t), `owner custom tools must include ${t}`);
-}
-
-// Retired tools reach the Operator as `oo` verbs (adr/0001-agent-uses-its-own-cli.md).
+// Every capability reaches the Operator as an `oo` verb (adr/0001-agent-uses-its-own-cli.md).
+assert.deepEqual(ownerOperatorCustomTools, [], "the Operator has no native custom tools");
 for (const t of RETIRED_AGENT_TOOL_IDS) {
   assert.ok(!ownerOperatorTools.includes(t as never), `${t} is retired from the roster`);
-  assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === t), `${t} is retired from the custom tools`);
 }
-
-assert.ok(!ownerOperatorCustomTools.some((tool) => tool.name === "search_sessions"), "session search is a skill, not a duplicate custom tool");
 
 const harnessPrompt = ownerOperatorPrompt();
 assert.ok(harnessPrompt.includes(`\`\`\`text\n${rootHelp().trimEnd()}\n\`\`\``), "the prompt embeds the generated `oo --help` verbatim");

@@ -32,7 +32,6 @@ export enum AgentToolId {
   Ls = "ls",
   Read = "read",
   Write = "write",
-  UseWorktree = "use_worktree",
 }
 
 /** Tool ids retired for `oo` verbs (adr/0001-agent-uses-its-own-cli.md). The agent reaches
@@ -47,6 +46,7 @@ export const RETIRED_AGENT_TOOL_IDS: readonly string[] = [
   "manage_agent_run",
   "get_harness_details",
   "manage_delegated_baseline",
+  "use_worktree",
 ];
 
 /** `tools` with each retired id replaced by bash, order kept, duplicates dropped. */

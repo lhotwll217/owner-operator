@@ -46,11 +46,13 @@ function sessionSearchArgs(execution) {
 }
 
 // A bash `oo <noun> <verb>` call counts as that surface ("oo session-state done"), so cases
-// name what the Operator reached the same way they name a native tool.
+// name what the Operator reached the same way they name a native tool. Reading a verb's --help
+// runs nothing, so it stays plain bash.
 function surface(execution) {
   if (execution.name !== "bash") return execution.name;
-  const invocation = /^\s*oo\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(String(execution.input?.command ?? ""));
-  if (!invocation) return execution.name;
+  const command = String(execution.input?.command ?? "");
+  const invocation = /^\s*oo\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(command);
+  if (!invocation || /\s(?:--help|-h)(?=\s|$)/.test(command)) return execution.name;
   return invocation[2] ? `oo ${invocation[1]} ${invocation[2]}` : `oo ${invocation[1]}`;
 }
 
@@ -214,18 +216,19 @@ export default (_output, context) => {
     );
   }
   const called = new Set(executions.flatMap((execution) => [execution.name, surface(execution)]));
-  const succeeded = executions.filter((execution) => execution.isError === false).map(surface);
+  const succeeded = executions.filter((execution) => execution.isError === false)
+    .flatMap((execution) => [execution.name, surface(execution)]);
   const any = md.expectToolAny ?? [];
-  const forbid = new Set([
-    ...(md.forbidTool ?? []),
-    MARK_DONE,
-    ...SCHEDULE_CHANGES,
-    "edit",
-    "write",
-  ]);
+  // A case's own forbidTool fails on any attempt. State changes fail only when they succeed:
+  // the fixture home denies them, and a denied attempt leaves the shared fixture intact.
+  const stateChanges = [MARK_DONE, ...SCHEDULE_CHANGES, DELEGATE, ...RUN_MUTATIONS,
+    APPROVE, "oo worktrees create", "oo worktrees select", "edit", "write"];
 
   const missingAny = any.length > 0 && !any.some((expected) => succeeded.some((name) => reaches(name, expected)));
-  const usedForbidden = [...forbid].filter((tool) => called.has(tool));
+  const usedForbidden = [
+    ...(md.forbidTool ?? []).filter((tool) => called.has(tool)),
+    ...stateChanges.filter((tool) => succeeded.includes(tool)),
+  ];
   const sessionSearches = executions.flatMap((execution, executionIndex) => {
     if (execution.name !== "bash") return [];
     const args = sessionSearchArgs(execution);
