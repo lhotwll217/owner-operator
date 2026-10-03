@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["src/agent/skills/*/vendor/**"],
+  "ignorePatterns": ["src/agent/skills/*/vendor/**", ".claude/skills/pstack*/**"],
   "rules": {
     "no-control-regex": "off"
   }
