@@ -18,7 +18,7 @@ assert.ok(model, "choose an explicit model for the paid live test");
 const root = mkdtempSync(join(tmpdir(), "oo-cancel-resume-live-"));
 const priorHome = process.env.OO_HOME;
 process.env.OO_HOME = join(root, "oo");
-for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID"]) delete process.env[key];
+for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"]) delete process.env[key];
 const { startDaemon } = await import("../daemon/runtime");
 const daemon = await startDaemon({
   port: 0, watch: false, enableEnrichment: false,

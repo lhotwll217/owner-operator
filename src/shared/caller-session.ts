@@ -1,16 +1,19 @@
-/** The coding session invoking `oo`, when it identifies itself: an explicit `--from-session`,
- * then `OO_FROM_SESSION`, then the harness's own session env (Codex exports `CODEX_THREAD_ID`). */
+/** Environment that names the coding session invoking `oo`, in precedence order: an explicit
+ * `OO_FROM_SESSION`, then the harness's own session id (Codex exports `CODEX_THREAD_ID`, Claude Code
+ * exports `CLAUDE_CODE_SESSION_ID`). */
+export const CALLER_SESSION_ENV = ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"] as const;
+
+/** The coding session invoking `oo`, when it identifies itself: an explicit `--from-session`, then
+ * `CALLER_SESSION_ENV`. */
 export function callerSessionId(explicit?: string): string | undefined {
-  return [explicit, process.env.OO_FROM_SESSION, process.env.CODEX_THREAD_ID]
+  return [explicit, ...CALLER_SESSION_ENV.map((name) => process.env[name])]
     .find((value) => typeof value === "string" && value.trim())?.trim();
 }
 
-/** The session a delegated run belongs to and reports back to. Inside the Operator's own bash the
- * privacy guard (src/agent/privacy-tools.ts) exports `OO_CURRENT_SESSION_ID`, and it wins over any
- * `--from-session`, so runs follow the Operator session as they did for delegate_agent. Outside an
- * Operator, the explicit flag, then the calling coding session.
- * `callerSessionId` stays separate because search keeps the current Operator session and its
- * caller apart. */
+/** The session a delegated run belongs to and reports back to: an explicit id, then the Operator
+ * session whose own bash is running `oo` (`OO_CURRENT_SESSION_ID`, exported by the privacy guard in
+ * src/agent/privacy-tools.ts), then the calling coding session. `callerSessionId` stays separate
+ * because search keeps the current Operator session and its caller apart. */
 export function parentSessionId(explicit?: string): string | undefined {
-  return process.env.OO_CURRENT_SESSION_ID?.trim() || explicit?.trim() || callerSessionId();
+  return explicit?.trim() || process.env.OO_CURRENT_SESSION_ID?.trim() || callerSessionId();
 }

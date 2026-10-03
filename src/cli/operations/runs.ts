@@ -109,12 +109,12 @@ export const runs: Noun = {
         model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice" },
         effort: { type: "string", help: `reasoning effort (${AGENT_RUN_EFFORTS.join(", ")}); omitted: resolved like --model` },
         cwd: { type: "string", help: "child working directory (default: current directory)" },
-        "from-session": { type: "string", help: "the run's parent session when not run from an Operator (an Operator's bash always parents to its own session)" },
+        "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
         "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow`" },
       },
       examples: [
-        'oo runs delegate --harness claude-code --effort high --cwd ../other-repo --no-wait --json "Review the open diff against the repo standards"',
         'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',
+        'oo runs delegate --harness claude-code --effort high --cwd ../other-repo --no-wait --json "Review the open diff against the repo standards"',
       ],
       async run({ values, positionals: [task], json }) {
         const harness = values.harness;

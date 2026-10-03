@@ -27,9 +27,12 @@ missing from `oo`, where anyone can see it. This ADR makes the same reversal her
   the prompt, skills, and evals onto `oo` commands, and deletes the tool. `use_worktree` moves
   too, so the interactive runtime learns of a worktree change without a tool result.
 - The Operator's bash identifies its own session: the privacy guard exports
-  `OO_CURRENT_SESSION_ID`, and `oo runs delegate` records it as the run's parent ahead of any
-  `--from-session`, so completion delivery and the depth guard follow the Operator session as
-  they did for `delegate_agent`.
+  `OO_CURRENT_SESSION_ID`, and `oo runs delegate` records it as the run's parent when no
+  `--from-session` is given, so completion delivery and the depth guard follow the Operator
+  session as they did for `delegate_agent`. Outside the Operator, Codex and Claude Code sessions
+  identify themselves from their own environment (`CALLER_SESSION_ENV` in
+  `src/shared/caller-session.ts`), and the daemon drops those variables at startup so its children
+  never inherit the identity of the shell that started it.
 - The privacy guard exports `OO_AGENT=1`. `oo` verbs then connect to the running daemon without
   starting or replacing one, and the forms that would start a daemon or a nested Operator
   (`oo`, `oo -p`, `oo --continue`, `oo --session`, `oo daemon`) refuse to run. An agent call must

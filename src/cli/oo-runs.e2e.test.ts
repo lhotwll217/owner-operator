@@ -11,7 +11,7 @@ import { repoRoot } from "../shared/repo-root";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-runs-e2e-"));
 process.env.OO_HOME = ooHome;
-for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID"]) delete process.env[key];
+for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"]) delete process.env[key];
 let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
 
 const launched: AgentRunLaunchRequest[] = [];

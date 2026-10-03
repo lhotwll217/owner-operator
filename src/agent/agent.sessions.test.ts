@@ -26,9 +26,14 @@ const p = ooProvenance("chat", "caller-session-123");
 assert.equal(p.origin, "agent", "--from-session marks the caller as an agent");
 assert.equal(p.fromSession, "caller-session-123", "--from-session lands in provenance");
 assert.equal(p.callerRepo, repo, "caller repo derived from the invoking git checkout");
+const inheritedClaudeSessionId = process.env.CLAUDE_CODE_SESSION_ID;
+delete process.env.CLAUDE_CODE_SESSION_ID;
 const inheritedCodexThreadId = process.env.CODEX_THREAD_ID;
 delete process.env.CODEX_THREAD_ID;
 assert.equal(ooProvenance("interactive").origin, "owner", "interactive without caller identity is an owner surface");
+process.env.CLAUDE_CODE_SESSION_ID = "auto-claude-session-456";
+assert.equal(ooProvenance("chat").fromSession, "auto-claude-session-456", "Claude Code session id lands in provenance");
+delete process.env.CLAUDE_CODE_SESSION_ID;
 process.env.CODEX_THREAD_ID = "auto-codex-session-789";
 const detected = ooProvenance("chat");
 assert.equal(detected.origin, "agent", "Codex caller identity is detected without an extra flag");
@@ -40,6 +45,8 @@ assert.equal(
 );
 if (inheritedCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID;
 else process.env.CODEX_THREAD_ID = inheritedCodexThreadId;
+if (inheritedClaudeSessionId === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+else process.env.CLAUDE_CODE_SESSION_ID = inheritedClaudeSessionId;
 
 // Stamp in-memory (same append path as on disk): entry + human-readable session name.
 const sm = SessionManager.inMemory(process.cwd());
