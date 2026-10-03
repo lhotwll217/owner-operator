@@ -43,14 +43,11 @@ import { rootHelp } from "../cli/help";
 
 export { repoRoot };
 export {
-  getCurrentSessionStateTool,
   configuredOwnerOperatorTools,
   createOwnerOperatorCustomTools,
-  markThreadDoneTool,
   manageScheduleTool,
   ownerOperatorCustomTools,
   ownerOperatorTools,
-  queryDatabaseTool,
   schedulePromptTool,
   useWorktreeTool,
 } from "./tools";
@@ -146,7 +143,7 @@ export async function createOwnerOperatorSession(
 ): Promise<OwnerOperatorSession> {
   // Eval-only: OO_EVAL_BASELINE_PROMPT swaps the Operator for a naive session-search agent
   // — same binary, same model, same trace — so the eval's controlled arm differs from OO
-  // by exactly its prompt and toolset (no DB/state tools). Product runs never set it.
+  // by exactly its prompt. Product runs never set it.
   const baselinePrompt = process.env.OO_EVAL_BASELINE_PROMPT;
   const evalReadOnly = process.env.OO_EVAL_READ_ONLY === "1";
   const prompt = baselinePrompt ? readFileSync(baselinePrompt, "utf8") : ownerOperatorPrompt();
@@ -154,29 +151,17 @@ export async function createOwnerOperatorSession(
     ?? await ownerOperatorPiServices(undefined, opts.credentials);
   configurePermissionSystemEnvironment(paths);
   const configuredTools = configuredOwnerOperatorTools(paths.home);
-  const readOnlyCustomToolNames = new Set<string>([
-    AgentToolId.GetCurrentSessionState,
-    AgentToolId.QueryDatabase,
-  ]);
   const productionCustomTools = opts.harnessAdapters
     ? createOwnerOperatorCustomTools(opts.harnessAdapters)
     : ownerOperatorCustomTools;
-  const customTools = baselinePrompt
-    ? []
-    : evalReadOnly
-      ? productionCustomTools.filter((tool) => readOnlyCustomToolNames.has(tool.name))
-      : productionCustomTools;
+  // The read-only eval arm reads state through `oo` from bash; its grader forbids mutating verbs.
+  const customTools = baselinePrompt || evalReadOnly ? [] : productionCustomTools;
   const tools = baselinePrompt
     ? ["read", "bash"]
     : opts.toolsAllow
       ? opts.toolsAllow.filter((tool) => configuredTools.includes(tool))
       : evalReadOnly
-        ? [
-            AgentToolId.Bash,
-            AgentToolId.Read,
-            AgentToolId.GetCurrentSessionState,
-            AgentToolId.QueryDatabase,
-          ]
+        ? [AgentToolId.Bash, AgentToolId.Read]
         : [...configuredTools];
   const enabledToolNames = new Set<string>(tools);
   const enabledCustomTools = customTools.filter((tool) => enabledToolNames.has(tool.name));

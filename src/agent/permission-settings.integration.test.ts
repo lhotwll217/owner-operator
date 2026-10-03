@@ -146,16 +146,16 @@ try {
   assert.ok(permissions, "the permission service is published when a session starts");
   const markDoneGate = await session.extensionRunner.emitToolCall({
     type: "tool_call",
-    toolName: "mark_thread_done",
+    toolName: "bash",
     toolCallId: "mark-done-after-owner-cleanup-request",
-    input: { ids: ["thread-1"] },
+    input: { command: "oo session-state done thread-1" },
   });
   assert.equal(
     markDoneGate?.block,
     undefined,
-    `bounded native cleanup passes the interactive tool gate: ${JSON.stringify(markDoneGate)}`,
+    `marking done through oo passes the interactive gate: ${JSON.stringify(markDoneGate)}`,
   );
-  assert.equal(approvalPrompts, 0, "bounded native cleanup does not open Pi's generic approval dialog");
+  assert.equal(approvalPrompts, 0, "marking done through oo does not open Pi's generic approval dialog");
   const scheduleGate = await session.extensionRunner.emitToolCall({
     type: "tool_call",
     toolName: "schedule_prompt",
@@ -227,9 +227,6 @@ try {
       bash: "ask",
       edit: "ask",
       write: "ask",
-      get_current_session_state: "allow",
-      mark_thread_done: "allow",
-      query_database: "allow",
       schedule_prompt: "ask",
       manage_schedule: "ask",
       delegate_agent: "ask",

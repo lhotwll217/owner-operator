@@ -59,7 +59,6 @@ try {
   assert.deepEqual(ask.permission.bash, { "*": "ask", oo: "allow", "oo *": "allow", "git status": "allow" },
     "existing configs gain the agent's own-CLI rules ahead of owner rules");
   assert.deepEqual(ask.permission.edit, { "*": "ask", "*.md": "allow" });
-  assert.deepEqual(ask.permission.mark_thread_done, { "*": "allow" });
   assert.deepEqual(ask.permission.schedule_prompt, { "*": "ask" });
   assert.deepEqual(ask.permission.manage_schedule, { "*": "ask" });
   assert.deepEqual(ask.permission.use_worktree, { "*": "ask" });
@@ -99,7 +98,6 @@ try {
   assert.equal(readOnly.permission.read["*"], "allow");
   assert.equal(readOnly.permission.edit["*"], "deny");
   assert.equal(readOnly.permission.edit["*.md"], "allow", "advanced project/user rules remain user-owned");
-  assert.equal(readOnly.permission.mark_thread_done["*"], "deny");
   assert.equal(readOnly.permission.schedule_prompt["*"], "deny");
   assert.equal(readOnly.permission.manage_schedule["*"], "deny");
   assert.equal(readOnly.permission.use_worktree["*"], "deny");

@@ -1,4 +1,6 @@
 import assert from "node:assert";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -10,8 +12,8 @@ import {
   type ScheduleExecutionResult,
 } from "@owner-operator/core";
 import { manageScheduleTool } from "../agent/tools/manage-schedule";
-import { queryDatabaseTool } from "../agent/tools/query-database";
 import { connectGateway } from "../gateway/client";
+import { repoRoot } from "../shared/repo-root";
 import { fakeScanRow, tempOoHome, waitFor } from "../gateway/test/helpers";
 import { startDaemon } from "./runtime";
 
@@ -70,17 +72,13 @@ try {
   }) as { rows: Array<{ status: string; stdout_tail: string }> };
   assert.deepEqual(runs.rows[0], { status: "completed", stdout_tail: "ran\n" });
 
-  const discoveredResult = await queryDatabaseTool.execute(
-    "discover-schedule",
-    { action: DatabaseQueryAction.Query, sql: "SELECT id FROM schedules WHERE name = 'check'" },
-    undefined,
-    undefined,
-    toolContext,
-  );
-  const discoveryText = discoveredResult.content.find(({ type }) => type === "text");
-  assert.ok(discoveryText && discoveryText.type === "text");
-  const discovered = JSON.parse(discoveryText.text) as { rows: Array<{ id: string }> };
-  assert.equal(discovered.rows[0]?.id, schedule.id, "the read-only Operator tool identifies the stable schedule id");
+  // The Operator's bash runs `oo` with OO_AGENT=1: connect to this daemon, never start one.
+  // Async, because this process hosts the daemon that must answer.
+  const { stdout } = await promisify(execFile)(join(repoRoot, "oo"), [
+    "db", "query", "SELECT id FROM schedules WHERE name = 'check'", "--json",
+  ], { cwd: repoRoot, env: { ...process.env, OO_AGENT: "1" } });
+  const discovered = JSON.parse(stdout) as { rows: Array<{ id: string }> };
+  assert.equal(discovered.rows[0]?.id, schedule.id, "the Operator's `oo db query` identifies the stable schedule id");
   const discoveredScheduleId = discovered.rows[0].id;
 
   const disabledResult = await manageScheduleTool.execute(

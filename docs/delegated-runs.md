@@ -417,7 +417,7 @@ receives it.
 ## State
 
 The `agent_runs` table is the durable ledger; its columns are documented once in
-[`src/state/schema-docs.ts`](../src/state/schema-docs.ts) and inspectable through `query_database`.
+[`src/state/schema-docs.ts`](../src/state/schema-docs.ts) and inspectable through `oo db query`.
 `acpx` session records and process leases live under `~/.owner-operator/agent-runs/` (relocated
 out of the system tmpdir so restart reconciliation, safe orphan reaping, retry, and resume retain their
 identities across daemon restarts).

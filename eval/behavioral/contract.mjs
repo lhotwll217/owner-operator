@@ -55,7 +55,7 @@ export function behavioralHarnessProblems(metadata) {
 function sameRoster(actual, configured) {
   return Array.isArray(actual) && Array.isArray(configured)
     && JSON.stringify(actual) === JSON.stringify(configured)
-    && actual.includes("mark_thread_done");
+    && actual.includes("bash");
 }
 
 function markDoneStateEvidence(value) {

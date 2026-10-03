@@ -32,9 +32,6 @@ export enum AgentToolId {
   Ls = "ls",
   Read = "read",
   Write = "write",
-  GetCurrentSessionState = "get_current_session_state",
-  MarkThreadDone = "mark_thread_done",
-  QueryDatabase = "query_database",
   SchedulePrompt = "schedule_prompt",
   ManageSchedule = "manage_schedule",
   DelegateAgent = "delegate_agent",
@@ -42,6 +39,19 @@ export enum AgentToolId {
   GetHarnessDetails = "get_harness_details",
   ManageDelegatedBaseline = "manage_delegated_baseline",
   UseWorktree = "use_worktree",
+}
+
+/** Tool ids retired for `oo` verbs (adr/0001-agent-uses-its-own-cli.md). The agent reaches
+ * those verbs through bash, so a stored `toolsAllow` naming one is migrated to bash. */
+export const RETIRED_AGENT_TOOL_IDS: readonly string[] = [
+  "get_current_session_state",
+  "mark_thread_done",
+  "query_database",
+];
+
+/** `tools` with each retired id replaced by bash, order kept, duplicates dropped. */
+export function withoutRetiredAgentTools(tools: readonly string[]): AgentToolId[] {
+  return [...new Set(tools.map((tool) => RETIRED_AGENT_TOOL_IDS.includes(tool) ? AgentToolId.Bash : tool))] as AgentToolId[];
 }
 
 export type ScheduleTrigger =

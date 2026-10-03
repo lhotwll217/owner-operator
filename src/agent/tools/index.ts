@@ -7,19 +7,15 @@ import {
   type ManageDelegatedBaselineOptions,
 } from "./manage-delegated-baseline";
 import { manageScheduleTool } from "./manage-schedule";
-import { queryDatabaseTool } from "./query-database";
 import { schedulePromptTool } from "./schedule-prompt";
-import { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 import { createUseWorktreeTool } from "./use-worktree";
 
-export { queryDatabaseTool } from "./query-database";
 export { manageScheduleTool } from "./manage-schedule";
 export { schedulePromptTool } from "./schedule-prompt";
 export { delegateAgentTool } from "./delegate-agent";
 export { getHarnessDetailsTool } from "./get-harness-details";
 export { manageAgentRunTool } from "./manage-agent-run";
 export { manageDelegatedBaselineTool } from "./manage-delegated-baseline";
-export { getCurrentSessionStateTool, markThreadDoneTool } from "./session-state";
 export { useWorktreeTool } from "./use-worktree";
 
 export interface OwnerOperatorHarnessAdapters {
@@ -38,9 +34,6 @@ export function createOwnerOperatorCustomTools(
   runtimeAdapters: OwnerOperatorRuntimeAdapters = {},
 ) {
   return [
-    getCurrentSessionStateTool,
-    markThreadDoneTool,
-    queryDatabaseTool,
     schedulePromptTool,
     manageScheduleTool,
     delegateAgentTool,
@@ -54,9 +47,6 @@ export function createOwnerOperatorCustomTools(
 export const ownerOperatorCustomTools = createOwnerOperatorCustomTools();
 
 const ownerOperatorTypedTools: readonly AgentToolId[] = [
-  AgentToolId.GetCurrentSessionState,
-  AgentToolId.MarkThreadDone,
-  AgentToolId.QueryDatabase,
   AgentToolId.SchedulePrompt,
   AgentToolId.ManageSchedule,
   AgentToolId.DelegateAgent,

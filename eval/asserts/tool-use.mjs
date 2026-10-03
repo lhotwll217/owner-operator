@@ -45,6 +45,49 @@ function sessionSearchArgs(execution) {
   return args;
 }
 
+// A bash `oo <noun> <verb>` call counts as that surface ("oo session-state done"), so cases
+// name what the Operator reached the same way they name a native tool.
+function surface(execution) {
+  if (execution.name !== "bash") return execution.name;
+  const invocation = /^\s*oo\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(String(execution.input?.command ?? ""));
+  if (!invocation) return execution.name;
+  return invocation[2] ? `oo ${invocation[1]} ${invocation[2]}` : `oo ${invocation[1]}`;
+}
+
+/** Whether `name` is `expected` or one of its verbs ("oo db query" reaches "oo db"). */
+function reaches(name, expected) {
+  return name === expected || name.startsWith(`${expected} `);
+}
+
+function ooPositionals(execution, verbWords) {
+  const words = String(execution.input?.command ?? "").trim().split(/\s+/).slice(1 + verbWords);
+  return words.filter((word) => !word.startsWith("-")).map((word) => word.replace(/^(["'])(.*)\1$/, "$2"));
+}
+
+function resultText(result) {
+  const content = Array.isArray(result?.content) ? result.content : [];
+  return content.filter((block) => block?.type === "text").map((block) => block.text).join("");
+}
+
+/** `oo session-state done` output, as its --json payload or its `done|already|missing <id>` lines. */
+function doneOutcome(result) {
+  const text = resultText(result);
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      marked: (parsed.marked ?? []).map((item) => typeof item === "string" ? item : item?.id),
+      already: parsed.alreadyDoneIds ?? [],
+      missing: parsed.missingIds ?? [],
+    };
+  } catch {
+    const ids = (label) => [...text.matchAll(new RegExp(`^${label}\\s+(\\S+)`, "gm"))].map((match) => match[1]);
+    return { marked: ids("done"), already: ids("already"), missing: ids("missing") };
+  }
+}
+
+const LOCATORS = ["oo session-state list", "oo db"];
+const MARK_DONE = "oo session-state done";
+
 export default (_output, context) => {
   // This gate encodes OO's soundness (evidence from transcripts, not summaries) — a claim
   // about OO's composition, so it judges only the owner-operator arm. The baseline has only
@@ -65,18 +108,18 @@ export default (_output, context) => {
       md,
     );
   }
-  const called = new Set(executions.map((execution) => execution.name));
-  const succeeded = new Set(executions.filter((execution) => execution.isError === false).map((execution) => execution.name));
+  const called = new Set(executions.flatMap((execution) => [execution.name, surface(execution)]));
+  const succeeded = executions.filter((execution) => execution.isError === false).map(surface);
   const any = md.expectToolAny ?? [];
   const forbid = new Set([
     ...(md.forbidTool ?? []),
-    "mark_thread_done",
+    MARK_DONE,
     "schedule_prompt",
     "edit",
     "write",
   ]);
 
-  const missingAny = any.length > 0 && !any.some((t) => succeeded.has(t));
+  const missingAny = any.length > 0 && !any.some((expected) => succeeded.some((name) => reaches(name, expected)));
   const usedForbidden = [...forbid].filter((tool) => called.has(tool));
   const sessionSearches = executions.flatMap((execution, executionIndex) => {
     if (execution.name !== "bash") return [];
@@ -122,7 +165,7 @@ export default (_output, context) => {
     });
     const searchIndex = (directRead ?? validSessionSearches[0]).executionIndex;
     const locatorIndex = executions.findIndex((execution) =>
-      ["get_current_session_state", "query_database"].includes(execution.name) && execution.isError === false
+      execution.isError === false && LOCATORS.some((locator) => reaches(surface(execution), locator))
     );
     if (locatorIndex < 0 || locatorIndex > searchIndex) {
       problems.push("expected a successful state/DB locator before direct session retrieval");
@@ -145,7 +188,7 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
   const before = providerMetadata.stateBefore ?? {};
   const after = providerMetadata.stateAfter ?? {};
   const successful = executions.filter((execution) => execution.isError === false);
-  const doneCalls = executions.filter((execution) => execution.name === "mark_thread_done");
+  const doneCalls = executions.filter((execution) => surface(execution) === MARK_DONE);
   const successfulDoneCalls = doneCalls.filter((execution) => execution.isError === false);
   const mutationTools = new Set([
     "edit",
@@ -187,29 +230,26 @@ function markDoneBehavior(executions, providerMetadata, testMetadata) {
 
   if (shouldMarkDone) {
     if (doneCalls.length !== 1) {
-      problems.push(`expected exactly one mark_thread_done call, got ${doneCalls.length}`);
+      problems.push(`expected exactly one \`${MARK_DONE}\` call, got ${doneCalls.length}`);
     }
     if (successfulDoneCalls.length === 0) {
-      problems.push(`expected mark_thread_done exactly [${childId}], got no successful call`);
+      problems.push(`expected \`${MARK_DONE}\` exactly [${childId}], got no successful call`);
     }
     for (const execution of successfulDoneCalls) {
-      const ids = Array.isArray(execution.input?.ids) ? execution.input.ids : [];
+      const ids = ooPositionals(execution, 2);
       if (JSON.stringify(ids) !== JSON.stringify([childId])) {
-        problems.push(`expected mark_thread_done exactly [${childId}], got [${ids.join(", ")}]`);
+        problems.push(`expected \`${MARK_DONE}\` exactly [${childId}], got [${ids.join(", ")}]`);
       }
-      const result = execution.result?.details ?? execution.result ?? {};
-      const markedIds = Array.isArray(result.marked)
-        ? result.marked.map((item) => typeof item === "string" ? item : item?.id).filter(Boolean)
-        : [];
-      if (!markedIds.includes(childId) || result.missingIds?.length || result.alreadyDoneIds?.length) {
-        problems.push("mark_thread_done result did not confirm a fresh exact-target mutation");
+      const outcome = doneOutcome(execution.result);
+      if (!outcome.marked.includes(childId) || outcome.missing.length || outcome.already.length) {
+        problems.push(`\`${MARK_DONE}\` result did not confirm a fresh exact-target mutation`);
       }
     }
     if (after.rawThreadStates?.[childId] !== "done" || after.activeIds?.includes(childId)) {
       problems.push("finished child did not become done and leave the active projection");
     }
   } else {
-    if (doneCalls.length) problems.push("unresolved child must not call mark_thread_done");
+    if (doneCalls.length) problems.push(`unresolved child must not run \`${MARK_DONE}\``);
     if (after.rawThreadStates?.[childId] !== before.rawThreadStates?.[childId] ||
         !after.activeIds?.includes(childId)) {
       problems.push("unresolved child changed or left the active projection");
@@ -243,8 +283,8 @@ function delegationSelectionBehavior(output, executions, providerMetadata, testM
     execution.name === "read" && String(execution.input?.path ?? "").endsWith("preferences.md")
     || execution.name === "bash" && /preferences\.md/.test(String(execution.input?.command ?? ""))
   );
-  const changed = ["edit", "write", "schedule_prompt", "manage_schedule", "manage_agent_run", "mark_thread_done"]
-    .filter((name) => successful(name).length);
+  const changed = ["edit", "write", "schedule_prompt", "manage_schedule", "manage_agent_run", MARK_DONE]
+    .filter((name) => successful(name).length || succeeded.some((execution) => surface(execution) === name));
   if (changed.length) problems.push(`unexpected successful mutations [${changed.join(", ")}]`);
   if (directPreferenceReads.length) problems.push("selection read a preference file directly instead of the snapshot");
   if (before.userHarnessPreferences !== after.userHarnessPreferences) {

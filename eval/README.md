@@ -18,8 +18,8 @@ tool-roster source of truth; SSE transport is pinned and recorded in the manifes
 behavioral subject calls `createOwnerOperatorSession("chat", ...)` directly with the shipped
 prompt and its exact configured tool roster.
 
-Scope: this eval grades answers, not SQL. Deterministic `query_database` correctness lives
-in `src/state/query.test.ts`.
+Scope: this eval grades answers, not SQL. Deterministic `oo db` correctness lives
+in `src/state/query.integration.test.ts`.
 
 ## Run
 
@@ -119,7 +119,7 @@ separately when suites differ.
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
 | `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not a subject) |
 | `cases.yaml` | every case, tagged by `qtype` + tool expectations; every subject attempts all of them |
-| `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator subject, opt-in per case) |
+| `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator subject, opt-in per case). A bash `oo <noun> <verb>` call counts as that surface, e.g. `oo session-state done` |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |
 | `compare.mjs` | downstream: pairs two published runs per case; optional A≥B correctness gate; qtype breakdown |
 | `loop.mjs` | attested one-case/probe/core/holdout runner; writes every run to history and per-run detail |

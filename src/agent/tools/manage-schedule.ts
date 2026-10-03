@@ -42,7 +42,7 @@ export const manageScheduleTool = defineTool({
   label: "Manage schedule",
   description:
     "Disable or delete one durable Owner Operator schedule by its exact stable id. " +
-    "Use query_database on schedules to find the id; names are not accepted.",
+    "Use `oo db query` on schedules to find the id; names are not accepted.",
   parameters: Type.Object({
     action: Type.Union([
       Type.Literal("disable"),

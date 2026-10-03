@@ -45,24 +45,21 @@ try {
   assert.equal(config.enableNativeUserMessageBox, false, "Owner Operator initially keeps Pi's native user box disabled");
   assert.equal(config.readOutputMode, "summary", "the compact preset keeps raw read output expandable");
   assert.equal(config.expandedPreviewMaxLines, 0, "expanded results remain fully raw instead of truncating");
-  assert.equal(config.customToolOverrides.query_database.kind, "generic");
+  assert.equal(config.customToolOverrides.use_worktree.kind, "generic");
   assert.equal(config.customToolOverrides.delegate_agent.outputMode, "preview",
     "delegation shows its authoritative compact result in the package-owned block");
   assert.deepEqual(Object.keys(config.customToolOverrides).sort(), [
     "delegate_agent",
-    "get_current_session_state",
     "get_harness_details",
     "manage_agent_run",
     "manage_delegated_baseline",
     "manage_schedule",
-    "mark_thread_done",
-    "query_database",
     "schedule_prompt",
     "use_worktree",
   ], "every OO custom tool opts into package-owned generic rendering");
 
   const read = session.extensionRunner.getToolDefinition("read");
-  const query = session.extensionRunner.getToolDefinition("query_database");
+  const query = session.extensionRunner.getToolDefinition("use_worktree");
   const delegate = session.extensionRunner.getToolDefinition("delegate_agent");
   for (const name of ["read", "grep", "find", "ls", "bash", "edit", "write"]) {
     const tool = session.extensionRunner.getToolDefinition(name);
@@ -76,7 +73,7 @@ try {
   }
 
   assert.match(rendered(read!.renderCall!({ path: "src/agent/agent.ts" }, theme as never, {} as never) as never), /^read src\/agent\/agent\.ts$/);
-  assert.match(rendered(query!.renderCall!({ action: "threads", limit: 2 }, theme as never, {} as never) as never), /^query_database \(2 args\)$/);
+  assert.match(rendered(query!.renderCall!({ action: "threads", limit: 2 }, theme as never, {} as never) as never), /^use_worktree \(2 args\)$/);
 
   const result = { content: [{ type: "text", text: "first raw line\nsecond raw line" }] };
   const collapsedRead = rendered(read!.renderResult!(result as never, { expanded: false, isPartial: false } as never, theme as never, {} as never) as never);

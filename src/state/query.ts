@@ -1,5 +1,5 @@
 // Owner Operator — read-only SQL access to the state db, the progressive-disclosure
-// surface behind the agent's query_database tool: list tables → describe one → run a
+// surface behind `oo db`: list tables → describe one → run a
 // SELECT. The Gateway invokes this inside the daemon; clients never open SQLite.
 //
 // Enforcement is the connection itself ({ readOnly: true } — any write statement throws
