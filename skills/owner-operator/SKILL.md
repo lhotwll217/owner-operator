@@ -17,6 +17,12 @@ child process; `oo` starts it when needed.
 - **Delegation**: a task for another harness (Claude Code, Codex, Cursor, OpenCode) that should
   run as its own tracked session.
 
+## Find the session first
+
+To find which session handled something, `oo db query` with a `LIKE` on `thread_details.topic`
+and `status_summary` (every session's titles and status-summary history) before searching
+transcripts, then `oo search --skim` the ids it returns.
+
 ## Start at `oo --help`
 
 Run `oo --help` first. It routes each question to a noun and says how to identify your session.

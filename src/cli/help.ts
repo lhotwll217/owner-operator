@@ -31,21 +31,24 @@ Operations: which noun answers which question. Model-free; \`oo <noun> --help\` 
 \`oo <noun> <verb> --help\` its flags, rules, and examples; every verb takes --json.
 ${OPERATION_NOUNS.map(nounLine).join("\n")}
 
-Discovery: choose the shortest mode the known facts justify. After every result, answer if the
+Discovery: to find which session handled something, start from the index of every session's
+titles and status-summary history, then take the ids it returns to the transcripts:
+  oo db query "SELECT thread_id, version, topic, status_summary FROM thread_details
+    WHERE topic LIKE '%<words>%' OR status_summary LIKE '%<words>%' ORDER BY thread_id, version"
+  oo search --skim <thread_id>
+Choose the shortest mode the known facts justify. After every result, answer if the
 evidence suffices or reclassify: zero hits call for a broader route, several plausible sessions for
 progressive discovery, one resolved id for direct retrieval. Do not run state and transcript
 discovery in parallel merely to hedge.
   Direct       a stable session id or verbatim anchor such as an error, PR, filename, code symbol,
                or quoted phrase: search transcripts for it and stop when the bounded result answers.
   Indexed      state, repo, time, titles, and status-summary history are structured facts
-               \`oo session-state\` and \`oo db\` answer. To find which session handled something,
-               match its words against \`thread_details.topic\` and \`status_summary\` with
-               \`oo db query\` before searching transcripts. Metadata answers a metadata-only
-               question; when exact changes, reasons, artifacts, or proof are requested, take a
-               returned id to transcript search.
+               \`oo session-state\` and \`oo db\` answer. Metadata answers a metadata-only question;
+               when exact changes, reasons, artifacts, or proof are requested, take a returned id to
+               transcript search.
   Progressive  the target is ambiguous, paraphrased, or spread across plausible sessions: candidate
-               discovery first through that title and summary match, then inspect only candidates
-               whose pointers remain relevant.
+               discovery first through the title and summary index above, then inspect only
+               candidates whose pointers remain relevant.
   Exhaustive   absence, completeness, or "every session" is part of the claim: search an explicit
                time, source, and namespace scope, broaden grounded terms as needed, and qualify the
                answer by the coverage actually inspected.
