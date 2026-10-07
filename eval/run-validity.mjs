@@ -1,5 +1,5 @@
 export function shouldWriteGlobalResults(scope) {
-  return scope === "full" || scope === "behavioral";
+  return scope === "full" || scope === "behavioral" || scope === "external";
 }
 
 export function validateEvalRun(records, cases, { expectedIds, manifest, repeat, scope }) {
@@ -25,7 +25,7 @@ export function validateEvalRun(records, cases, { expectedIds, manifest, repeat,
     item.tokens === null || item.toolCalls === null || item.cost === null || item.latencyMs === null
   )) reasons.push("missing-telemetry");
   if (cases.some((item) => item.stats.n !== repeat)) reasons.push("repeat-mismatch");
-  if (scope === "behavioral") {
+  if (scope === "behavioral" || scope === "external") {
     if (records.some((item) => item.trajectoryPresent !== true)) reasons.push("missing-behavioral-trajectory");
     if (records.some((item) => item.trajectoryWellFormed !== true)) reasons.push("malformed-behavioral-trajectory");
     if (records.some((item) => item.harnessValid !== true)) reasons.push("invalid-behavioral-harness");

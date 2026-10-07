@@ -196,13 +196,15 @@ function snapshotHarnesses(execution) {
 }
 
 export default (_output, context) => {
+  const md = context.test?.metadata ?? {};
+  if (md.profile === "external") return externalEvidence(context.providerResponse?.metadata ?? {}, md);
+
   // This gate encodes OO's soundness (evidence from transcripts, not summaries) — a claim
   // about OO's composition, so it judges only the owner-operator arm. The baseline has only
   // grep and isn't the subject of this gate.
   const arm = context.provider?.label ?? context.provider?.id ?? "";
   if (!arm.startsWith("owner-operator")) return { pass: true, score: 1, reason: "n/a (baseline arm)" };
 
-  const md = context.test?.metadata ?? {};
   const executions = context.providerResponse?.metadata?.toolExecutions ?? [];
   if (md.profile === "mark-done") {
     return markDoneBehavior(executions, context.providerResponse?.metadata ?? {}, md);
@@ -288,6 +290,45 @@ export default (_output, context) => {
       : problems.join("; "),
   };
 };
+
+/** External agents reach Owner Operator through the instrumented `oo` (eval/external/trial.mjs
+ * records `cliCalls`). Grade the evidence behind the answer; a case names a route only when the
+ * route is the behavior under test (indexBeforeTranscript). */
+function externalEvidence(metadata, md) {
+  const problems = [];
+  if (metadata.harnessValid !== true) problems.push("external trial did not attest a valid harness");
+  const calls = Array.isArray(metadata.cliCalls) ? metadata.cliCalls : [];
+  const succeeded = calls.filter((call) => call.exitCode === 0 && !call.args.includes("--help") && !call.args.includes("-h"));
+  const transcriptReads = succeeded.filter((call) => call.args[0] === "search");
+  const indexReads = succeeded.filter((call) => call.args[0] === "db" && call.args[1] === "query"
+    && /\bthread_details\b/i.test(call.args[2] ?? ""));
+  if (!transcriptReads.length) problems.push("no successful transcript retrieval through `oo search`");
+  if (calls.some((call) => call.effectiveCaller !== metadata.sessionId)) {
+    problems.push("an `oo` call's caller identity differs from the agent's own session");
+  }
+  if (md.indexBeforeTranscript) {
+    const firstIndex = calls.findIndex((call) => indexReads.includes(call)
+      && /\b(?:topic|status_summary)\b/i.test(call.args[2]));
+    const firstTranscript = calls.findIndex((call) => transcriptReads.includes(call));
+    if (firstIndex < 0 || (firstTranscript >= 0 && firstTranscript < firstIndex)) {
+      problems.push("thread_details topic/status_summary not queried before transcripts");
+    }
+  }
+  if (md.requireEvidenceFrom && ![...transcriptReads, ...indexReads]
+    .some((call) => String(call.output ?? "").includes(md.requireEvidenceFrom))) {
+    problems.push(`no retrieved evidence from session ${md.requireEvidenceFrom}`);
+  }
+  if (md.excludeCallerTranscript && transcriptReads.some((call) => call.callerTranscriptReturned)) {
+    problems.push("search returned the caller's own transcript");
+  }
+  return {
+    pass: problems.length === 0,
+    score: problems.length === 0 ? 1 : 0,
+    reason: problems.length === 0
+      ? `oo evidence ok: ${transcriptReads.length} transcript read(s), ${indexReads.length} index query(ies)`
+      : problems.join("; "),
+  };
+}
 
 function markDoneBehavior(executions, providerMetadata, testMetadata) {
   const childId = String(testMetadata.childSessionId ?? "");

@@ -902,3 +902,44 @@
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-printed-before-send
+
+# ── external coding agents: Claude Code / Codex driving the shipped skill and `oo` CLI ──
+# Run only by the external-* subjects (`--external`). Each trial builds its own sandbox from
+# the measured checkout; eval/external/trial.mjs adds a later session that settles PR #42
+# and plants a caller transcript that retrieval must exclude. tool-use.mjs grades the
+# recorded `oo` calls against these metadata keys.
+- description: external-queue-decision
+  vars:
+    id: external-queue-decision
+    question: "Which sessions handled the nova-events queue decision, and what did we finally decide?"
+  metadata: { profile: external, qtype: external, indexBeforeTranscript: true }
+  assert:
+    - type: llm-rubric
+      value: >-
+        Identify both the earlier Claude recommendation of Kafka and the later Codex reversal
+        to NATS JetStream. Explain that the soak test found rebalance storms and 2.8s p99
+        tails. Cite session evidence for the final decision.
+
+- description: external-current-obligations
+  vars:
+    id: external-current-obligations
+    question: "What needs my attention right now?"
+  metadata: { profile: external, qtype: external, requireEvidenceFrom: fx-aurora-release-settled }
+  assert:
+    - type: llm-rubric
+      value: >-
+        Do not present aurora-weather PR #42 as awaiting review: a later session merged it.
+        Orbit-payments green rollout PR #81 still needs owner review. Distinguish current
+        obligations from optional idle follow-ups.
+
+- description: external-error-provenance
+  vars:
+    id: external-error-provenance
+    question: "Find the session that diagnosed the spurious 429s in quasar-api and explain the cause."
+  metadata: { profile: external, qtype: external, excludeCallerTranscript: true }
+  assert:
+    - type: llm-rubric
+      value: >-
+        Locate the quasar-api rate-limiter session. RateLimiter.refill() interpreted
+        refill_interval_ms as seconds, making refills 1000 times too slow. Do not claim that
+        DNS caching caused the problem. Support the answer with transcript evidence.

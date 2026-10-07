@@ -28,6 +28,13 @@ providers:
   - id: file://providers/behavioral-agent.mjs
     label: owner-operator-behavioral
     config: { timeoutMs: 600000 }
+  # External coding agents; eval/loop.mjs --external supplies checkout, model, and credential.
+  - id: file://providers/external-agent.mjs
+    label: external-codex
+    config: { harness: codex, timeoutMs: 600000 }
+  - id: file://providers/external-agent.mjs
+    label: external-claude-code
+    config: { harness: claude-code, timeoutMs: 600000 }
 
 defaultTest:
   options:

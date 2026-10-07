@@ -29,6 +29,7 @@
     "test:delegated-identity:live": "node --import tsx src/agent-runs/delegated-identity.live.test.ts",
     "eval": "node eval/loop.mjs --full",
     "eval:behavioral": "node eval/loop.mjs --behavioral",
+    "eval:external": "node eval/loop.mjs --external",
     "eval:loop": "node eval/loop.mjs",
     "eval:compare": "node eval/compare.mjs",
     "poll:smoke": "tsx src/session-monitor/monitor.smoke.ts",
@@ -50,6 +51,8 @@
     "pi-tool-display": "0.5.0"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.280",
+    "@openai/codex-sdk": "0.142.5",
     "@types/node": "^24",
     "oxlint": "^1.72.0",
     "promptfoo": "0.121.18",
