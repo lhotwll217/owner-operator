@@ -8,7 +8,7 @@ read_when:
 
 # Agent evaluations
 
-[`eval/`](../eval/) is the single Promptfoo pipeline for retrieval and mutable behavior. Its
+[`eval/`](../eval/) is the single Promptfoo pipeline for retrieval, mutable behavior, and external coding agents. Its
 operational command/catalog is [`eval/README.md`](../eval/README.md); this page owns the behavioral
 and isolation contracts.
 
@@ -116,6 +116,37 @@ events with independently captured raw ledger state, active projection, transcri
 completion identity/status, and an unrelated sentinel. Missing behavior is a failed grade. Missing
 or malformed trajectory/state components, provider errors, invalid sandbox teardown, or a false
 `harnessValid` attestation invalidate the measurement and prevent comparison-artifact publication.
+
+## External coding agents
+
+The `external-codex` and `external-claude-code` subjects run Codex or Claude Code through
+Promptfoo's native SDK providers (`openai:codex-sdk`, `anthropic:claude-agent-sdk`). The agent
+gets an ordinary task plus the measured checkout's `skills/owner-operator/SKILL.md` and reaches
+Owner Operator only through that checkout's `oo` CLI. `npm run eval:external -- --help` lists
+the subject options; cases carry `qtype: external` in [`eval/cases.yaml`](../eval/cases.yaml).
+
+Each sample runs [`eval/external/trial.mjs`](../eval/external/trial.mjs) in its own process,
+because a sandbox user owns `process.env` and an in-process daemon. The trial builds a
+`cli-driving` sandbox from `--checkout`, seeds the shared fixture sessions, and adds a later
+session that settles one stale PR obligation. Host instructions, skills, MCP servers, and settings
+stay out. `--credential` names the auth file the harness reads from its config directory: Codex
+`auth.json`, Claude Code `.credentials.json`. The trial copies it into the sandbox, blacklists it,
+deletes it at teardown, and scrubs its values from every returned field. This isolates
+configuration and fixture data; it is not an OS security sandbox for hostile agents.
+
+An instrumented `oo` comes first on the login shell's PATH. It forwards to the checkout's CLI and
+records each call's arguments, effective caller, exit status, and output. It also plants a
+transcript under the agent's real session id that caller-identity exclusion must keep out of
+search. [`asserts/tool-use.mjs`](../eval/asserts/tool-use.mjs) grades that evidence; a case
+requires a route only when the route is the behavior under test.
+
+Validity follows the behavioral path: provider errors, a missing answer or trajectory, and
+unverified teardown invalidate the run, and the first provider error stops later samples. A
+wrong answer or missing evidence is a valid failure. To compare checkouts, run the same subject,
+model, effort, executable, and repeat once per checkout, then `compare.mjs` the two
+`global_results.json` files. The manifest's git fields identify the measured checkout;
+`external.runner` records the evaluation code. The cases are a focused guidance check, not a
+representative workload.
 
 ## Ledgers and comparison
 

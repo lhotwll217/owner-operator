@@ -8,8 +8,8 @@ actual tool trajectory plus resulting state. Pattern adapted from the
 The sandbox, credential, teardown, diagnostic, validity, and publication contracts live only in
 [Agent evaluations](../docs/evals.md).
 
-A run measures **one subject**: `owner-operator` (default), `naive-session-grep`, or
-`owner-operator-behavioral`. The first two are the
+A run measures **one subject**: `owner-operator` (default), `naive-session-grep`,
+`owner-operator-behavioral`, `external-codex`, or `external-claude-code`. The first two are the
 [#31](https://github.com/lhotwll217/owner-operator/issues/31) control that runs the same
 `oo` binary at the same configured model (`.pi/settings.json`, falling back to the
 committed `.pi/settings.example.json`) with `OO_EVAL_BASELINE_PROMPT` swapping out OO's
@@ -30,7 +30,13 @@ npm run eval -- --label "<campaign>" --notes "<claim>" --repeat 1   # smoke: one
 npm run eval -- ... --subject naive-session-grep                    # run the #31 control instead
 npm run eval:behavioral -- --label "<campaign>" --notes "<claim>"   # real mutable cases, repeat 3
 node eval/compare.mjs <global_results_A.json> <global_results_B.json> [--gate]
+npm run eval:external -- --label "<campaign>" --notes "<claim>" --subject external-codex \
+  --checkout <path> --model <id> --effort <level> --executable <codex|claude> --credential <auth.json>
 ```
+
+External subjects measure the `--checkout` skill and CLI without installing evaluation code on
+that branch; [Agent evaluations](../docs/evals.md#external-coding-agents) owns their isolation,
+evidence, and validity rules.
 
 Comparison is downstream: point `compare.mjs` at any two published runs (harness vs its
 last global entry, or harness vs the naive-session-grep control). Every stats entry
@@ -108,12 +114,16 @@ separately when suites differ.
 | path | what |
 | --- | --- |
 | `fixtures/sessions.mjs` | synthetic sessions (claude + codex formats) — THE ground truth; cases key off facts planted here |
+| `seed/fixture-sessions.mjs` | writes the fixture transcripts and seeded state DB; shared by the retrieval and external sandboxes |
 | `seed/build-fixture-home.mjs` | materializes a run-scoped `$TMPDIR/oo-eval-sandbox/<run-id>`: transcripts + seeded OO_HOME (sources config, state.db with versioned details history); timestamps relative to now; answer-key paths blacklisted |
 | `providers/pi-agent-core.mjs` | shared runner: seeds once, spawns `oo`, records a hashed run manifest plus full session/tool trajectories and usage |
 | `sandbox.mjs`, `sandbox-user.ts` | diagnostic sanitizers plus the canonical disposable user/daemon/session/CLI primitive ([contract](../docs/evals.md)) |
 | `providers/oo-agent.mjs` | the owner-operator subject: OO's shipped read-only composition |
 | `providers/naive-agent.mjs` | the naive-session-grep control: same runner/model/search capability without OO's state/index composition |
 | `providers/behavioral-agent.mjs` | real mutable subject: fresh trial per case/repeat over production chat composition and full roster |
+| `providers/external-agent.mjs` | external Codex / Claude Code subjects over the measured checkout's skill and CLI |
+| `external/trial.mjs` | one external sample: checkout sandbox, fixture seed, instrumented `oo`, native Promptfoo SDK provider, verified teardown |
+| `external/cli-observer.mjs` | the instrumented `oo`: forwards to the checkout's CLI and records each call as evidence |
 | `behavioral/run-scenario-trial.ts` | one generic Harbor-style lifecycle for every mutable case: configure, create, setup, observe, execute, observe, and verified teardown |
 | `behavioral/scenario-operations.ts` | reusable OO-specific environment operations; these materialize state but do not own trial lifecycle or grading |
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
@@ -137,7 +147,9 @@ separately when suites differ.
 ## Mapping to promptfoo
 
 - **Provider** — a [custom JS provider](https://www.promptfoo.dev/docs/providers/custom-api/) spawning the CLI, returning `{ output, tokenUsage, cost, metadata }` (`exec:` returns only stdout, no metadata).
-- **Subjects** — three labeled providers over one case file; a run filters the compatible subject and case profile.
+- **Subjects** — five labeled providers over one case file; a run filters the compatible subject and case profile.
+  External subjects delegate each sample to Promptfoo's native `openai:codex-sdk` or
+  `anthropic:claude-agent-sdk` provider inside the sample's sandbox process.
 - **Correctness** — `llm-rubric` per case, graded by a pinned provider.
 - **Tool behavior** — a `javascript` assertion over the provider's ordered `OO_TRACE`
   metadata ([docs](https://www.promptfoo.dev/docs/providers/custom-api/)): require a

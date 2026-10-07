@@ -78,6 +78,10 @@ Why something was *not* adopted belongs in the issue/PR where that call was made
     untouched.
 - **[Promptfoo](https://github.com/promptfoo/promptfoo/tree/7d26d8f3cccb35dc6df53b18af32f0082cef2197)** —
   first-party real-agent evaluation examples.
+  - Borrowed (external coding-agent subjects): the native
+    [Claude Agent SDK provider](https://github.com/promptfoo/promptfoo/blob/cb323b0fedb7704f40d8246168e45634b2e8f56d/src/providers/claude-agent-sdk.ts#L1-L40)
+    and [Codex SDK provider](https://github.com/promptfoo/promptfoo/blob/cb323b0fedb7704f40d8246168e45634b2e8f56d/src/providers/openai/codex-sdk.ts#L1-L40)
+    run the agents. Owner Operator adds the per-sample sandbox, CLI evidence, and verified teardown.
   - Borrowed (behavioral harness, [#129](https://github.com/lhotwll217/owner-operator/issues/129)):
     serialize mutation-capable cases
     ([advanced config](https://github.com/promptfoo/promptfoo/blob/7d26d8f3cccb35dc6df53b18af32f0082cef2197/examples/claude-agent-sdk/advanced/promptfooconfig.yaml#L8-L23))
