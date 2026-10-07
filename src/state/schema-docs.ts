@@ -9,7 +9,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
     columns: [
       { name: "id", description: "Stable monitored-session thread id." },
       { name: "repo", description: "Repository name." },
-      { name: "project", description: "Absolute session working directory." },
+      { name: "project", description: "Absolute session working directory: a coding cwd, not a transcript source root." },
       { name: "app", description: "Originating app or CLI." },
       { name: "source", description: "Transcript adapter id." },
       { name: "transcript_path", description: "Absolute transcript path, when known." },
@@ -172,6 +172,14 @@ export const SCHEMA_DOCS: TableDoc[] = [
     ],
   },
 ];
+
+/** Every table and column with its documented purpose, as the Operator's prompt embeds it. */
+export function schemaReference(): string {
+  return SCHEMA_DOCS.map((table) => [
+    `${table.name} — ${table.description}`,
+    ...table.columns.map((column) => `  ${column.name.padEnd(28)} ${column.description}`),
+  ].join("\n")).join("\n\n");
+}
 
 export function tableDoc(name: string): TableDoc | undefined {
   return SCHEMA_DOCS.find((table) => table.name === name);

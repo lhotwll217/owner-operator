@@ -5,10 +5,8 @@ import { emit, gateway, type Noun } from "./operation";
 export const db: Noun = {
   summary: "read-only SQL over the state database (POST /query-database)",
   useWhen: "structured facts and history: past session versions, schedule runs, delegated runs, anything SQL answers",
-  guide: "`threads` holds one identity row per session; `thread_details` is an append-only versioned\n"
-    + "ledger of what is believed about each, and its version history is the thread's audit trail.\n"
-    + "A session's `project` is its coding cwd, not a transcript source root. Run `oo db tables`, then\n"
-    + "`oo db describe <table>`, before unfamiliar SQL.",
+  guide: "Run `oo db tables`, then `oo db describe <table>`, before unfamiliar SQL: the table and\n"
+    + "column docs say what each holds.",
   verbs: {
     tables: {
       summary: "table names, row counts, and documented purpose",

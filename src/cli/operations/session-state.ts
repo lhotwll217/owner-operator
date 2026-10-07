@@ -16,6 +16,12 @@ export const sessionState: Noun = {
     list: {
       summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "
         + "index sessions: take an id to `oo search` for what changed, why, or proof",
+      guide: "For \"what needs me / is waiting on me?\", run `oo session-state list --state needs-you` and\n"
+        + "treat the result, including an empty one, as authoritative for current widget rows. Priority\n"
+        + "ranks rows; approval or review wording does not promote an idle row; optional idle follow-ups\n"
+        + "remain a separate category. An obligation that names an artifact (a pull request, issue,\n"
+        + "file, or command) is current only if nothing since settled it: search that artifact across\n"
+        + "sessions before reporting it, because the session that settled it is usually a different one.",
       options: {
         state: { type: "string", help: `only rows in this exact state: ${STATES.join(", ")}` },
       },
