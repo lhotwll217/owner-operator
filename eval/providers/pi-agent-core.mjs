@@ -430,6 +430,7 @@ async function runExternalTrial({ arm, prompt, caseId, invocationId, baseName, t
     fs.rmSync(`${root}.settings`, { force: true });
   }
   const redactions = [root, external?.trial.checkout, external?.trial.credentialSource].filter(Boolean);
+  fs.writeFileSync(path.join(logDir, `${baseName}.stdout.txt`), payload?.output ?? '');
   fs.writeFileSync(path.join(logDir, `${baseName}.stderr.txt`), sanitizeEvalDiagnosticText(stderr, redactions));
   const trial = payload?.metadata ?? { toolExecutions: [], cliCalls: [], harnessValid: false, harnessProblems: [] };
   fs.writeFileSync(traceFile, [
