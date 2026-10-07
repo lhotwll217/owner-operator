@@ -18,6 +18,8 @@ import {
 } from "./agent";
 import { AGENT_RUN_COMPLETION_MESSAGE_TYPE } from "../agent-runs/agent-run-completion";
 import { helpTree } from "../cli/help";
+import { NOUNS } from "../cli/operations";
+import { verbHelp } from "../cli/operations/operation";
 
 const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
 const priorOoHome = process.env.OO_HOME;
@@ -188,7 +190,10 @@ assert.doesNotMatch(
   "the reusable transcript skill does not route between Owner Operator's other surfaces",
 );
 assert.match(authoredPrompt, /`oo session-state list --state needs-you`/, "what-needs-me reads the authoritative state filter");
-assert.match(helpTree(), /MUST run `oo session-state done <id>`/, "the done verb's help carries the mark-done rule");
+assert.match(verbHelp("session-state", "done", NOUNS["session-state"].verbs.done!), /MUST run `oo session-state done <id>`/,
+  "the done verb's own help carries the mark-done rule");
+assert.match(verbHelp("runs", "resume", NOUNS.runs.verbs.resume!), /submitted a prompt or is already a resume successor/,
+  "the resume verb's own help carries its eligibility");
 for (const moved of [/MUST run `oo session-state done/, /completion arrives automatically/i, /schedule_runs/, /thread_details\.topic/]) {
   assert.doesNotMatch(authoredPrompt, moved, `${moved} lives in the help the prompt embeds, not in prompt prose`);
 }

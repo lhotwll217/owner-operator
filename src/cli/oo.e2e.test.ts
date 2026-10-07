@@ -45,13 +45,13 @@ try {
 
   // The Operator's prompt embeds helpTree(); every page it holds must be what that command prints.
   const pages = Object.entries(NOUNS).flatMap(([noun, { verbs }]) => [[noun], ...Object.keys(verbs).map((verb) => [noun, verb])]);
-  const tree = helpTree();
-  await Promise.all(pages.map(async (page) => {
-    const printed = await runOo([...page, "--help"]);
-    assert.equal(printed.status, 0, `oo ${page.join(" ")} --help exits 0`);
-    assert.ok(tree.includes(`\n\n${printed.stdout.trimEnd()}\n\n`) || tree.endsWith(`\n\n${printed.stdout.trimEnd()}`),
-      `the embedded help tree holds exactly what \`oo ${page.join(" ")} --help\` prints`);
+  const printed = await Promise.all(pages.map(async (page) => {
+    const result = await runOo([...page, "--help"]);
+    assert.equal(result.status, 0, `oo ${page.join(" ")} --help exits 0`);
+    return result.stdout.trimEnd();
   }));
+  assert.equal(helpTree(), [help.stdout.trimEnd(), ...printed].join("\n\n"),
+    "the embedded help tree is exactly `oo --help` then every noun and verb page, in order, as printed");
   assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
   for (const argv of [["daemon", "--help"], ["doctor", "-h"]]) {

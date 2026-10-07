@@ -117,7 +117,9 @@ const rowVerb = (summary: string, examples: string[], act: (id: string) => Promi
 export const runs: Noun = {
   summary: "delegated runs: daemon-owned child agents (/agent-runs)",
   useWhen: "handing a task to a child coding agent, or checking, following, cancelling, retrying, or continuing a delegated run",
-  guide: "The daemon owns every child; the runtime contract is docs/delegated-runs.md.\n"
+  guide: "The daemon owns every child, so interrupting `delegate` or `logs --follow` detaches without\n"
+    + "stopping the run, and `logs --follow` replays from the start when you reattach. Runtime contract:\n"
+    + "https://github.com/lhotwll217/owner-operator/blob/main/docs/delegated-runs.md\n"
     + "In the Operator's bash, `delegate` returns the pending row and completion arrives automatically,\n"
     + "so run management is for owner-directed lifecycle control or explicit inspection.",
   verbs: {
@@ -125,9 +127,7 @@ export const runs: Noun = {
       args: "<task>",
       summary: "launch a child agent; the Operator's bash gets the pending row, other callers stream the child until it finishes",
       guide: "Outside the Operator, the command streams the child's output and exits 0 only when the run\n"
-        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.\n"
-        + "Interrupting either detaches without stopping the run, and `logs --follow` replays from the\n"
-        + "start when you reattach.",
+        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
@@ -213,7 +213,7 @@ export const runs: Noun = {
         + "submitted a prompt or is already a resume successor, and its session can reload; successors\n"
         + "cancelled while queued or loading still resume, fresh startup cancellations do not. If the\n"
         + "harness cannot reload the conversation, report the error: starting a fresh `delegate` instead\n"
-        + "needs the owner's explicit decision.",
+        + "needs an explicit decision.",
       minPositionals: 2,
       examples: ['oo runs resume <id> "Continue where you stopped and finish the remaining tests"'],
       async run({ positionals: [id, task], json }) {

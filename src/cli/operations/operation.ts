@@ -51,12 +51,12 @@ function optionLabel(name: string, option: ParseArgsOptionsConfig[string]): stri
   return option.type === "string" ? `${flag} <value>` : flag;
 }
 
-/** A guide's lines, indented under the summary line. */
-const guideLines = (guide: string | undefined): string[] =>
-  guide ? ["", ...guide.split("\n").map((line) => `  ${line}`)] : [];
+/** A guide's lines after a blank line, each prefixed by `indent`. */
+const guideLines = (guide: string | undefined, indent: string): string[] =>
+  guide ? ["", ...guide.split("\n").map((line) => `${indent}${line}`)] : [];
 
 export function verbHelp(nounName: string, verbName: string, verb: Verb): string {
-  const lines = [`oo ${nounName} ${verbName}${verb.args ? ` ${verb.args}` : ""} [--json]`, "", `  ${verb.summary}`, ...guideLines(verb.guide)];
+  const lines = [`oo ${nounName} ${verbName}${verb.args ? ` ${verb.args}` : ""} [--json]`, "", `  ${verb.summary}`, ...guideLines(verb.guide, "  ")];
   lines.push("", "Flags:");
   for (const [name, option] of Object.entries(verb.options ?? {})) {
     lines.push(`  ${optionLabel(name, option).padEnd(28)} ${option.help}`);
@@ -73,7 +73,7 @@ export function nounHelp(nounName: string, noun: Noun): string {
     `oo ${nounName} — ${noun.summary}`,
     "",
     `Use when: ${noun.useWhen}`,
-    ...guideLines(noun.guide).map((line) => line.slice(2)),
+    ...guideLines(noun.guide, ""),
     "",
     "Verbs:",
     ...rows,

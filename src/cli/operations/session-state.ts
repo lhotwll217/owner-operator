@@ -10,8 +10,8 @@ const rowLine = (row: SessionStateRow, position: number): string =>
 export const sessionState: Noun = {
   summary: "the owner's current session rows, as the widget shows them",
   useWhen: "what is active right now, what needs the owner, or marking finished sessions done",
-  guide: "Rows are an index over sessions, not the sessions themselves, and can lag a transcript by\n"
-    + "one monitor poll.",
+  guide: "Rows are an index over sessions, not the sessions themselves. The monitor appends a new\n"
+    + "version on every semantic change, so a row can lag its transcript by one poll.",
   verbs: {
     list: {
       summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "
