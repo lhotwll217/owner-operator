@@ -17,7 +17,8 @@ export const sessionState: Noun = {
     + "ranks rows; approval or review wording does not promote an idle row; optional idle follow-ups\n"
     + "remain a separate category. An obligation that names an artifact (a pull request, issue,\n"
     + "file, or command) is current only if nothing since settled it: search that artifact across\n"
-    + "sessions before reporting it, because the session that settled it is usually a different one.",
+    + "sessions before reporting it (`oo db query` on `status_summary`, then transcripts), because the\n"
+    + "session that settled it is usually a different one.",
   verbs: {
     list: {
       summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "

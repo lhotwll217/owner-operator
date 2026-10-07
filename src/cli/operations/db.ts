@@ -4,7 +4,7 @@ import { emit, gateway, type Noun } from "./operation";
 
 export const db: Noun = {
   summary: "read-only SQL over the state database (POST /query-database)",
-  useWhen: "structured facts and history: past session versions, schedule runs, delegated runs, anything SQL answers",
+  useWhen: "which session handled something (every session's titles and status-summary history), past session versions, schedule runs, delegated runs, anything SQL answers",
   guide: "Run `oo db tables`, then `oo db describe <table>`, before unfamiliar SQL: the table and\n"
     + "column docs say what each holds.",
   verbs: {
@@ -39,8 +39,6 @@ export const db: Noun = {
     query: {
       args: "<sql>",
       summary: "run one read-only SELECT; results are capped and flag truncation",
-      guide: "To find which session handled something, match its words against `thread_details.topic`\n"
-        + "and `status_summary` before searching transcripts.",
       minPositionals: 1,
       examples: [
         'oo db query "SELECT id, repo, app, last_message_at FROM threads ORDER BY last_message_at DESC LIMIT 10"',

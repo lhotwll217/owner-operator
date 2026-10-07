@@ -37,11 +37,15 @@ progressive discovery, one resolved id for direct retrieval. Do not run state an
 discovery in parallel merely to hedge.
   Direct       a stable session id or verbatim anchor such as an error, PR, filename, code symbol,
                or quoted phrase: search transcripts for it and stop when the bounded result answers.
-  Indexed      state, repo, time, and stored thread details are structured facts \`oo session-state\`
-               and \`oo db\` answer. Metadata answers a metadata-only question; when exact changes,
-               reasons, artifacts, or proof are requested, take a returned id to transcript search.
+  Indexed      state, repo, time, titles, and status-summary history are structured facts
+               \`oo session-state\` and \`oo db\` answer. To find which session handled something,
+               match its words against \`thread_details.topic\` and \`status_summary\` with
+               \`oo db query\` before searching transcripts. Metadata answers a metadata-only
+               question; when exact changes, reasons, artifacts, or proof are requested, take a
+               returned id to transcript search.
   Progressive  the target is ambiguous, paraphrased, or spread across plausible sessions: candidate
-               discovery first, then inspect only candidates whose pointers remain relevant.
+               discovery first through that title and summary match, then inspect only candidates
+               whose pointers remain relevant.
   Exhaustive   absence, completeness, or "every session" is part of the claim: search an explicit
                time, source, and namespace scope, broaden grounded terms as needed, and qualify the
                answer by the coverage actually inspected.
