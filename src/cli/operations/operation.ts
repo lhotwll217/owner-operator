@@ -34,7 +34,7 @@ export interface Noun {
   summary: string;
   /** The questions this noun answers; root help routes by it. */
   useWhen: string;
-  /** How the noun's verbs fit together and the rules shared by all of them. */
+  /** How the noun's verbs fit together, and the rules for the questions its `useWhen` routes here. */
   guide?: string;
   verbs: Record<string, Verb>;
 }

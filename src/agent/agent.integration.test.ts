@@ -20,7 +20,7 @@ import { AGENT_RUN_COMPLETION_MESSAGE_TYPE } from "../agent-runs/agent-run-compl
 import { helpTree, rootHelp } from "../cli/help";
 import { schemaReference } from "../state/schema-docs";
 import { NOUNS } from "../cli/operations";
-import { verbHelp } from "../cli/operations/operation";
+import { nounHelp, verbHelp } from "../cli/operations/operation";
 
 const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
 const priorOoHome = process.env.OO_HOME;
@@ -190,8 +190,8 @@ assert.doesNotMatch(
   /oo session-state|oo db\b/,
   "the reusable transcript skill does not route between Owner Operator's other surfaces",
 );
-assert.match(verbHelp("session-state", "list", NOUNS["session-state"].verbs.list!), /`oo session-state list --state needs-you`/,
-  "what-needs-me reads the authoritative state filter");
+assert.match(nounHelp("session-state", NOUNS["session-state"]), /`oo session-state list --state needs-you`/,
+  "the noun that answers what-needs-me carries its rules");
 assert.ok(harnessPrompt.includes(schemaReference()), "the prompt embeds the generated state schema");
 assert.match(verbHelp("session-state", "done", NOUNS["session-state"].verbs.done!), /MUST run `oo session-state done <id>`/,
   "the done verb's own help carries the mark-done rule");
