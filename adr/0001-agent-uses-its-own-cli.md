@@ -46,7 +46,7 @@ missing from `oo`, where anyone can see it. This ADR makes the same reversal her
   schedule can run any program. This is deliberate: native tools and `oo` verbs are product
   actions the Operator may take without approval.
 - Guidance lives in `oo` help, nested by level, with examples on every verb. The system prompt
-  embeds the generated root help rather than restating it, so the Operator and an outside agent
+  embeds the generated help tree, every noun and verb, rather than restating it, so the Operator and an outside agent
   read the same text, and what an eval proves for one holds for the other.
 - `src/cli/conventions.test.ts` requires an `oo` verb for every agent-facing Gateway route. Its
   `PENDING` table lists the routes a native tool still covers, and each retirement PR empties its

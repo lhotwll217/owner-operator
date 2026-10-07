@@ -117,10 +117,17 @@ const rowVerb = (summary: string, examples: string[], act: (id: string) => Promi
 export const runs: Noun = {
   summary: "delegated runs: daemon-owned child agents (/agent-runs)",
   useWhen: "handing a task to a child coding agent, or checking, following, cancelling, retrying, or continuing a delegated run",
+  guide: "The daemon owns every child; the runtime contract is docs/delegated-runs.md.\n"
+    + "In the Operator's bash, `delegate` returns the pending row and completion arrives automatically,\n"
+    + "so run management is for owner-directed lifecycle control or explicit inspection.",
   verbs: {
     delegate: {
       args: "<task>",
-      summary: "launch a child agent and stream it until it finishes; the Operator's bash gets the pending row instead, since completion arrives on its own",
+      summary: "launch a child agent; the Operator's bash gets the pending row, other callers stream the child until it finishes",
+      guide: "Outside the Operator, the command streams the child's output and exits 0 only when the run\n"
+        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.\n"
+        + "Interrupting either detaches without stopping the run, and `logs --follow` replays from the\n"
+        + "start when you reattach.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
@@ -200,7 +207,13 @@ export const runs: Noun = {
     retry: rowVerb("rerun the same task after failed, interrupted, or lost", ["oo runs retry <id>"], async (id) => (await gateway()).retryAgentRun(id)),
     resume: {
       args: "<id> <task>",
-      summary: "continue a completed or cancelled run's child conversation (default after cancellation; cancelled runs need a submitted prompt or resume relationship; session must support reloading)",
+      summary: "continue a completed or cancelled run's child conversation in a new run row",
+      guide: "The default way to continue cancelled work. Pass instructions that continue or revise the\n"
+        + "work, and use the latest run id in that conversation. A cancelled run resumes when it\n"
+        + "submitted a prompt or is already a resume successor, and its session can reload; successors\n"
+        + "cancelled while queued or loading still resume, fresh startup cancellations do not. If the\n"
+        + "harness cannot reload the conversation, report the error: starting a fresh `delegate` instead\n"
+        + "needs the owner's explicit decision.",
       minPositionals: 2,
       examples: ['oo runs resume <id> "Continue where you stopped and finish the remaining tests"'],
       async run({ positionals: [id, task], json }) {

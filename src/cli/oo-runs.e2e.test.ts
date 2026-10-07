@@ -161,7 +161,7 @@ try {
   assert.equal(state.agentRunById(cancelId)?.status, AgentRunStatus.Cancelled);
   const resumeHelp = await runOo(["runs", "resume", "--help"]);
   assert.match(resumeHelp.stdout, /completed or cancelled/);
-  assert.match(resumeHelp.stdout, /default after cancellation/);
+  assert.match(resumeHelp.stdout, /default way to continue cancelled work/);
   // A log far larger than the pipe buffer, read only after a pause, arrives whole with its
   // terminal record: the CLI waits on backpressure and drains stdout before exiting.
   const big = state.createAgentRun({ harness: "claude-code" as never, task: "HOLD big log", cwd: repoRoot, depth: 1, timeoutSeconds: 60 });

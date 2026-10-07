@@ -13,13 +13,9 @@ model, and effort value—including `effort: null`—while selecting only omitte
 
 ## Continue existing work
 
-To continue a cancelled delegated run, default to `oo runs resume <id> "<task>"` with the latest
-run id and a new task describing what to do next. Cancelled runs require a submitted
-prompt or an existing resume relationship, plus a reloadable session. A resume successor cancelled
-while queued or loading can still be resumed. Resume also accepts completed runs.
-It preserves the child conversation and recorded harness, model, effort, and cwd, so selection is
-unnecessary. If continuation fails, report the error before deciding on a fresh delegate.
-The [continuation contract](../../../../docs/delegated-runs.md#lifecycle) owns eligibility and limits.
+To continue a cancelled or completed delegated run, use `oo runs resume`; its help owns
+eligibility. Resume preserves the child conversation and its recorded harness, model, effort, and
+cwd, so selection is unnecessary.
 
 ## Select
 

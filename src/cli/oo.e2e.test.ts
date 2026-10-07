@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
 import { markOnboarded } from "@owner-operator/core";
 import { CALLER_SESSION_ENV } from "../shared/caller-session";
-import { rootHelp } from "./help";
+import { helpTree, rootHelp } from "./help";
+import { NOUNS } from "./operations";
 
 const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
@@ -41,6 +42,16 @@ try {
   assert.match(help.stdout, /^  oo search .*flags only, no verbs/m, "top-level help says search has flags, not verbs");
   assert.equal(help.stdout, `${rootHelp()}\n`, "`oo --help` prints exactly the text the Operator prompt embeds");
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
+
+  // The Operator's prompt embeds helpTree(); every page it holds must be what that command prints.
+  const pages = Object.entries(NOUNS).flatMap(([noun, { verbs }]) => [[noun], ...Object.keys(verbs).map((verb) => [noun, verb])]);
+  const tree = helpTree();
+  await Promise.all(pages.map(async (page) => {
+    const printed = await runOo([...page, "--help"]);
+    assert.equal(printed.status, 0, `oo ${page.join(" ")} --help exits 0`);
+    assert.ok(tree.includes(`\n\n${printed.stdout.trimEnd()}\n\n`) || tree.endsWith(`\n\n${printed.stdout.trimEnd()}`),
+      `the embedded help tree holds exactly what \`oo ${page.join(" ")} --help\` prints`);
+  }));
   assert.equal(existsSync(join(ooHome, "workspace", "AGENTS.md")), true, "every CLI exit seeds the workspace");
 
   for (const argv of [["daemon", "--help"], ["doctor", "-h"]]) {

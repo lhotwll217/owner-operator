@@ -10,6 +10,8 @@ const rowLine = (row: SessionStateRow, position: number): string =>
 export const sessionState: Noun = {
   summary: "the owner's current session rows, as the widget shows them",
   useWhen: "what is active right now, what needs the owner, or marking finished sessions done",
+  guide: "Rows are an index over sessions, not the sessions themselves, and can lag a transcript by\n"
+    + "one monitor poll.",
   verbs: {
     list: {
       summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "
@@ -39,6 +41,12 @@ export const sessionState: Noun = {
     done: {
       args: "<id...>",
       summary: "mark sessions done by exact id (POST /done); ids come from `list`",
+      guide: "Reconcile terminal work before reporting it. When bounded evidence establishes no remaining\n"
+        + "independent work or owner action, MUST run `oo session-state done <id>`. Example: a child\n"
+        + "reports the requested deliverable complete, validation passed, and no blockers, questions,\n"
+        + "remaining child work, or owner action: mark that child done, then report the outcome. Keep a\n"
+        + "session visible when evidence is ambiguous, blocked, incomplete, or awaiting a decision; age\n"
+        + "or a completed agent turn alone is not proof that the work is done.",
       minPositionals: 1,
       variadic: true,
       examples: ["oo session-state done <id>", "oo session-state done <id> <id> --json"],

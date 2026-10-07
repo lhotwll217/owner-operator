@@ -34,7 +34,7 @@ import { ownerOperatorResourceLoaderOptions } from "./skills";
 import { configuredOwnerOperatorTools, ownerOperatorCustomTools } from "./tools";
 import { createOwnerOperatorToolDisplayExtension } from "./tool-display";
 import { callerSessionId } from "../shared/caller-session";
-import { rootHelp } from "../cli/help";
+import { helpTree } from "../cli/help";
 
 export { repoRoot };
 export {
@@ -98,16 +98,16 @@ export function evalSettingsOverrides(
   };
 }
 
-const OO_HELP_MARKER = "<!-- generated: oo --help -->";
+const OO_HELP_MARKER = "<!-- generated: oo help tree -->";
 
 // The opinionated agent config, shared by every frontend so they can't drift: one prompt,
-// one set of custom tools, one allowlist. The prompt embeds `oo --help` verbatim, so the agent's
-// map of its own CLI is generated from the same noun table the CLI runs.
+// one set of custom tools, one allowlist. The prompt embeds every `oo` help page verbatim, so the
+// agent's guidance for its own CLI is generated from the same noun table the CLI runs.
 export function ownerOperatorPrompt(): string {
   const template = readFileSync(join(repoRoot, "src", "prompts", "owner-operator.md"), "utf8");
   const [before, ...after] = template.split(OO_HELP_MARKER);
   if (after.length !== 1) throw new Error(`owner-operator.md must contain ${OO_HELP_MARKER} exactly once`);
-  return `${before}${rootHelp().trimEnd()}${after[0]}`;
+  return `${before}${helpTree().trimEnd()}${after[0]}`;
 }
 
 export async function ownerOperatorPiServices(

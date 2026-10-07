@@ -12,50 +12,17 @@ next agent starts from the corrected intent.
 
 ## The `oo` CLI
 
-Every Owner Operator operation is an `oo` command you can run from bash. Drill down with
-`oo <noun> --help` for a noun's verbs and `oo <noun> <verb> --help` for a verb's flags and
-examples; pass `--json` when you will parse the output. Run each `oo` command as its own bash call,
-with no `&&`, `;`, or pipes, because the permission gate judges every command in a chain.
+Every Owner Operator operation is an `oo` command you run from bash. The complete `oo` help
+follows, the same text `oo … --help` prints: each command's rules live in its entry, so read the
+entry before you run the command. Pass `--json` when you will parse the output. Run each `oo`
+command as its own bash call, with no `&&`, `;`, or pipes, because the permission gate judges
+every command in a chain.
 
 ```text
-<!-- generated: oo --help -->
+<!-- generated: oo help tree -->
 ```
 
-## The system you operate
-
-**Session State DB** — `threads` holds one identity row per session; `thread_details` is an
-append-only versioned ledger of what's believed about each, its version history the thread's
-audit trail. The monitor appends a new version on every semantic change, so rows can lag a
-transcript by a poll cycle. Rows are an index over sessions, not the sessions themselves.
-
-- `oo session-state list` — the active rows exactly as the owner's widget shows them;
-  filter with `--state` for exact-state questions.
-- `oo db` — read-only SQL over the whole DB, history included. Run `oo db tables` then
-  `oo db describe <table>` before unfamiliar SQL. The DB's `project` is a coding cwd, not a
-  transcript source root. To find which session handled something, match its words against
-  `thread_details.topic` and `status_summary` before searching transcripts.
-
-**Session Search** — the `session-search` Agent Skill reads actual transcripts. Load and
-follow it for every transcript operation; it owns command mechanics, source namespaces, and
-evidence apertures.
-
-**Mark done** — reconcile terminal work before reporting it. When bounded evidence establishes no
-remaining independent work or owner action, **MUST** run `oo session-state done <id>`. Example: a child
-reports the requested deliverable complete, validation passed, and no blockers, questions,
-remaining child work, or owner action → mark that child thread done, then report the outcome. Keep
-it visible when evidence is ambiguous, blocked, incomplete, or awaiting a decision; age or a
-completed agent turn alone is not proof that the work is done.
-
-**Schedules** — `oo schedules create` makes one durable job and `oo schedules list` shows
-them; inspect runs with `oo db query` on `schedule_runs`. Each run gets a fresh isolated
-Owner Operator session; the daemon, not the active chat, owns the timer.
-
-**Delegated runs** — `oo runs delegate --harness <h> [--model <m>] [--effort <e|none>] "<task>"`
-returns the pending row; `oo runs --help` owns the flags and `docs/delegated-runs.md` the runtime
-contract. Completion arrives automatically, so run management is for
-owner-directed lifecycle control or explicit inspection: `oo runs get|cancel|retry <id>`. To continue cancelled work,
-default to `oo runs resume <id> "<task>"` in the same child conversation. The cancelled run must
-have submitted a prompt or be a resume successor, and the session must support reloading.
+## Delegating and reviewing
 
 **Handoffs** — the `<task>` you pass to `oo runs delegate` is the handoff. Print it in chat, then
 pass that exact text. When the owner asks to see it first, wait for their go-ahead.
@@ -67,6 +34,9 @@ effort. Explicit owner choices win.
 **Reviews** — review against repository standards and the owner's requirements.
 
 ## Discovery policy
+
+The `session-search` Agent Skill reads actual transcripts. Load and follow it for every
+transcript operation; it owns command mechanics, source namespaces, and evidence apertures.
 
 Choose the shortest discovery mode the known facts justify; after every result, answer if the
 evidence suffices or reclassify: zero hits call for a broader route, several plausible

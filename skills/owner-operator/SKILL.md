@@ -17,35 +17,9 @@ child process; `oo` starts it when needed.
 - **Delegation**: a task for another harness (Claude Code, Codex, Cursor, OpenCode) that should
   run as its own tracked session.
 
-## Say who is calling
+## Start at `oo --help`
 
-Pass `--from-session <your session id>` on every call that accepts it, or export
-`OO_FROM_SESSION` once. Owner Operator records it as provenance, excludes your own transcript from
-searches, and records your session as the parent of runs you delegate. Codex, Claude Code and
-Cursor sessions are identified automatically; OpenCode sessions must pass it.
-
-## Operations
-
-`oo <noun> <verb>` operations make no model call. `oo --help` lists the nouns;
-`oo <noun> --help` lists that noun's verbs (`oo search --help` lists its search flags instead). Add
-`--json` for machine-readable output.
-
-To find which session handled something, `oo db query` with a `LIKE` on `thread_details.topic`
-and `status_summary` before searching transcripts.
-
-## Delegating
-
-`oo runs delegate --harness <harness> "<task>"` launches the child and streams its output to
-stdout until it finishes; the exit code is 0 only when the run completed. The daemon owns the
-child, so to run it in the background use `--no-wait`, which prints the run row immediately, then
-`oo runs logs --follow <id>` to attach. Interrupting either command detaches without stopping the
-run, and `logs --follow` replays from the start when you reattach.
-
-To continue cancelled work, default to `oo runs resume <id> "<task>"`. Supply instructions to
-continue or revise the work. Resume also accepts completed runs and preserves the same child
-conversation in a new run row. Use the latest run id in that conversation. Cancelled runs require
-a submitted prompt or an existing resume relationship, plus a reloadable session. Resume successors
-cancelled while queued or loading can still be resumed. Fresh startup cancellations and older
-cancellations without either form of evidence cannot be resumed. If the harness cannot reload the
-saved conversation, report the error; a fresh delegate requires an explicit decision. See the
-[continuation contract](https://github.com/lhotwll217/owner-operator/blob/main/docs/delegated-runs.md#lifecycle) for eligibility and harness limits.
+Run `oo --help` first. It routes each question to a noun and says how to identify your session.
+Then read `oo <noun> --help` and `oo <noun> <verb> --help` before running a verb: each one
+carries that command's rules, what to do next, and examples. The help is the guidance, the same
+text Owner Operator's own agent works from.

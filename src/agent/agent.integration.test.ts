@@ -17,7 +17,7 @@ import {
   runScheduledPrompt,
 } from "./agent";
 import { AGENT_RUN_COMPLETION_MESSAGE_TYPE } from "../agent-runs/agent-run-completion";
-import { rootHelp } from "../cli/help";
+import { helpTree } from "../cli/help";
 
 const configRoot = mkdtempSync(join(tmpdir(), "oo-agent-config-"));
 const priorOoHome = process.env.OO_HOME;
@@ -138,8 +138,10 @@ for (const t of RETIRED_AGENT_TOOL_IDS) {
 }
 
 const harnessPrompt = ownerOperatorPrompt();
-assert.ok(harnessPrompt.includes(`\`\`\`text\n${rootHelp().trimEnd()}\n\`\`\``), "the prompt embeds the generated `oo --help` verbatim");
+assert.ok(harnessPrompt.includes(`\`\`\`text\n${helpTree().trimEnd()}\n\`\`\``), "the prompt embeds every generated `oo` help page verbatim");
 assert.ok(!harnessPrompt.includes("<!-- generated:"), "the generation marker never reaches the model");
+// The prose the prompt adds around the embedded help.
+const authoredPrompt = harnessPrompt.replace(helpTree().trimEnd(), "");
 assert.match(harnessPrompt, /select-harness-for-delegation/);
 assert.match(harnessPrompt, /unless the owner explicitly supplied harness, model, and\s+effort/i);
 assert.match(harnessPrompt, /explicit owner choices win/i);
@@ -152,8 +154,8 @@ for (const mechanic of [
   "allowance",
 ]) {
   assert.ok(
-    !harnessPrompt.toLowerCase().includes(mechanic.toLowerCase()),
-    `the permanent prompt delegates ${mechanic} mechanics to the bundled skill`,
+    !authoredPrompt.toLowerCase().includes(mechanic.toLowerCase()),
+    `the prompt's prose delegates ${mechanic} mechanics to the bundled skill and \`oo harness\` help`,
   );
 }
 assert.match(harnessPrompt, /completion arrives automatically/i);
@@ -175,8 +177,7 @@ assert.doesNotMatch(delegationSelectionSkill, /\$OO_HOME\/workspace\/.*\.md/,
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(harnessPrompt, new RegExp(`\\*\\*${mode}\\*\\*`), `the harness classifies ${mode.toLowerCase()} discovery`);
 }
-// The embedded `oo --help` names oo's own resume flag `--session`, not session-search mechanics.
-const authoredPrompt = harnessPrompt.replace(rootHelp().trimEnd(), "");
+// The embedded help names oo's own resume flag `--session`, not session-search mechanics.
 for (const flag of ["--query", "--candidates", "--skim", "--session"]) {
   assert.doesNotMatch(authoredPrompt, new RegExp(flag), `the harness delegates ${flag} mechanics to the skill`);
   assert.match(sessionSearchSkill, new RegExp(flag), `the session-search skill owns ${flag} mechanics`);
@@ -187,7 +188,10 @@ assert.doesNotMatch(
   "the reusable transcript skill does not route between Owner Operator's other surfaces",
 );
 assert.match(authoredPrompt, /`oo session-state list --state needs-you`/, "what-needs-me reads the authoritative state filter");
-assert.match(authoredPrompt, /\*\*MUST\*\* run `oo session-state done <id>`/, "terminal work is marked done through oo");
+assert.match(helpTree(), /MUST run `oo session-state done <id>`/, "the done verb's help carries the mark-done rule");
+for (const moved of [/MUST run `oo session-state done/, /completion arrives automatically/i, /schedule_runs/, /thread_details\.topic/]) {
+  assert.doesNotMatch(authoredPrompt, moved, `${moved} lives in the help the prompt embeds, not in prompt prose`);
+}
 
 const session = (messages: unknown[]) => ({ state: { messages } }) as any;
 assert.equal(lastAssistantError(session([{ role: "assistant", stopReason: "stop", content: [] }])), null);
