@@ -1,5 +1,55 @@
 [
   {
+    "timestamp": "2026-10-07T12:07:11.891Z",
+    "label": "help-tree-181-discovery-retrieval",
+    "commit": "90b4dbf",
+    "branch": "claude/181-help-tree-guidance",
+    "eval_folder": "2026-10-07T12-07-11-891Z",
+    "subject": "owner-operator",
+    "model": "openai-codex/gpt-6-sol",
+    "reasoning_level": "medium",
+    "grader_model": "openai-codex/gpt-5.6-luna",
+    "grader_reasoning": "high",
+    "cases": 16,
+    "repeat": 1,
+    "total_tests": 16,
+    "summary": {
+      "total_pass": 16,
+      "total_fail": 0,
+      "total_error": 0,
+      "global_pass_rate": 100,
+      "trajectory_pass": true
+    },
+    "tool_calls": {
+      "mean": 5.13,
+      "median": 5,
+      "min": 0,
+      "max": 12,
+      "stdev": 2.9
+    },
+    "tokens": {
+      "mean": 61826.13,
+      "median": 62672.5,
+      "min": 8338,
+      "max": 110178,
+      "stdev": 28226.48
+    },
+    "cost_usd": {
+      "mean": 0.040903,
+      "median": 0.03859,
+      "min": 0.018308,
+      "max": 0.085625,
+      "stdev": 0.016756
+    },
+    "latency_ms": {
+      "mean": 32249,
+      "median": 32106,
+      "min": 15521,
+      "max": 54077,
+      "stdev": 11383
+    }
+  },
+  {
     "timestamp": "2026-10-07T10:39:57.360Z",
     "label": "help-tree-181-retrieval",
     "commit": "3087803",
