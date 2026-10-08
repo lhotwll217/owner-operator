@@ -28,7 +28,18 @@ providers:
   - id: file://providers/behavioral-agent.mjs
     label: owner-operator-behavioral
     config: { timeoutMs: 600000 }
+  # External coding agents; eval/loop.mjs --external supplies checkout, model, and credential.
+  - id: file://providers/external-agent.mjs
+    label: external-codex
+    config: { harness: codex, timeoutMs: 600000 }
+  - id: file://providers/external-agent.mjs
+    label: external-claude-code
+    config: { harness: claude-code, timeoutMs: 600000 }
 
+# Which subjects may attempt a case is `metadata.subjects` in cases.yaml, read by loop.mjs.
+# Promptfoo's own test-level `providers` filter cannot carry it: it is validated against the
+# post-`--filter-providers` provider list, so a declaration naming the other subjects aborts a
+# single-subject run (ProviderReferenceValidationError in resolveConfigs).
 defaultTest:
   options:
     provider: file://providers/codex-grader.mjs

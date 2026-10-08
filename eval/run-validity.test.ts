@@ -50,4 +50,13 @@ const invalidHarness = validateEvalRun([{ ...record, harnessValid: false }], cas
 assert.equal(invalidHarness.valid, false);
 assert.ok(invalidHarness.reasons.includes("invalid-behavioral-harness"));
 
+const external = { ...record, caseId: "external-error-provenance", subject: "external-codex", correct: 1 };
+const externalOptions = { ...options, expectedIds: new Set([external.caseId]), scope: "external" };
+const externalCases = [{ caseId: external.caseId, stats: { n: 1 } }];
+assert.equal(shouldWriteGlobalResults("external"), true);
+assert.equal(validateEvalRun([external], externalCases, externalOptions).valid, true,
+  "an external evidence failure is a valid measurement");
+assert.ok(validateEvalRun([{ ...external, harnessValid: false }], externalCases, externalOptions)
+  .reasons.includes("invalid-behavioral-harness"), "an unverified external teardown invalidates the run");
+
 process.stdout.write("ok — eval run validity: behavioral grades may fail, harness/trajectory wiring may not\n");

@@ -7,15 +7,19 @@
 //
 // Seeding runs once per eval process (this module is a singleton), so the two providers
 // importing it don't rebuild the sandbox against each other mid-run.
+//
+// The behavioral and external profiles instead run one worker process per sample, each with
+// its own sandbox user; they share this module's run id, logs, manifest, and circuit breaker.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   evalSandboxPath,
+  evalRuntimeEnvironment,
   evalSandboxUserPaths,
   sanitizeEvalDiagnosticText,
   sanitizeEvalDiagnosticValue,
@@ -27,6 +31,7 @@ import { DEFAULT_GRADER_MODEL, DEFAULT_GRADER_REASONING } from './codex-grader.m
 import { readGitProvenance } from './git-provenance.mjs';
 import { loadEvalModelSettings } from './model-settings.mjs';
 import { readFatalModelError } from './trace-errors.mjs';
+import { spawnTrialWorker } from './trial-worker.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
@@ -111,6 +116,10 @@ export function makePiAgentProvider({ arm, env = {}, profile = 'retrieval' }) {
             providerError: error,
           },
         };
+      }
+
+      if (profile === 'external') {
+        return runExternalTrial({ arm, prompt, context, caseId, invocationId, baseName, traceFile, timeoutMs });
       }
 
       if (profile === 'behavioral') {
@@ -289,12 +298,13 @@ async function runBehavioralTrial({
       protectedOwnerPaths: [ownerOoHome, path.join(repoRoot, 'eval')],
       modelSettings: { ...evalModelSettings.settings, transport: SUBJECT_TRANSPORT },
     };
-    ({ stdout, stderr, timedOut, spawnError } = await spawnBehavioralWorker(
+    ({ stdout, stderr, timedOut, spawnError } = await spawnTrialWorker(
+      path.join(repoRoot, 'eval', 'behavioral', 'run-scenario-trial.ts'),
       trialInput,
-      sandbox,
+      { cwd: sandbox.taskCwd, env: { ...sandbox.env, OO_EVAL_SANDBOX: sandbox.root }, loader: tsxLoaderPath },
       timeoutMs,
     ));
-    payload = parseBehavioralPayload(stdout);
+    payload = parseTrialPayload(stdout, 'OO_BEHAVIOR_RESULT');
   } catch (error) {
     spawnError = error instanceof Error ? error.message : String(error);
   }
@@ -392,38 +402,91 @@ async function runBehavioralTrial({
   };
 }
 
-function spawnBehavioralWorker(input, sandbox, timeoutMs) {
-  return new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [
-      '--import',
-      tsxLoaderPath,
-      path.join(repoRoot, 'eval', 'behavioral', 'run-scenario-trial.ts'),
-      Buffer.from(JSON.stringify(input)).toString('base64url'),
-    ], {
-      cwd: sandbox.taskCwd,
-      env: { ...sandbox.env, OO_EVAL_SANDBOX: sandbox.root },
-    });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    let spawnError = null;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs + 5_000);
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => { spawnError = String(error); });
-    child.once('close', (code, signal) => {
-      clearTimeout(timer);
-      if (code !== 0 && !spawnError) spawnError = `behavioral trial exited ${code ?? signal ?? 'unknown'}`;
-      resolvePromise({ stdout, stderr, timedOut, spawnError });
-    });
-  });
+// External coding agents (Claude Code, Codex) on the measured checkout's skill and `oo` CLI;
+// eval/external/trial.mjs owns one sample. The neutral sandbox base keeps "eval" out of every
+// path the subject can see.
+async function runExternalTrial({ arm, prompt, context, caseId, invocationId, baseName, traceFile, timeoutMs }) {
+  const started = Date.now();
+  const external = runManifest.external;
+  const base = path.join(tmpdir(), 'operator-sessions');
+  const root = path.join(base, `${runStamp}-${invocationId}`);
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let spawnError = null;
+  if (external && `external-${external.harness}` === arm) {
+    ({ stdout, stderr, timedOut, spawnError } = await spawnTrialWorker(
+      path.join(repoRoot, 'eval', 'external', 'trial.mjs'),
+      // A case opts into the fixture it needs; every other case keeps the shared ground truth.
+      { ...external.trial, root, prompt, timeoutMs, settledObligation: context?.vars?.settledObligation === true },
+      { cwd: repoRoot, env: { ...evalRuntimeEnvironment(), OO_EVAL_SANDBOX_BASE: base }, loader: tsxLoaderPath },
+      timeoutMs,
+    ));
+  } else {
+    spawnError = `${arm} requires eval/loop.mjs --external options for that harness`;
+  }
+  const payload = parseTrialPayload(stdout, 'OO_EXTERNAL_RESULT');
+  // A worker that never reported cannot have verified teardown; its root holds a copied credential.
+  if (!payload) {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(`${root}.settings`, { force: true });
+  }
+  const redactions = [root, external?.trial.checkout, external?.trial.credentialSource].filter(Boolean);
+  fs.writeFileSync(path.join(logDir, `${baseName}.stdout.txt`), payload?.output ?? '');
+  fs.writeFileSync(path.join(logDir, `${baseName}.stderr.txt`), sanitizeEvalDiagnosticText(stderr, redactions));
+  const trial = payload?.metadata ?? { toolExecutions: [], ooCalls: [], harnessValid: false, harnessProblems: [] };
+  // A worker that reports a different shape is a broken instrument, not a failed subject.
+  for (const key of ['toolExecutions', 'ooCalls']) {
+    if (!Array.isArray(trial[key])) throw new Error(`external trial reported no ${key}`);
+  }
+  fs.writeFileSync(traceFile, [
+    ...trial.toolExecutions.map((execution) => ({ event: 'tool_call', ...execution })),
+    ...trial.ooCalls.map((call) => ({ event: 'oo_call', ...call })),
+  ].map((event) => JSON.stringify(event)).join('\n') + '\n');
+  const usage = payload?.tokenUsage ?? {};
+  const metadata = {
+    arm,
+    profile: 'external',
+    caseId,
+    invocationId,
+    runId: runStamp,
+    manifestHash: runManifest.manifestHash,
+    modelLabel: runManifest.modelLabel,
+    traceFile: path.relative(repoRoot, traceFile),
+    durationMs: Date.now() - started,
+    ...trial,
+    toolCalls: trial.toolExecutions.map(({ name, input }) => ({ name, input })),
+    toolCallCount: trial.toolExecutions.length,
+    ooCallCount: trial.ooCalls.length,
+    toolResultChars: trial.toolExecutions.reduce((total, item) => total + Number(item.resultChars ?? 0), 0),
+    tokensTotal: usage.total ?? null,
+    tokensUncached: usage.prompt == null ? null : usage.prompt - (usage.cached ?? 0) + (usage.completion ?? 0),
+    tokensCacheRead: usage.cached ?? 0,
+    tokensOutput: usage.completion ?? null,
+    // Subscription-authenticated harnesses report no price.
+    costUsd: payload?.cost ?? 0,
+    numTurns: payload ? 1 : 0,
+  };
+  fs.appendFileSync(path.join(logDir, 'summary.jsonl'), JSON.stringify(metadata) + '\n');
+  const providerError = spawnError
+    ?? (timedOut ? `external trial timed out after ${timeoutMs}ms` : null)
+    ?? (!payload ? 'external trial produced no parseable result' : null)
+    ?? (trial.harnessValid !== true ? trial.harnessProblems.join('; ') || 'external trial harness invalid' : null);
+  if (providerError) {
+    // Auth, quota, and launch failures repeat; later samples fail cheaply instead of billing.
+    fatalRunError = providerError;
+    return { error: providerError, output: payload?.output ?? '', metadata: { ...metadata, providerError } };
+  }
+  return {
+    output: payload.output,
+    tokenUsage: payload.tokenUsage,
+    cost: metadata.costUsd,
+    metadata,
+  };
 }
 
-function parseBehavioralPayload(stdout) {
-  const match = [...String(stdout).matchAll(/^OO_BEHAVIOR_RESULT=([A-Za-z0-9_-]+)$/gm)].at(-1);
+function parseTrialPayload(stdout, prefix) {
+  const match = [...String(stdout).matchAll(new RegExp(`^${prefix}=([A-Za-z0-9_-]+)$`, 'gm'))].at(-1);
   if (!match) return null;
   return JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8'));
 }
@@ -576,28 +639,60 @@ function buildRunManifest() {
     'eval/providers/noop-grader.mjs',
     'eval/providers/pi-agent-core.mjs',
     'eval/providers/trace-errors.mjs',
+    'eval/providers/trial-worker.mjs',
     'eval/promptfooconfig.yaml',
+    'eval/external/trial.mjs',
+    'eval/external/cli-observer.mjs',
+    'eval/seed/fixture-sessions.mjs',
   ])];
   const artifacts = Object.fromEntries(artifactPaths.map((relative) => [
     relative,
     sha256(fs.readFileSync(path.join(repoRoot, relative))),
   ]));
-  const git = readGitProvenance(repoRoot);
+  const external = readExternalSubject();
+  // An external run measures another checkout; its git state identifies the subject.
+  const git = readGitProvenance(external?.trial.checkout ?? repoRoot);
   const manifest = {
     runId: runStamp,
     createdAt: new Date().toISOString(),
-    modelLabel: [settings.defaultProvider, settings.defaultModel].filter(Boolean).join('/'),
+    modelLabel: external
+      ? `${external.harness}/${external.trial.model}`
+      : [settings.defaultProvider, settings.defaultModel].filter(Boolean).join('/'),
     modelSettingsArtifact,
-    reasoningLevel: settings.defaultThinkingLevel ?? null,
+    reasoningLevel: external ? external.trial.effort : settings.defaultThinkingLevel ?? null,
     subjectTransport: SUBJECT_TRANSPORT,
     graderModel: process.env.EVAL_GRADER_MODEL ?? DEFAULT_GRADER_MODEL,
     graderReasoning: DEFAULT_GRADER_REASONING,
     piVersion: JSON.parse(fs.readFileSync(path.join(repoRoot, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8')).version,
     promptfooVersion: JSON.parse(fs.readFileSync(path.join(repoRoot, 'node_modules', 'promptfoo', 'package.json'), 'utf8')).version,
     ...git,
+    ...(external ? { external } : {}),
     artifacts,
   };
   return { ...manifest, manifestHash: sha256(JSON.stringify(manifest)) };
+}
+
+/** eval/loop.mjs --external passes the subject through OO_EVAL_EXTERNAL_* variables. */
+function readExternalSubject(env = process.env) {
+  if (!env.OO_EVAL_EXTERNAL_HARNESS) return null;
+  const trial = {
+    harness: env.OO_EVAL_EXTERNAL_HARNESS,
+    checkout: env.OO_EVAL_EXTERNAL_CHECKOUT,
+    model: env.OO_EVAL_EXTERNAL_MODEL,
+    effort: env.OO_EVAL_EXTERNAL_EFFORT,
+    executable: env.OO_EVAL_EXTERNAL_EXECUTABLE,
+    credentialSource: env.OO_EVAL_EXTERNAL_CREDENTIAL,
+  };
+  const missing = Object.entries(trial).filter(([, value]) => !value?.trim()).map(([key]) => key);
+  if (missing.length) throw new Error(`external subject is missing: ${missing.join(', ')}`);
+  for (const key of ['checkout', 'executable', 'credentialSource']) trial[key] = path.resolve(trial[key]);
+  return {
+    harness: trial.harness,
+    executableVersion: spawnSync(trial.executable, ['--version'], { encoding: 'utf8', timeout: 10_000 }).stdout?.trim() || null,
+    skillHash: sha256(fs.readFileSync(path.join(trial.checkout, 'skills', 'owner-operator', 'SKILL.md'))),
+    runner: readGitProvenance(repoRoot),
+    trial,
+  };
 }
 
 function sha256(value) {

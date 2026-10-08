@@ -22,7 +22,9 @@ const statsLogFile = path.join(here, "eval_stat_log.json");
 const iterationsDir = path.join(here, "results", "iterations");
 fs.mkdirSync(iterationsDir, { recursive: true });
 
-const SUBJECTS = ["owner-operator", "naive-session-grep", "owner-operator-behavioral"];
+const EXTERNAL_SUBJECTS = ["external-codex", "external-claude-code"];
+const SUBJECTS = ["owner-operator", "naive-session-grep", "owner-operator-behavioral", ...EXTERNAL_SUBJECTS];
+const EXTERNAL_OPTIONS = ["checkout", "model", "effort", "executable", "credential"];
 
 const PROBE_IDS = [
   "evidence-flaky-error",             // rare literal / query-led
@@ -43,8 +45,11 @@ const CORE_IDS = [
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
-    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full | --behavioral]\n" +
-    "         [--subject owner-operator|naive-session-grep|owner-operator-behavioral] [--repeat N (default 3; 1 = smoke)] [--dry]\n" +
+    "Usage: node eval/loop.mjs --label NAME --notes HYPOTHESIS [--cases a,b | --probe | --full | --behavioral | --external]\n" +
+    `         [--subject ${SUBJECTS.join("|")}] [--repeat N (default 3; 1 = smoke)] [--dry]\n` +
+    "       external subjects also take --checkout PATH --model ID --effort LEVEL\n" +
+    "         --executable PATH (the installed claude/codex) --credential PATH (harness auth JSON);\n" +
+    "         --external selects the external cases, --cases a subset of them.\n" +
     "       node eval/loop.mjs --backfill-git EVAL_FOLDER [--commit SHA] [--branch NAME]\n" +
     "A run measures one subject. Compare two runs downstream:\n" +
     "  node eval/compare.mjs <global_results_A.json> <global_results_B.json> [--gate]\n" +
@@ -77,28 +82,54 @@ const notes = option("notes");
 const custom = option("cases");
 const behavioral = has("behavioral");
 let subject = option("subject", behavioral ? "owner-operator-behavioral" : "owner-operator");
+const externalSubject = EXTERNAL_SUBJECTS.includes(subject);
 const repeat = Number(option("repeat", "3"));
 const dry = has("dry");
 if (!label) fail("--label is required: name the mechanism being tested");
 if (!notes) fail("--notes is required: state the hypothesis and expected trajectory effect");
 if (!SUBJECTS.includes(subject)) fail(`unknown subject: ${subject}; expected ${SUBJECTS.join(" | ")}`);
 if (!Number.isInteger(repeat) || repeat < 1) fail("--repeat must be a positive integer");
-if ([has("probe"), has("full"), behavioral, Boolean(custom)].filter(Boolean).length > 1) {
-  fail("choose only one of --probe, --full, --behavioral, or --cases id1,id2");
+if ([has("probe"), has("full"), behavioral, has("external"), Boolean(custom)].filter(Boolean).length > 1) {
+  fail("choose only one of --probe, --full, --behavioral, --external, or --cases id1,id2");
 }
 if (behavioral && subject !== "owner-operator-behavioral") {
   fail("--behavioral requires the owner-operator-behavioral subject");
 }
+if (has("external") !== externalSubject && !(externalSubject && custom)) {
+  fail(`--external and the external subjects (${EXTERNAL_SUBJECTS.join(", ")}) go together`);
+}
+const externalEnv = {};
+if (externalSubject) {
+  for (const name of EXTERNAL_OPTIONS) {
+    const value = option(name);
+    if (!value) fail(`${subject} requires --${name}`);
+    externalEnv[`OO_EVAL_EXTERNAL_${name.toUpperCase()}`] = value;
+  }
+  externalEnv.OO_EVAL_EXTERNAL_HARNESS = subject.slice("external-".length);
+}
 
-// cases.yaml owns case membership: `metadata.qtype: behavioral` is the one behavioral marker.
+// A subject's suite is every case whose `metadata.subjects` admits it, defaulting to every
+// subject that reaches Owner Operator through a question rather than through its own chat
+// composition. promptfooconfig.yaml says why Promptfoo's own filter cannot hold this.
 const caseBlocks = fs.readFileSync(path.join(here, "cases.yaml"), "utf8").split(/^- description:\s*/m).slice(1);
 const caseIds = caseBlocks.map((block) => block.split(/\s/, 1)[0]);
 const knownIds = new Set(caseIds);
-const behavioralIds = caseIds.filter((id, index) => /\bqtype:\s*behavioral\b/.test(caseBlocks[index]));
-const retrievalIds = caseIds.filter((id) => !behavioralIds.includes(id));
+const DEFAULT_SUBJECTS = ["owner-operator", "naive-session-grep", "external-codex", "external-claude-code"];
+const subjectsByCase = new Map(caseIds.map((id, index) => [
+  id,
+  /^\s*subjects:/m.test(caseBlocks[index]) ? subjectsOf(caseBlocks[index], id) : DEFAULT_SUBJECTS,
+]));
+const runs = (id, name) => subjectsByCase.get(id).some((ref) =>
+  ref.endsWith("*") ? name.startsWith(ref.slice(0, -1)) : ref === name);
+const suiteOf = (name) => caseIds.filter((id) => runs(id, name));
+const behavioralIds = suiteOf("owner-operator-behavioral");
+const externalIds = suiteOf(subject);
+const retrievalIds = suiteOf("owner-operator");
 const ids = behavioral
   ? behavioralIds
-  : custom
+  : has("external")
+    ? externalIds
+    : custom
     ? custom.split(",").filter(Boolean)
     : has("probe")
       ? PROBE_IDS
@@ -106,7 +137,9 @@ const ids = behavioral
         ? retrievalIds
         : CORE_IDS;
 for (const id of ids) if (!knownIds.has(id)) fail(`unknown case id: ${id}`);
-const scope = behavioral ? "behavioral" : custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
+const unavailable = ids.filter((id) => !runs(id, subject));
+if (unavailable.length) fail(`${subject} cannot run: ${unavailable.join(", ")}`);
+const scope = behavioral ? "behavioral" : has("external") ? "external" : custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
 const filterPattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
 const pattern = scope === "full" ? null : filterPattern;
 const createdAt = new Date().toISOString();
@@ -132,6 +165,7 @@ if (!dry) {
       stdio: "inherit",
       env: {
         ...process.env,
+        ...externalEnv,
         OO_EVAL_RUN_ID: requestedRunId,
         PROMPTFOO_CONFIG_DIR: promptfooHome,
         PROMPTFOO_LOG_DIR: path.join(promptfooHome, "logs"),
@@ -267,7 +301,7 @@ function toRecord(result) {
     // The tool-selection gate judges OO's composition; the control passes vacuously.
     trajectoryPresent: Boolean(trajectory),
     trajectoryWellFormed: typeof trajectory?.pass === "boolean",
-    trajectoryPass: ["owner-operator", "owner-operator-behavioral"].includes(subjectName)
+    trajectoryPass: ["owner-operator", "owner-operator-behavioral", ...EXTERNAL_SUBJECTS].includes(subjectName)
       ? typeof trajectory?.pass === "boolean" ? trajectory.pass : null
       : true,
     rubricReason: rubric?.reason ?? null,
@@ -347,4 +381,15 @@ function unique(values) { return [...new Set(values)]; }
 function round(value) { return Math.round(value * 10) / 10; }
 function pct(value) { return `${Math.round(value * 100)}%`; }
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+/** The subject labels one `metadata.subjects` declaration admits. Flow style only, so a
+ *  block-style list fails loudly here instead of silently dropping that case from a suite. */
+function subjectsOf(text, where) {
+  const line = /^\s*subjects:(.*)$/m.exec(text);
+  const flow = /^\s*\[([^\]]*)\]\s*$/.exec(line?.[1] ?? "");
+  if (!flow) fail(`${where}: write subjects as a flow list, for example [owner-operator, external-*]`);
+  const refs = flow[1].split(",").map((value) => value.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  if (!refs.length) fail(`${where}: subjects is empty, so no subject can run it`);
+  return refs;
+}
 function fail(message) { console.error(`eval/loop: ${message}`); process.exit(2); }

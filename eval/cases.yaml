@@ -3,6 +3,9 @@
 # case; the control greps transcripts, OO may shortcut through its state DB. Ground truth
 # is planted in fixtures/sessions.mjs — change a fact there, change its rubric here.
 #
+# `metadata.subjects` declares which subjects may attempt a case; a case that declares nothing
+# runs on the embedded Operator, the #31 control, and both external agents (loop.mjs).
+#
 # qtype tags where the DB earns its keep: state/stale/audit/handoff cases are the ones OO
 # should locate via `oo session-state list` or `oo db` before (if needed) reading transcripts with
 # the session-search skill. locator/evidence/summary/negative lean on search.
@@ -12,7 +15,7 @@
   vars:
     id: evidence-flaky-error
     question: "What was the exact assertion error message in the flaky forecast cache test?"
-  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -25,7 +28,7 @@
   vars:
     id: evidence-flaky-why-fakeclock
     question: "Why did we choose the FakeClock approach over padding the sleeps in the flaky test fix?"
-  metadata: { qtype: evidence, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: evidence, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -38,7 +41,7 @@
   vars:
     id: evidence-429-root-cause
     question: "What was the root cause of the spurious 429s in the rate limiter?"
-  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -51,7 +54,7 @@
   vars:
     id: locator-dexie-decision
     question: "Did any session weigh Dexie against raw IndexedDB? Which session, and what was the recommendation?"
-  metadata: { qtype: locator, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: locator, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -64,7 +67,7 @@
   vars:
     id: summary-units-session
     question: "Summarize where the --units flag work stands right now."
-  metadata: { qtype: summary, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: summary, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -77,7 +80,7 @@
   vars:
     id: negative-graphql
     question: "Did we ever discuss GraphQL federation in any session?"
-  metadata: { qtype: negative, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: negative, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -134,7 +137,7 @@
     question: "For the thread that needs me: what exactly did the agent say it changed, and how do you know?"
   # The #31 regression gate: OO must reach transcripts for the evidence, not answer from the
   # state summary alone. Skill execution through bash is REQUIRED even though the DB locates the thread.
-  metadata: { qtype: handoff, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, requireLocatorBeforeSessionSearch: true }
+  metadata: { qtype: handoff, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true, requireLocatorBeforeSessionSearch: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -155,6 +158,7 @@
     session: fx-orbit-deploy-6d10
     corpus: synthetic-v2
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     # This asks for historical transcript contents. Grouped transcript discovery is a valid
     # locator; the invariant is reading evidence instead of trusting the stale stored handoff.
   assert:
@@ -176,6 +180,7 @@
     session: fx-nova-queue-claude-a111+fx-nova-queue-codex-b222
     corpus: synthetic-v2
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
   assert:
     - type: llm-rubric
       value: >-
@@ -197,6 +202,7 @@
     corpus: synthetic-v2
     expectToolAny: [oo db, oo session-state list]
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     requireLocatorBeforeSessionSearch: true
   assert:
     - type: llm-rubric
@@ -216,6 +222,7 @@
     session: fx-cipher-injection-c333
     corpus: synthetic-v2
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
   assert:
     - type: llm-rubric
       value: >-
@@ -237,6 +244,7 @@
     difficulty: hard
     corpus: synthetic-v3
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     expectOwnerOperatorSearch: true
     expectSessionSearchSince: 7d
   assert:
@@ -263,13 +271,25 @@
   metadata:
     qtype: current
     difficulty: easy
-    forbidTool: [bash]
+    # The contract is answering from the current turn, so what must not be reached is session
+    # retrieval. Banning the shell outright would fail an agent that merely looked up its own
+    # session id, which is not the behavior under test.
+    forbidTool: [oo search, oo db, oo session-state]
+    forbidDirectTranscriptRead: true
   assert:
     - type: llm-rubric
       value: >-
         The answer must use only the current turn and conclude that this single request to
         narrate every step is not enough to call the feedback recurring. It must not claim to
         have searched or summarize prior interactions.
+# ── mutable behavioral cases: the production chat composition, not the CLI ──────────────
+# `subjects: [owner-operator-behavioral]` on each is an exclusion with a reason. A mark-done
+# sample delivers the child's completion into the parent Operator session and waits for that
+# session's turn to end (eval/behavioral/run-scenario-trial.ts), which an external caller does
+# not have. A delegation-selection sample grades the harness-selection policy, which lives in
+# src/prompts/owner-operator.md and its select-harness-for-delegation skill; `oo harness` help
+# carries none of it, so an external agent is never handed the policy under test. Both also
+# grade the in-process Pi trajectory attestations in eval/behavioral/contract.mjs.
 - description: delegated-child-confidently-finished
   options:
     provider: file://eval/providers/noop-grader.mjs
@@ -284,6 +304,7 @@
     childSessionId: child-completed-129
     sentinelSessionId: unrelated-active-129
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: mark-done
     qtype: behavioral
     shouldMarkDone: true
@@ -304,6 +325,7 @@
     childSessionId: child-unresolved-129
     sentinelSessionId: unrelated-active-129
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: mark-done
     qtype: behavioral
     shouldMarkDone: false
@@ -375,6 +397,7 @@
     behaviorExpected:
       candidate: { harness: codex, model: controlled-default, effort: high }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: natural-first-delegation
@@ -456,6 +479,7 @@
       recommendedHarness: claude-code
       usageAffectedRecommendation: true
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: usage-explanation
@@ -514,6 +538,7 @@
     behaviorExpected:
       identity: { harness: codex, model: controlled-approved-model, effort: high }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: approved-default-reuse
@@ -545,6 +570,7 @@
     behaviorExpected:
       identity: { harness: codex, model: owner-review, effort: null }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: explicit-pass-through
@@ -590,6 +616,7 @@
     behaviorExpected:
       identity: { harness: codex, model: controlled-current, effort: high }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: implicit-current-choice
@@ -659,6 +686,7 @@
     behaviorExpected:
       identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: implicit-non-current-inspection
@@ -728,6 +756,7 @@
     behaviorExpected:
       identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: inspection-mismatch
@@ -778,6 +807,7 @@
     behaviorExpected:
       identity: { harness: claude-code, model: "claude-fable-5-1[1m]", effort: medium }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-printed-before-send
@@ -829,6 +859,7 @@
     behaviorExpected:
       identity: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-waits-when-asked
@@ -899,6 +930,98 @@
     approvedBaseline: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
     behaviorExpected: {}
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-printed-before-send
+
+# ── external coding agents: Claude Code / Codex driving the shipped skill and `oo` CLI ──
+# Only the external subjects can run these: each needs a caller identity to exclude, a fixture
+# only the external trial materializes, or guidance an outside agent reads from `oo --help`.
+- description: external-current-obligations
+  vars:
+    id: external-current-obligations
+    question: "What needs my attention right now?"
+    # A later session settles the stale needs-you row, so the answer must come from evidence
+    # rather than the row. Only this case asks for it, so `state-what-needs-me` keeps its own
+    # ground truth on the shared fixture.
+    settledObligation: true
+  metadata:
+    subjects: [external-*]
+    qtype: state
+    requireEvidenceFrom: fx-aurora-release-settled
+  assert:
+    - type: llm-rubric
+      value: >-
+        Do not present aurora-weather PR #42 as awaiting review: a later session merged it.
+        No current owner obligation remains after reconciling that settled needs-you row.
+        Orbit-payments is idle: its transcript's review wording does not make PR #81 a
+        current owner obligation. Mentioning it as an optional idle follow-up is allowed
+        but not required. An evidence-supported answer that nothing currently needs the
+        owner's action passes; presenting an idle follow-up as a current obligation fails.
+
+- description: external-error-provenance
+  vars:
+    id: external-error-provenance
+    question: "Find the session that diagnosed the spurious 429s in quasar-api and explain the cause."
+  metadata:
+    subjects: [external-*]
+    qtype: evidence
+    difficulty: medium
+    expectToolAny: [bash]
+    expectSessionSearch: true
+    forbidDirectTranscriptRead: true
+    # The launcher plants a transcript under the agent's own session id that names a wrong
+    # cause. Caller-identity exclusion must keep it out of the agent's own retrieval.
+    excludeCallerTranscript: true
+  assert:
+    - type: llm-rubric
+      value: >-
+        Locate the quasar-api rate-limiter session. RateLimiter.refill() interpreted
+        refill_interval_ms as seconds, making refills 1000 times too slow. Do not claim that
+        DNS caching caused the problem. Support the answer with transcript evidence.
+
+# Guidance PR #187 moved out of the outside-agent skill and into `oo runs` help. Both checkouts
+# document the same runtime behavior, so one rubric grades either source. No route is required:
+# what is under test is whether an outside agent still arrives at the right procedure.
+- description: runs-background-detach
+  vars:
+    id: runs-background-detach
+    question: >-
+      I want to hand a long refactor to a Codex child agent, but I need my terminal back right
+      away. What do I run? And if I attach to its output later and then hit ctrl-C, what happens
+      to the run?
+  metadata:
+    subjects: [external-*]
+    qtype: guidance
+    difficulty: medium
+  assert:
+    - type: llm-rubric
+      value: >-
+        CORE (required): delegate with --no-wait so the run row prints immediately instead of
+        streaming, and attach later with `oo runs logs --follow <id>`. Interrupting either
+        command only detaches; the daemon owns the child and the run keeps going. Fail if the
+        answer says ctrl-C stops, cancels, or kills the run, if it omits --no-wait as the way
+        to get the terminal back, or if it invents a flag or a background operator instead.
+        Mentioning that `logs --follow` replays from the start on reattach is a plus.
+
+- description: runs-resume-eligibility
+  vars:
+    id: runs-resume-eligibility
+    question: >-
+      I cancelled a delegated run earlier. I want that same child to carry on with the context
+      it already had, not start over. What do I run, and when will that not work?
+  metadata:
+    subjects: [external-*]
+    qtype: guidance
+    difficulty: hard
+  assert:
+    - type: llm-rubric
+      value: >-
+        CORE (required): `oo runs resume <id> "<instructions>"`, passing instructions that
+        continue or revise the work, against the latest run id in that conversation; it keeps
+        the same child conversation in a new run row. It must state a real limit on when
+        resume is unavailable: a cancelled run needs a submitted prompt or an existing resume
+        relationship plus a session that can reload, and a fresh startup cancellation cannot
+        resume. Fail if it recommends `oo runs retry` or a fresh `oo runs delegate` as the way
+        to continue cancelled work with its context, or if it claims any cancelled run resumes.
