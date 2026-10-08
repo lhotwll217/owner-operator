@@ -118,7 +118,7 @@ export function makePiAgentProvider({ arm, env = {}, profile = 'retrieval' }) {
       }
 
       if (profile === 'external') {
-        return runExternalTrial({ arm, prompt, caseId, invocationId, baseName, traceFile, timeoutMs });
+        return runExternalTrial({ arm, prompt, context, caseId, invocationId, baseName, traceFile, timeoutMs });
       }
 
       if (profile === 'behavioral') {
@@ -404,7 +404,7 @@ async function runBehavioralTrial({
 // External coding agents (Claude Code, Codex) on the measured checkout's skill and `oo` CLI;
 // eval/external/trial.mjs owns one sample. The neutral sandbox base keeps "eval" out of every
 // path the subject can see.
-async function runExternalTrial({ arm, prompt, caseId, invocationId, baseName, traceFile, timeoutMs }) {
+async function runExternalTrial({ arm, prompt, context, caseId, invocationId, baseName, traceFile, timeoutMs }) {
   const started = Date.now();
   const external = runManifest.external;
   const base = path.join(tmpdir(), 'operator-sessions');
@@ -416,7 +416,8 @@ async function runExternalTrial({ arm, prompt, caseId, invocationId, baseName, t
   if (external && `external-${external.harness}` === arm) {
     ({ stdout, stderr, timedOut, spawnError } = await spawnTrialWorker(
       path.join(repoRoot, 'eval', 'external', 'trial.mjs'),
-      { ...external.trial, root, prompt, timeoutMs },
+      // A case opts into the fixture it needs; every other case keeps the shared ground truth.
+      { ...external.trial, root, prompt, timeoutMs, settledObligation: context?.vars?.settledObligation === true },
       { cwd: repoRoot, env: { ...evalRuntimeEnvironment(), OO_EVAL_SANDBOX_BASE: base } },
       timeoutMs,
     ));
@@ -450,7 +451,9 @@ async function runExternalTrial({ arm, prompt, caseId, invocationId, baseName, t
     durationMs: Date.now() - started,
     ...trial,
     toolCalls: trial.toolExecutions.map(({ name, input }) => ({ name, input })),
-    toolCallCount: trial.toolExecutions.length,
+    // Spend is the harness's own tool calls; `toolExecutions` is the subject's `oo` usage, which
+    // the behavior gate reads. The two differ whenever the agent runs commands besides `oo`.
+    toolCallCount: trial.harnessToolCalls ?? trial.toolExecutions.length,
     toolResultChars: trial.toolExecutions.reduce((total, item) => total + Number(item.resultChars ?? 0), 0),
     tokensTotal: usage.total ?? null,
     tokensUncached: usage.prompt == null ? null : usage.prompt - (usage.cached ?? 0) + (usage.completion ?? 0),

@@ -283,6 +283,7 @@
     shouldMarkDone: true
     childSessionId: child-completed-129
     sentinelSessionId: unrelated-active-129
+  providers: [owner-operator-behavioral]
   metadata:
     profile: mark-done
     qtype: behavioral
@@ -303,6 +304,7 @@
     shouldMarkDone: false
     childSessionId: child-unresolved-129
     sentinelSessionId: unrelated-active-129
+  providers: [owner-operator-behavioral]
   metadata:
     profile: mark-done
     qtype: behavioral
@@ -374,6 +376,7 @@
       availableEfforts: [high]
     behaviorExpected:
       candidate: { harness: codex, model: controlled-default, effort: high }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -455,6 +458,7 @@
       unknownHarness: claude-code
       recommendedHarness: claude-code
       usageAffectedRecommendation: true
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -513,6 +517,7 @@
       effort: high
     behaviorExpected:
       identity: { harness: codex, model: controlled-approved-model, effort: high }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -544,6 +549,7 @@
       unknowns: []
     behaviorExpected:
       identity: { harness: codex, model: owner-review, effort: null }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -589,6 +595,7 @@
       unknowns: []
     behaviorExpected:
       identity: { harness: codex, model: controlled-current, effort: high }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -658,6 +665,7 @@
           unknowns: []
     behaviorExpected:
       identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -727,6 +735,7 @@
           unknowns: []
     behaviorExpected:
       identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -777,6 +786,7 @@
     approvedBaseline: { harness: claude-code, model: "claude-fable-5-1[1m]", effort: medium }
     behaviorExpected:
       identity: { harness: claude-code, model: "claude-fable-5-1[1m]", effort: medium }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -828,6 +838,7 @@
     approvedBaseline: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
     behaviorExpected:
       identity: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
@@ -898,33 +909,26 @@
       unknowns: []
     approvedBaseline: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
     behaviorExpected: {}
+  providers: [owner-operator-behavioral]
   metadata:
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-printed-before-send
 
 # ── external coding agents: Claude Code / Codex driving the shipped skill and `oo` CLI ──
-# Run only by the external-* subjects (`--external`). Each trial builds its own sandbox from
-# the measured checkout; eval/external/trial.mjs adds a later session that settles PR #42
-# and plants a caller transcript that retrieval must exclude. tool-use.mjs grades the
-# recorded `oo` calls against these metadata keys.
-- description: external-queue-decision
-  vars:
-    id: external-queue-decision
-    question: "Which sessions handled the nova-events queue decision, and what did we finally decide?"
-  metadata: { profile: external, qtype: external, indexBeforeTranscript: true }
-  assert:
-    - type: llm-rubric
-      value: >-
-        Identify both the earlier Claude recommendation of Kafka and the later Codex reversal
-        to NATS JetStream. Explain that the soak test found rebalance storms and 2.8s p99
-        tails. Cite session evidence for the final decision.
-
+# Only the external subjects can run these: each needs a caller identity to exclude, a fixture
+# only the external trial materializes, or guidance an outside agent reads from `oo --help`.
+# Every other case above runs on the external subjects too (promptfooconfig.yaml defaultTest).
 - description: external-current-obligations
+  providers: [external-*]
   vars:
     id: external-current-obligations
     question: "What needs my attention right now?"
-  metadata: { profile: external, qtype: external, requireEvidenceFrom: fx-aurora-release-settled }
+    # A later session settles the stale needs-you row, so the answer must come from evidence
+    # rather than the row. Only this case asks for it, so `state-what-needs-me` keeps its own
+    # ground truth on the shared fixture.
+    settledObligation: true
+  metadata: { qtype: state, requireEvidenceFrom: fx-aurora-release-settled }
   assert:
     - type: llm-rubric
       value: >-
@@ -936,13 +940,62 @@
         owner's action passes; presenting an idle follow-up as a current obligation fails.
 
 - description: external-error-provenance
+  providers: [external-*]
   vars:
     id: external-error-provenance
     question: "Find the session that diagnosed the spurious 429s in quasar-api and explain the cause."
-  metadata: { profile: external, qtype: external, excludeCallerTranscript: true }
+  metadata:
+    qtype: evidence
+    difficulty: medium
+    expectToolAny: [bash]
+    expectSessionSearch: true
+    # The launcher plants a transcript under the agent's own session id that names a wrong
+    # cause. Caller-identity exclusion must keep it out of the agent's own retrieval.
+    excludeCallerTranscript: true
   assert:
     - type: llm-rubric
       value: >-
         Locate the quasar-api rate-limiter session. RateLimiter.refill() interpreted
         refill_interval_ms as seconds, making refills 1000 times too slow. Do not claim that
         DNS caching caused the problem. Support the answer with transcript evidence.
+
+# Guidance PR #187 moved out of the outside-agent skill and into `oo runs` help. Both checkouts
+# document the same runtime behavior, so one rubric grades either source. No route is required:
+# what is under test is whether an outside agent still arrives at the right procedure.
+- description: runs-background-detach
+  providers: [external-*]
+  vars:
+    id: runs-background-detach
+    question: >-
+      I want to hand a long refactor to a Codex child agent, but I need my terminal back right
+      away. What do I run? And if I attach to its output later and then hit ctrl-C, what happens
+      to the run?
+  metadata: { qtype: guidance, difficulty: medium }
+  assert:
+    - type: llm-rubric
+      value: >-
+        CORE (required): delegate with --no-wait so the run row prints immediately instead of
+        streaming, and attach later with `oo runs logs --follow <id>`. Interrupting either
+        command only detaches; the daemon owns the child and the run keeps going. Fail if the
+        answer says ctrl-C stops, cancels, or kills the run, if it omits --no-wait as the way
+        to get the terminal back, or if it invents a flag or a background operator instead.
+        Mentioning that `logs --follow` replays from the start on reattach is a plus.
+
+- description: runs-resume-eligibility
+  providers: [external-*]
+  vars:
+    id: runs-resume-eligibility
+    question: >-
+      I cancelled a delegated run earlier. I want that same child to carry on with the context
+      it already had, not start over. What do I run, and when will that not work?
+  metadata: { qtype: guidance, difficulty: hard }
+  assert:
+    - type: llm-rubric
+      value: >-
+        CORE (required): `oo runs resume <id> "<instructions>"`, passing instructions that
+        continue or revise the work, against the latest run id in that conversation; it keeps
+        the same child conversation in a new run row. It must state a real limit on when
+        resume is unavailable: a cancelled run needs a submitted prompt or an existing resume
+        relationship plus a session that can reload, and a fresh startup cancellation cannot
+        resume. Fail if it recommends `oo runs retry` or a fresh `oo runs delegate` as the way
+        to continue cancelled work with its context, or if it claims any cancelled run resumes.

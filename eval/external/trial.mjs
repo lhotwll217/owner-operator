@@ -44,7 +44,7 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     const seeded = seedFixtureSessions({ root: sandbox.root, ooHome: sandbox.ooHome });
     writeFileSync(sandbox.paths.sessionSources, JSON.stringify(seeded.sessionSources));
     writeFileSync(join(sandbox.ooHome, "settings.json"), JSON.stringify({ activeWindow: "14d" }));
-    addSettledObligation(sandbox);
+    if (input.settledObligation) addSettledObligation(sandbox);
     const observed = await installObservedCli(input, sandbox);
     callsFile = observed.callsFile;
     const skill = readFileSync(join(input.checkout, "skills/owner-operator/SKILL.md"), "utf8");
@@ -77,9 +77,9 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     }
     rmSync(neutralConfig, { force: true });
   }
-  let toolExecutions = [];
+  let harnessToolCalls = null;
   if (response && !problems.length) {
-    try { toolExecutions = normalizeTools(input.harness, response); }
+    try { harnessToolCalls = normalizeTools(input.harness, response).length; }
     catch (error) { problems.push(error.message); }
   }
   return sanitizeEvalDiagnosticValue({
@@ -87,11 +87,30 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     tokenUsage: response?.tokenUsage ?? null,
     cost: response?.cost ?? null,
     metadata: {
-      sessionId: response?.sessionId ?? null, toolExecutions, cliCalls,
+      sessionId: response?.sessionId ?? null,
+      toolExecutions: cliCalls.map(sharedExecution), ooCalls: cliCalls, harnessToolCalls,
       harnessValid: problems.length === 0, harnessProblems: problems,
       sandbox: teardown && { daemonStopped: teardown.daemonStopped, leasesRemaining: teardown.leasesRemaining },
     },
   }, [input.root, input.checkout, input.credentialSource, ...secrets]);
+}
+
+/** One recorded `oo` invocation in the shape asserts/tool-use.mjs grades every subject by, so the
+ * external subjects are judged by the same behavior gate as the embedded Operator. The launcher
+ * records argv, so the command is rebuilt from it rather than parsed back out of a shell line. */
+function sharedExecution(call, index) {
+  return {
+    id: String(index),
+    name: "bash",
+    input: { command: ["oo", ...call.args].map(shellWord).join(" ") },
+    isError: call.exitCode !== 0,
+    resultChars: String(call.output ?? "").length,
+    result: { content: [{ type: "text", text: String(call.output ?? "") }] },
+  };
+}
+
+function shellWord(value) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 /** Native provider options: the agent sees only the sandbox env, cwd, and named executable. */
@@ -115,7 +134,7 @@ export function nativeConfig(input, cwd, env) {
   };
 }
 
-/** The native providers' trajectories in the shared provider-metadata `toolExecutions` shape. */
+/** The native providers' tool trajectories, normalized so a missing one fails the trial. */
 export function normalizeTools(harness, response) {
   if (harness === "claude-code") {
     if (!Array.isArray(response.metadata?.toolCalls)) throw new Error("missing Claude tool trajectory");

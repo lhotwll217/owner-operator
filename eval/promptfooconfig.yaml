@@ -37,6 +37,12 @@ providers:
     config: { harness: claude-code, timeoutMs: 600000 }
 
 defaultTest:
+  # Applicability, per case, through Promptfoo's own test-level provider filter. A case runs on
+  # the subjects listed here unless it names its own `providers`. Retrieval questions are
+  # answerable by the embedded Operator, by the #31 control, and by an external agent holding
+  # only the shipped skill and `oo`, so they are the default. Mutable behavioral cases and the
+  # external-only cases override it.
+  providers: [owner-operator, naive-session-grep, external-codex, external-claude-code]
   options:
     provider: file://providers/codex-grader.mjs
   assert:

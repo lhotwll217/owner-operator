@@ -108,13 +108,24 @@ if (externalSubject) {
   externalEnv.OO_EVAL_EXTERNAL_HARNESS = subject.slice("external-".length);
 }
 
-// cases.yaml owns case membership: `metadata.qtype: behavioral` is the one behavioral marker.
+// Applicability lives on each case as Promptfoo's own test-level `providers` filter, defaulted
+// in promptfooconfig.yaml. A subject's suite is every case that filter admits, so a case is
+// declared applicable once and both this runner and Promptfoo read the same declaration.
 const caseBlocks = fs.readFileSync(path.join(here, "cases.yaml"), "utf8").split(/^- description:\s*/m).slice(1);
 const caseIds = caseBlocks.map((block) => block.split(/\s/, 1)[0]);
 const knownIds = new Set(caseIds);
-const behavioralIds = caseIds.filter((id, index) => /\bqtype:\s*behavioral\b/.test(caseBlocks[index]));
-const externalIds = caseIds.filter((id, index) => /\bqtype:\s*external\b/.test(caseBlocks[index]));
-const retrievalIds = caseIds.filter((id) => !behavioralIds.includes(id) && !externalIds.includes(id));
+const config = fs.readFileSync(path.join(here, "promptfooconfig.yaml"), "utf8");
+const defaultSubjects = subjectsOf(config.slice(config.indexOf("\ndefaultTest:")), "defaultTest applicability");
+const subjectsByCase = new Map(caseIds.map((id, index) => [
+  id,
+  /^\s*providers:/m.test(caseBlocks[index]) ? subjectsOf(caseBlocks[index], id) : defaultSubjects,
+]));
+const runs = (id, name) => subjectsByCase.get(id).some((ref) =>
+  ref.endsWith("*") ? name.startsWith(ref.slice(0, -1)) : ref === name);
+const suiteOf = (name) => caseIds.filter((id) => runs(id, name));
+const behavioralIds = suiteOf("owner-operator-behavioral");
+const externalIds = suiteOf(subject);
+const retrievalIds = suiteOf("owner-operator");
 const ids = behavioral
   ? behavioralIds
   : has("external")
@@ -127,9 +138,8 @@ const ids = behavioral
         ? retrievalIds
         : CORE_IDS;
 for (const id of ids) if (!knownIds.has(id)) fail(`unknown case id: ${id}`);
-if (externalSubject !== ids.every((id) => externalIds.includes(id))) {
-  fail("external subjects run only the external cases, and only external subjects run them");
-}
+const unavailable = ids.filter((id) => !runs(id, subject));
+if (unavailable.length) fail(`${subject} cannot run: ${unavailable.join(", ")}`);
 const scope = behavioral ? "behavioral" : has("external") ? "external" : custom ? "custom" : has("probe") ? "probe" : has("full") ? "full" : "core";
 const filterPattern = ids.length ? `^(${ids.map(escapeRegex).join("|")})$` : null;
 const pattern = scope === "full" ? null : filterPattern;
@@ -372,4 +382,15 @@ function unique(values) { return [...new Set(values)]; }
 function round(value) { return Math.round(value * 10) / 10; }
 function pct(value) { return `${Math.round(value * 100)}%`; }
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+/** The subject labels one `providers:` declaration admits. Flow style only, so a block-style
+ *  list fails loudly here instead of silently dropping that case from a suite. */
+function subjectsOf(text, where) {
+  const line = /^\s*providers:(.*)$/m.exec(text);
+  const flow = /^\s*\[([^\]]*)\]\s*$/.exec(line?.[1] ?? "");
+  if (!flow) fail(`${where}: write providers as a flow list, for example [owner-operator, external-*]`);
+  const refs = flow[1].split(",").map((value) => value.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  if (!refs.length) fail(`${where}: providers is empty, so no subject can run it`);
+  return refs;
+}
 function fail(message) { console.error(`eval/loop: ${message}`); process.exit(2); }
