@@ -94,44 +94,54 @@ try {
   const [help, locator, ownSearch] = metadata.ooCalls;
   const honest = { ...metadata, toolExecutions: ooOnly, ooCalls: [help, locator, ownSearch] };
 
-  // A direct transcript read fails a case that wants evidence through session-search, by shell or
-  // by file tool, even though a successful `oo search` also ran.
-  const clean = grade(honest, { expectSessionSearch: true });
+  // Reaching the wrapper and bypassing it are separate contracts, so each fails on its own flag
+  // and neither failure is reported as the other.
+  const clean = grade(honest, { expectSessionSearch: true, forbidDirectTranscriptRead: true });
   assert.equal(clean.pass, true, clean.reason);
-  const withShellRead = grade({ ...honest, toolExecutions: [...ooOnly, metadata.toolExecutions[4]] },
-    { expectSessionSearch: true });
-  assert.equal(withShellRead.pass, false, "a shell read of a transcript bypasses session-search");
+  const shellRead = [...ooOnly, metadata.toolExecutions[4]];
+  const withShellRead = grade({ ...honest, toolExecutions: shellRead }, { forbidDirectTranscriptRead: true });
+  assert.equal(withShellRead.pass, false, "a shell read of a transcript bypasses the wrapper");
   assert.match(withShellRead.reason, /read transcript files directly/);
+  assert.equal(grade({ ...honest, toolExecutions: shellRead }, { expectSessionSearch: true }).pass, true,
+    "a case that only requires reaching the wrapper does not fail for the bypass contract");
   const nativeRead = { id: "r", name: "read", isError: false, resultChars: 20,
     input: { file_path: "/var/transcripts/codex/fx-quasar-ratelimit-7f3a.jsonl" } };
-  const withNativeRead = grade({ ...honest, toolExecutions: [...ooOnly, nativeRead] }, { expectSessionSearch: true });
-  assert.equal(withNativeRead.pass, false, "a file-tool read of a transcript bypasses session-search");
+  const withNativeRead = grade({ ...honest, toolExecutions: [...ooOnly, nativeRead] }, { forbidDirectTranscriptRead: true });
+  assert.equal(withNativeRead.pass, false, "a file-tool read of a transcript bypasses the wrapper");
   assert.match(withNativeRead.reason, /read transcript files directly/);
 
-  // A current-turn-only case fails on any tool use, including shell work that never ran `oo`.
+  // A current-turn-only case forbids session retrieval, and a forbidden noun covers its verbs.
+  const currentTurn = { forbidTool: ["oo search", "oo db", "oo session-state"], forbidDirectTranscriptRead: true };
+  assert.equal(grade(honest, currentTurn).pass, false, "querying the index breaks a current-turn-only case");
+  assert.match(grade(honest, currentTurn).reason, /oo db query/, "the forbidden noun names the verb that was reached");
+  assert.equal(grade({ ...honest, toolExecutions: [], ooCalls: [] }, currentTurn).pass, true,
+    "an answer with no retrieval satisfies it");
+  // Unrelated shell work is not the behavior under test, so it must not fail the case.
+  const envProbe = { id: "e", name: "bash", isError: false, resultChars: 40,
+    input: { command: "/bin/zsh -lc 'printenv CODEX_THREAD_ID'" } };
+  assert.equal(grade({ ...honest, toolExecutions: [envProbe], ooCalls: [] }, currentTurn).pass, true,
+    "looking up its own session id is not session retrieval");
+  // Whole-trajectory surfaces are still forbidden when a case names them.
   const shellOnly = { ...honest, toolExecutions: [metadata.toolExecutions[4]], ooCalls: [] };
   assert.equal(grade(shellOnly, { forbidTool: ["bash"] }).pass, false,
-    "shell work without any oo call still breaks a current-turn-only case");
-  assert.equal(grade(honest, { forbidTool: ["bash"] }).pass, false, "calling oo breaks a current-turn-only case");
-  assert.equal(grade({ ...honest, toolExecutions: [], ooCalls: [] }, { forbidTool: ["bash"] }).pass, true,
-    "only an empty trajectory satisfies a current-turn-only case");
+    "a case that does name the shell still catches shell work with no oo call");
 
   // One `oo` word must not shield the rest of a compound command.
   const compound = { id: "c", name: "bash", isError: false, resultChars: 9,
     input: { command: "oo search --query 429 --json; cat /var/transcripts/codex/a.jsonl" } };
-  const withCompound = grade({ ...honest, toolExecutions: [...ooOnly, compound] }, { expectSessionSearch: true });
+  const withCompound = grade({ ...honest, toolExecutions: [...ooOnly, compound] }, { forbidDirectTranscriptRead: true });
   assert.equal(withCompound.pass, false, "a transcript read after an oo call in one command is still a direct read");
   assert.match(withCompound.reason, /read transcript files directly/);
   const nestedQuery = 'oo db query "SELECT transcript_path FROM threads WHERE path LIKE \'%/transcripts/%\'"';
   const ooWithTranscriptArg = { id: "q", name: "bash", isError: false, resultChars: 9,
     input: { command: `${process.env.SHELL || "/bin/sh"} -lc ${JSON.stringify(nestedQuery)}` } };
-  assert.equal(grade({ ...honest, toolExecutions: [...ooOnly, ooWithTranscriptArg] }, { expectSessionSearch: true }).pass, true,
+  assert.equal(grade({ ...honest, toolExecutions: [...ooOnly, ooWithTranscriptArg] }, { forbidDirectTranscriptRead: true }).pass, true,
     "an oo command that merely names a transcript path is the wrapper, not a direct read");
 
   // A patch the agent applied is a mutation, and mutations are forbidden in this suite.
   const patch = { id: "p", name: "write", isError: false, resultChars: 0,
     input: { paths: ["/tmp/x.ts"], changes: [{ path: "/tmp/x.ts", kind: "update" }] } };
-  const withPatch = grade({ ...honest, toolExecutions: [...ooOnly, patch] }, { expectSessionSearch: true });
+  const withPatch = grade({ ...honest, toolExecutions: [...ooOnly, patch] }, { expectSessionSearch: true });  // mutations are always forbidden
   assert.equal(withPatch.pass, false, "a successful file_change reaches the mutation rule");
   assert.match(withPatch.reason, /forbidden/);
   const failedPatch = grade({ ...honest, toolExecutions: [...ooOnly, { ...patch, isError: true }] }, { expectSessionSearch: true });
@@ -203,7 +213,7 @@ try {
     });
   assert.equal(claude.metadata.harnessValid, true, JSON.stringify(claude.metadata.harnessProblems));
   assert.deepEqual(claude.metadata.toolExecutions.map((item: { name: string }) => item.name), ["bash", "read", "write"]);
-  const claudeGrade = grade(claude.metadata, { expectSessionSearch: true });
+  const claudeGrade = grade(claude.metadata, { expectSessionSearch: true, forbidDirectTranscriptRead: true });
   assert.equal(claudeGrade.pass, false, "Claude's own Read of a transcript is a direct read");
   assert.match(claudeGrade.reason, /read transcript files directly/);
   assert.match(claudeGrade.reason, /forbidden/, "Claude's Write is a forbidden mutation");

@@ -7,12 +7,14 @@
 // which `oo`/pi don't; `tool-call-f1` is native but scores the EXACT set (extra calls hurt
 // precision), so it can't express "must include X, others fine". Hence this.
 //
-// A case opts in via metadata.expectToolAny (at least one must appear),
-// expectSessionSearch (a successful policy-wrapper invocation),
+// One flag, one contract, one reason to fail. A case opts in via metadata.expectToolAny (at least
+// one must appear), expectSessionSearch (a successful policy-wrapper invocation),
 // expectOwnerOperatorSearch (that invocation must search OO's saved sessions),
 // expectSessionSearchSince (that search must preserve the requested time scope),
-// requireLocatorBeforeSessionSearch, and/or forbidTool. Mutation tools are always
-// forbidden in the controlled read-only suite.
+// requireLocatorBeforeSessionSearch (an index locator before direct retrieval),
+// forbidDirectTranscriptRead (transcript evidence comes through the wrapper, not a raw file read),
+// and/or forbidTool (a named surface must not be reached; a noun covers its verbs). Mutation tools
+// are always forbidden in the controlled read-only suite.
 import { behavioralHarnessProblems } from "../behavioral/contract.mjs";
 
 function sessionSearchMode(args) {
@@ -289,7 +291,9 @@ export default (_output, context) => {
 
   const missingAny = any.length > 0 && !any.some((expected) => succeeded.some((name) => reaches(name, expected)));
   const usedForbidden = [
-    ...(md.forbidTool ?? []).filter((tool) => called.has(tool)),
+    // Name the surface actually reached, not the pattern that forbade it, so the failure is
+    // diagnosable: a forbidden noun reports the verb that tripped it.
+    ...[...called].filter((name) => (md.forbidTool ?? []).some((tool) => reaches(name, tool))),
     ...stateChanges.filter((tool) => succeeded.includes(tool)),
   ];
   const sessionSearches = ooExecutions.flatMap((execution, executionIndex) => {
@@ -312,7 +316,7 @@ export default (_output, context) => {
   if (md.expectSessionSearch && validSessionSearches.length === 0) {
     problems.push("expected a successful session-search call in query, scoped-query, skim, or anchored-window mode");
   }
-  if (md.expectSessionSearch && transcriptReads.length) {
+  if (md.forbidDirectTranscriptRead && transcriptReads.length) {
     problems.push(`read transcript files directly instead of session-search (${transcriptReads.length} call(s))`);
   }
   if (md.expectOwnerOperatorSearch && ownerOperatorSearches.length === 0) {

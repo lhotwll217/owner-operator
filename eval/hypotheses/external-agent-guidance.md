@@ -121,6 +121,14 @@ test that fails without the fix.
 The answer comparison is independent of all four: `llm-rubric` grades the subject's output, which
 no gate change touches.
 
+Two contracts were then separated so each fails for its own reason, following
+[writing-great-evals](../../../.agents/skills/writing-great-evals/SKILL.md). Reaching the
+session-search wrapper and not bypassing it were one flag; bypassing it is now
+`forbidDirectTranscriptRead`, declared where transcript evidence is the point. And
+`owner-operator-current-turn-only` forbade `bash`, which would have failed an agent that only
+looked up its own session id; it now forbids the retrieval surfaces, which is the behavior its
+rubric describes. Regrading every saved arm shows both changes move no result.
+
 ## Limits
 
 - `external-claude-code` has no live run. This machine's Claude Code login is keychain-backed, and

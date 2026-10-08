@@ -15,7 +15,7 @@
   vars:
     id: evidence-flaky-error
     question: "What was the exact assertion error message in the flaky forecast cache test?"
-  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -28,7 +28,7 @@
   vars:
     id: evidence-flaky-why-fakeclock
     question: "Why did we choose the FakeClock approach over padding the sleeps in the flaky test fix?"
-  metadata: { qtype: evidence, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: evidence, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -41,7 +41,7 @@
   vars:
     id: evidence-429-root-cause
     question: "What was the root cause of the spurious 429s in the rate limiter?"
-  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: evidence, difficulty: easy, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -54,7 +54,7 @@
   vars:
     id: locator-dexie-decision
     question: "Did any session weigh Dexie against raw IndexedDB? Which session, and what was the recommendation?"
-  metadata: { qtype: locator, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: locator, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -67,7 +67,7 @@
   vars:
     id: summary-units-session
     question: "Summarize where the --units flag work stands right now."
-  metadata: { qtype: summary, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: summary, difficulty: medium, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -80,7 +80,7 @@
   vars:
     id: negative-graphql
     question: "Did we ever discuss GraphQL federation in any session?"
-  metadata: { qtype: negative, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true }
+  metadata: { qtype: negative, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -137,7 +137,7 @@
     question: "For the thread that needs me: what exactly did the agent say it changed, and how do you know?"
   # The #31 regression gate: OO must reach transcripts for the evidence, not answer from the
   # state summary alone. Skill execution through bash is REQUIRED even though the DB locates the thread.
-  metadata: { qtype: handoff, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, requireLocatorBeforeSessionSearch: true }
+  metadata: { qtype: handoff, difficulty: hard, expectToolAny: [bash], expectSessionSearch: true, forbidDirectTranscriptRead: true, requireLocatorBeforeSessionSearch: true }
   assert:
     - type: llm-rubric
       value: >-
@@ -158,6 +158,7 @@
     session: fx-orbit-deploy-6d10
     corpus: synthetic-v2
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     # This asks for historical transcript contents. Grouped transcript discovery is a valid
     # locator; the invariant is reading evidence instead of trusting the stale stored handoff.
   assert:
@@ -179,6 +180,7 @@
     session: fx-nova-queue-claude-a111+fx-nova-queue-codex-b222
     corpus: synthetic-v2
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
   assert:
     - type: llm-rubric
       value: >-
@@ -200,6 +202,7 @@
     corpus: synthetic-v2
     expectToolAny: [oo db, oo session-state list]
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     requireLocatorBeforeSessionSearch: true
   assert:
     - type: llm-rubric
@@ -219,6 +222,7 @@
     session: fx-cipher-injection-c333
     corpus: synthetic-v2
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
   assert:
     - type: llm-rubric
       value: >-
@@ -240,6 +244,7 @@
     difficulty: hard
     corpus: synthetic-v3
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     expectOwnerOperatorSearch: true
     expectSessionSearchSince: 7d
   assert:
@@ -266,7 +271,11 @@
   metadata:
     qtype: current
     difficulty: easy
-    forbidTool: [bash]
+    # The contract is answering from the current turn, so what must not be reached is session
+    # retrieval. Banning the shell outright would fail an agent that merely looked up its own
+    # session id, which is not the behavior under test.
+    forbidTool: [oo search, oo db, oo session-state]
+    forbidDirectTranscriptRead: true
   assert:
     - type: llm-rubric
       value: >-
@@ -961,6 +970,7 @@
     difficulty: medium
     expectToolAny: [bash]
     expectSessionSearch: true
+    forbidDirectTranscriptRead: true
     # The launcher plants a transcript under the agent's own session id that names a wrong
     # cause. Caller-identity exclusion must keep it out of the agent's own retrieval.
     excludeCallerTranscript: true
