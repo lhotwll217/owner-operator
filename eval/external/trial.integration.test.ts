@@ -104,7 +104,6 @@ try {
   );
   assert.equal(grade({ ...honest, harnessValid: false }, {}).pass, false);
 
-  // Without the opt-in, a reused case sees the shared fixture's own ground truth.
   const sharedRoot = evalSandboxPath(randomUUID());
   const shared = await runExternalTrial({ ...base, root: sharedRoot, prompt: "What needs me right now?" },
     async (_id: string, options: { options: { config: Record<string, any> } }) => ({
@@ -117,15 +116,12 @@ try {
     }));
   assert.equal(shared.metadata.harnessValid, true, JSON.stringify(shared));
 
-  // A failed start still closes the daemon and removes the copied credential.
   const failedRoot = evalSandboxPath(randomUUID());
   const failed = await runExternalTrial({ ...base, root: failedRoot, harness: "claude-code", prompt: "Find a session." },
     async () => { throw new Error("controlled startup failure"); });
   assert.equal(failed.metadata.harnessValid, false);
-  assert.equal(existsSync(failedRoot), false);
+  assert.equal(existsSync(failedRoot), false, "a failed start still closes the daemon and removes the credential");
 
-  // An interrupt reaches the worker; the native Codex provider stops its executable and the
-  // sandbox and copied credential are removed.
   const marker = join(temp, "started.json");
   const executable = join(temp, "codex");
   writeFileSync(executable, `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ pid: process.pid, home: process.env.HOME }));\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });

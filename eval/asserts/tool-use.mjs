@@ -199,8 +199,8 @@ export default (_output, context) => {
   const md = context.test?.metadata ?? {};
   const metadata = context.providerResponse?.metadata ?? {};
 
-  // This gate encodes OO's soundness (evidence from transcripts, not summaries) — a claim about
-  // OO's composition and about an external agent's use of the same CLI. The naive baseline has
+  // This gate encodes soundness: evidence read from a transcript, not from an AI-written summary.
+  // It judges OO's composition and an external agent's use of the same CLI. The naive baseline has
   // only grep and isn't the subject of this gate.
   const arm = context.provider?.label ?? context.provider?.id ?? "";
   const external = arm.startsWith("external-");

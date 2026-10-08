@@ -108,11 +108,9 @@ if (externalSubject) {
   externalEnv.OO_EVAL_EXTERNAL_HARNESS = subject.slice("external-".length);
 }
 
-// A subject's suite is every case whose `metadata.subjects` admits it. Retrieval questions are
-// answerable by the embedded Operator, by the #31 control, and by an external agent holding only
-// the shipped skill and `oo`, so a case that declares nothing runs on all of those; mutable
-// behavioral cases and the external-only cases name their subjects. Promptfoo's own test-level
-// `providers` filter cannot hold this (see promptfooconfig.yaml).
+// A subject's suite is every case whose `metadata.subjects` admits it, defaulting to every
+// subject that reaches Owner Operator through a question rather than through its own chat
+// composition. promptfooconfig.yaml says why Promptfoo's own filter cannot hold this.
 const caseBlocks = fs.readFileSync(path.join(here, "cases.yaml"), "utf8").split(/^- description:\s*/m).slice(1);
 const caseIds = caseBlocks.map((block) => block.split(/\s/, 1)[0]);
 const knownIds = new Set(caseIds);

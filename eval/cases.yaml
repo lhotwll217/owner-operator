@@ -929,7 +929,6 @@
 # ── external coding agents: Claude Code / Codex driving the shipped skill and `oo` CLI ──
 # Only the external subjects can run these: each needs a caller identity to exclude, a fixture
 # only the external trial materializes, or guidance an outside agent reads from `oo --help`.
-# Every other case above runs on the external subjects too (promptfooconfig.yaml defaultTest).
 - description: external-current-obligations
   vars:
     id: external-current-obligations
