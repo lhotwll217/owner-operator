@@ -3,6 +3,9 @@
 # case; the control greps transcripts, OO may shortcut through its state DB. Ground truth
 # is planted in fixtures/sessions.mjs — change a fact there, change its rubric here.
 #
+# `metadata.subjects` declares which subjects may attempt a case; a case that declares nothing
+# runs on the embedded Operator, the #31 control, and both external agents (loop.mjs).
+#
 # qtype tags where the DB earns its keep: state/stale/audit/handoff cases are the ones OO
 # should locate via `oo session-state list` or `oo db` before (if needed) reading transcripts with
 # the session-search skill. locator/evidence/summary/negative lean on search.
@@ -270,6 +273,14 @@
         The answer must use only the current turn and conclude that this single request to
         narrate every step is not enough to call the feedback recurring. It must not claim to
         have searched or summarize prior interactions.
+# ── mutable behavioral cases: the production chat composition, not the CLI ──────────────
+# `subjects: [owner-operator-behavioral]` on each is an exclusion with a reason. A mark-done
+# sample delivers the child's completion into the parent Operator session and waits for that
+# session's turn to end (eval/behavioral/run-scenario-trial.ts), which an external caller does
+# not have. A delegation-selection sample grades the harness-selection policy, which lives in
+# src/prompts/owner-operator.md and its select-harness-for-delegation skill; `oo harness` help
+# carries none of it, so an external agent is never handed the policy under test. Both also
+# grade the in-process Pi trajectory attestations in eval/behavioral/contract.mjs.
 - description: delegated-child-confidently-finished
   options:
     provider: file://eval/providers/noop-grader.mjs
@@ -283,8 +294,8 @@
     shouldMarkDone: true
     childSessionId: child-completed-129
     sentinelSessionId: unrelated-active-129
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: mark-done
     qtype: behavioral
     shouldMarkDone: true
@@ -304,8 +315,8 @@
     shouldMarkDone: false
     childSessionId: child-unresolved-129
     sentinelSessionId: unrelated-active-129
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: mark-done
     qtype: behavioral
     shouldMarkDone: false
@@ -376,8 +387,8 @@
       availableEfforts: [high]
     behaviorExpected:
       candidate: { harness: codex, model: controlled-default, effort: high }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: natural-first-delegation
@@ -458,8 +469,8 @@
       unknownHarness: claude-code
       recommendedHarness: claude-code
       usageAffectedRecommendation: true
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: usage-explanation
@@ -517,8 +528,8 @@
       effort: high
     behaviorExpected:
       identity: { harness: codex, model: controlled-approved-model, effort: high }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: approved-default-reuse
@@ -549,8 +560,8 @@
       unknowns: []
     behaviorExpected:
       identity: { harness: codex, model: owner-review, effort: null }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: explicit-pass-through
@@ -595,8 +606,8 @@
       unknowns: []
     behaviorExpected:
       identity: { harness: codex, model: controlled-current, effort: high }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: implicit-current-choice
@@ -665,8 +676,8 @@
           unknowns: []
     behaviorExpected:
       identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: implicit-non-current-inspection
@@ -735,8 +746,8 @@
           unknowns: []
     behaviorExpected:
       identity: { harness: claude-code, model: "opus[1m]", effort: xhigh }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: inspection-mismatch
@@ -786,8 +797,8 @@
     approvedBaseline: { harness: claude-code, model: "claude-fable-5-1[1m]", effort: medium }
     behaviorExpected:
       identity: { harness: claude-code, model: "claude-fable-5-1[1m]", effort: medium }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-printed-before-send
@@ -838,8 +849,8 @@
     approvedBaseline: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
     behaviorExpected:
       identity: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-waits-when-asked
@@ -909,8 +920,8 @@
       unknowns: []
     approvedBaseline: { harness: opencode, model: "opencode-go/grok-4.6", effort: medium }
     behaviorExpected: {}
-  providers: [owner-operator-behavioral]
   metadata:
+    subjects: [owner-operator-behavioral]
     profile: delegation-selection
     qtype: behavioral
     behaviorClaim: handoff-printed-before-send
@@ -920,7 +931,6 @@
 # only the external trial materializes, or guidance an outside agent reads from `oo --help`.
 # Every other case above runs on the external subjects too (promptfooconfig.yaml defaultTest).
 - description: external-current-obligations
-  providers: [external-*]
   vars:
     id: external-current-obligations
     question: "What needs my attention right now?"
@@ -928,7 +938,10 @@
     # rather than the row. Only this case asks for it, so `state-what-needs-me` keeps its own
     # ground truth on the shared fixture.
     settledObligation: true
-  metadata: { qtype: state, requireEvidenceFrom: fx-aurora-release-settled }
+  metadata:
+    subjects: [external-*]
+    qtype: state
+    requireEvidenceFrom: fx-aurora-release-settled
   assert:
     - type: llm-rubric
       value: >-
@@ -940,11 +953,11 @@
         owner's action passes; presenting an idle follow-up as a current obligation fails.
 
 - description: external-error-provenance
-  providers: [external-*]
   vars:
     id: external-error-provenance
     question: "Find the session that diagnosed the spurious 429s in quasar-api and explain the cause."
   metadata:
+    subjects: [external-*]
     qtype: evidence
     difficulty: medium
     expectToolAny: [bash]
@@ -963,14 +976,16 @@
 # document the same runtime behavior, so one rubric grades either source. No route is required:
 # what is under test is whether an outside agent still arrives at the right procedure.
 - description: runs-background-detach
-  providers: [external-*]
   vars:
     id: runs-background-detach
     question: >-
       I want to hand a long refactor to a Codex child agent, but I need my terminal back right
       away. What do I run? And if I attach to its output later and then hit ctrl-C, what happens
       to the run?
-  metadata: { qtype: guidance, difficulty: medium }
+  metadata:
+    subjects: [external-*]
+    qtype: guidance
+    difficulty: medium
   assert:
     - type: llm-rubric
       value: >-
@@ -982,13 +997,15 @@
         Mentioning that `logs --follow` replays from the start on reattach is a plus.
 
 - description: runs-resume-eligibility
-  providers: [external-*]
   vars:
     id: runs-resume-eligibility
     question: >-
       I cancelled a delegated run earlier. I want that same child to carry on with the context
       it already had, not start over. What do I run, and when will that not work?
-  metadata: { qtype: guidance, difficulty: hard }
+  metadata:
+    subjects: [external-*]
+    qtype: guidance
+    difficulty: hard
   assert:
     - type: llm-rubric
       value: >-

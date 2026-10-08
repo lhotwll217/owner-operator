@@ -33,7 +33,7 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
   let sandbox;
   let response;
   let callsFile;
-  let cliCalls = [];
+  let ooCalls = [];
   let teardown = null;
   try {
     sandbox = await createSandboxUser({
@@ -66,7 +66,7 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     process.removeListener("SIGTERM", onTerm);
     process.removeListener("SIGINT", onInt);
     if (callsFile && existsSync(callsFile)) {
-      try { cliCalls = readFileSync(callsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); }
+      try { ooCalls = readFileSync(callsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); }
       catch (error) { problems.push(`command evidence unreadable: ${error.message}`); }
     }
     if (sandbox) {
@@ -88,7 +88,7 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     cost: response?.cost ?? null,
     metadata: {
       sessionId: response?.sessionId ?? null,
-      toolExecutions: cliCalls.map(sharedExecution), ooCalls: cliCalls, harnessToolCalls,
+      toolExecutions: ooCalls.map(sharedExecution), ooCalls, harnessToolCalls,
       harnessValid: problems.length === 0, harnessProblems: problems,
       sandbox: teardown && { daemonStopped: teardown.daemonStopped, leasesRemaining: teardown.leasesRemaining },
     },

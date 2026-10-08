@@ -9,7 +9,8 @@ The sandbox, credential, teardown, diagnostic, validity, and publication contrac
 [Agent evaluations](../docs/evals.md).
 
 A run measures **one subject**: `owner-operator` (default), `naive-session-grep`,
-`owner-operator-behavioral`, `external-codex`, or `external-claude-code`. The first two are the
+`owner-operator-behavioral`, `external-codex`, or `external-claude-code`. Each case's
+`metadata.subjects` says which of them may attempt it. The first two are the
 [#31](https://github.com/lhotwll217/owner-operator/issues/31) control that runs the same
 `oo` binary at the same configured model (`.pi/settings.json`, falling back to the
 committed `.pi/settings.example.json`) with `OO_EVAL_BASELINE_PROMPT` swapping out OO's
@@ -128,8 +129,8 @@ separately when suites differ.
 | `behavioral/scenario-operations.ts` | reusable OO-specific environment operations; these materialize state but do not own trial lifecycle or grading |
 | `fixtures/naive-baseline-prompt.md` | the control subject's generic session-search prompt |
 | `providers/codex-grader.mjs` | pinned cheap rubric grader (strict, verbosity-bias guarded; judge only, not a subject) |
-| `cases.yaml` | every case, tagged by `qtype` + tool expectations; every subject attempts all of them |
-| `asserts/tool-use.mjs` | soundness gate — evidence answers must read a transcript, not a summary (owner-operator subject, opt-in per case). A bash `oo <noun> <verb>` call counts as that surface, e.g. `oo session-state done`; an `oo runs delegate` call is graded by its parsed `--harness`/`--model`/`--effort` (`--effort none` is null) and task; `oo harness details` by its parsed `--harness`/`--inspect` flags and the snapshot it printed (`--json`, else the text rendering's harness lines) |
+| `cases.yaml` | every case, tagged by `qtype` + tool expectations, with `metadata.subjects` declaring which subjects may attempt it |
+| `asserts/tool-use.mjs` | soundness gate for the Operator and for an external agent on the same CLI — evidence answers must read a transcript, not a summary (owner-operator subject, opt-in per case). A bash `oo <noun> <verb>` call counts as that surface, e.g. `oo session-state done`; an `oo runs delegate` call is graded by its parsed `--harness`/`--model`/`--effort` (`--effort none` is null) and task; `oo harness details` by its parsed `--harness`/`--inspect` flags and the snapshot it printed (`--json`, else the text rendering's harness lines) |
 | `asserts/efficiency.mjs` | tool-call / token / cost telemetry as named scores |
 | `compare.mjs` | downstream: pairs two published runs per case; optional A≥B correctness gate; qtype breakdown |
 | `loop.mjs` | attested one-case/probe/core/holdout runner; writes every run to history and per-run detail |

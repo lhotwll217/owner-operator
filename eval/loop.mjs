@@ -108,17 +108,18 @@ if (externalSubject) {
   externalEnv.OO_EVAL_EXTERNAL_HARNESS = subject.slice("external-".length);
 }
 
-// Applicability lives on each case as Promptfoo's own test-level `providers` filter, defaulted
-// in promptfooconfig.yaml. A subject's suite is every case that filter admits, so a case is
-// declared applicable once and both this runner and Promptfoo read the same declaration.
+// A subject's suite is every case whose `metadata.subjects` admits it. Retrieval questions are
+// answerable by the embedded Operator, by the #31 control, and by an external agent holding only
+// the shipped skill and `oo`, so a case that declares nothing runs on all of those; mutable
+// behavioral cases and the external-only cases name their subjects. Promptfoo's own test-level
+// `providers` filter cannot hold this (see promptfooconfig.yaml).
 const caseBlocks = fs.readFileSync(path.join(here, "cases.yaml"), "utf8").split(/^- description:\s*/m).slice(1);
 const caseIds = caseBlocks.map((block) => block.split(/\s/, 1)[0]);
 const knownIds = new Set(caseIds);
-const config = fs.readFileSync(path.join(here, "promptfooconfig.yaml"), "utf8");
-const defaultSubjects = subjectsOf(config.slice(config.indexOf("\ndefaultTest:")), "defaultTest applicability");
+const DEFAULT_SUBJECTS = ["owner-operator", "naive-session-grep", "external-codex", "external-claude-code"];
 const subjectsByCase = new Map(caseIds.map((id, index) => [
   id,
-  /^\s*providers:/m.test(caseBlocks[index]) ? subjectsOf(caseBlocks[index], id) : defaultSubjects,
+  /^\s*subjects:/m.test(caseBlocks[index]) ? subjectsOf(caseBlocks[index], id) : DEFAULT_SUBJECTS,
 ]));
 const runs = (id, name) => subjectsByCase.get(id).some((ref) =>
   ref.endsWith("*") ? name.startsWith(ref.slice(0, -1)) : ref === name);
@@ -383,14 +384,14 @@ function round(value) { return Math.round(value * 10) / 10; }
 function pct(value) { return `${Math.round(value * 100)}%`; }
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-/** The subject labels one `providers:` declaration admits. Flow style only, so a block-style
- *  list fails loudly here instead of silently dropping that case from a suite. */
+/** The subject labels one `metadata.subjects` declaration admits. Flow style only, so a
+ *  block-style list fails loudly here instead of silently dropping that case from a suite. */
 function subjectsOf(text, where) {
-  const line = /^\s*providers:(.*)$/m.exec(text);
+  const line = /^\s*subjects:(.*)$/m.exec(text);
   const flow = /^\s*\[([^\]]*)\]\s*$/.exec(line?.[1] ?? "");
-  if (!flow) fail(`${where}: write providers as a flow list, for example [owner-operator, external-*]`);
+  if (!flow) fail(`${where}: write subjects as a flow list, for example [owner-operator, external-*]`);
   const refs = flow[1].split(",").map((value) => value.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-  if (!refs.length) fail(`${where}: providers is empty, so no subject can run it`);
+  if (!refs.length) fail(`${where}: subjects is empty, so no subject can run it`);
   return refs;
 }
 function fail(message) { console.error(`eval/loop: ${message}`); process.exit(2); }

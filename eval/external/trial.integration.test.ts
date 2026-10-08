@@ -74,7 +74,7 @@ try {
     "oo search --query 429 --from-session none --json",
   ]);
 
-  const [help, locator, ownSearch, wrongCaller] = metadata.ooCalls;
+  const [help, locator, ownSearch] = metadata.ooCalls;
   const honest = { ...metadata, ooCalls: [help, locator, ownSearch], toolExecutions: metadata.toolExecutions.slice(0, 3) };
   const reorderedExecutions = [metadata.toolExecutions[0], metadata.toolExecutions[2], metadata.toolExecutions[1]];
 

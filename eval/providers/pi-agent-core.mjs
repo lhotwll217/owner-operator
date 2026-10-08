@@ -433,10 +433,14 @@ async function runExternalTrial({ arm, prompt, context, caseId, invocationId, ba
   const redactions = [root, external?.trial.checkout, external?.trial.credentialSource].filter(Boolean);
   fs.writeFileSync(path.join(logDir, `${baseName}.stdout.txt`), payload?.output ?? '');
   fs.writeFileSync(path.join(logDir, `${baseName}.stderr.txt`), sanitizeEvalDiagnosticText(stderr, redactions));
-  const trial = payload?.metadata ?? { toolExecutions: [], cliCalls: [], harnessValid: false, harnessProblems: [] };
+  const trial = payload?.metadata ?? { toolExecutions: [], ooCalls: [], harnessValid: false, harnessProblems: [] };
+  // A worker that reports a different shape is a broken instrument, not a failed subject.
+  for (const key of ['toolExecutions', 'ooCalls']) {
+    if (!Array.isArray(trial[key])) throw new Error(`external trial reported no ${key}`);
+  }
   fs.writeFileSync(traceFile, [
     ...trial.toolExecutions.map((execution) => ({ event: 'tool_call', ...execution })),
-    ...trial.cliCalls.map((call) => ({ event: 'oo_call', ...call })),
+    ...trial.ooCalls.map((call) => ({ event: 'oo_call', ...call })),
   ].map((event) => JSON.stringify(event)).join('\n') + '\n');
   const usage = payload?.tokenUsage ?? {};
   const metadata = {
