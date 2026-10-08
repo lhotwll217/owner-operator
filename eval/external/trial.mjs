@@ -77,9 +77,9 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     }
     rmSync(neutralConfig, { force: true });
   }
-  let harnessToolCalls = null;
+  let toolExecutions = [];
   if (response && !problems.length) {
-    try { harnessToolCalls = normalizeTools(input.harness, response).length; }
+    try { toolExecutions = normalizeTools(input.harness, response); }
     catch (error) { problems.push(error.message); }
   }
   return sanitizeEvalDiagnosticValue({
@@ -87,30 +87,11 @@ export async function runExternalTrial(input, loadProvider = loadApiProvider) {
     tokenUsage: response?.tokenUsage ?? null,
     cost: response?.cost ?? null,
     metadata: {
-      sessionId: response?.sessionId ?? null,
-      toolExecutions: ooCalls.map(sharedExecution), ooCalls, harnessToolCalls,
+      sessionId: response?.sessionId ?? null, toolExecutions, ooCalls,
       harnessValid: problems.length === 0, harnessProblems: problems,
       sandbox: teardown && { daemonStopped: teardown.daemonStopped, leasesRemaining: teardown.leasesRemaining },
     },
   }, [input.root, input.checkout, input.credentialSource, ...secrets]);
-}
-
-/** One recorded `oo` invocation in the shape asserts/tool-use.mjs grades every subject by, so the
- * external subjects are judged by the same behavior gate as the embedded Operator. The launcher
- * records argv, so the command is rebuilt from it rather than parsed back out of a shell line. */
-function sharedExecution(call, index) {
-  return {
-    id: String(index),
-    name: "bash",
-    input: { command: ["oo", ...call.args].map(shellWord).join(" ") },
-    isError: call.exitCode !== 0,
-    resultChars: String(call.output ?? "").length,
-    result: { content: [{ type: "text", text: String(call.output ?? "") }] },
-  };
-}
-
-function shellWord(value) {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 /** Native provider options: the agent sees only the sandbox env, cwd, and named executable. */
@@ -134,22 +115,51 @@ export function nativeConfig(input, cwd, env) {
   };
 }
 
-/** The native providers' tool trajectories, normalized so a missing one fails the trial. */
+/** The agent's own tool trajectory, every tool-ish call of it, in the shape asserts/tool-use.mjs
+ * grades every subject by. This is the whole trajectory and not only the `oo` calls: a case that
+ * forbids a surface, or that wants evidence through session-search rather than a direct file read,
+ * is answerable only if the commands, file writes, and tool calls that never touched `oo` are here
+ * too. `ooCalls` stays a separate lens over the subset that did, carrying the argv, exit status,
+ * caller identity, and output that the harness trace does not expose. A missing trajectory fails
+ * the trial rather than grading as an agent that used no tools.
+ *
+ * Codex item types are the ThreadItem union in @openai/codex-sdk (dist/index.d.ts); the ones that
+ * are not tool calls (agent_message, reasoning, todo_list, error) carry no surface to grade. */
 export function normalizeTools(harness, response) {
   if (harness === "claude-code") {
     if (!Array.isArray(response.metadata?.toolCalls)) throw new Error("missing Claude tool trajectory");
     return response.metadata.toolCalls.map((tool, index) => ({
-      id: tool.id ?? String(index), name: tool.name, input: tool.input,
-      isError: tool.is_error === true, resultChars: JSON.stringify(tool.output ?? "").length,
+      id: tool.id ?? String(index),
+      name: String(tool.name ?? "").toLowerCase(),
+      input: tool.input,
+      isError: tool.is_error === true,
+      resultChars: JSON.stringify(tool.output ?? "").length,
     }));
   }
   const turn = JSON.parse(response.raw ?? "{}");
   if (!Array.isArray(turn.items)) throw new Error("missing Codex tool trajectory");
-  return turn.items.filter((item) => item.type === "command_execution").map((item, index) => ({
-    id: item.id ?? String(index), name: "shell", input: { command: item.command },
-    isError: item.status !== "completed" || item.exit_code !== 0,
-    resultChars: String(item.aggregated_output ?? "").length,
-  }));
+  return turn.items.flatMap((item, index) => {
+    const id = item.id ?? String(index);
+    if (item.type === "command_execution") return [{
+      id, name: "bash", input: { command: String(item.command ?? "") },
+      isError: item.status !== "completed" || item.exit_code !== 0,
+      resultChars: String(item.aggregated_output ?? "").length,
+    }];
+    // A patch the agent applied. The mutation rules read the surface, so it must be present.
+    if (item.type === "file_change") return [{
+      id, name: "write",
+      input: { paths: (item.changes ?? []).map((change) => change.path), changes: item.changes ?? [] },
+      isError: item.status !== "completed", resultChars: 0,
+    }];
+    if (item.type === "mcp_tool_call") return [{
+      id, name: String(item.tool ?? "mcp").toLowerCase(), input: { server: item.server, arguments: item.arguments },
+      isError: item.status !== "completed", resultChars: JSON.stringify(item.result ?? "").length,
+    }];
+    if (item.type === "web_search") return [{
+      id, name: "websearch", input: { query: item.query }, isError: false, resultChars: 0,
+    }];
+    return [];
+  });
 }
 
 // A login shell can re-order PATH from the user's shell files, so the sandbox HOME's own

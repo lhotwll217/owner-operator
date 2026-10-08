@@ -30,6 +30,9 @@ function sessionSearchMode(args) {
 function sessionSearchArgs(execution) {
   const supplied = execution.input?.args;
   if (execution.input?.command === "session-search" && Array.isArray(supplied)) return supplied;
+  // An observed `oo` invocation carries its own argv, so nothing is reparsed out of a shell line.
+  const argv = execution.input?.argv;
+  if (Array.isArray(argv)) return argv[0] === "search" ? argv.slice(1) : null;
 
   const command = String(execution.input?.command ?? "");
   const invocation = /^\s*oo\s+search(?=\s|$)/.exec(command);
@@ -49,6 +52,13 @@ function sessionSearchArgs(execution) {
 // name what the Operator reached the same way they name a native tool. Reading a verb's --help
 // runs nothing, so it stays plain bash.
 function surface(execution) {
+  const argv = execution.input?.argv;
+  if (Array.isArray(argv)) {
+    if (argv.includes("--help") || argv.includes("-h")) return execution.name;
+    const [noun, verb] = argv;
+    if (!/^[a-z][a-z-]*$/.test(noun ?? "")) return execution.name;
+    return /^[a-z][a-z-]*$/.test(verb ?? "") ? `oo ${noun} ${verb}` : `oo ${noun}`;
+  }
   if (execution.name !== "bash") return execution.name;
   const command = String(execution.input?.command ?? "");
   const invocation = /^\s*oo\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(command);
@@ -85,6 +95,20 @@ function doneOutcome(result) {
     const ids = (label) => [...text.matchAll(new RegExp(`^${label}\\s+(\\S+)`, "gm"))].map((match) => match[1]);
     return { marked: ids("done"), already: ids("already"), missing: ids("missing") };
   }
+}
+
+const TRANSCRIPT_PATH = /(?:^|\/)(?:transcripts?|sessions?)(?:\/|$)|\.jsonl(?:\b|$)/i;
+
+/** Reading transcript evidence without going through the session-search policy wrapper: a file
+ * tool aimed at a transcript path, or a shell command that reads one itself. An `oo` invocation is
+ * the wrapper, so it never counts, even when its arguments name a transcript. */
+function readsTranscriptDirectly(execution) {
+  const target = String(execution.input?.path ?? execution.input?.file_path ?? "");
+  if (["read", "grep", "glob"].includes(execution.name)) return TRANSCRIPT_PATH.test(target);
+  if (execution.name !== "bash" || Array.isArray(execution.input?.argv)) return false;
+  // One `oo` word must not shield the rest of a compound command, so each segment stands alone.
+  return String(execution.input?.command ?? "").split(/[;&|]+|\n/)
+    .some((segment) => !/(?:^|[\s'"])oo(?=\s|$)/.test(segment) && TRANSCRIPT_PATH.test(segment));
 }
 
 const LOCATORS = ["oo session-state list", "oo db"];
@@ -212,9 +236,18 @@ export default (_output, context) => {
   if (md.profile === "mark-done") return markDoneBehavior(executions, metadata, md);
   if (md.profile === "delegation-selection") return delegationSelectionBehavior(_output, executions, metadata, md);
   const problems = external ? externalCallerProblems(metadata, md) : [];
-  const called = new Set(executions.flatMap((execution) => [execution.name, surface(execution)]));
-  const succeeded = executions.filter((execution) => execution.isError === false)
-    .flatMap((execution) => [execution.name, surface(execution)]);
+  // Two lenses on one trajectory. `executions` is every tool call the harness made, which is what
+  // a forbidden surface or a direct transcript read has to be judged against. `ooExecutions` is
+  // the launcher's observation of the `oo` calls among them, carrying argv and exit status the
+  // harness trace does not expose, which is what the CLI-surface rules need. For the embedded
+  // Operator the two are the same list, since its own trace already carries both.
+  const ooExecutions = external ? (metadata.ooCalls ?? []).map(observedExecution) : executions;
+  const surfaces = (list) => list.flatMap((execution) => [execution.name, surface(execution)]);
+  const called = new Set([...surfaces(executions), ...surfaces(ooExecutions)]);
+  const succeeded = [
+    ...surfaces(executions.filter((execution) => execution.isError === false)),
+    ...surfaces(ooExecutions.filter((execution) => execution.isError === false)),
+  ];
   const any = md.expectToolAny ?? [];
   // A case's own forbidTool fails on any attempt. State changes fail only when they succeed:
   // the fixture home denies them, and a denied attempt leaves the shared fixture intact.
@@ -226,8 +259,7 @@ export default (_output, context) => {
     ...(md.forbidTool ?? []).filter((tool) => called.has(tool)),
     ...stateChanges.filter((tool) => succeeded.includes(tool)),
   ];
-  const sessionSearches = executions.flatMap((execution, executionIndex) => {
-    if (execution.name !== "bash") return [];
+  const sessionSearches = ooExecutions.flatMap((execution, executionIndex) => {
     const args = sessionSearchArgs(execution);
     return args ? [{ ...execution, executionIndex, input: { ...execution.input, command: "session-search", args } }] : [];
   });
@@ -241,9 +273,7 @@ export default (_output, context) => {
     .filter((execution) => execution.input.args.some((arg, index, args) =>
       arg === "--since" && args[index + 1] === md.expectSessionSearchSince
     ));
-  const transcriptReads = executions.filter((execution) =>
-    execution.name === "read" && /(?:^|\/)(?:transcripts?|sessions?)(?:\/|$)|\.jsonl$/i.test(String(execution.input?.path ?? ""))
-  );
+  const transcriptReads = executions.filter(readsTranscriptDirectly);
 
   if (missingAny) problems.push(`expected one of [${any.join(", ")}], got [${[...called].join(", ") || "none"}]`);
   if (usedForbidden.length) problems.push(`used forbidden [${usedForbidden.join(", ")}]`);
@@ -268,7 +298,7 @@ export default (_output, context) => {
       return ["scoped-query", "skim", "window"].includes(sessionSearchMode(args));
     });
     const searchIndex = (directRead ?? validSessionSearches[0]).executionIndex;
-    const locatorIndex = executions.findIndex((execution) =>
+    const locatorIndex = ooExecutions.findIndex((execution) =>
       execution.isError === false && LOCATORS.some((locator) => reaches(surface(execution), locator))
     );
     if (locatorIndex < 0 || locatorIndex > searchIndex) {
@@ -284,6 +314,21 @@ export default (_output, context) => {
       : problems.join("; "),
   };
 };
+
+/** One observed `oo` invocation as an execution the gate can read. The launcher recorded argv, so
+ * the surface and flag rules read it directly instead of reparsing a shell line whose quoting,
+ * escapes, environment prefixes, or compound segments could lose evidence. */
+function observedExecution(call, index) {
+  const argv = Array.isArray(call.args) ? call.args : [];
+  return {
+    id: String(index),
+    name: "bash",
+    input: { argv, command: ["oo", ...argv].join(" ") },
+    isError: call.exitCode !== 0,
+    resultChars: String(call.output ?? "").length,
+    result: { content: [{ type: "text", text: String(call.output ?? "") }] },
+  };
+}
 
 /** Only an external caller has its own session identity to declare and exclude, so these rules sit
  * beside the shared gate instead of inside it. Everything else an external subject is held to (a

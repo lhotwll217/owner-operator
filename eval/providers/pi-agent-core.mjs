@@ -31,6 +31,7 @@ import { DEFAULT_GRADER_MODEL, DEFAULT_GRADER_REASONING } from './codex-grader.m
 import { readGitProvenance } from './git-provenance.mjs';
 import { loadEvalModelSettings } from './model-settings.mjs';
 import { readFatalModelError } from './trace-errors.mjs';
+import { spawnTrialWorker } from './trial-worker.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
@@ -300,7 +301,7 @@ async function runBehavioralTrial({
     ({ stdout, stderr, timedOut, spawnError } = await spawnTrialWorker(
       path.join(repoRoot, 'eval', 'behavioral', 'run-scenario-trial.ts'),
       trialInput,
-      { cwd: sandbox.taskCwd, env: { ...sandbox.env, OO_EVAL_SANDBOX: sandbox.root } },
+      { cwd: sandbox.taskCwd, env: { ...sandbox.env, OO_EVAL_SANDBOX: sandbox.root }, loader: tsxLoaderPath },
       timeoutMs,
     ));
     payload = parseTrialPayload(stdout, 'OO_BEHAVIOR_RESULT');
@@ -418,7 +419,7 @@ async function runExternalTrial({ arm, prompt, context, caseId, invocationId, ba
       path.join(repoRoot, 'eval', 'external', 'trial.mjs'),
       // A case opts into the fixture it needs; every other case keeps the shared ground truth.
       { ...external.trial, root, prompt, timeoutMs, settledObligation: context?.vars?.settledObligation === true },
-      { cwd: repoRoot, env: { ...evalRuntimeEnvironment(), OO_EVAL_SANDBOX_BASE: base } },
+      { cwd: repoRoot, env: { ...evalRuntimeEnvironment(), OO_EVAL_SANDBOX_BASE: base }, loader: tsxLoaderPath },
       timeoutMs,
     ));
   } else {
@@ -455,9 +456,8 @@ async function runExternalTrial({ arm, prompt, context, caseId, invocationId, ba
     durationMs: Date.now() - started,
     ...trial,
     toolCalls: trial.toolExecutions.map(({ name, input }) => ({ name, input })),
-    // Spend is the harness's own tool calls; `toolExecutions` is the subject's `oo` usage, which
-    // the behavior gate reads. The two differ whenever the agent runs commands besides `oo`.
-    toolCallCount: trial.harnessToolCalls ?? trial.toolExecutions.length,
+    toolCallCount: trial.toolExecutions.length,
+    ooCallCount: trial.ooCalls.length,
     toolResultChars: trial.toolExecutions.reduce((total, item) => total + Number(item.resultChars ?? 0), 0),
     tokensTotal: usage.total ?? null,
     tokensUncached: usage.prompt == null ? null : usage.prompt - (usage.cached ?? 0) + (usage.completion ?? 0),
@@ -483,38 +483,6 @@ async function runExternalTrial({ arm, prompt, context, caseId, invocationId, ba
     cost: metadata.costUsd,
     metadata,
   };
-}
-
-// The worker shares the terminal's process group, so an interrupt reaches it directly. On
-// timeout it gets SIGTERM first: workers that own child agents abort them and tear down.
-function spawnTrialWorker(script, input, { cwd, env }, timeoutMs) {
-  return new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [
-      '--import',
-      tsxLoaderPath,
-      script,
-      Buffer.from(JSON.stringify(input)).toString('base64url'),
-    ], { cwd, env });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    let spawnError = null;
-    let killTimer;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      killTimer = setTimeout(() => child.kill('SIGKILL'), 15_000);
-    }, timeoutMs + 5_000);
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => { spawnError = String(error); });
-    child.once('close', (code, signal) => {
-      clearTimeout(timer);
-      clearTimeout(killTimer);
-      if (code !== 0 && !spawnError) spawnError = `trial worker exited ${code ?? signal ?? 'unknown'}`;
-      resolvePromise({ stdout, stderr, timedOut, spawnError });
-    });
-  });
 }
 
 function parseTrialPayload(stdout, prefix) {
@@ -671,6 +639,7 @@ function buildRunManifest() {
     'eval/providers/noop-grader.mjs',
     'eval/providers/pi-agent-core.mjs',
     'eval/providers/trace-errors.mjs',
+    'eval/providers/trial-worker.mjs',
     'eval/promptfooconfig.yaml',
     'eval/external/trial.mjs',
     'eval/external/cli-observer.mjs',
