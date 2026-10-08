@@ -179,6 +179,35 @@ try {
   assert.equal(blind.metadata.harnessValid, false);
   assert.match(blind.metadata.harnessProblems.join(" "), /missing Codex tool trajectory/);
 
+  // The Claude subject cannot run live on this machine, so its trajectory mapping and isolated
+  // configuration are held to the same controlled check as Codex's.
+  const claudeRoot = evalSandboxPath(randomUUID());
+  const claude = await runExternalTrial({ ...base, root: claudeRoot, harness: "claude-code", prompt: "Find a session." },
+    async (_id: string, options: { options: { config: Record<string, any> } }) => {
+      const config = options.options.config;
+      assert.deepEqual(config.setting_sources, [], "host settings are not imported");
+      assert.deepEqual(config.mcp, { servers: [] }, "no MCP server reaches the subject");
+      assert.equal(config.apiKeyRequired, false, "the harness authenticates itself");
+      assert.equal(config.env.CLAUDE_CONFIG_DIR, join(claudeRoot, "user-home", ".claude"),
+        "the copied credential directory is the sandbox's own");
+      return { async callApi() {
+        return {
+          output: "the quasar-api session explains it", sessionId,
+          metadata: { toolCalls: [
+            { id: "t1", name: "Bash", input: { command: "oo search --skim fx-quasar-ratelimit-7f3a" }, output: "hit" },
+            { id: "t2", name: "Read", input: { file_path: "/var/transcripts/codex/fx-quasar-ratelimit-7f3a.jsonl" }, output: "{}" },
+            { id: "t3", name: "Write", input: { file_path: "/tmp/notes.md" }, output: "ok" },
+          ] },
+        };
+      } };
+    });
+  assert.equal(claude.metadata.harnessValid, true, JSON.stringify(claude.metadata.harnessProblems));
+  assert.deepEqual(claude.metadata.toolExecutions.map((item: { name: string }) => item.name), ["bash", "read", "write"]);
+  const claudeGrade = grade(claude.metadata, { expectSessionSearch: true });
+  assert.equal(claudeGrade.pass, false, "Claude's own Read of a transcript is a direct read");
+  assert.match(claudeGrade.reason, /read transcript files directly/);
+  assert.match(claudeGrade.reason, /forbidden/, "Claude's Write is a forbidden mutation");
+
   const failedRoot = evalSandboxPath(randomUUID());
   const failed = await runExternalTrial({ ...base, root: failedRoot, harness: "claude-code", prompt: "Find a session." },
     async () => { throw new Error("controlled startup failure"); });
