@@ -46,26 +46,50 @@ cases named against them were written for this campaign.
 
 ## Results
 
-Codex CLI 0.160.0, `gpt-6-astra` at medium effort, grader `gpt-5.6-luna` at high reasoning, 20
-cases at repeat 3 per checkout, 120 live samples. Both measurements valid.
+Codex CLI 0.160.0, `gpt-6-astra` at medium effort, grader `gpt-5.6-luna` at high reasoning, one
+arm per checkout. The answer comparison is the first campaign, 20 cases at repeat 3, 120 live
+samples, both arms valid. The evidence comparison is the recheck that followed the instrument fix,
+13 cases at repeat 3, 78 live samples.
+
+### Answers, 20 cases at repeat 3
 
 | case | main `5bd55b6` | #187 `1cba061` |
 | --- | --- | --- |
 | state-what-needs-me | 0/3 | 3/3 |
 | external-current-obligations | 0/3 | 3/3 |
-| summary-units-session | 3/3 answers, 2/3 evidence | 3/3 answers, 3/3 evidence |
 | stale-abandoned | 0/3 | 0/3 |
-| the other 16 | 3/3 | 3/3 |
+| the other 17 | 3/3 | 3/3 |
 
-Answers: 17 of 20 cases clean on main, 19 of 20 on #187. `compare.mjs --gate` passes, which is an
-aggregate check; the per-case accounting above is the one that carries the claim.
+17 of 20 cases clean on main, 19 of 20 on #187. `compare.mjs --gate` passes, which is an aggregate
+check; the per-case accounting is the one that carries the claim.
 
-Both improvements are the same behavior, which rows count as a current obligation. On main the
+### Evidence, 13 cases at repeat 3
+
+The first campaign's evidence column is superseded. The gate then saw only `oo` calls, so it could
+not see a transcript read done any other way, and it reported those cases as clean. These numbers
+come from the recheck that followed the fix, with the whole trajectory recorded.
+
+| case | main `5bd55b6` | #187 `1cba061` |
+| --- | --- | --- |
+| summary-units-session | 1/3 | 3/3 |
+| external-error-provenance | 1/3 | 3/3 |
+| the other 11 | 3/3 | 3/3 |
+
+Both main failures are the same bypass: the agent queried the index with `oo db query`, then read
+the transcript with `cat`, and never called `oo search`. #187's root help sends the returned id to
+transcript search instead, and no sample on that arm read a transcript directly or skipped the
+wrapper. This is a second improvement, and it was invisible before the instrument fix.
+
+The #187 arm of this recheck is a valid measurement. The main arm did not publish: one sample's
+rubric came back `grader-error: WebSocket closed 1000`, so its answer grade is missing and the run
+fails closed. Its evidence measurement is complete, with all 39 trajectory assertions well formed,
+and the affected case passed evidence 3/3 on that arm, so the comparison above does not rest on the
+missing grade.
+
+Both answer improvements are one behavior, which rows count as a current obligation. On main the
 agent answered "three reviews need your attention" and listed two idle threads beside the real one.
 On #187 it answered "One thing needs you: review PR #42 … No other sessions are currently marked as
-needing you." `summary-units-session` is the discovery policy working: main answered "where does
-the work stand" from `oo db query` rows and never opened a transcript, while #187 took the returned
-id to `oo search --skim`.
+needing you."
 
 `stale-abandoned` fails on both arms for the same reason, neither names the lumen-notes
 storage-migration thread, so it is pre-existing rather than a #187 effect.
@@ -110,3 +134,6 @@ no gate change touches.
 - An outside agent that places `--from-session` before the noun gets exit 2 on both arms, and the
   error names `--json` rather than the misplaced flag, so it spends a call before recovering. This
   is pre-existing product behavior and is not addressed here.
+- The grader reaches its model over a socket that occasionally closes mid-grade, which fails a run
+  closed rather than scoring an empty answer. It cost one arm of the evidence recheck its answer
+  grades. There is no judge-only replay path, so recovering a grade means rerunning the sample.
