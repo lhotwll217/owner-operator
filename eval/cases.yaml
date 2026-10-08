@@ -929,8 +929,11 @@
     - type: llm-rubric
       value: >-
         Do not present aurora-weather PR #42 as awaiting review: a later session merged it.
-        Orbit-payments green rollout PR #81 still needs owner review. Distinguish current
-        obligations from optional idle follow-ups.
+        No current owner obligation remains after reconciling that settled needs-you row.
+        Orbit-payments is idle: its transcript's review wording does not make PR #81 a
+        current owner obligation. Mentioning it as an optional idle follow-up is allowed
+        but not required. An evidence-supported answer that nothing currently needs the
+        owner's action passes; presenting an idle follow-up as a current obligation fails.
 
 - description: external-error-provenance
   vars:
