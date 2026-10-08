@@ -97,6 +97,39 @@ function doneOutcome(result) {
   }
 }
 
+const DAY_MS = 86_400_000;
+
+/** A `--since` value as the window start it selects, following the contract `oo search --help`
+ * documents (`today|Nd|YYYY-MM-DD`) and parseSince in
+ * src/session-search/vendor/session-grep/session-grep.mjs implements. */
+export function sinceWindowStart(value, now) {
+  if (value === "today") {
+    const day = new Date(now);
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+  }
+  const days = /^(\d+)d$/.exec(String(value ?? ""));
+  if (days) return now - Number(days[1]) * DAY_MS;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ""))) return Date.parse(`${value}T00:00:00`);
+  return null;
+}
+
+/** Whether a search preserved the time scope the question asked for. A case names the scope, and
+ * any spelling that selects the same window satisfies it: an agent that computes the dates itself
+ * is as scoped as one that passes `7d`. A window that reaches further back, or one that falls
+ * short, is a different scope and does not. */
+export function preservesSinceScope(args, requested, now) {
+  const wanted = sinceWindowStart(requested, now);
+  if (wanted === null) return false;
+  for (let index = 0; index < args.length; index++) {
+    const inline = /^--since=([\s\S]+)$/.exec(args[index]);
+    const value = inline ? inline[1] : args[index] === "--since" ? args[index + 1] : null;
+    if (value === null) continue;
+    const start = sinceWindowStart(value, now);
+    if (start !== null && Math.abs(start - wanted) <= DAY_MS) return true;
+  }
+  return false;
+}
+
 const TRANSCRIPT_PATH = /(?:^|\/)(?:transcripts?|sessions?)(?:\/|$)|\.jsonl(?:\b|$)/i;
 
 /** Reading transcript evidence without going through the session-search policy wrapper: a file
@@ -269,10 +302,9 @@ export default (_output, context) => {
   const ownerOperatorSearches = validSessionSearches.filter((execution) =>
     execution.input.args.includes("--owner-operator")
   );
+  const now = Date.now();
   const timeScopedSearches = (md.expectOwnerOperatorSearch ? ownerOperatorSearches : validSessionSearches)
-    .filter((execution) => execution.input.args.some((arg, index, args) =>
-      arg === "--since" && args[index + 1] === md.expectSessionSearchSince
-    ));
+    .filter((execution) => preservesSinceScope(execution.input.args, md.expectSessionSearchSince, now));
   const transcriptReads = executions.filter(readsTranscriptDirectly);
 
   if (missingAny) problems.push(`expected one of [${any.join(", ")}], got [${[...called].join(", ") || "none"}]`);
