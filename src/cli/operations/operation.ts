@@ -22,6 +22,8 @@ export interface Verb {
   /** Number of required positionals; extra positionals are an error unless `variadic`. */
   minPositionals?: number;
   variadic?: boolean;
+  /** The verb's rules and what to do next, when the summary and flags do not carry them. */
+  guide?: string;
   /** Complete invocations, each starting `oo <noun> <verb>`; help shows them under Examples. */
   examples: string[];
   /** Returns the process exit code. */
@@ -32,6 +34,8 @@ export interface Noun {
   summary: string;
   /** The questions this noun answers; root help routes by it. */
   useWhen: string;
+  /** How the noun's verbs fit together, and the rules for the questions its `useWhen` routes here. */
+  guide?: string;
   verbs: Record<string, Verb>;
 }
 
@@ -47,8 +51,12 @@ function optionLabel(name: string, option: ParseArgsOptionsConfig[string]): stri
   return option.type === "string" ? `${flag} <value>` : flag;
 }
 
+/** A guide's lines after a blank line, each prefixed by `indent`. */
+const guideLines = (guide: string | undefined, indent: string): string[] =>
+  guide ? ["", ...guide.split("\n").map((line) => `${indent}${line}`)] : [];
+
 export function verbHelp(nounName: string, verbName: string, verb: Verb): string {
-  const lines = [`oo ${nounName} ${verbName}${verb.args ? ` ${verb.args}` : ""} [--json]`, "", `  ${verb.summary}`];
+  const lines = [`oo ${nounName} ${verbName}${verb.args ? ` ${verb.args}` : ""} [--json]`, "", `  ${verb.summary}`, ...guideLines(verb.guide, "  ")];
   lines.push("", "Flags:");
   for (const [name, option] of Object.entries(verb.options ?? {})) {
     lines.push(`  ${optionLabel(name, option).padEnd(28)} ${option.help}`);
@@ -65,11 +73,12 @@ export function nounHelp(nounName: string, noun: Noun): string {
     `oo ${nounName} — ${noun.summary}`,
     "",
     `Use when: ${noun.useWhen}`,
+    ...guideLines(noun.guide, ""),
     "",
     "Verbs:",
     ...rows,
     "",
-    `Every verb accepts --json. \`oo ${nounName} <verb> --help\` shows its flags and examples.`,
+    `Every verb accepts --json. \`oo ${nounName} <verb> --help\` shows its flags, rules, and examples.`,
   ].join("\n");
 }
 

@@ -1,4 +1,5 @@
 import { SESSION_SEARCH_VALUE_FLAGS } from "../../session-search/flags.mjs";
+import { SEARCH_HELP } from "../../session-search/help.mjs";
 import { callerSessionId } from "../../shared/caller-session";
 import { gateway, reportFailure, writeOut } from "./operation";
 
@@ -8,6 +9,10 @@ export const SEARCH_USE_WHEN = "what a session actually said or did: transcript 
 /** `oo search` forwards every argument except `--from-session` to the daemon's search wrapper;
  * the wrapper's flags (`oo search --help`) and output are the contract. */
 export async function runSearch(argv: readonly string[]): Promise<number> {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    await writeOut(`${SEARCH_HELP}\n`);
+    return 0;
+  }
   const args: string[] = [];
   let fromSession: string | undefined;
   for (let index = 0; index < argv.length; index++) {

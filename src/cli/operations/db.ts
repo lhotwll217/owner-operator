@@ -4,7 +4,9 @@ import { emit, gateway, type Noun } from "./operation";
 
 export const db: Noun = {
   summary: "read-only SQL over the state database (POST /query-database)",
-  useWhen: "structured facts and history: past session versions, schedule runs, delegated runs, anything SQL answers",
+  useWhen: "which session handled something (every session's titles and status-summary history), past session versions, schedule runs, delegated runs, anything SQL answers",
+  guide: "Run `oo db tables`, then `oo db describe <table>`, before unfamiliar SQL: the table and\n"
+    + "column docs say what each holds.",
   verbs: {
     tables: {
       summary: "table names, row counts, and documented purpose",

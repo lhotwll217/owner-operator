@@ -103,6 +103,8 @@ const runLine = recordText;
 export const schedules: Noun = {
   summary: "durable prompt and command schedules (/schedules)",
   useWhen: "seeing, creating, changing, deleting, or triggering recurring prompts and commands",
+  guide: "The daemon, not the active chat, owns the timer. Each run gets a fresh isolated Owner\n"
+    + "Operator session; inspect past runs with `oo db query` on `schedule_runs`.",
   verbs: {
     list: {
       summary: "every schedule",

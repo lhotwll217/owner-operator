@@ -10,6 +10,15 @@ const rowLine = (row: SessionStateRow, position: number): string =>
 export const sessionState: Noun = {
   summary: "the owner's current session rows, as the widget shows them",
   useWhen: "what is active right now, what needs the owner, or marking finished sessions done",
+  guide: "Rows are an index over sessions, not the sessions themselves. The monitor appends a new\n"
+    + "version on every semantic change, so a row can lag its transcript by one poll.\n"
+    + "For \"what needs me / is waiting on me?\", run `oo session-state list --state needs-you` and\n"
+    + "treat the result, including an empty one, as authoritative for current widget rows. Priority\n"
+    + "ranks rows; approval or review wording does not promote an idle row; optional idle follow-ups\n"
+    + "remain a separate category. An obligation that names an artifact (a pull request, issue,\n"
+    + "file, or command) is current only if nothing since settled it: search that artifact across\n"
+    + "sessions before reporting it (`oo db query` on `status_summary`, then transcripts), because the\n"
+    + "session that settled it is usually a different one.",
   verbs: {
     list: {
       summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "
@@ -39,6 +48,12 @@ export const sessionState: Noun = {
     done: {
       args: "<id...>",
       summary: "mark sessions done by exact id (POST /done); ids come from `list`",
+      guide: "Reconcile terminal work before reporting it. When bounded evidence establishes no remaining\n"
+        + "independent work or owner action, MUST run `oo session-state done <id>`. Example: a child\n"
+        + "reports the requested deliverable complete, validation passed, and no blockers, questions,\n"
+        + "remaining child work, or owner action: mark that child done, then report the outcome. Keep a\n"
+        + "session visible when evidence is ambiguous, blocked, incomplete, or awaiting a decision; age\n"
+        + "or a completed agent turn alone is not proof that the work is done.",
       minPositionals: 1,
       variadic: true,
       examples: ["oo session-state done <id>", "oo session-state done <id> <id> --json"],
