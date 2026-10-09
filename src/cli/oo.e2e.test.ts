@@ -44,7 +44,7 @@ try {
   assert.equal(help.stderr, "", "top-level help is clean: no agent/runtime warnings");
 
   // The Operator's prompt embeds helpTree(); every page it holds must be what that command prints.
-  const pages = Object.entries(NOUNS).flatMap(([noun, { verbs }]) => [[noun], ...Object.keys(verbs).map((verb) => [noun, verb])]);
+  const pages = [...Object.entries(NOUNS).flatMap(([noun, { verbs }]) => [[noun], ...Object.keys(verbs).map((verb) => [noun, verb])]), ["search"]];
   const printed = await Promise.all(pages.map(async (page) => {
     const result = await runOo([...page, "--help"]);
     assert.equal(result.status, 0, `oo ${page.join(" ")} --help exits 0`);

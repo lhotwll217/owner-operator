@@ -19,6 +19,7 @@ import {
 import { AGENT_RUN_COMPLETION_MESSAGE_TYPE } from "../agent-runs/agent-run-completion";
 import { helpTree, rootHelp } from "../cli/help";
 import { schemaReference } from "../state/schema-docs";
+import { SEARCH_HELP } from "../session-search/help.mjs";
 import { NOUNS } from "../cli/operations";
 import { nounHelp, verbHelp } from "../cli/operations/operation";
 
@@ -180,16 +181,14 @@ assert.doesNotMatch(delegationSelectionSkill, /\$OO_HOME\/workspace\/.*\.md/,
 for (const mode of ["Direct", "Indexed", "Progressive", "Exhaustive"]) {
   assert.match(rootHelp(), new RegExp(`^  ${mode} `, "m"), `\`oo --help\` classifies ${mode.toLowerCase()} discovery`);
 }
-// The embedded help names oo's own resume flag `--session`, not session-search mechanics.
-for (const flag of ["--query", "--candidates", "--skim", "--session"]) {
-  assert.doesNotMatch(authoredPrompt, new RegExp(flag), `the harness delegates ${flag} mechanics to the skill`);
-  assert.match(sessionSearchSkill, new RegExp(flag), `the session-search skill owns ${flag} mechanics`);
+// Search mechanics live once, in `oo search --help`; the prose and the skill only point there.
+for (const flag of ["--query", "--candidates", "--skim", "--any", "--include-tools"]) {
+  assert.doesNotMatch(authoredPrompt, new RegExp(flag), `the prompt's prose leaves ${flag} to \`oo search --help\``);
+  assert.doesNotMatch(sessionSearchSkill, new RegExp(flag), `the session-search skill leaves ${flag} to \`oo search --help\``);
+  assert.match(SEARCH_HELP, new RegExp(`^ +${flag}`, "m"), `\`oo search --help\` documents ${flag}`);
 }
-assert.doesNotMatch(
-  sessionSearchSkill,
-  /oo session-state|oo db\b/,
-  "the reusable transcript skill does not route between Owner Operator's other surfaces",
-);
+assert.ok(harnessPrompt.includes(SEARCH_HELP), "the prompt embeds `oo search --help`");
+assert.match(sessionSearchSkill, /oo search --help/, "the session-search skill points at the search help");
 assert.match(nounHelp("session-state", NOUNS["session-state"]), /`oo session-state list --state needs-you`/,
   "the noun that answers what-needs-me carries its rules");
 assert.ok(harnessPrompt.includes(schemaReference()), "the prompt embeds the generated state schema");

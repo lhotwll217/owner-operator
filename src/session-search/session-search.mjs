@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS } from "./flags.mjs";
+import { SEARCH_HELP } from "./help.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src/blacklist.mjs";
 import {
   loadSessionSources,
@@ -474,18 +475,5 @@ function takeValue(flag, index, { allowLeadingDashes = false } = {}) {
 }
 
 function printHelp() {
-  process.stdout.write(
-    "Usage: oo search (--query TEXT | --skim ID | --session ID --at INDEX) [options]\n" +
-    "Default discovery searches configured coding-agent stores plus Owner Operator history.\n" +
-    "  --owner-operator              search Owner Operator history only\n" +
-    "  --target-type claude|codex|pi search that coding transcript format only\n" +
-    "  --target-root DIR          narrow to a configured transcript-store root\n" +
-    "  --include-tools           include tool calls/results\n" +
-    "  --include-skill-bodies    include injected skill documentation, excluded by default\n" +
-    "  --until TIME              close a --since time window\n" +
-    "  --focus TEXT              center an anchored window on text inside a long message\n" +
-    "  --json                    machine-readable query results\n" +
-    "  --from-session ID         (oo search) the calling coding session, excluded from discovery\n" +
-    "  --help, -h                 show this help\n",
-  );
+  process.stdout.write(`${SEARCH_HELP}\n`);
 }

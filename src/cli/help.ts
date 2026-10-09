@@ -4,13 +4,14 @@
 import { OPERATION_NOUNS } from "./oo-args";
 import { NOUNS } from "./operations";
 import { nounHelp, verbHelp } from "./operations/operation";
+import { SEARCH_HELP } from "../session-search/help.mjs";
 import { SEARCH_USE_WHEN } from "./operations/search";
 
 const NOUN_COLUMN = 18;
 
 function nounLine(noun: (typeof OPERATION_NOUNS)[number]): string {
   const useWhen = noun === "search"
-    ? `${SEARCH_USE_WHEN}; flags only, no verbs (\`oo search --help\` prints them)`
+    ? `${SEARCH_USE_WHEN}; flags only, no verbs (\`oo search --help\` prints them with its modes and evidence rules)`
     : NOUNS[noun].useWhen;
   return `  ${`oo ${noun}`.padEnd(NOUN_COLUMN)} ${useWhen}`;
 }
@@ -71,11 +72,11 @@ becomes the parent of the runs it delegates.
 Model: imported or configured under OO_HOME/pi/settings.json`;
 }
 
-/** Every noun's help followed by each of its verbs' help, exactly as `oo <noun> [<verb>] --help`
- * prints them. `oo search` is left out: the session-search skill owns its flags. */
+/** Every noun's help followed by each of its verbs' help, then `oo search --help`, exactly as
+ * `oo <noun> [<verb>] --help` prints them. */
 export function helpTree(): string {
   return [rootHelp(), ...Object.entries(NOUNS).flatMap(([nounName, noun]) => [
     nounHelp(nounName, noun),
     ...Object.entries(noun.verbs).map(([verbName, verb]) => verbHelp(nounName, verbName, verb)),
-  ])].join("\n\n");
+  ]), SEARCH_HELP].join("\n\n");
 }

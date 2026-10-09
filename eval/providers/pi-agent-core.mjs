@@ -557,6 +557,7 @@ function buildRunManifest() {
     'src/session-search/run.ts',
     'src/session-search/session-search.mjs',
     'src/session-search/flags.mjs',
+    'src/session-search/help.mjs',
     'src/session-search/vendor/session-grep/session-grep.mjs',
     'src/session-search/vendor/session-grep/sources.mjs',
     'src/session-search/vendor/session-grep/adapters/_shared.mjs',
