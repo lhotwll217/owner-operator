@@ -55,6 +55,9 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
   (`createWorktreeRuntimeRebindExtension` in [`worktree-runtime.ts`](../src/agent/worktree-runtime.ts)).
 - **Skills** are standard Agent Skills under `src/agent/skills`; each `SKILL.md` may bundle the
   scripts and private vendored dependencies needed to follow its workflow.
+- `writing-for-agents` is a copy of the owner's version, whose source is
+  [`plugins/mattpocock-skills/skills/productivity/writing-for-agents`](https://github.com/lhotwll217/skills/tree/main/plugins/mattpocock-skills/skills/productivity/writing-for-agents)
+  in `lhotwll217/skills`. Change it there, then copy it here. Its `scripts/jev-lint.py` needs the `jev` CLI.
 - `session-search` uses Pi's native `bash` to run `oo search`; the daemon runs the shared policy
   wrapper, which executes the pinned upstream `session-grep` CLI. The bash tool puts this
   checkout's `oo` first on `PATH` and supplies the current and caller session ids. The wrapper owns local source mapping, blacklist
