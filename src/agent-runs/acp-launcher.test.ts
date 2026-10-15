@@ -174,7 +174,8 @@ assert.deepEqual(
   "the delegated task starts only after exact state is read back",
 );
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
-assert.match(turnTexts[0] ?? "", /Do the work yourself/i);
+assert.match(turnTexts[0] ?? "", /may delegate through Owner Operator up to depth 5/i);
+assert.doesNotMatch(turnTexts[0] ?? "", /Do not launch nested or background agents/i);
 assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
 
 // Every child event reaches the run's event log, in order, including thought and status.

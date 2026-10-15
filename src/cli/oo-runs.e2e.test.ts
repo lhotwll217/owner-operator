@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunStatus, type AgentRun, type AgentRunLaunchRequest, type DaemonInfo } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus, type AgentRun, type AgentRunLaunchRequest, type DaemonInfo } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-runs-e2e-"));
@@ -115,9 +115,16 @@ try {
   assert.equal(flaggedRow.parentThreadId, "parent-flag", "--from-session wins");
   const fromEnv = JSON.parse((await runOo(["runs", "delegate", "--harness", "codex", "t", "--no-wait", "--json"], { CODEX_THREAD_ID: "parent-codex" })).stdout) as AgentRun;
   assert.equal(fromEnv.parentThreadId, "parent-codex", "the harness env names the parent");
-  const nested = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", `child-${id}`]);
-  assert.equal(nested.status, 1, "a delegated child cannot delegate");
-  assert.match(nested.stderr, /delegation depth 2 exceeds the cap of 1/);
+  const nested = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", `child-${id}`, "--no-wait", "--json"]);
+  assert.equal(nested.status, 0, nested.stderr);
+  const nestedRow = JSON.parse(nested.stdout) as AgentRun;
+  assert.equal(nestedRow.depth, 2);
+  assert.equal(nestedRow.parentThreadId, `child-${id}`);
+  state.createAgentRun({ harness: AgentRunHarness.Codex, task: "depth five", cwd: repoRoot,
+    depth: 5, timeoutSeconds: 60, childSessionId: "depth-five-child" });
+  const tooDeep = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", "depth-five-child", "--no-wait"]);
+  assert.equal(tooDeep.status, 1);
+  assert.match(tooDeep.stderr, /delegation depth 6 exceeds the cap of 5/);
 
   // Kill the CLI mid-stream: the run keeps running; logs --follow replays from the start.
   const streaming = spawnOo(["runs", "delegate", "--harness", "claude-code", "HOLD then reply", "--json"]);
