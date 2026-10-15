@@ -163,7 +163,7 @@ for (const mechanic of [
   );
 }
 assert.match(harnessPrompt, /completion arrives automatically/i);
-assert.match(harnessPrompt, /run management is for\s+owner-directed lifecycle control/i);
+assert.match(harnessPrompt, /ACP parent continues automatically in its saved conversation/i);
 const sessionSearchSkill = readFileSync(
   join(repoRoot, "src", "agent", "skills", "session-search", "SKILL.md"),
   "utf8",

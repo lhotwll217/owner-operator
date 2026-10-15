@@ -21,7 +21,8 @@ const waitFor = async (condition: () => boolean): Promise<void> => {
   }
 };
 const launcher = async (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> => {
-  request.onActivity({ childSessionId: `session-${request.run.id}`, acpxRecordId: request.run.id });
+  request.onActivity({ childSessionId: request.run.childSessionId ?? `session-${request.run.id}`,
+    acpxRecordId: request.run.acpxRecordId ?? request.run.id });
   if (request.run.resumeOfRunId) {
     resumed.push(request);
     return { status: AgentRunStatus.Completed, resultText: "parent saw child result", error: null };

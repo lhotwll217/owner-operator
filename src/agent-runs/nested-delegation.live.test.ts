@@ -50,7 +50,7 @@ try {
     task: `Use the shell tool to launch one controlled OO child with \`OO_AGENT=1 ${join(repoRoot, "oo")} runs delegate --harness codex `
       + "--model fixture-child --json --from-session <your exact session id> "
       + "\"FIXTURE CHILD: produce result\"`. Substitute the exact session id in your appended instruction. "
-      + "Do not wait for the child. Report `PENDING <child run id>` and state that this task needs a follow-up turn.",
+      + "Do not wait for the child. Report `PENDING <child run id>` and the remaining work. Owner Operator will continue your saved conversation when the child completes.",
   });
   const child = await waitFor(() => daemon.state.listAgentRuns()
     .find((run) => run.parentThreadId === daemon.state.agentRunById(parent.id)?.childSessionId
@@ -71,8 +71,8 @@ try {
     return run && isTerminalAgentRunStatus(run.status) ? run : undefined;
   }, "controlled child completion");
   assert.equal(finishedChild.status, AgentRunStatus.Completed);
-  const followUp = daemon.agentRuns.resume(parent.id,
-    `Use the shell tool to run OO_AGENT=1 ${join(repoRoot, "oo")} runs get ${child.id} --json. Read its resultTail, then reply with exactly the result token.`);
+  const followUp = await waitFor(() => daemon.state.listAgentRuns()
+    .find((run) => run.resumeOfRunId === parent.id), "automatic parent follow-up");
   const finalTurn = await waitFor(() => {
     const run = daemon.state.agentRunById(followUp.id);
     return run && isTerminalAgentRunStatus(run.status) ? run : undefined;

@@ -121,7 +121,7 @@ export const runs: Noun = {
     + "stopping the run, and `logs --follow` replays from the start when you reattach. Runtime contract:\n"
     + "https://github.com/lhotwll217/owner-operator/blob/main/docs/delegated-runs.md\n"
     + "From an agent, `delegate` returns the pending row. Operator completion arrives automatically;\n"
-    + "an ACP child can inspect the nested run in a later turn of its saved conversation.",
+    + "an ACP parent continues automatically in its saved conversation after nested children finish.",
   verbs: {
     delegate: {
       args: "<task>",
@@ -131,7 +131,7 @@ export const runs: Noun = {
         + `At most ${AGENT_RUN_MAX_CONCURRENT} runs execute daemon-wide; later runs remain queued. `
         + `Delegation can nest to depth ${AGENT_RUN_MAX_DEPTH}. Children should pass their own saved\n`
         + "session id with --from-session so depth and parent lineage are recorded. An ACP child\n"
-        + "can report a pending run id and finish its task in a later same-session turn after inspection.",
+        + "can report a pending run id; its conversation continues automatically after the children finish.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },

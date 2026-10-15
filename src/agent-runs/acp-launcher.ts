@@ -45,7 +45,7 @@ export function delegatedChildTaskEnvelope(task: string, depth: number, childSes
   const boundary = depth < AGENT_RUN_MAX_DEPTH && childSessionId
     ? `You may delegate through Owner Operator up to depth ${AGENT_RUN_MAX_DEPTH}. `
       + `Use OO_AGENT=1 oo runs delegate --from-session ${childSessionId} so the child is linked to this conversation and returns a pending run id. `
-      + "If the child is still running, report its id and remaining work; a follow-up turn in this same conversation can inspect its result and finish. "
+      + "If the child is still running, report its id and remaining work. Owner Operator will continue this saved conversation automatically when its children finish. "
       + "Do not launch untracked harness-native or background agents."
     : depth >= AGENT_RUN_MAX_DEPTH
       ? `This run is at delegation depth ${AGENT_RUN_MAX_DEPTH}, the maximum. `

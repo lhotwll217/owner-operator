@@ -183,8 +183,9 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   durable `pending` row and returns immediately; the parent session is never frozen. The result is
   carried by the ledger, not the parent bash call. Completion reaches the Operator through its
   subscription, without polling. An ACP parent receives the pending
-  child id, can finish that turn with work still pending, then inspect the child result on an
-  explicit same-session `oo runs resume` turn. Owner and outside callers stream the child until
+  child id and can finish that turn with work still pending. After all children from that turn
+  finish, the daemon resumes the same saved parent conversation with bounded, untrusted child
+  evidence. Owner and outside callers stream the child until
   it finishes unless they pass `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
   [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
