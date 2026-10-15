@@ -1,6 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { AgentRunHarness, type AgentRun } from "@owner-operator/core";
+import { AgentRunHarness, agentRunResumeError, isTerminalAgentRunStatus,
+  type AgentRun, type ChildIdentity } from "@owner-operator/core";
 import { ownerOperatorHome } from "../shared/paths";
 import {
   deriveParentAgentState,
@@ -17,6 +18,53 @@ export function resumeCwdError(cwd: string): string | null {
     return null;
   } catch {
     return `resume working directory is unavailable: ${cwd}`;
+  }
+}
+
+/** An unsuccessful startup may have saved an ACP record before the run row received its identity. */
+export function recoverSavedSessionIdentity(run: AgentRun): ChildIdentity | null {
+  if (run.childSessionId) return null;
+  const recordId = run.acpxRecordId ?? run.id;
+  const path = join(ownerOperatorHome(), "agent-runs", "sessions", `${encodeURIComponent(recordId)}.json`);
+  if (!existsSync(path)) {
+    if (run.acpxRecordId) throw new Error(`saved ACP session record ${recordId} is missing; no fresh session was started`);
+    return null;
+  }
+  try {
+    const record = JSON.parse(readFileSync(path, "utf8"));
+    const childSessionId = record.agent_session_id ?? record.acp_session_id;
+    if (record.schema !== "acpx.session.v1" || record.acpx_record_id !== recordId
+      || record.cwd !== run.cwd || typeof record.acp_session_id !== "string"
+      || !record.acp_session_id || typeof childSessionId !== "string" || !childSessionId) {
+      throw new Error("record identity or workspace does not match the run");
+    }
+    return { childSessionId, acpxRecordId: recordId };
+  } catch (error) {
+    throw new Error(`saved ACP session record ${recordId} cannot be recovered; no fresh session was started: ${String(error)}`);
+  }
+}
+
+function canRecoverStartupRetry(run: AgentRun, runs: readonly AgentRun[]): boolean {
+  try {
+    const identity = recoverSavedSessionIdentity(run);
+    return !identity || (openCodeContinuationError({ ...run, ...identity }) === null
+      && !runs.some((other) => !isTerminalAgentRunStatus(other.status)
+        && other.childSessionId === identity.childSessionId));
+  } catch {
+    return false;
+  }
+}
+
+function canRecoverResume(run: AgentRun, runs: readonly AgentRun[]): boolean {
+  try {
+    const identity = recoverSavedSessionIdentity(run);
+    if (!identity || resumeCwdError(run.cwd) || openCodeContinuationError({ ...run, ...identity })) return false;
+    const existingResumeRunId = runs.find((other) => other.resumeOfRunId === run.id)?.id ?? null;
+    const activeRunId = runs.find((other) => !isTerminalAgentRunStatus(other.status)
+      && other.childSessionId === identity.childSessionId)?.id ?? null;
+    return agentRunResumeError({ ...run, ...identity }, { existingResumeRunId, activeRunId }) === null;
+  } catch {
+    return false;
   }
 }
 
@@ -62,6 +110,9 @@ export function deriveParentAgentStateWithEnvironment(
   const byId = new Map(runs.map((run) => [run.id, run]));
   return { ...view, runs: view.runs.map((run) => ({
     ...run,
-    canRetry: run.canRetry && openCodeContinuationError(byId.get(run.id)!) === null,
+    canRetry: run.canRetry && (byId.get(run.id)!.childSessionId
+      ? openCodeContinuationError(byId.get(run.id)!) === null
+      : canRecoverStartupRetry(byId.get(run.id)!, runs)),
+    canResume: run.canResume || (!byId.get(run.id)!.childSessionId && canRecoverResume(byId.get(run.id)!, runs)),
   })) };
 }

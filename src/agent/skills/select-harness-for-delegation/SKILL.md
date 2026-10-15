@@ -13,9 +13,11 @@ model, and effort value—including `effort: null`—while selecting only omitte
 
 ## Continue existing work
 
-To continue a cancelled or completed delegated run, use `oo runs resume`; its help owns
-eligibility. Resume preserves the child conversation and its recorded harness, model, effort, and
-cwd, so selection is unnecessary.
+To continue a failed, cancelled, interrupted, lost, or completed delegated run with new
+instructions, use `oo runs resume` when it has a saved conversation. Its help owns eligibility.
+Resume preserves the child conversation and its recorded harness, model, effort, and cwd, so
+selection is unnecessary. Retry repeats the original task. An explicit retry after startup saved
+no conversation starts fresh; a saved record is recovered or produces a specific error.
 
 ## Select
 

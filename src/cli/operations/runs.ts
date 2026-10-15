@@ -204,16 +204,20 @@ export const runs: Noun = {
     },
     get: rowVerb("the durable run row", ["oo runs get <id>", "oo runs get <id> --json"], async (id) => (await gateway()).agentRun(id)),
     cancel: rowVerb("cancel a pending or running run", ["oo runs cancel <id>"], async (id) => (await gateway()).cancelAgentRun(id)),
-    retry: rowVerb("rerun the same task after failed, interrupted, or lost", ["oo runs retry <id>"], async (id) => (await gateway()).retryAgentRun(id)),
+    retry: {
+      ...rowVerb("rerun the same task after failed, interrupted, or lost", ["oo runs retry <id>"],
+        async (id) => (await gateway()).retryAgentRun(id)),
+      guide: "Retry repeats the original task in a linked run. It reloads a saved child conversation\n"
+        + "when one exists. If startup saved no child session or ACP record, this explicit retry\n"
+        + "starts a fresh conversation. A present but invalid record fails instead of starting fresh.",
+    },
     resume: {
       args: "<id> <task>",
-      summary: "continue a completed or cancelled run's child conversation in a new run row",
-      guide: "The default way to continue cancelled work. Pass instructions that continue or revise the\n"
-        + "work, and use the latest run id in that conversation. A cancelled run resumes when it\n"
-        + "submitted a prompt or is already a resume successor, and its session can reload; successors\n"
-        + "cancelled while queued or loading still resume, fresh startup cancellations do not. If the\n"
-        + "harness cannot reload the conversation, report the error: starting a fresh `delegate` instead\n"
-        + "needs an explicit decision.",
+      summary: "continue any terminal run's saved child conversation with new instructions in a linked run",
+      guide: "Use the latest run id in the conversation. Failed, cancelled, interrupted, and lost\n"
+        + "runs can continue when a prompt was submitted or they inherited a conversation, and the\n"
+        + "saved session can reload. A startup failure with no saved conversation cannot resume.\n"
+        + "If reload fails, report that error. Starting fresh requires an explicit delegate or retry.",
       minPositionals: 2,
       examples: ['oo runs resume <id> "Continue where you stopped and finish the remaining tests"'],
       async run({ positionals: [id, task], json }) {

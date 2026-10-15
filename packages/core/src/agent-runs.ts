@@ -50,8 +50,8 @@ export function harnessIdentityObservation(input: {
   return { observed: false };
 }
 
-/** Terminal states are monotonic: retry and resume always create a
- * new run under the same child identity, never a status downgrade on the old row. */
+/** Terminal states are monotonic: retry and resume create a new run, never a status downgrade
+ * on the old row. Resume always reuses a saved child; startup retry can start fresh. */
 export const AGENT_RUN_TERMINAL_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Completed,
   AgentRunStatus.Failed,
@@ -64,17 +64,14 @@ export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
   return AGENT_RUN_TERMINAL_STATUSES.includes(status);
 }
 
-/** Statuses a retry may start from. Retrying requires a persisted child session id. */
+/** Statuses a retry may start from. A startup retry without a saved child starts fresh. */
 export const AGENT_RUN_RETRYABLE_STATUSES: readonly AgentRunStatus[] = [
   AgentRunStatus.Interrupted,
   AgentRunStatus.Lost,
   AgentRunStatus.Failed,
 ];
 
-export const AGENT_RUN_RESUMABLE_STATUSES: readonly AgentRunStatus[] = [
-  AgentRunStatus.Completed,
-  AgentRunStatus.Cancelled,
-];
+export const AGENT_RUN_RESUMABLE_STATUSES = AGENT_RUN_TERMINAL_STATUSES;
 
 export const AGENT_RUN_RESUME_TASK_ERROR = "resume follow-up task is required";
 
@@ -222,7 +219,7 @@ export interface AgentRun {
   error: string | null;
   /** Exact unsuccessful run whose task this row retries. */
   retryOfRunId: string | null;
-  /** Exact completed or cancelled run after which this row sends a required new task. */
+  /** Exact terminal run after which this row sends a required new task. */
   resumeOfRunId: string | null;
   timeoutSeconds: number;
 }
@@ -245,10 +242,9 @@ export function agentRunRetryError(
   if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
     return `agent run ${run.id} is not retryable from status ${run.status}`;
   }
-  if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
+  if (run.childSessionId && !AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
     return `harness ${run.harness} does not support loading an existing session`;
   }
-  if (!run.childSessionId) return `agent run ${run.id} has no child session identity to retry`;
   if (context.existingRetryRunId) {
     return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
   }
@@ -265,15 +261,15 @@ export function agentRunResumeError(
   context: AgentRunResumeContext,
 ): string | null {
   if (!AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)) {
-    return `agent run ${run.id} can only be resumed from completed or cancelled status, not ${run.status}`;
+    return `agent run ${run.id} cannot be resumed while ${run.status}`;
   }
   if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
     return `harness ${run.harness} does not support loading an existing session`;
   }
   if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
   if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
-  if (run.status === AgentRunStatus.Cancelled && !run.promptSubmitted && !run.resumeOfRunId) {
-    return `cancelled agent run ${run.id} has no confirmed prompt submission; cannot resume`;
+  if (run.status !== AgentRunStatus.Completed && !run.promptSubmitted && !run.resumeOfRunId && !run.retryOfRunId) {
+    return `${run.status} agent run ${run.id} has no confirmed prompt submission; cannot resume`;
   }
   if (context.existingResumeRunId) {
     return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
@@ -284,8 +280,8 @@ export function agentRunResumeError(
   return null;
 }
 
-/** Explicit runtime intent derived from the two semantic run relationships. Referenced rows are
- * immutable; a missing or inconsistent relationship must fail rather than launch fresh. */
+/** Explicit runtime intent derived from the two semantic run relationships. A retry with no
+ * saved child starts fresh; missing or inconsistent relationships fail. */
 export type AgentRunTurnIntent =
   | { kind: "fresh" }
   | { kind: "retry"; childSessionId: string; acpxRecordId?: string }
@@ -307,14 +303,18 @@ export function agentRunTurnIntent(
     if (retriedRun.id !== run.retryOfRunId) {
       throw new Error(`agent run ${run.id} retry identity mismatch: expected ${run.retryOfRunId}, found ${retriedRun.id}`);
     }
-    if (!run.childSessionId || run.childSessionId !== retriedRun.childSessionId) {
+    if (retriedRun.childSessionId && run.childSessionId !== retriedRun.childSessionId) {
       throw new Error(`agent run ${run.id} child identity mismatch with retried run ${retriedRun.id}`);
     }
-    if (run.acpxRecordId !== retriedRun.acpxRecordId) {
+    if (retriedRun.acpxRecordId && run.acpxRecordId !== retriedRun.acpxRecordId) {
       throw new Error(`agent run ${run.id} acpx record identity mismatch with retried run ${retriedRun.id}`);
     }
     if (!AGENT_RUN_RETRYABLE_STATUSES.includes(retriedRun.status)) {
       throw new Error(`agent run ${run.id} cannot retry run ${retriedRun.id} from status ${retriedRun.status}`);
+    }
+    if (!run.childSessionId) {
+      if (run.acpxRecordId) throw new Error(`agent run ${run.id} has an ACP record but no child identity`);
+      return { kind: "fresh" };
     }
     return {
       kind: "retry",
@@ -331,13 +331,14 @@ export function agentRunTurnIntent(
   if (!AGENT_RUN_RESUMABLE_STATUSES.includes(resumedRun.status)) {
     throw new Error(`agent run ${run.id} cannot resume run ${resumedRun.id} from status ${resumedRun.status}`);
   }
-  if (resumedRun.status === AgentRunStatus.Cancelled && !resumedRun.promptSubmitted && !resumedRun.resumeOfRunId) {
-    throw new Error(`cancelled agent run ${resumedRun.id} has no confirmed prompt submission; cannot resume`);
+  if (resumedRun.status !== AgentRunStatus.Completed && !resumedRun.promptSubmitted
+    && !resumedRun.resumeOfRunId && !resumedRun.retryOfRunId) {
+    throw new Error(`${resumedRun.status} agent run ${resumedRun.id} has no confirmed prompt submission; cannot resume`);
   }
-  if (!run.childSessionId || run.childSessionId !== resumedRun.childSessionId) {
+  if (!run.childSessionId || (resumedRun.childSessionId && run.childSessionId !== resumedRun.childSessionId)) {
     throw new Error(`agent run ${run.id} child identity mismatch with resumed run ${resumedRun.id}`);
   }
-  if (!run.acpxRecordId || run.acpxRecordId !== resumedRun.acpxRecordId) {
+  if (!run.acpxRecordId || (resumedRun.acpxRecordId && run.acpxRecordId !== resumedRun.acpxRecordId)) {
     throw new Error(`agent run ${run.id} acpx record identity mismatch with resumed run ${resumedRun.id}`);
   }
   return {

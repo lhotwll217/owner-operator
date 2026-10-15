@@ -64,25 +64,30 @@ owns transcript identity and discovery.
 
 - **Terminal states are monotonic.** Retry and resume each create a new row; reopening a terminal
   row would erase one paid turn's history. Retry links the new row to the unsuccessful run whose
-  task it reruns; resume links the new row to the completed or cancelled run after which it sends a new task.
+  task it reruns; resume links the new row to the terminal run after which it sends a new task.
   The exact ledger-column contract lives in
   [schema docs](../src/state/schema-docs.ts). The
   [domain contract](../packages/core/src/agent-runs.ts) derives runtime turn intent from those
   relationships and fails closed when either is inconsistent.
 - **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
-  `interrupted`, or `lost`; resume requires a new task after `completed` or `cancelled`. The
+  `interrupted`, or `lost`; resume requires a new task after any terminal outcome. The
   [`oo runs` verbs](../src/cli/operations/runs.ts) own their inputs, while the
   [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
-- **Resume is the default way to continue cancelled work.** Supply a new task, including an
+- **Resume continues saved work after any terminal outcome.** Supply a new task, including an
   instruction to continue when the goal is unchanged. Both saved conversation identities and the
-  original workspace must still be available. A cancelled run requires either its own confirmed
+  original workspace must still be available. An unsuccessful run requires either its own confirmed
   prompt submission, recorded from ACPX `promptStarted`, or a `resume_of_run_id` relationship to
   an existing conversation. A resume successor cancelled while queued or loading can itself be
   resumed even though its new prompt was never submitted. Its `prompt_submitted` stays false.
-  Fresh startup cancellations and legacy cancellations without either form of evidence cannot
+  Fresh startup failures and cancellations without either form of evidence cannot
   be resumed. Session creation alone is insufficient.
   Use the latest run in the conversation; an already resumed run cannot branch it.
   A reload failure stays explicit. Starting a fresh delegate is a separate decision.
+- **Startup retry checks for a saved ACP record.** A failed run without a recorded child identity
+  may still have an ACP record saved before the run row was updated. Retry recovers that identity
+  and reloads the conversation. If no record exists, the explicit retry starts a fresh conversation
+  with the original task. A present but invalid record fails with its cause instead of silently
+  starting fresh. Resume never substitutes a fresh conversation.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
 - **`interrupted`** is retryable: a graceful daemon shutdown mid-run, or a restart reconciling a
@@ -94,7 +99,7 @@ owns transcript identity and discovery.
 
 ### Harness continuation
 
-Resume attempts to load the saved conversation after an eligible run is cancelled.
+Resume attempts to load the saved conversation after any eligible terminal run.
 Conversation retention has the harness-specific proof levels below. Resume uses the same
 ACP loading path as a follow-up after completion. OO checks both conversation identities after
 loading and fails with the harness and session in the error if loading fails. It never sends the

@@ -19,7 +19,7 @@ import {
   type AgentRunOutcome,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
-import { openCodeContinuationError, resumeCwdError } from "./agent-state-projection";
+import { openCodeContinuationError, recoverSavedSessionIdentity, resumeCwdError } from "./agent-state-projection";
 import { resolveAgentRunLaunch } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
@@ -207,17 +207,21 @@ export class AgentRunExecutor {
     if (!run) throw new Error(`no such agent run: ${id}`);
     const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
     if (existingRetry && !isTerminalAgentRunStatus(existingRetry.status)) return existingRetry;
-    const inflight = run.childSessionId
-      ? this.state.nonterminalAgentRunByChildSession(run.childSessionId)
+    const recoveredIdentity = recoverSavedSessionIdentity(run);
+    const childSessionId = recoveredIdentity?.childSessionId ?? run.childSessionId;
+    const inflight = childSessionId
+      ? this.state.nonterminalAgentRunByChildSession(childSessionId)
       : undefined;
-    const domainError = agentRunRetryError(run, {
+    const domainError = agentRunRetryError({ ...run, ...recoveredIdentity }, {
       existingRetryRunId: existingRetry?.id ?? null,
       activeRunId: inflight?.id ?? null,
     });
     if (domainError) throw new Error(domainError);
     // retry()/createAgentRun() are synchronous over DatabaseSync, so eligibility checks and
     // row creation are atomic in the single-process daemon.
-    const capabilityError = openCodeContinuationError(run);
+    const capabilityError = run.childSessionId || recoveredIdentity
+      ? openCodeContinuationError({ ...run, ...recoveredIdentity })
+      : null;
     if (capabilityError) throw new Error(capabilityError);
     const retried = this.state.createAgentRun({
       harness: run.harness,
@@ -229,31 +233,33 @@ export class AgentRunExecutor {
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
       retryOfRunId: run.id,
-      childSessionId: run.childSessionId,
-      acpxRecordId: run.acpxRecordId,
+      childSessionId: recoveredIdentity?.childSessionId ?? run.childSessionId,
+      acpxRecordId: recoveredIdentity?.acpxRecordId ?? run.acpxRecordId,
     });
     this.pump();
     return retried;
   }
 
-  /** Resume = one required new task after a completed or cancelled run, using the same child conversation. */
+  /** Resume = one required new task after a terminal run, using the same child conversation. */
   resume(id: string, task: string): AgentRun {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
     const followUpTask = validateAgentRunResumeTask(task);
     const existingResume = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
-    const inflight = run.childSessionId
-      ? this.state.nonterminalAgentRunByChildSession(run.childSessionId)
+    const recoveredIdentity = recoverSavedSessionIdentity(run);
+    const childSessionId = recoveredIdentity?.childSessionId ?? run.childSessionId;
+    const inflight = childSessionId
+      ? this.state.nonterminalAgentRunByChildSession(childSessionId)
       : undefined;
-    const domainError = agentRunResumeError(run, {
+    const domainError = agentRunResumeError({ ...run, ...recoveredIdentity }, {
       existingResumeRunId: existingResume?.id ?? null,
       activeRunId: inflight?.id ?? null,
     });
     if (domainError) throw new Error(domainError);
     const cwdError = resumeCwdError(run.cwd);
     if (cwdError) throw new Error(cwdError);
-    const capabilityError = openCodeContinuationError(run);
+    const capabilityError = openCodeContinuationError({ ...run, ...recoveredIdentity });
     if (capabilityError) throw new Error(capabilityError);
     const resumed = this.state.createAgentRun({
       harness: run.harness,
@@ -265,8 +271,8 @@ export class AgentRunExecutor {
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
       resumeOfRunId: run.id,
-      childSessionId: run.childSessionId,
-      acpxRecordId: run.acpxRecordId,
+      childSessionId: recoveredIdentity?.childSessionId ?? run.childSessionId,
+      acpxRecordId: recoveredIdentity?.acpxRecordId ?? run.acpxRecordId,
     });
     this.pump();
     return resumed;
