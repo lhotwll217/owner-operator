@@ -107,6 +107,7 @@ export class AgentRunExecutor {
     if (interrupted.length) {
       this.logger({ event: AgentRunExecutorLogEvent.StartupInterrupted, count: interrupted.length });
     }
+    this.retryInterruptedNestedFollowUps();
     this.reconcileNestedCompletions();
     this.timer = setInterval(() => {
       try {
@@ -242,6 +243,7 @@ export class AgentRunExecutor {
       depth: run.depth,
       timeoutSeconds: run.timeoutSeconds,
       retryOfRunId: run.id,
+      completionRunIds: run.completionRunIds,
       childSessionId: recoveredIdentity?.childSessionId ?? run.childSessionId,
       acpxRecordId: recoveredIdentity?.acpxRecordId ?? run.acpxRecordId,
     });
@@ -251,7 +253,18 @@ export class AgentRunExecutor {
 
   /** Resume = one required new task after a terminal run, using the same child conversation. */
   resume(id: string, task: string): AgentRun {
-    return this.resumeWithCompletions(id, task, []);
+    const run = this.state.agentRunById(id);
+    if (!run) throw new Error(`no such agent run: ${id}`);
+    const pending = run.promptSubmitted ? [] : run.completionRunIds.map((childId) => {
+      const child = this.state.agentRunById(childId);
+      if (!child) throw new Error(`undelivered child run ${childId} is missing`);
+      return child;
+    });
+    const corrected = validateAgentRunResumeTask(task);
+    return this.resumeWithCompletions(id, pending.length
+      ? corrected + "\n\nPending child completion evidence from the earlier unsubmitted turn:\n"
+        + this.nestedCompletionTask(run, pending)
+      : corrected, pending.map((child) => child.id));
   }
 
   private resumeWithCompletions(id: string, task: string, completionRunIds: readonly string[]): AgentRun {
@@ -334,6 +347,22 @@ export class AgentRunExecutor {
     }
   }
 
+  private retryInterruptedNestedFollowUps(): void {
+    const runs = this.state.listAgentRuns();
+    const hasSuccessor = new Set(runs.flatMap((run) => [run.retryOfRunId, run.resumeOfRunId]
+      .filter((id): id is string => id !== null)));
+    for (const run of runs) {
+      if (run.status !== AgentRunStatus.Interrupted || run.promptSubmitted || !run.resumeOfRunId
+        || run.retryOfRunId || !run.completionRunIds.length || hasSuccessor.has(run.id)) continue;
+      try {
+        this.retry(run.id);
+      } catch (error) {
+        this.logger({ event: AgentRunExecutorLogEvent.LoopFailed,
+          error: `automatic retry of interrupted follow-up ${run.id}: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    }
+  }
+
   private reconcileNestedCompletions(): void {
     const runs = this.state.listAgentRuns();
     const allChildren = new Map<string, AgentRun[]>();
@@ -342,7 +371,7 @@ export class AgentRunExecutor {
     const deliveredBySession = new Map<string, Set<string>>();
     for (const run of runs) {
       if (run.childSessionId && !latestBySession.has(run.childSessionId)) latestBySession.set(run.childSessionId, run);
-      if (run.childSessionId && run.completionRunIds.length) {
+      if (run.childSessionId && run.promptSubmitted && run.completionRunIds.length) {
         const delivered = deliveredBySession.get(run.childSessionId) ?? new Set<string>();
         for (const id of run.completionRunIds) delivered.add(id);
         deliveredBySession.set(run.childSessionId, delivered);
@@ -363,7 +392,8 @@ export class AgentRunExecutor {
         const children = [...new Map((allChildren.get(run.childSessionId) ?? []).map((child) => [child.childSessionId ?? child.id,
           child.childSessionId ? latestBySession.get(child.childSessionId) ?? child : child])).values()]
           .filter((child) => !delivered.has(child.id));
-        if (run.status === AgentRunStatus.Completed && run.depth < AGENT_RUN_MAX_DEPTH && run.finishedAt
+        if (run.status === AgentRunStatus.Completed && (run.promptSubmitted || !run.completionRunIds.length)
+          && run.depth < AGENT_RUN_MAX_DEPTH && run.finishedAt
           && children.length && children.every((child) => isTerminalAgentRunStatus(child.status)
             && (!child.childSessionId || (!continuingSessions.has(child.childSessionId)
               && !sessionsWithActiveChildren.has(child.childSessionId))))) {
@@ -375,6 +405,15 @@ export class AgentRunExecutor {
   }
 
   private continueParentAfterChildren(parent: AgentRun, children: readonly AgentRun[]): void {
+    try {
+      this.resumeWithCompletions(parent.id, this.nestedCompletionTask(parent, children), children.map((child) => child.id));
+    } catch (error) {
+      this.logger({ event: AgentRunExecutorLogEvent.LoopFailed,
+        error: `automatic continuation of ${parent.id}: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  private nestedCompletionTask(parent: AgentRun, children: readonly AgentRun[]): string {
     const sorted = [...children].sort((a, b) => Number(a.status === AgentRunStatus.Completed)
       - Number(b.status === AgentRunStatus.Completed));
     const details: Array<{ runId: string; outcome: AgentRunStatus; result: string; error: string | null }> = [];
@@ -405,13 +444,7 @@ export class AgentRunExecutor {
         details.pop();
       }
     }
-    const task = render(children.length - details.length);
-    try {
-      this.resumeWithCompletions(parent.id, task, children.map((child) => child.id));
-    } catch (error) {
-      this.logger({ event: AgentRunExecutorLogEvent.LoopFailed,
-        error: `automatic continuation of ${parent.id}: ${error instanceof Error ? error.message : String(error)}` });
-    }
+    return render(children.length - details.length);
   }
 
   private async execute(run: AgentRun): Promise<void> {

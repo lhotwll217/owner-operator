@@ -282,6 +282,12 @@ try {
   assert.match(evidence.retrieval.list, /runs list --parent/);
   assert.match(evidence.retrieval.get, /runs get/);
   assert.equal(budgetContinuation.run.completionRunIds.length, 80);
+  await waitFor(() => budgetState.agentRunById(budgetContinuation.run.id)?.status === AgentRunStatus.Completed);
+  const correctedBudget = budget.resume(budgetContinuation.run.id, "CORRECTED_BUDGET_189");
+  assert.equal(correctedBudget.completionRunIds.length, 80);
+  assert.match(correctedBudget.task, /CORRECTED_BUDGET_189/);
+  assert.match(correctedBudget.task, /CHILD_EVIDENCE|RESULT_|FAILED_/);
+  assert.ok(Buffer.byteLength(correctedBudget.task, "utf8") <= NESTED_COMPLETION_TASK_MAX_BYTES + 150);
   await budget.stop();
   budgetState.close();
   process.stdout.write("ok - active parent, multiple children, failure, dedupe, restart, fixed-clock overlap, and bounded evidence\n");

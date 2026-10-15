@@ -128,7 +128,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "error", description: "Terminal failure/interruption/loss explanation." },
       { name: "retry_of_run_id", description: "Exact failed, interrupted, or lost run whose task this row retries; mutually exclusive with resume_of_run_id." },
       { name: "resume_of_run_id", description: "Exact terminal run after which this row sends a required new task. Resume requires a reloadable saved child conversation and is mutually exclusive with retry_of_run_id." },
-      { name: "completion_run_ids", description: "JSON array of terminal child run IDs delivered by this automatic same-session follow-up; durable deduplication does not depend on timestamps." },
+      { name: "completion_run_ids", description: "JSON array of terminal child run IDs carried by this follow-up. prompt_submitted confirms delivery; pending rows retain the scheduled evidence without acknowledging it." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
     ],
   },

@@ -185,8 +185,11 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   subscription, without polling. An ACP parent receives the pending child id and can finish that
   turn with work still pending. When its nested child conversations finish, the daemon resumes the
   same saved parent conversation with bounded, untrusted child evidence. The follow-up includes
-  outcome counts and scoped `oo runs` retrieval instructions when details exceed its total budget;
-  the ledger records which child run IDs were delivered for restart-safe deduplication. It waits
+  outcome counts and scoped `oo runs` retrieval instructions when details exceed its total budget.
+  The ledger records which child run IDs the follow-up carries; prompt submission confirms delivery
+  for restart-safe deduplication. An interrupted follow-up that never submitted its prompt gets one
+  automatic retry. Failed starts retain evidence for explicit retry or corrected resume; owner
+  cancellations retain it for explicit resume and never restart automatically. The follow-up waits
   for an active parent turn to end. Owner and outside callers stream the child until it finishes unless they
   pass `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
