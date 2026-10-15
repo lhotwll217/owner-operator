@@ -330,21 +330,38 @@ export class AgentRunExecutor {
 
   private reconcileNestedCompletions(): void {
     const runs = this.state.listAgentRuns();
-    const newerChildren = new Map<string, AgentRun[]>();
+    const allChildren = new Map<string, AgentRun[]>();
     const latestBySession = new Map<string, AgentRun>();
     const sessionsWithActiveChildren = new Set<string>();
-    for (const run of runs) {
+    const rank = new Map<string, number>();
+    for (const [index, run] of runs.entries()) {
+      rank.set(run.id, index);
       if (run.childSessionId && !latestBySession.has(run.childSessionId)) latestBySession.set(run.childSessionId, run);
-      if (run.parentThreadId && !isTerminalAgentRunStatus(run.status)) sessionsWithActiveChildren.add(run.parentThreadId);
+      if (run.parentThreadId) {
+        const siblings = allChildren.get(run.parentThreadId) ?? [];
+        siblings.push(run);
+        allChildren.set(run.parentThreadId, siblings);
+        if (!isTerminalAgentRunStatus(run.status)) sessionsWithActiveChildren.add(run.parentThreadId);
+      }
     }
     const seenSessions = new Set<string>();
     const continuingSessions = new Set<string>();
     for (const run of runs) {
       if (run.childSessionId && !seenSessions.has(run.childSessionId)) {
         seenSessions.add(run.childSessionId);
-        const directChildren = (newerChildren.get(run.childSessionId) ?? [])
-          .filter(({ createdAt }) => run.finishedAt && createdAt <= run.finishedAt);
-        const children = [...new Map(directChildren.map((child) => [child.childSessionId ?? child.id,
+        const siblings = allChildren.get(run.childSessionId) ?? [];
+        const parentRank = rank.get(run.id)!;
+        const directChildren = siblings.filter((child) => rank.get(child.id)! < parentRank
+          && run.finishedAt && child.createdAt <= run.finishedAt);
+        const carriedChildren = siblings.filter((child) => {
+          if (rank.get(child.id)! <= parentRank) return false;
+          const latest = child.childSessionId ? latestBySession.get(child.childSessionId) ?? child : child;
+          return !isTerminalAgentRunStatus(latest.status)
+            || (latest.finishedAt !== null && latest.finishedAt > run.createdAt)
+            || (child.childSessionId !== null && (sessionsWithActiveChildren.has(child.childSessionId)
+              || continuingSessions.has(child.childSessionId)));
+        });
+        const children = [...new Map([...directChildren, ...carriedChildren].map((child) => [child.childSessionId ?? child.id,
           child.childSessionId ? latestBySession.get(child.childSessionId) ?? child : child])).values()];
         if (run.status === AgentRunStatus.Completed && run.depth < AGENT_RUN_MAX_DEPTH && run.finishedAt
           && children.length && children.every((child) => isTerminalAgentRunStatus(child.status)
@@ -353,11 +370,6 @@ export class AgentRunExecutor {
           continuingSessions.add(run.childSessionId);
           this.continueParentAfterChildren(run, children);
         }
-      }
-      if (run.parentThreadId) {
-        const children = newerChildren.get(run.parentThreadId) ?? [];
-        children.push(run);
-        newerChildren.set(run.parentThreadId, children);
       }
     }
   }

@@ -175,7 +175,56 @@ try {
   assert.doesNotMatch(chainContinuations[1]!.run.task, /nested work pending/);
   await chain.stop();
   chainState.close();
-  process.stdout.write("ok - active parent, multiple children, failure, dedupe, restart, and nested dependency chain\n");
+
+  const overlapDir = join(root, "overlap");
+  tick = 0;
+  const overlapState = new State(join(overlapDir, "state.db"), {
+    now: () => new Date(Date.UTC(2026, 9, 16, 0, 0, 3, tick++)).toISOString(),
+  });
+  let completeChild!: (result: AgentRunLaunchResult) => void;
+  let completeParentTurn!: (result: AgentRunLaunchResult) => void;
+  const delivered: AgentRunLaunchRequest[] = [];
+  let overlap!: AgentRunExecutor;
+  overlap = new AgentRunExecutor(overlapState, { tickMs: 10, logger: () => undefined,
+    launcher: async (request) => {
+      request.onActivity({ childSessionId: request.run.childSessionId ?? `session-${request.run.id}`,
+        acpxRecordId: request.run.acpxRecordId ?? request.run.id });
+      if (request.run.task === "independent parent turn") {
+        return await new Promise<AgentRunLaunchResult>((resolve) => {
+          completeParentTurn = resolve;
+          held(request, resolve);
+        });
+      }
+      if (request.run.resumeOfRunId) {
+        delivered.push(request);
+        return completed("handled late child");
+      }
+      if (request.run.depth === 1) {
+        overlap.launch({ harness: AgentRunHarness.Codex, model: "controlled", cwd: overlapDir,
+          task: "child", parentThreadId: `session-${request.run.id}` });
+        return completed("child pending");
+      }
+      return await new Promise<AgentRunLaunchResult>((resolve) => {
+        completeChild = resolve;
+        held(request, resolve);
+      });
+    },
+  });
+  overlap.start();
+  const firstParentTurn = overlap.launch({ harness: AgentRunHarness.Codex, model: "controlled", cwd: overlapDir, task: "parent" });
+  await waitFor(() => overlapState.agentRunById(firstParentTurn.id)?.status === AgentRunStatus.Completed && !!completeChild);
+  const activeParentTurn = overlap.resume(firstParentTurn.id, "independent parent turn");
+  await waitFor(() => !!completeParentTurn);
+  completeChild(completed("LATE_CHILD_189"));
+  await waitFor(() => overlapState.listAgentRuns().some((run) => run.task === "child" && run.status === AgentRunStatus.Completed));
+  assert.equal(delivered.length, 0, "completion waits for the active parent turn");
+  completeParentTurn(completed("independent work done"));
+  await waitFor(() => delivered.length === 1);
+  assert.equal(delivered[0]!.run.resumeOfRunId, activeParentTurn.id);
+  assert.match(delivered[0]!.run.task, /LATE_CHILD_189/);
+  await overlap.stop();
+  overlapState.close();
+  process.stdout.write("ok - active parent, multiple children, failure, dedupe, restart, nested chain, and overlapping turn\n");
 } finally {
   if (priorHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorHome;
