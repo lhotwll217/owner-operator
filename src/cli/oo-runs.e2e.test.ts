@@ -11,6 +11,7 @@ import { repoRoot } from "../shared/repo-root";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-runs-e2e-"));
 process.env.OO_HOME = ooHome;
+delete process.env.OO_AGENT_RUN_LEASE_ID;
 for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CURSOR_CONVERSATION_ID"]) delete process.env[key];
 let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
 
@@ -226,6 +227,12 @@ try {
   const agentRow = JSON.parse(agentDelegated.stdout) as AgentRun;
   assert.equal(agentRow.status, AgentRunStatus.Pending, "the Operator's delegate returns the pending row");
   assert.equal(agentDelegated.stderr, "", "and streams nothing");
+  const acpDelegated = await runOo(["runs", "delegate", "--harness", "codex", "--model", "m1", "ACP child", "--json"],
+    { OO_AGENT_RUN_LEASE_ID: "isolated-acp-lease", OO_FROM_SESSION: "acp-parent" });
+  assert.equal(acpDelegated.status, 0, acpDelegated.stderr);
+  assert.equal((JSON.parse(acpDelegated.stdout) as AgentRun).status, AgentRunStatus.Pending);
+  assert.equal((JSON.parse(acpDelegated.stdout) as AgentRun).parentThreadId, "acp-parent");
+  assert.equal(acpDelegated.stderr, "", "an ACP child returns without streaming its nested child");
   assert.equal(agentRow.timeoutSeconds, 90, "--timeout reaches the run");
   assert.equal(agentRow.effort, null, "--effort none launches with an explicit null effort");
   assert.equal(agentRow.cwd, repoRoot, "no --cwd and no selected worktree: the parent's resolved cwd falls back to the shell cwd");

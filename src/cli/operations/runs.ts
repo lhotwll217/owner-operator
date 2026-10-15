@@ -14,13 +14,11 @@ import {
   type AgentRunLogRecord,
 } from "@owner-operator/core";
 import { parentSessionId } from "../../shared/caller-session";
+import { agentCaller } from "../../shared/agent-caller";
 import { AgentConnectError, emit, gateway, UsageError, writeOut, type Noun } from "./operation";
 
 const HARNESSES = Object.values(AgentRunHarness) as string[];
 const RECONNECT_MS = 1_000; // the Gateway client's own SSE reconnect delay (src/gateway/client.ts)
-/** The Operator's bash (ADR 0001). Its completion events arrive on their own, so a delegation
- * returns the pending row instead of streaming the child into the Operator's context. */
-const agentCaller = (): boolean => process.env.OO_AGENT === "1";
 
 /** A whole number of seconds in 1..max, or undefined when the flag is absent. */
 function secondsFlag(name: string, value: unknown, max: number): number | undefined {
@@ -122,17 +120,18 @@ export const runs: Noun = {
   guide: "The daemon owns every child, so interrupting `delegate` or `logs --follow` detaches without\n"
     + "stopping the run, and `logs --follow` replays from the start when you reattach. Runtime contract:\n"
     + "https://github.com/lhotwll217/owner-operator/blob/main/docs/delegated-runs.md\n"
-    + "In the Operator's bash, `delegate` returns the pending row and completion arrives automatically,\n"
-    + "so run management is for owner-directed lifecycle control or explicit inspection.",
+    + "From an agent, `delegate` returns the pending row. Operator completion arrives automatically;\n"
+    + "an ACP child can inspect the nested run in a later turn of its saved conversation.",
   verbs: {
     delegate: {
       args: "<task>",
-      summary: "launch a child agent; the Operator's bash gets the pending row, other callers stream the child until it finishes",
+      summary: "launch a child agent; agent callers get the pending row, other callers stream until it finishes",
       guide: "Outside the Operator, the command streams the child's output and exits 0 only when the run\n"
         + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.\n"
         + `At most ${AGENT_RUN_MAX_CONCURRENT} runs execute daemon-wide; later runs remain queued. `
         + `Delegation can nest to depth ${AGENT_RUN_MAX_DEPTH}. Children should pass their own saved\n`
-        + "session id with --from-session so depth and parent lineage are recorded.",
+        + "session id with --from-session so depth and parent lineage are recorded. An ACP child\n"
+        + "can report a pending run id and finish its task in a later same-session turn after inspection.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
@@ -141,7 +140,7 @@ export const runs: Noun = {
         cwd: { type: "string", help: "child working directory (default: the parent session's selected worktree, else the current directory)" },
         timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },
         "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
-        "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default in the Operator's bash)" },
+        "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default for agent callers)" },
       },
       examples: [
         'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',

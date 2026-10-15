@@ -157,13 +157,12 @@ export async function flushStdio(): Promise<void> {
     new Promise<void>((resolve) => stream.write("", () => resolve()))));
 }
 
-/** The ready daemon's Gateway, starting the daemon when needed. The daemon owns every state
- * read and write; the CLI never opens the store. Under `OO_AGENT=1` (an Owner Operator agent's
- * bash) it only connects: ensureDaemon may replace a daemon whose fingerprint differs, and the
- * agent may be running inside that daemon (a scheduled run) or depend on it. */
+/** The ready daemon's Gateway, starting it for outside callers. Agent callers only connect:
+ * ensureDaemon may replace the daemon that owns their current run. */
 export async function gateway(): Promise<GatewayApi> {
   const { resolveBackend } = await import("../../gateway/client");
-  if (process.env.OO_AGENT === "1") {
+  const { agentCaller } = await import("../../shared/agent-caller");
+  if (agentCaller()) {
     try {
       return await resolveBackend();
     } catch (cause) {

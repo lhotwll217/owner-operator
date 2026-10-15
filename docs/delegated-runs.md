@@ -179,12 +179,13 @@ resource retains the run projection. Pi completion delivery uses the shared comp
 
 ## Execution
 
-- **Background by default for the Operator.** Under `OO_AGENT=1`, `oo runs delegate` records the
+- **Background by default for agents.** Under `OO_AGENT=1` or an ACP run lease, `oo runs delegate` records the
   durable `pending` row and returns immediately; the parent session is never frozen. The result is
-  carried by the ledger, not the parent bash call, and completion arrives through the parent
-  subscription. The Operator does not poll after delegation. Status reads remain only for explicit
-  owner requests. Owner and outside callers stream the child until it finishes unless they pass
-  `--no-wait`.
+  carried by the ledger, not the parent bash call. Completion reaches the Operator through its
+  subscription, without polling. An ACP parent receives the pending
+  child id, can finish that turn with work still pending, then inspect the child result on an
+  explicit same-session `oo runs resume` turn. Owner and outside callers stream the child until
+  it finishes unless they pass `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
   [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
   [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available record/session identity
@@ -205,7 +206,7 @@ resource retains the run projection. Pi completion delivery uses the shared comp
 - **Owner Operator owns the deadline.** The executor aborts on its own per-run timeout so a
   launcher-side timeout after partial output can never read as success.
 - **Depth is capped at 5.** An Operator launch is depth 1. A child may delegate through
-  `oo runs delegate --from-session <its child session id>` at the next depth; the executor
+  `OO_AGENT=1 oo runs delegate --from-session <its child session id>` at the next depth; the executor
   rejects depth 6. The child prompt includes its confirmed session id when nesting is available.
   A depth-5 child, or a child without a confirmed session id, is told to work directly.
   Untracked harness-native and background agents remain outside the delegated-run ledger.
