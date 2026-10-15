@@ -199,15 +199,16 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   mismatched selection fails closed. An explicit absolute `--cwd` remains exact, and a relative
   one resolves from the shell cwd. The initial child row records the resolved absolute path, and
   retry/resume copy that immutable cwd from the original run lineage.
-- **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
+- **Concurrency** is capped at 50 running daemon-wide; launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.
 - **Owner Operator owns the deadline.** The executor aborts on its own per-run timeout so a
   launcher-side timeout after partial output can never read as success.
-- **Depth is 1**, enforced not just structurally. The executor rejects a launch whose parent
-  thread is itself a delegated run's child (`AGENT_RUN_MAX_DEPTH`). Every child prompt also tells
-  the child to complete the work directly without nested or background agents, including
-  harness-native sub-agents.
+- **Depth is capped at 5.** An Operator launch is depth 1. A child may delegate through
+  `oo runs delegate --from-session <its child session id>` at the next depth; the executor
+  rejects depth 6. The child prompt includes its confirmed session id when nesting is available.
+  A depth-5 child, or a child without a confirmed session id, is told to work directly.
+  Untracked harness-native and background agents remain outside the delegated-run ledger.
 - **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)

@@ -485,23 +485,6 @@ try {
   await retryIdentityExecutor.stop();
   retryIdentityState.close();
 
-  // --- depth cap: delegating from a thread that is itself a delegated child is rejected -----
-  // Isolated so the never-started executor's pump can't disturb the positional launches above.
-  const depthState = new State(join(dir, "depth.db"), { bus: new InMemoryEventBus() });
-  const depthExecutor = new AgentRunExecutor(depthState, { launcher, logger: () => undefined });
-  depthState.createAgentRun({
-    harness: AgentRunHarness.ClaudeCode, task: "a delegated child", cwd: dir, depth: 1,
-    timeoutSeconds: 60, childSessionId: "delegated-child-session",
-  });
-  assert.throws(
-    () => depthExecutor.launch({
-      harness: AgentRunHarness.Codex, task: "grandchild", cwd: dir, parentThreadId: "delegated-child-session",
-    }),
-    /depth/,
-    "a run whose parent is itself a delegated child exceeds the depth cap",
-  );
-  depthState.close();
-
   process.stdout.write("ok — delegated-run executor lifecycle over real state\n");
 } finally {
   closeState?.();

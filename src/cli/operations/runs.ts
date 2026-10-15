@@ -1,6 +1,8 @@
 import { isAbsolute, resolve } from "node:path";
 import {
   AGENT_RUN_EFFORTS,
+  AGENT_RUN_MAX_CONCURRENT,
+  AGENT_RUN_MAX_DEPTH,
   AgentRunHarness,
   AgentRunMissingBaseline,
   AgentRunStatus,
@@ -127,7 +129,10 @@ export const runs: Noun = {
       args: "<task>",
       summary: "launch a child agent; the Operator's bash gets the pending row, other callers stream the child until it finishes",
       guide: "Outside the Operator, the command streams the child's output and exits 0 only when the run\n"
-        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.",
+        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.\n"
+        + `At most ${AGENT_RUN_MAX_CONCURRENT} runs execute daemon-wide; later runs remain queued. `
+        + `Delegation can nest to depth ${AGENT_RUN_MAX_DEPTH}. Children should pass their own saved\n`
+        + "session id with --from-session so depth and parent lineage are recorded.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },

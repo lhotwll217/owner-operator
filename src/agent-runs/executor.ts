@@ -2,6 +2,7 @@ import { isAbsolute } from "node:path";
 import {
   AGENT_RUN_CAPABILITIES,
   AGENT_RUN_MAX_DEPTH,
+  AGENT_RUN_MAX_CONCURRENT,
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
@@ -88,7 +89,11 @@ export class AgentRunExecutor {
     this.launcher = options.launcher;
     this.now = options.now ?? Date.now;
     this.tickMs = options.tickMs ?? 1_000;
-    this.maxConcurrent = options.maxConcurrent ?? 3;
+    this.maxConcurrent = options.maxConcurrent ?? AGENT_RUN_MAX_CONCURRENT;
+    if (!Number.isSafeInteger(this.maxConcurrent) || this.maxConcurrent < 0
+      || this.maxConcurrent > AGENT_RUN_MAX_CONCURRENT) {
+      throw new Error(`maxConcurrent must be an integer in 0..${AGENT_RUN_MAX_CONCURRENT}`);
+    }
     this.lostGraceMs = options.lostGraceMs ?? 60_000;
     this.logger = options.logger ?? (() => undefined);
   }
@@ -142,9 +147,6 @@ export class AgentRunExecutor {
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > MAX_AGENT_RUN_TIMEOUT_SECONDS) {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
     }
-    // Enforce the delegation-depth cap, not just structurally: if the delegating thread is
-    // itself some run's child, this launch would sit one level deeper. The ACP task envelope also
-    // tells every delegated child to complete its work directly without native subagents.
     const depth = this.depthFor(input.parentThreadId ?? null);
     if (depth > AGENT_RUN_MAX_DEPTH) {
       throw new Error(`delegation depth ${depth} exceeds the cap of ${AGENT_RUN_MAX_DEPTH}`);

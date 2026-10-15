@@ -114,7 +114,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "harness_model", description: "Model independently read back from the live harness after configuration; NULL when not observed." },
       { name: "harness_effort", description: "Storage encoding for supported reasoning effort independently read from live status; NULL when effort was absent or unsupported." },
       { name: "harness_identity_observed", description: "Storage discriminator: 1 only when harness_model or harness_effort contains a supported observed fact. Decoded publicly as AgentRun.harnessIdentity." },
-      { name: "depth", description: "Delegation depth; 1 for Operator-launched runs (cap is 1)." },
+      { name: "depth", description: "Delegation depth; Operator-launched runs start at 1, with a cap of 5." },
       { name: "status", description: "pending | running | completed | failed | cancelled | interrupted | lost. Terminal states are monotonic." },
       { name: "created_at", description: "ISO time the run was queued." },
       { name: "started_at", description: "ISO time the run was claimed and started." },

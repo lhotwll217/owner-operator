@@ -12,6 +12,7 @@ import {
 } from "acpx/runtime";
 import {
   AGENT_RUN_CAPABILITIES,
+  AGENT_RUN_MAX_DEPTH,
   AgentRunHarness,
   AgentRunStatus,
   isAgentRunEffort,
@@ -39,12 +40,17 @@ import {
  * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
-const CHILD_TASK_BOUNDARY =
-  "Do the work yourself. Do not launch nested or background agents; delegated children must complete the task directly.";
-
 /** Preserve the durable owner task verbatim while adding execution-only child policy. */
-export function delegatedChildTaskEnvelope(task: string): string {
-  return `${task}\n\n${CHILD_TASK_BOUNDARY}`;
+export function delegatedChildTaskEnvelope(task: string, depth: number, childSessionId?: string): string {
+  const boundary = depth < AGENT_RUN_MAX_DEPTH && childSessionId
+    ? `You may delegate through Owner Operator up to depth ${AGENT_RUN_MAX_DEPTH}. `
+      + `Use oo runs delegate --from-session ${childSessionId} so the child is linked to this conversation. `
+      + "Do not launch untracked harness-native or background agents."
+    : depth >= AGENT_RUN_MAX_DEPTH
+      ? `This run is at delegation depth ${AGENT_RUN_MAX_DEPTH}, the maximum. `
+        + "Complete the work directly; do not launch further agents."
+      : "No child session identity was confirmed. Complete the work directly; do not launch further agents.";
+  return `${task}\n\n${boundary}`;
 }
 
 /** Where acpx persists its per-child session records. Relocated out of the system tmpdir
@@ -329,7 +335,8 @@ async function runAcpTurn(
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
   const turn = runtime.startTurn({
     handle,
-    text: delegatedChildTaskEnvelope(request.run.task),
+    text: delegatedChildTaskEnvelope(request.run.task, request.run.depth,
+      handle.agentSessionId ?? handle.backendSessionId),
     mode: "prompt",
     requestId: request.run.id,
     signal: request.signal,

@@ -87,6 +87,8 @@ try {
   const delegateHelp = await runOo(["runs", "delegate", "--help"]);
   assert.match(delegateHelp.stdout, /--model <value>\s+exact model id; omitted: the approved delegated baseline, else the harness's own choice/,
     "help states the resolution order: pin, approved baseline, harness choice");
+  assert.match(delegateHelp.stdout, /At most 50 runs execute daemon-wide/);
+  assert.match(delegateHelp.stdout, /Delegation can nest to depth 5/);
 
   // delegate --json: NDJSON events as they happen, then the result line; exit 0 on completed.
   const delegated = await runOo(["runs", "delegate", "--harness", "claude-code", "reply OO_STREAM_OK", "--json"]);
@@ -120,8 +122,9 @@ try {
   const nestedRow = JSON.parse(nested.stdout) as AgentRun;
   assert.equal(nestedRow.depth, 2);
   assert.equal(nestedRow.parentThreadId, `child-${id}`);
-  state.createAgentRun({ harness: AgentRunHarness.Codex, task: "depth five", cwd: repoRoot,
+  const depthFive = state.createAgentRun({ harness: AgentRunHarness.Codex, task: "depth five", cwd: repoRoot,
     depth: 5, timeoutSeconds: 60, childSessionId: "depth-five-child" });
+  state.finishAgentRun(depthFive.id, { status: AgentRunStatus.Completed, resultTail: null, error: null });
   const tooDeep = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", "depth-five-child", "--no-wait"]);
   assert.equal(tooDeep.status, 1);
   assert.match(tooDeep.stderr, /delegation depth 6 exceeds the cap of 5/);

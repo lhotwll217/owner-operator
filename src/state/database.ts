@@ -1124,8 +1124,7 @@ export class ThreadDb {
     return this.agentRunById(insert.id)!;
   }
 
-  /** The most recent run whose child session equals this id — the depth-guard and monitor-join
-   * lookup. A thread that is some run's child cannot itself be a delegating parent at depth 1. */
+  /** The most recent run whose child session equals this id, used for depth and monitor joins. */
   agentRunByChildSession(childSessionId: string): AgentRun | undefined {
     const row = this.db.prepare(
       `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs

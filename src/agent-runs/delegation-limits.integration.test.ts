@@ -20,6 +20,8 @@ const launcher = (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult>
     }), { once: true });
   });
 const executor = new AgentRunExecutor(state, { launcher, logger: () => undefined });
+assert.throws(() => new AgentRunExecutor(state, { launcher, maxConcurrent: 51 }),
+  /maxConcurrent must be an integer in 0..50/);
 const waitFor = async (condition: () => boolean): Promise<void> => {
   const deadline = Date.now() + 5_000;
   while (!condition()) {
@@ -33,6 +35,7 @@ try {
     const ancestor = state.createAgentRun({
       harness: AgentRunHarness.Codex, task: `ancestor ${depth}`, cwd: dir,
       depth, timeoutSeconds: 60, childSessionId: `ancestor-${depth}`,
+      ...(depth > 1 ? { parentThreadId: `ancestor-${depth - 1}` } : {}),
     });
     state.claimNextPendingAgentRun(1);
     state.finishAgentRun(ancestor.id, { status: AgentRunStatus.Completed, resultTail: null, error: null });

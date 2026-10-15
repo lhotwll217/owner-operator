@@ -136,10 +136,8 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
   },
 };
 
-/** Delegation-depth cap: only the Operator delegates through the ledger (depth 1). Why the cap is
- * 1, and how a child gets a helper instead, is documented on the behavior page
- * (docs/delegated-runs.md, Execution). */
-export const AGENT_RUN_MAX_DEPTH = 1;
+export const AGENT_RUN_MAX_DEPTH = 5;
+export const AGENT_RUN_MAX_CONCURRENT = 50;
 
 export const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 3_600;
 export const MAX_AGENT_RUN_TIMEOUT_SECONDS = 86_400;

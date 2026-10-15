@@ -13,6 +13,7 @@ import {
   codexInitialAgentMode,
   createAcpLauncher,
   cursorAcpAgentCommand,
+  delegatedChildTaskEnvelope,
 } from "./acp-launcher";
 
 // The command is `[INITIAL_AGENT_MODE=<mode>] "<node>" "<entrypoint>"`; the entrypoint must be a real installed file, not
@@ -176,7 +177,10 @@ assert.deepEqual(
 assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
 assert.match(turnTexts[0] ?? "", /may delegate through Owner Operator up to depth 5/i);
 assert.doesNotMatch(turnTexts[0] ?? "", /Do not launch nested or background agents/i);
-assert.match(turnTexts[0] ?? "", /do not launch nested or background agents/i, "every child task envelope forbids nested agents");
+assert.match(turnTexts[0] ?? "", /--from-session child-session/);
+assert.match(delegatedChildTaskEnvelope("finish", 5, "child-session"), /do not launch further agents/i);
+assert.doesNotMatch(delegatedChildTaskEnvelope("finish", 5, "child-session"), /may delegate/i);
+assert.match(delegatedChildTaskEnvelope("finish", 4), /No child session identity was confirmed/);
 
 // Every child event reaches the run's event log, in order, including thought and status.
 const streamed = [
