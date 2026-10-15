@@ -60,9 +60,10 @@ function canRecoverResume(run: AgentRun, runs: readonly AgentRun[]): boolean {
     const identity = recoverSavedSessionIdentity(run);
     if (!identity || resumeCwdError(run.cwd) || openCodeContinuationError({ ...run, ...identity })) return false;
     const existingResumeRunId = runs.find((other) => other.resumeOfRunId === run.id)?.id ?? null;
+    const existingRetryRunId = runs.find((other) => other.retryOfRunId === run.id)?.id ?? null;
     const activeRunId = runs.find((other) => !isTerminalAgentRunStatus(other.status)
       && other.childSessionId === identity.childSessionId)?.id ?? null;
-    return agentRunResumeError({ ...run, ...identity }, { existingResumeRunId, activeRunId }) === null;
+    return agentRunResumeError({ ...run, ...identity }, { existingRetryRunId, existingResumeRunId, activeRunId }) === null;
   } catch {
     return false;
   }

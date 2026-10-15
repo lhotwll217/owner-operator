@@ -253,8 +253,8 @@ try {
   const migrated = after.agentRunById("legacy-cancelled")!;
   assert.equal(migrated.promptSubmitted, false, "migration cannot infer submission from child identity");
   assert.equal(migrated.childSessionId, "child");
-  assert.match(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }) ?? "",
-    /no confirmed prompt submission/);
+  assert.equal(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }), null,
+    "legacy submission uncertainty does not block reloading a saved conversation");
   after.close();
 } finally {
   rmSync(submissionDir, { recursive: true, force: true });

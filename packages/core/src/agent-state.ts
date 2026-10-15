@@ -160,8 +160,8 @@ function deriveRunView(
     retryOfRunId: run.retryOfRunId,
     resumeOfRunId: run.resumeOfRunId,
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
-    canRetry: agentRunRetryError(run, { existingRetryRunId, activeRunId }) === null,
-    canResume: agentRunResumeError(run, { existingResumeRunId, activeRunId }) === null
+    canRetry: agentRunRetryError(run, { existingRetryRunId, existingResumeRunId, activeRunId }) === null,
+    canResume: agentRunResumeError(run, { existingRetryRunId, existingResumeRunId, activeRunId }) === null
       && isResumeEnvironmentEligible(run),
   };
 }

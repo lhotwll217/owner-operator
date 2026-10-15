@@ -200,12 +200,12 @@ export class AgentRunExecutor {
     return run;
   }
 
-  /** Retry = same task and child identity in a new immutable run. */
   retry(id: string): AgentRun {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
     const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
+    const existingResume = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
     if (existingRetry && !isTerminalAgentRunStatus(existingRetry.status)) return existingRetry;
     const recoveredIdentity = recoverSavedSessionIdentity(run);
     const childSessionId = recoveredIdentity?.childSessionId ?? run.childSessionId;
@@ -214,6 +214,7 @@ export class AgentRunExecutor {
       : undefined;
     const domainError = agentRunRetryError({ ...run, ...recoveredIdentity }, {
       existingRetryRunId: existingRetry?.id ?? null,
+      existingResumeRunId: existingResume?.id ?? null,
       activeRunId: inflight?.id ?? null,
     });
     if (domainError) throw new Error(domainError);
@@ -247,6 +248,7 @@ export class AgentRunExecutor {
     if (!run) throw new Error(`no such agent run: ${id}`);
     const followUpTask = validateAgentRunResumeTask(task);
     const existingResume = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
+    const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
     const recoveredIdentity = recoverSavedSessionIdentity(run);
     const childSessionId = recoveredIdentity?.childSessionId ?? run.childSessionId;
     const inflight = childSessionId
@@ -254,6 +256,7 @@ export class AgentRunExecutor {
       : undefined;
     const domainError = agentRunResumeError({ ...run, ...recoveredIdentity }, {
       existingResumeRunId: existingResume?.id ?? null,
+      existingRetryRunId: existingRetry?.id ?? null,
       activeRunId: inflight?.id ?? null,
     });
     if (domainError) throw new Error(domainError);

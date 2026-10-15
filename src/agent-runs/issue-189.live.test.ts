@@ -39,14 +39,14 @@ try {
 
   const failed = state.createAgentRun({
     harness: loaded.harness, model: loaded.model, effort: loaded.effort,
-    task: "simulated failed outcome after the saved turn", cwd: loaded.cwd,
+    task: "synthetic failed outcome after the saved turn", cwd: loaded.cwd,
     depth: loaded.depth, timeoutSeconds: 180,
     childSessionId: loaded.childSessionId, acpxRecordId: loaded.acpxRecordId,
   });
   state.claimNextPendingAgentRun(1);
   state.recordAgentRunActivity(failed.id, { promptSubmitted: true });
   const terminal = state.finishAgentRun(failed.id, {
-    status: AgentRunStatus.Failed, resultTail: null, error: "simulated post-turn failure",
+    status: AgentRunStatus.Failed, resultTail: null, error: "synthetic post-turn failure",
   })!;
   const resumed = executor.resume(failed.id,
     "Without tools, reply with only the private token I gave in the earlier turn.");
@@ -57,7 +57,7 @@ try {
   assert.equal(result.resumeOfRunId, failed.id);
   assert.equal(result.resultTail?.trim(), token);
   assert.deepEqual(state.agentRunById(failed.id), terminal);
-  process.stdout.write("ok - real Codex ACP loaded the exact saved child after a failed terminal row\n");
+  process.stdout.write("ok - real Codex ACP reloaded the exact saved child after a synthetic failed ledger row\n");
 } finally {
   await executor.stop();
   state.close();

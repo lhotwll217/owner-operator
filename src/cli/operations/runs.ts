@@ -215,8 +215,8 @@ export const runs: Noun = {
       args: "<id> <task>",
       summary: "continue any terminal run's saved child conversation with new instructions in a linked run",
       guide: "Use the latest run id in the conversation. Failed, cancelled, interrupted, and lost\n"
-        + "runs can continue when a prompt was submitted or they inherited a conversation, and the\n"
-        + "saved session can reload. A startup failure with no saved conversation cannot resume.\n"
+        + "runs can continue when their saved child conversation can reload, even if prompt\n"
+        + "submission was not acknowledged. A startup failure with no saved conversation cannot resume.\n"
         + "If reload fails, report that error. Starting fresh requires an explicit delegate or retry.",
       minPositionals: 2,
       examples: ['oo runs resume <id> "Continue where you stopped and finish the remaining tests"'],

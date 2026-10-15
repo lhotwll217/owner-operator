@@ -75,13 +75,11 @@ owns transcript identity and discovery.
   [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
 - **Resume continues saved work after any terminal outcome.** Supply a new task, including an
   instruction to continue when the goal is unchanged. Both saved conversation identities and the
-  original workspace must still be available. An unsuccessful run requires either its own confirmed
-  prompt submission, recorded from ACPX `promptStarted`, or a `resume_of_run_id` relationship to
-  an existing conversation. A resume successor cancelled while queued or loading can itself be
-  resumed even though its new prompt was never submitted. Its `prompt_submitted` stays false.
-  Fresh startup failures and cancellations without either form of evidence cannot
-  be resumed. Session creation alone is insufficient.
-  Use the latest run in the conversation; an already resumed run cannot branch it.
+  original workspace must still be available. Prompt acknowledgement is per-turn evidence, not
+  a continuation prerequisite: a run cancelled or failed after saving a session can resume even
+  when `prompt_submitted` is false. ACP reload must validate the exact saved record and child identity.
+  A startup failure with no saved session cannot resume.
+  Use the latest run in the conversation; an already retried or resumed run cannot branch it.
   A reload failure stays explicit. Starting a fresh delegate is a separate decision.
 - **Startup retry checks for a saved ACP record.** A failed run without a recorded child identity
   may still have an ACP record saved before the run row was updated. Retry recovers that identity

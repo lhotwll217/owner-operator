@@ -34,9 +34,9 @@ for (const status of [AgentRunStatus.Failed, AgentRunStatus.Interrupted, AgentRu
   assert.equal(agentRunResumeError({ ...completed, status, promptSubmitted: true }, {
     existingResumeRunId: null, activeRunId: null,
   }), null, `${status} with a saved conversation accepts new instructions`);
-  assert.match(agentRunResumeError({ ...completed, status, promptSubmitted: false }, {
+  assert.equal(agentRunResumeError({ ...completed, status, promptSubmitted: false }, {
     existingResumeRunId: null, activeRunId: null,
-  }) ?? "", /no confirmed prompt submission/, `${status} before its first prompt has no conversation to continue`);
+  }), null, `${status} can reload a saved session before prompt acknowledgement`);
 }
 const failedRetryBeforePrompt = { ...completed, status: AgentRunStatus.Failed,
   promptSubmitted: false, retryOfRunId: "earlier-failed" };
@@ -47,10 +47,9 @@ assert.match(agentRunRetryError(cancelled, {
   existingRetryRunId: null, activeRunId: null,
 }) ?? "", /not retryable/);
 const unsubmitted = { ...cancelled, promptSubmitted: false };
-assert.match(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activeRunId: null }) ?? "",
-  /no confirmed prompt submission/);
-assert.throws(() => agentRunTurnIntent({ ...unsubmitted, id: "invalid", resumeOfRunId: cancelled.id },
-  undefined, unsubmitted), /no confirmed prompt submission/);
+assert.equal(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activeRunId: null }), null);
+assert.deepEqual(agentRunTurnIntent({ ...unsubmitted, id: "continued-before-prompt", resumeOfRunId: cancelled.id },
+  undefined, unsubmitted), { kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record" });
 const unsubmittedSuccessor = { ...unsubmitted, id: "successor", resumeOfRunId: cancelled.id };
 assert.equal(agentRunResumeError(unsubmittedSuccessor, { existingResumeRunId: null, activeRunId: null }), null,
   "a cancelled resume successor retains the submitted conversation before its own prompt");
@@ -73,6 +72,11 @@ assert.equal(
 assert.match(
   agentRunRetryError(failedForRetry, { existingRetryRunId: "exact-retry", activeRunId: null }) ?? "",
   /already been retried by exact-retry/,
+);
+assert.match(
+  agentRunRetryError(failedForRetry, {
+    existingRetryRunId: null, existingResumeRunId: "corrected-successor", activeRunId: null,
+  }) ?? "", /already been resumed by corrected-successor/,
 );
 assert.match(
   agentRunRetryError(failedForRetry, { existingRetryRunId: null, activeRunId: "other-active" }) ?? "",
@@ -104,6 +108,11 @@ assert.equal(
 assert.match(
   agentRunResumeError(completed, { existingResumeRunId: "next", activeRunId: null }) ?? "",
   /already been resumed by next/,
+);
+assert.match(
+  agentRunResumeError({ ...failedForRetry, acpxRecordId: "saved-record" }, {
+    existingResumeRunId: null, existingRetryRunId: "retried-successor", activeRunId: null,
+  }) ?? "", /already been retried by retried-successor/,
 );
 assert.match(
   agentRunResumeError(completed, { existingResumeRunId: null, activeRunId: "active" }) ?? "",

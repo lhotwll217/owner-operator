@@ -226,11 +226,13 @@ export interface AgentRun {
 
 export interface AgentRunResumeContext {
   existingResumeRunId: string | null;
+  existingRetryRunId?: string | null;
   activeRunId: string | null;
 }
 
 export interface AgentRunRetryContext {
   existingRetryRunId: string | null;
+  existingResumeRunId?: string | null;
   activeRunId: string | null;
 }
 
@@ -247,6 +249,9 @@ export function agentRunRetryError(
   }
   if (context.existingRetryRunId) {
     return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
+  }
+  if (context.existingResumeRunId) {
+    return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
   }
   if (context.activeRunId) {
     return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
@@ -268,11 +273,11 @@ export function agentRunResumeError(
   }
   if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
   if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
-  if (run.status !== AgentRunStatus.Completed && !run.promptSubmitted && !run.resumeOfRunId && !run.retryOfRunId) {
-    return `${run.status} agent run ${run.id} has no confirmed prompt submission; cannot resume`;
-  }
   if (context.existingResumeRunId) {
     return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
+  }
+  if (context.existingRetryRunId) {
+    return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
   }
   if (context.activeRunId) {
     return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
@@ -330,10 +335,6 @@ export function agentRunTurnIntent(
   }
   if (!AGENT_RUN_RESUMABLE_STATUSES.includes(resumedRun.status)) {
     throw new Error(`agent run ${run.id} cannot resume run ${resumedRun.id} from status ${resumedRun.status}`);
-  }
-  if (resumedRun.status !== AgentRunStatus.Completed && !resumedRun.promptSubmitted
-    && !resumedRun.resumeOfRunId && !resumedRun.retryOfRunId) {
-    throw new Error(`${resumedRun.status} agent run ${resumedRun.id} has no confirmed prompt submission; cannot resume`);
   }
   if (!run.childSessionId || (resumedRun.childSessionId && run.childSessionId !== resumedRun.childSessionId)) {
     throw new Error(`agent run ${run.id} child identity mismatch with resumed run ${resumedRun.id}`);

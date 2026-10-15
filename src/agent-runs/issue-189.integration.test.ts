@@ -54,6 +54,25 @@ try {
     assert.throws(() => executor.resume(original.id, "branch"), /already been resumed/);
   }
 
+  const retriedFirst = terminal(AgentRunStatus.Failed);
+  const retrySuccessor = executor.retry(retriedFirst.id);
+  assert.equal((await executor.wait(retrySuccessor.id, 5_000)).status, AgentRunStatus.Completed);
+  assert.throws(() => executor.resume(retriedFirst.id, "branch from old turn"),
+    new RegExp(`already been retried by ${retrySuccessor.id}`));
+  assert.equal(deriveParentAgentStateWithEnvironment(state.listAgentRuns()).runs
+    .find(({ id }) => id === retriedFirst.id)?.canResume, false);
+  const afterRetry = executor.resume(retrySuccessor.id, "continue current conversation");
+  assert.equal(afterRetry.resumeOfRunId, retrySuccessor.id);
+  assert.equal((await executor.wait(afterRetry.id, 5_000)).status, AgentRunStatus.Completed);
+
+  const resumedFirst = terminal(AgentRunStatus.Failed);
+  const resumeSuccessor = executor.resume(resumedFirst.id, "corrected scope");
+  assert.equal((await executor.wait(resumeSuccessor.id, 5_000)).status, AgentRunStatus.Completed);
+  assert.throws(() => executor.retry(resumedFirst.id),
+    new RegExp(`already been resumed by ${resumeSuccessor.id}`));
+  assert.equal(deriveParentAgentStateWithEnvironment(state.listAgentRuns()).runs
+    .find(({ id }) => id === resumedFirst.id)?.canRetry, false);
+
   const startup = terminal(AgentRunStatus.Failed, false);
   assert.equal(deriveParentAgentStateWithEnvironment([startup]).runs[0]?.canResume, false);
   const freshRetry = executor.retry(startup.id);
@@ -75,7 +94,7 @@ try {
   }, "an existing record keeps its conversation");
   assert.equal((await executor.wait(recoveredRetry.id, 5_000)).status, AgentRunStatus.Completed);
 
-  const recoverableFollowUp = terminal(AgentRunStatus.Failed, false, true);
+  const recoverableFollowUp = terminal(AgentRunStatus.Failed, false, false);
   writeFileSync(join(sessions, `${recoverableFollowUp.id}.json`), JSON.stringify({
     schema: "acpx.session.v1", acpx_record_id: recoverableFollowUp.id,
     cwd: dir, acp_session_id: "follow-up-acp", agent_session_id: "follow-up-native",
@@ -88,6 +107,17 @@ try {
     kind: "resume", childSessionId: "follow-up-native", acpxRecordId: recoverableFollowUp.id,
   });
   assert.equal((await executor.wait(recoveredFollowUp.id, 5_000)).status, AgentRunStatus.Completed);
+
+  const recoveredCancellation = terminal(AgentRunStatus.Cancelled, false, false);
+  writeFileSync(join(sessions, `${recoveredCancellation.id}.json`), JSON.stringify({
+    schema: "acpx.session.v1", acpx_record_id: recoveredCancellation.id,
+    cwd: dir, acp_session_id: "cancelled-acp", agent_session_id: "cancelled-native",
+  }));
+  const cancellationFollowUp = executor.resume(recoveredCancellation.id, "continue after cancellation");
+  assert.deepEqual(requests.at(-1)?.turnIntent, {
+    kind: "resume", childSessionId: "cancelled-native", acpxRecordId: recoveredCancellation.id,
+  });
+  assert.equal((await executor.wait(cancellationFollowUp.id, 5_000)).status, AgentRunStatus.Completed);
 
   const conflicted = terminal(AgentRunStatus.Failed, false);
   writeFileSync(join(sessions, `${conflicted.id}.json`), JSON.stringify({
