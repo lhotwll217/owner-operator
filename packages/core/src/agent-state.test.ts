@@ -102,7 +102,8 @@ assert.deepEqual(
   { glyph: "!", text: "attention" },
   "attention status is always exposed as an accessible glyph/text pair",
 );
-assert.equal(view.runs.find(({ id }) => id === "lost-no-child")?.canRetry, false, "missing child identity blocks retry");
+assert.equal(view.runs.find(({ id }) => id === "lost-no-child")?.canRetry, true,
+  "an explicit retry can start fresh after a startup loss with no saved child");
 assert.equal(view.runs.find(({ id }) => id === "completed-new")?.canResume, true, "the latest completed session can take a follow-up");
 assert.ok(view.runs.find(({ id }) => id === "completed-new")!.task.length <= AGENT_STATE_TASK_MAX_LENGTH);
 assert.equal(

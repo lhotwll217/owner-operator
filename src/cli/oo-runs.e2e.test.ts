@@ -18,6 +18,7 @@ const launched: AgentRunLaunchRequest[] = [];
 const held = new Map<string, () => void>();
 const launcher = async (request: AgentRunLaunchRequest) => {
   launched.push(request);
+  if (request.run.task.includes("FAIL STARTUP")) throw new Error("startup failed before a child existed");
   const childSessionId = request.turnIntent.kind === "fresh" ? `child-${request.run.id}` : request.turnIntent.childSessionId;
   const acpxRecordId = request.run.acpxRecordId ?? `acpx-${request.run.id}`;
   request.onActivity({ childSessionId, acpxRecordId });
@@ -29,6 +30,9 @@ const launcher = async (request: AgentRunLaunchRequest) => {
   request.onEvent?.({ type: "text_delta", stream: "output", text: "OO_STREAM" });
   if (request.run.task.includes("HOLD")) await new Promise<void>((release) => held.set(request.run.id, release));
   request.onEvent?.({ type: "text_delta", stream: "output", text: "_OK" });
+  if (request.run.task.includes("FAIL TURN")) {
+    return { status: AgentRunStatus.Failed as const, resultText: "", error: "turn failed", childSessionId, acpxRecordId };
+  }
   return { status: AgentRunStatus.Completed as const, resultText: "OO_STREAM_OK", error: null, childSessionId, acpxRecordId };
 };
 
@@ -160,8 +164,29 @@ try {
   assert.equal(continuedRun.task, "continue the cancelled task");
   assert.equal(state.agentRunById(cancelId)?.status, AgentRunStatus.Cancelled);
   const resumeHelp = await runOo(["runs", "resume", "--help"]);
-  assert.match(resumeHelp.stdout, /completed or cancelled/);
-  assert.match(resumeHelp.stdout, /default way to continue cancelled work/);
+  assert.match(resumeHelp.stdout, /any terminal run's saved child conversation/);
+  assert.match(resumeHelp.stdout, /Failed, cancelled, interrupted, and lost/);
+  const failedCall = await runOo(["runs", "delegate", "--harness", "codex", "FAIL TURN", "--json"]);
+  assert.equal(failedCall.status, 1);
+  const failedId = runIdFrom(failedCall.stderr);
+  assert.equal(state.agentRunById(failedId)?.status, AgentRunStatus.Failed);
+  const corrected = await runOo(["runs", "resume", failedId, "continue with corrected scope", "--json"]);
+  assert.equal(corrected.status, 0, corrected.stderr);
+  const correctedRun = JSON.parse(corrected.stdout) as AgentRun;
+  assert.equal(correctedRun.resumeOfRunId, failedId);
+  assert.equal(correctedRun.childSessionId, state.agentRunById(failedId)?.childSessionId);
+  assert.equal(correctedRun.task, "continue with corrected scope");
+
+  const startupCall = await runOo(["runs", "delegate", "--harness", "codex", "FAIL STARTUP", "--json"]);
+  assert.equal(startupCall.status, 1);
+  const startupId = runIdFrom(startupCall.stderr);
+  assert.equal(state.agentRunById(startupId)?.childSessionId, null);
+  const startupRetry = await runOo(["runs", "retry", startupId, "--json"]);
+  assert.equal(startupRetry.status, 0, startupRetry.stderr);
+  const startupRetryRun = JSON.parse(startupRetry.stdout) as AgentRun;
+  assert.equal(startupRetryRun.retryOfRunId, startupId);
+  await waitFor(() => launched.find(({ run }) => run.id === startupRetryRun.id), "fresh startup retry");
+  assert.deepEqual(launched.find(({ run }) => run.id === startupRetryRun.id)?.turnIntent, { kind: "fresh" });
   // A log far larger than the pipe buffer, read only after a pause, arrives whole with its
   // terminal record: the CLI waits on backpressure and drains stdout before exiting.
   const big = state.createAgentRun({ harness: "claude-code" as never, task: "HOLD big log", cwd: repoRoot, depth: 1, timeoutSeconds: 60 });

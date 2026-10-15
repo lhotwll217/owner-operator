@@ -194,7 +194,7 @@ assert.match(nounHelp("session-state", NOUNS["session-state"]), /`oo session-sta
 assert.ok(harnessPrompt.includes(schemaReference()), "the prompt embeds the generated state schema");
 assert.match(verbHelp("session-state", "done", NOUNS["session-state"].verbs.done!), /MUST run `oo session-state done <id>`/,
   "the done verb's own help carries the mark-done rule");
-assert.match(verbHelp("runs", "resume", NOUNS.runs.verbs.resume!), /submitted a prompt or is already a resume successor/,
+assert.match(verbHelp("runs", "resume", NOUNS.runs.verbs.resume!), /Failed, cancelled, interrupted, and lost/,
   "the resume verb's own help carries its eligibility");
 for (const moved of [/MUST run `oo session-state done/, /completion arrives automatically/i, /thread_details\.topic/, /\bIndexed\b/, /--state needs-you/]) {
   assert.doesNotMatch(authoredPrompt, moved, `${moved} lives in the help the prompt embeds, not in prompt prose`);
