@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   error TEXT,
   retry_of_run_id TEXT REFERENCES agent_runs(id),
   resume_of_run_id TEXT REFERENCES agent_runs(id),
+  completion_run_ids TEXT NOT NULL DEFAULT '[]',
   timeout_seconds INTEGER NOT NULL,
   CHECK (retry_of_run_id IS NULL OR resume_of_run_id IS NULL)
 );
@@ -306,7 +307,8 @@ const AGENT_RUN_COLUMNS = `
   activity, last_activity_at AS lastActivityAt, child_session_id AS childSessionId,
   acpx_record_id AS acpxRecordId, prompt_submitted AS promptSubmitted, result_tail AS resultTail, error,
   retry_of_run_id AS retryOfRunId,
-  resume_of_run_id AS resumeOfRunId, timeout_seconds AS timeoutSeconds`;
+  resume_of_run_id AS resumeOfRunId, completion_run_ids AS completionRunIds,
+  timeout_seconds AS timeoutSeconds`;
 
 /** A sweep that failed part way; `committed` lists the runs it had already finalized. */
 export class PartialAgentRunSweepError extends Error {
@@ -334,11 +336,13 @@ export interface AgentRunInsert {
   timeoutSeconds: number;
   retryOfRunId?: string | null;
   resumeOfRunId?: string | null;
+  completionRunIds?: readonly string[];
   childSessionId?: string | null;
   acpxRecordId?: string | null;
 }
 
-type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted"> & {
+type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted" | "completionRunIds"> & {
+  completionRunIds: string;
   effortApplied: number;
   promptSubmitted: number;
   harnessModel: string | null;
@@ -348,7 +352,7 @@ type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promp
 
 function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
   if (!row) return undefined;
-  const { harnessModel, harnessEffort, harnessIdentityObserved, ...run } = row;
+  const { harnessModel, harnessEffort, harnessIdentityObserved, completionRunIds, ...run } = row;
   const harnessIdentity = harnessIdentityObservation({ model: harnessModel, effort: harnessEffort });
   void harnessIdentityObserved;
   return {
@@ -356,6 +360,7 @@ function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
     effortApplied: Boolean(row.effortApplied),
     promptSubmitted: Boolean(row.promptSubmitted),
     harnessIdentity,
+    completionRunIds: JSON.parse(completionRunIds) as string[],
   };
 }
 
@@ -388,6 +393,7 @@ export class ThreadDb {
     this.migrateSessionSummaries();
     this.migrateAgentRunEffort();
     this.migrateAgentRunPromptSubmission();
+    this.migrateAgentRunCompletionReceipts();
     this.migrateRetiredScheduleTools();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
@@ -450,6 +456,13 @@ export class ThreadDb {
     if (!columns.some(({ name }) => name === "prompt_submitted")) {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN prompt_submitted INTEGER NOT NULL DEFAULT 0 "
         + "CHECK (prompt_submitted IN (0, 1))");
+    }
+  }
+
+  private migrateAgentRunCompletionReceipts(): void {
+    const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "completion_run_ids")) {
+      this.db.exec("ALTER TABLE agent_runs ADD COLUMN completion_run_ids TEXT NOT NULL DEFAULT '[]'");
     }
   }
 
@@ -1113,13 +1126,14 @@ export class ThreadDb {
     this.db.prepare(
       `INSERT INTO agent_runs (
          id, harness, task, cwd, parent_thread_id, model, effort, depth, status, created_at,
-         child_session_id, acpx_record_id, retry_of_run_id, resume_of_run_id, timeout_seconds
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         child_session_id, acpx_record_id, retry_of_run_id, resume_of_run_id, completion_run_ids, timeout_seconds
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
       insert.model ?? null, insert.effort ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
       insert.childSessionId ?? null, insert.acpxRecordId ?? null,
-      insert.retryOfRunId ?? null, insert.resumeOfRunId ?? null, insert.timeoutSeconds,
+      insert.retryOfRunId ?? null, insert.resumeOfRunId ?? null,
+      JSON.stringify(insert.completionRunIds ?? []), insert.timeoutSeconds,
     );
     return this.agentRunById(insert.id)!;
   }

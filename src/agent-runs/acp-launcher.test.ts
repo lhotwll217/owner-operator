@@ -144,6 +144,7 @@ const run: AgentRun = {
   error: null,
   retryOfRunId: null,
   resumeOfRunId: null,
+  completionRunIds: [],
   timeoutSeconds: 3_600,
 };
 

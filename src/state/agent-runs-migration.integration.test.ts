@@ -47,6 +47,7 @@ try {
   const legacyRun = migrated.agentRunById("legacy-run");
   assert.equal(legacyRun?.effort, null, "migration never backfills an invented effort");
   assert.equal(legacyRun?.effortApplied, false, "legacy null effort is distinguishably unapplied");
+  assert.deepEqual(legacyRun?.completionRunIds, [], "legacy rows have no recorded child delivery");
   migrated.close();
 } finally {
   rmSync(legacyDir, { recursive: true, force: true });

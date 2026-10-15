@@ -219,6 +219,8 @@ export interface AgentRun {
   retryOfRunId: string | null;
   /** Exact terminal run after which this row sends a required new task. */
   resumeOfRunId: string | null;
+  /** Terminal child run IDs delivered by this automatic same-session follow-up. */
+  completionRunIds: string[];
   timeoutSeconds: number;
 }
 

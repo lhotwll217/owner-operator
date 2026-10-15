@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus, type AgentRunLaunchRequest, type AgentRunLaunchResult } from "@owner-operator/core";
 import { State } from "../state/state";
-import { AgentRunExecutor } from "./executor";
+import { AgentRunExecutor, NESTED_COMPLETION_TASK_MAX_BYTES } from "./executor";
 
 const root = mkdtempSync(join(tmpdir(), "oo-nested-auto-recovery-"));
 const priorHome = process.env.OO_HOME;
@@ -177,9 +177,8 @@ try {
   chainState.close();
 
   const overlapDir = join(root, "overlap");
-  tick = 0;
   const overlapState = new State(join(overlapDir, "state.db"), {
-    now: () => new Date(Date.UTC(2026, 9, 16, 0, 0, 3, tick++)).toISOString(),
+    now: () => "2026-10-16T00:00:03.000Z",
   });
   let completeChild!: (result: AgentRunLaunchResult) => void;
   let completeParentTurn!: (result: AgentRunLaunchResult) => void;
@@ -224,7 +223,68 @@ try {
   assert.match(delivered[0]!.run.task, /LATE_CHILD_189/);
   await overlap.stop();
   overlapState.close();
-  process.stdout.write("ok - active parent, multiple children, failure, dedupe, restart, nested chain, and overlapping turn\n");
+  const reopenedOverlap = new State(join(overlapDir, "state.db"), {
+    now: () => "2026-10-16T00:00:03.000Z",
+  });
+  const repeated: AgentRunLaunchRequest[] = [];
+  const overlapRestart = new AgentRunExecutor(reopenedOverlap, { tickMs: 10, logger: () => undefined,
+    launcher: async (request) => { repeated.push(request); return completed("unexpected repeat"); },
+  });
+  overlapRestart.start();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(repeated.length, 0, "equal timestamps do not replay a delivered result after restart");
+  await overlapRestart.stop();
+  reopenedOverlap.close();
+
+  const budgetDir = join(root, "budget");
+  const budgetState = new State(join(budgetDir, "state.db"));
+  let budgetFollowUp: AgentRunLaunchRequest | undefined;
+  let budget!: AgentRunExecutor;
+  budget = new AgentRunExecutor(budgetState, { tickMs: 10, logger: () => undefined,
+    launcher: async (request) => {
+      request.onActivity({ childSessionId: request.run.childSessionId ?? `session-${request.run.id}`,
+        acpxRecordId: request.run.acpxRecordId ?? request.run.id });
+      if (request.run.resumeOfRunId) {
+        budgetFollowUp = request;
+        return completed("all children reviewed");
+      }
+      if (request.run.depth === 1) {
+        for (let index = 0; index < 80; index++) {
+          budget.launch({ harness: AgentRunHarness.Codex, model: "controlled", cwd: budgetDir,
+            task: `child-${index}`, parentThreadId: `session-${request.run.id}` });
+        }
+        return completed("dependent work pending");
+      }
+      const index = Number(request.run.task.slice("child-".length));
+      return index % 3 === 0
+        ? { status: AgentRunStatus.Failed, resultText: "", error: `FAILED_${index}_` + "e".repeat(4_000) }
+        : completed(`RESULT_${index}_` + "r".repeat(20_000));
+    },
+  });
+  budget.start();
+  const budgetParent = budget.launch({ harness: AgentRunHarness.Codex, model: "controlled", cwd: budgetDir,
+    task: "parent" });
+  await waitFor(() => budgetFollowUp !== undefined);
+  const budgetContinuation = budgetFollowUp!;
+  assert.equal(budgetContinuation.run.resumeOfRunId, budgetParent.id);
+  assert.ok(Buffer.byteLength(budgetContinuation.run.task, "utf8") <= NESTED_COMPLETION_TASK_MAX_BYTES);
+  const evidence = JSON.parse(budgetContinuation.run.task.split("\n\n")[1]!) as {
+    totalChildren: number; outcomes: Record<string, number>; details: Array<{ outcome: string }>;
+    omitted: number; retrieval: { parentRunId: string; list: string; get: string };
+  };
+  assert.equal(evidence.totalChildren, 80);
+  assert.equal(evidence.outcomes.failed, 27);
+  assert.equal(evidence.outcomes.completed, 53);
+  assert.ok(evidence.omitted > 0);
+  assert.equal(evidence.omitted + evidence.details.length, 80);
+  assert.equal(evidence.details[0]?.outcome, AgentRunStatus.Failed);
+  assert.equal(evidence.retrieval.parentRunId, budgetParent.id);
+  assert.match(evidence.retrieval.list, /runs list --parent/);
+  assert.match(evidence.retrieval.get, /runs get/);
+  assert.equal(budgetContinuation.run.completionRunIds.length, 80);
+  await budget.stop();
+  budgetState.close();
+  process.stdout.write("ok - active parent, multiple children, failure, dedupe, restart, fixed-clock overlap, and bounded evidence\n");
 } finally {
   if (priorHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorHome;

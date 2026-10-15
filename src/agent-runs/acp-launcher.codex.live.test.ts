@@ -41,6 +41,7 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
     error: null,
     retryOfRunId: null,
     resumeOfRunId: null,
+    completionRunIds: [],
     timeoutSeconds: 180,
   };
   const controller = new AbortController();
