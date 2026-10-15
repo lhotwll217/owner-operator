@@ -13,6 +13,7 @@ const ooHome = join(home, ".owner-operator");
 const bin = join(root, "bin");
 const launchLog = join(root, "launchctl.log");
 const daemonRootFile = join(root, "daemon-root");
+const daemonStaleFile = join(root, "daemon-stale");
 const oldEnv = { HOME: process.env.HOME, OO_HOME: process.env.OO_HOME, OO_PORT: process.env.OO_PORT, PATH: process.env.PATH };
 
 const port = await new Promise<number>((resolve, reject) => {
@@ -46,6 +47,7 @@ process.env.OO_TEST_LAUNCH_LOG = launchLog;
 const token = "daemon-token";
 const fingerprint = "another-checkout-fingerprint";
 writeFileSync(daemonRootFile, "/elsewhere/owner-operator");
+writeFileSync(daemonStaleFile, "false");
 const daemon = spawn(process.execPath, ["-e", `
   const http = require("node:http");
   const { readFileSync } = require("node:fs");
@@ -54,7 +56,8 @@ const daemon = spawn(process.execPath, ["-e", `
     response.setHeader("content-type", "application/json");
     if (request.url === "/health") {
       response.end(JSON.stringify({
-        ok: true, port: ${port}, pid: process.pid, startedAt: "now", fingerprint: "${fingerprint}", stale: false,
+        ok: true, port: ${port}, pid: process.pid, startedAt: "now", fingerprint: "${fingerprint}",
+        stale: readFileSync(${JSON.stringify(daemonStaleFile)}, "utf8") === "true",
         repoRoot: readFileSync(${JSON.stringify(daemonRootFile)}, "utf8"),
       }));
     } else if (request.url === "/ready") {
@@ -85,9 +88,14 @@ try {
   assert.equal(kickstarts(), 0, "a client from another checkout connects instead of restarting the daemon");
   assert.equal(isAlive(daemon.pid!), true, "the other checkout's daemon keeps running");
 
+  writeFileSync(daemonStaleFile, "true");
+  await ensureDaemon();
+  assert.equal(kickstarts(), 1, "a client from another checkout still replaces a stale daemon");
+  writeFileSync(daemonStaleFile, "false");
+
   writeFileSync(daemonRootFile, repoRoot);
   await ensureDaemon();
-  assert.equal(kickstarts(), 1, "a client from the daemon's own checkout still replaces a daemon on older code");
+  assert.equal(kickstarts(), 2, "a client from the daemon's own checkout still replaces a daemon on older code");
 
   console.log("ok — only the daemon's own checkout replaces it");
 } finally {

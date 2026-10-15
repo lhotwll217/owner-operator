@@ -24,7 +24,7 @@ let fail = false;
 let port = 0;
 
 const health = (): DaemonHealth => ({
-  ok: true, port, pid: process.pid, startedAt: "now", fingerprint: "worktree-test", stale: false,
+  ok: true, port, pid: process.pid, startedAt: "now", fingerprint: "worktree-test", stale: false, repoRoot: "/test",
 });
 const ready = (): DaemonReady => ({
   ready: true,

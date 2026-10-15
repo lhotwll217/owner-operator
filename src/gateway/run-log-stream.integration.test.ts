@@ -30,7 +30,7 @@ function* events(id: string, after: number): Generator<{ seq: number; record: Ag
 const state = new State(join(dir, "state.db"));
 const gateway = await startGateway({
   authToken: "t", state, port: 0,
-  health: () => ({ ok: true, port: 0, pid: process.pid, startedAt: "now", fingerprint: "f", stale: false }),
+  health: () => ({ ok: true, port: 0, pid: process.pid, startedAt: "now", fingerprint: "f", stale: false, repoRoot: "/test" }),
   ready: () => ({ ready: true, setupRequired: false, modules: { state: true, sessionMonitor: true, scheduler: true, gateway: true } }),
   agentRuns: {
     get: (id: string) => runs[id] as AgentRun | undefined,

@@ -22,6 +22,7 @@ import { describeTable, listTables, runQuery } from "../state/query";
 import { State } from "../state/state";
 import { CALLER_SESSION_ENV } from "../shared/caller-session";
 import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/paths";
+import { repoRoot } from "../shared/repo-root";
 import { WorktreeService } from "../worktrees/worktrees";
 import { runtimeFingerprint } from "./fingerprint";
 
@@ -107,7 +108,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   });
 
   const health = (): DaemonHealth => ({
-    ok: true, port: gateway.port, pid: process.pid, startedAt, fingerprint, stale,
+    ok: true, port: gateway.port, pid: process.pid, startedAt, fingerprint, stale, repoRoot,
   });
   const ready = (): DaemonReady => ({
     ready: Object.values(modules).every(Boolean) && !stale,
