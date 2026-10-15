@@ -139,7 +139,12 @@ export async function ensureDaemon(): Promise<void> {
       );
     }
   } else if (existing) {
-    if (existing.health.fingerprint === expected && !existing.health.stale && existing.ready.ready) return;
+    // The daemon is shared, so a client from another checkout defers to a ready one instead of
+    // interrupting its children; under launchd a replacement would restart the same checkout anyway.
+    // A pre-repoRoot daemon omits the field and counts as another checkout; on its own checkout it
+    // is already stale.
+    const otherCheckout = existing.health.repoRoot !== repoRoot;
+    if ((otherCheckout || existing.health.fingerprint === expected) && !existing.health.stale && existing.ready.ready) return;
     const ownership = launchdOwnsDaemon
       ? await launchdPidOwnership(existing.health.pid)
       : LaunchdPidOwnership.NotOwned;

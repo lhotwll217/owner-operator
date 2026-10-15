@@ -28,6 +28,8 @@ export interface DaemonHealth {
   startedAt: string;
   fingerprint: string;
   stale: boolean;
+  /** The checkout the daemon runs from. Only a client from this checkout may replace it. */
+  repoRoot: string;
 }
 
 export interface DaemonReady {

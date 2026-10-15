@@ -32,8 +32,12 @@ LaunchAgent ownership is verified against `launchctl print`; if an authenticated
 predates installation, the client stops it and waits for the port before handing ownership to launchd.
 An ambiguous launchctl result fails closed and never authorizes direct signaling.
 The client requires `/health` to agree with `daemon.json` on PID and fingerprint before it
-authorizes replacement. Once authenticated, a stale or unready daemon, or one with a fingerprint
-different from the client's runtime, follows the replacement path above. A health response that
+authorizes replacement. Once authenticated, a stale or unready daemon, or one from the client's own
+checkout with a fingerprint different from the client's runtime, follows the replacement path above.
+A client from another checkout, such as a worktree's `./oo`, connects to a ready daemon instead,
+launchd-owned or detached, because replacement would interrupt every running child. Its commands are
+then served by the daemon's code, not its own. To run a checkout's daemon code, use an isolated
+`HOME` and `OO_HOME`. A health response that
 disagrees with discovery is an identity failure, not authorization to replace that process.
 
 Clean shutdown removes `daemon.json` only if its PID and start time still match the closing

@@ -43,7 +43,7 @@ const fallbackRoot: ScanRow = {
 state.recordObservation(fallbackRoot);
 
 const health = (): DaemonHealth => ({
-  ok: true, port: 0, pid: process.pid, startedAt: "now", fingerprint: "test", stale: false,
+  ok: true, port: 0, pid: process.pid, startedAt: "now", fingerprint: "test", stale: false, repoRoot: "/test",
 });
 const ready = (): DaemonReady => ({
   ready: true, setupRequired: false,

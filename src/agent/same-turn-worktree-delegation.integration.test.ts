@@ -60,7 +60,7 @@ const launches: AgentRunCreateInput[] = [];
 const ordering: string[] = [];
 let port = 0;
 const health = (): DaemonHealth => ({
-  ok: true, port, pid: process.pid, startedAt: "now", fingerprint: "same-turn-test", stale: false,
+  ok: true, port, pid: process.pid, startedAt: "now", fingerprint: "same-turn-test", stale: false, repoRoot: "/test",
 });
 const ready = (): DaemonReady => ({
   ready: true,
