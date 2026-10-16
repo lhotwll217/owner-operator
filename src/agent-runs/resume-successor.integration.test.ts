@@ -9,7 +9,7 @@ import { AgentRunExecutor } from "./executor";
 import { createAcpLauncher } from "./acp-launcher";
 import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
 
-for (const phase of ["queued", "loading"] as const) {
+for (const phase of ["queued", "loading", "failed-before-prompt"] as const) {
   const dir = mkdtempSync(join(tmpdir(), `oo-resume-successor-${phase}-`));
   const previousHome = process.env.OO_HOME;
   process.env.OO_HOME = dir;
@@ -38,10 +38,12 @@ for (const phase of ["queued", "loading"] as const) {
     getStatus: async () => ({ models: { currentModelId: "test-model" }, details: { configOptions: [] } }),
     close: async () => undefined,
     startTurn: ({ text, signal }: { text: string; signal: AbortSignal }) => {
-      const promptStarted = signal.aborted
+      const failBeforePrompt = text.includes("fail before prompt");
+      const promptStarted = signal.aborted || failBeforePrompt
         ? Promise.reject(new Error("ACP turn cancelled before prompt submission.")) : Promise.resolve();
       void promptStarted.catch(() => {});
-      const result = signal.aborted ? Promise.resolve({ status: "cancelled" })
+      const result = failBeforePrompt ? Promise.resolve({ status: "failed", error: new Error("fixture failure before prompt") })
+        : signal.aborted ? Promise.resolve({ status: "cancelled" })
         : text.startsWith("block queue") ? new Promise<{ status: string }>((resolve) => {
             signal.addEventListener("abort", () => resolve({ status: "cancelled" }), { once: true });
             blockerStarted();
@@ -58,6 +60,20 @@ for (const phase of ["queued", "loading"] as const) {
   });
   const launch = (task: string) => executor.launch({ harness: AgentRunHarness.Codex, task, cwd: dir, model: "test-model", effort: null });
   try {
+    if (phase === "failed-before-prompt") {
+      const failed = await executor.wait(launch("fail before prompt").id, 5_000);
+      assert.equal(failed.status, AgentRunStatus.Failed);
+      assert.equal(failed.promptSubmitted, false);
+      assert.ok(failed.childSessionId);
+      assert.ok(failed.acpxRecordId);
+      const continued = await executor.wait(executor.resume(failed.id, "continue saved session").id, 5_000);
+      assert.equal(continued.status, AgentRunStatus.Completed, continued.error ?? "failed turn resumes");
+      assert.equal(continued.childSessionId, failed.childSessionId);
+      assert.equal(continued.acpxRecordId, failed.acpxRecordId);
+      assert.deepEqual(state.agentRunById(failed.id), failed);
+      process.stdout.write("ok - failed pre-prompt turn reloads exact saved ACP session\n");
+      continue;
+    }
     const original = await executor.wait(launch("establish conversation").id, 5_000);
     assert.equal(original.status, AgentRunStatus.Completed);
     assert.equal(original.promptSubmitted, true);

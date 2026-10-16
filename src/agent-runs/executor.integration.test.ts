@@ -178,7 +178,6 @@ try {
   assert.equal(orphanState.agentRunById(orphan.id)?.status, AgentRunStatus.Interrupted, "restart reconciles running rows");
 
   // --- retry: same child identity, new run row ---------------------------------------------
-  assert.throws(() => restarted.retry(orphan.id), /child session/, "retry without identity is rejected");
   const retryable = state.agentRunById(sixth.id)!;
   assert.ok(retryable.childSessionId, "interrupted run kept its child identity");
   const retriedRun = restarted.retry(sixth.id);
@@ -219,7 +218,6 @@ try {
   await waitFor(() => state.agentRunById(resumedRun.id)?.status === AgentRunStatus.Completed, "resumed run completion");
   assert.equal(state.agentRunById(retriedRun.id)?.resultTail, "retried fine", "the completed run stays immutable");
 
-  assert.throws(() => restarted.resume(sixth.id, "not completed"), /completed/);
   assert.throws(
     () => restarted.resume(resumedRun.id, "  "),
     (error: unknown) => error instanceof Error && error.message === AGENT_RUN_RESUME_TASK_ERROR,
@@ -486,23 +484,6 @@ try {
   assert.equal(retryIdentityState.agentRunById(activeC.id)?.status, AgentRunStatus.Pending);
   await retryIdentityExecutor.stop();
   retryIdentityState.close();
-
-  // --- depth cap: delegating from a thread that is itself a delegated child is rejected -----
-  // Isolated so the never-started executor's pump can't disturb the positional launches above.
-  const depthState = new State(join(dir, "depth.db"), { bus: new InMemoryEventBus() });
-  const depthExecutor = new AgentRunExecutor(depthState, { launcher, logger: () => undefined });
-  depthState.createAgentRun({
-    harness: AgentRunHarness.ClaudeCode, task: "a delegated child", cwd: dir, depth: 1,
-    timeoutSeconds: 60, childSessionId: "delegated-child-session",
-  });
-  assert.throws(
-    () => depthExecutor.launch({
-      harness: AgentRunHarness.Codex, task: "grandchild", cwd: dir, parentThreadId: "delegated-child-session",
-    }),
-    /depth/,
-    "a run whose parent is itself a delegated child exceeds the depth cap",
-  );
-  depthState.close();
 
   process.stdout.write("ok — delegated-run executor lifecycle over real state\n");
 } finally {

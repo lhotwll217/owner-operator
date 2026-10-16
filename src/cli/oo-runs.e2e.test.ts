@@ -6,11 +6,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentRunStatus, type AgentRun, type AgentRunLaunchRequest, type DaemonInfo } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus, type AgentRun, type AgentRunLaunchRequest, type DaemonInfo } from "@owner-operator/core";
 import { repoRoot } from "../shared/repo-root";
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-runs-e2e-"));
 process.env.OO_HOME = ooHome;
+delete process.env.OO_AGENT_RUN_LEASE_ID;
 for (const key of ["OO_FROM_SESSION", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CURSOR_CONVERSATION_ID"]) delete process.env[key];
 let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
 
@@ -18,6 +19,7 @@ const launched: AgentRunLaunchRequest[] = [];
 const held = new Map<string, () => void>();
 const launcher = async (request: AgentRunLaunchRequest) => {
   launched.push(request);
+  if (request.run.task.includes("FAIL STARTUP")) throw new Error("startup failed before a child existed");
   const childSessionId = request.turnIntent.kind === "fresh" ? `child-${request.run.id}` : request.turnIntent.childSessionId;
   const acpxRecordId = request.run.acpxRecordId ?? `acpx-${request.run.id}`;
   request.onActivity({ childSessionId, acpxRecordId });
@@ -29,6 +31,9 @@ const launcher = async (request: AgentRunLaunchRequest) => {
   request.onEvent?.({ type: "text_delta", stream: "output", text: "OO_STREAM" });
   if (request.run.task.includes("HOLD")) await new Promise<void>((release) => held.set(request.run.id, release));
   request.onEvent?.({ type: "text_delta", stream: "output", text: "_OK" });
+  if (request.run.task.includes("FAIL TURN")) {
+    return { status: AgentRunStatus.Failed as const, resultText: "", error: "turn failed", childSessionId, acpxRecordId };
+  }
   return { status: AgentRunStatus.Completed as const, resultText: "OO_STREAM_OK", error: null, childSessionId, acpxRecordId };
 };
 
@@ -83,6 +88,8 @@ try {
   const delegateHelp = await runOo(["runs", "delegate", "--help"]);
   assert.match(delegateHelp.stdout, /--model <value>\s+exact model id; omitted: the approved delegated baseline, else the harness's own choice/,
     "help states the resolution order: pin, approved baseline, harness choice");
+  assert.match(delegateHelp.stdout, /At most 50 runs execute daemon-wide/);
+  assert.match(delegateHelp.stdout, /Delegation can nest to depth 5/);
 
   // delegate --json: NDJSON events as they happen, then the result line; exit 0 on completed.
   const delegated = await runOo(["runs", "delegate", "--harness", "claude-code", "reply OO_STREAM_OK", "--json"]);
@@ -111,9 +118,17 @@ try {
   assert.equal(flaggedRow.parentThreadId, "parent-flag", "--from-session wins");
   const fromEnv = JSON.parse((await runOo(["runs", "delegate", "--harness", "codex", "t", "--no-wait", "--json"], { CODEX_THREAD_ID: "parent-codex" })).stdout) as AgentRun;
   assert.equal(fromEnv.parentThreadId, "parent-codex", "the harness env names the parent");
-  const nested = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", `child-${id}`]);
-  assert.equal(nested.status, 1, "a delegated child cannot delegate");
-  assert.match(nested.stderr, /delegation depth 2 exceeds the cap of 1/);
+  const nested = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", `child-${id}`, "--no-wait", "--json"]);
+  assert.equal(nested.status, 0, nested.stderr);
+  const nestedRow = JSON.parse(nested.stdout) as AgentRun;
+  assert.equal(nestedRow.depth, 2);
+  assert.equal(nestedRow.parentThreadId, `child-${id}`);
+  const depthFive = state.createAgentRun({ harness: AgentRunHarness.Codex, task: "depth five", cwd: repoRoot,
+    depth: 5, timeoutSeconds: 60, childSessionId: "depth-five-child" });
+  state.finishAgentRun(depthFive.id, { status: AgentRunStatus.Completed, resultTail: null, error: null });
+  const tooDeep = await runOo(["runs", "delegate", "--harness", "codex", "t", "--from-session", "depth-five-child", "--no-wait"]);
+  assert.equal(tooDeep.status, 1);
+  assert.match(tooDeep.stderr, /delegation depth 6 exceeds the cap of 5/);
 
   // Kill the CLI mid-stream: the run keeps running; logs --follow replays from the start.
   const streaming = spawnOo(["runs", "delegate", "--harness", "claude-code", "HOLD then reply", "--json"]);
@@ -160,8 +175,29 @@ try {
   assert.equal(continuedRun.task, "continue the cancelled task");
   assert.equal(state.agentRunById(cancelId)?.status, AgentRunStatus.Cancelled);
   const resumeHelp = await runOo(["runs", "resume", "--help"]);
-  assert.match(resumeHelp.stdout, /completed or cancelled/);
-  assert.match(resumeHelp.stdout, /default way to continue cancelled work/);
+  assert.match(resumeHelp.stdout, /any terminal run's saved child conversation/);
+  assert.match(resumeHelp.stdout, /Failed, cancelled, interrupted, and lost/);
+  const failedCall = await runOo(["runs", "delegate", "--harness", "codex", "FAIL TURN", "--json"]);
+  assert.equal(failedCall.status, 1);
+  const failedId = runIdFrom(failedCall.stderr);
+  assert.equal(state.agentRunById(failedId)?.status, AgentRunStatus.Failed);
+  const corrected = await runOo(["runs", "resume", failedId, "continue with corrected scope", "--json"]);
+  assert.equal(corrected.status, 0, corrected.stderr);
+  const correctedRun = JSON.parse(corrected.stdout) as AgentRun;
+  assert.equal(correctedRun.resumeOfRunId, failedId);
+  assert.equal(correctedRun.childSessionId, state.agentRunById(failedId)?.childSessionId);
+  assert.equal(correctedRun.task, "continue with corrected scope");
+
+  const startupCall = await runOo(["runs", "delegate", "--harness", "codex", "FAIL STARTUP", "--json"]);
+  assert.equal(startupCall.status, 1);
+  const startupId = runIdFrom(startupCall.stderr);
+  assert.equal(state.agentRunById(startupId)?.childSessionId, null);
+  const startupRetry = await runOo(["runs", "retry", startupId, "--json"]);
+  assert.equal(startupRetry.status, 0, startupRetry.stderr);
+  const startupRetryRun = JSON.parse(startupRetry.stdout) as AgentRun;
+  assert.equal(startupRetryRun.retryOfRunId, startupId);
+  await waitFor(() => launched.find(({ run }) => run.id === startupRetryRun.id), "fresh startup retry");
+  assert.deepEqual(launched.find(({ run }) => run.id === startupRetryRun.id)?.turnIntent, { kind: "fresh" });
   // A log far larger than the pipe buffer, read only after a pause, arrives whole with its
   // terminal record: the CLI waits on backpressure and drains stdout before exiting.
   const big = state.createAgentRun({ harness: "claude-code" as never, task: "HOLD big log", cwd: repoRoot, depth: 1, timeoutSeconds: 60 });
@@ -191,6 +227,12 @@ try {
   const agentRow = JSON.parse(agentDelegated.stdout) as AgentRun;
   assert.equal(agentRow.status, AgentRunStatus.Pending, "the Operator's delegate returns the pending row");
   assert.equal(agentDelegated.stderr, "", "and streams nothing");
+  const acpDelegated = await runOo(["runs", "delegate", "--harness", "codex", "--model", "m1", "ACP child", "--json"],
+    { OO_AGENT_RUN_LEASE_ID: "isolated-acp-lease", OO_FROM_SESSION: "acp-parent" });
+  assert.equal(acpDelegated.status, 0, acpDelegated.stderr);
+  assert.equal((JSON.parse(acpDelegated.stdout) as AgentRun).status, AgentRunStatus.Pending);
+  assert.equal((JSON.parse(acpDelegated.stdout) as AgentRun).parentThreadId, "acp-parent");
+  assert.equal(acpDelegated.stderr, "", "an ACP child returns without streaming its nested child");
   assert.equal(agentRow.timeoutSeconds, 90, "--timeout reaches the run");
   assert.equal(agentRow.effort, null, "--effort none launches with an explicit null effort");
   assert.equal(agentRow.cwd, repoRoot, "no --cwd and no selected worktree: the parent's resolved cwd falls back to the shell cwd");

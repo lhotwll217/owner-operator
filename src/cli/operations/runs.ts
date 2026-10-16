@@ -1,6 +1,8 @@
 import { isAbsolute, resolve } from "node:path";
 import {
   AGENT_RUN_EFFORTS,
+  AGENT_RUN_MAX_CONCURRENT,
+  AGENT_RUN_MAX_DEPTH,
   AgentRunHarness,
   AgentRunMissingBaseline,
   AgentRunStatus,
@@ -12,13 +14,11 @@ import {
   type AgentRunLogRecord,
 } from "@owner-operator/core";
 import { parentSessionId } from "../../shared/caller-session";
+import { agentCaller } from "../../shared/agent-caller";
 import { AgentConnectError, emit, gateway, UsageError, writeOut, type Noun } from "./operation";
 
 const HARNESSES = Object.values(AgentRunHarness) as string[];
 const RECONNECT_MS = 1_000; // the Gateway client's own SSE reconnect delay (src/gateway/client.ts)
-/** The Operator's bash (ADR 0001). Its completion events arrive on their own, so a delegation
- * returns the pending row instead of streaming the child into the Operator's context. */
-const agentCaller = (): boolean => process.env.OO_AGENT === "1";
 
 /** A whole number of seconds in 1..max, or undefined when the flag is absent. */
 function secondsFlag(name: string, value: unknown, max: number): number | undefined {
@@ -120,14 +120,18 @@ export const runs: Noun = {
   guide: "The daemon owns every child, so interrupting `delegate` or `logs --follow` detaches without\n"
     + "stopping the run, and `logs --follow` replays from the start when you reattach. Runtime contract:\n"
     + "https://github.com/lhotwll217/owner-operator/blob/main/docs/delegated-runs.md\n"
-    + "In the Operator's bash, `delegate` returns the pending row and completion arrives automatically,\n"
-    + "so run management is for owner-directed lifecycle control or explicit inspection.",
+    + "From an agent, `delegate` returns the pending row. Operator completion arrives automatically;\n"
+    + "an ACP parent continues automatically in its saved conversation after nested children finish.",
   verbs: {
     delegate: {
       args: "<task>",
-      summary: "launch a child agent; the Operator's bash gets the pending row, other callers stream the child until it finishes",
+      summary: "launch a child agent; agent callers get the pending row, other callers stream until it finishes",
       guide: "Outside the Operator, the command streams the child's output and exits 0 only when the run\n"
-        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.",
+        + "completed. --no-wait prints the run row at once; `oo runs logs --follow <id>` attaches.\n"
+        + `At most ${AGENT_RUN_MAX_CONCURRENT} runs execute daemon-wide; later runs remain queued. `
+        + `Delegation can nest to depth ${AGENT_RUN_MAX_DEPTH}. Children should pass their own saved\n`
+        + "session id with --from-session so depth and parent lineage are recorded. An ACP child\n"
+        + "can report a pending run id; its conversation continues automatically after the children finish.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
@@ -136,7 +140,7 @@ export const runs: Noun = {
         cwd: { type: "string", help: "child working directory (default: the parent session's selected worktree, else the current directory)" },
         timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },
         "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
-        "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default in the Operator's bash)" },
+        "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default for agent callers)" },
       },
       examples: [
         'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',
@@ -204,16 +208,20 @@ export const runs: Noun = {
     },
     get: rowVerb("the durable run row", ["oo runs get <id>", "oo runs get <id> --json"], async (id) => (await gateway()).agentRun(id)),
     cancel: rowVerb("cancel a pending or running run", ["oo runs cancel <id>"], async (id) => (await gateway()).cancelAgentRun(id)),
-    retry: rowVerb("rerun the same task after failed, interrupted, or lost", ["oo runs retry <id>"], async (id) => (await gateway()).retryAgentRun(id)),
+    retry: {
+      ...rowVerb("rerun the same task after failed, interrupted, or lost", ["oo runs retry <id>"],
+        async (id) => (await gateway()).retryAgentRun(id)),
+      guide: "Retry repeats the original task in a linked run. It reloads a saved child conversation\n"
+        + "when one exists. If startup saved no child session or ACP record, this explicit retry\n"
+        + "starts a fresh conversation. A present but invalid record fails instead of starting fresh.",
+    },
     resume: {
       args: "<id> <task>",
-      summary: "continue a completed or cancelled run's child conversation in a new run row",
-      guide: "The default way to continue cancelled work. Pass instructions that continue or revise the\n"
-        + "work, and use the latest run id in that conversation. A cancelled run resumes when it\n"
-        + "submitted a prompt or is already a resume successor, and its session can reload; successors\n"
-        + "cancelled while queued or loading still resume, fresh startup cancellations do not. If the\n"
-        + "harness cannot reload the conversation, report the error: starting a fresh `delegate` instead\n"
-        + "needs an explicit decision.",
+      summary: "continue any terminal run's saved child conversation with new instructions in a linked run",
+      guide: "Use the latest run id in the conversation. Failed, cancelled, interrupted, and lost\n"
+        + "runs can continue when their saved child conversation can reload, even if prompt\n"
+        + "submission was not acknowledged. A startup failure with no saved conversation cannot resume.\n"
+        + "If reload fails, report that error. Starting fresh requires an explicit delegate or retry.",
       minPositionals: 2,
       examples: ['oo runs resume <id> "Continue where you stopped and finish the remaining tests"'],
       async run({ positionals: [id, task], json }) {

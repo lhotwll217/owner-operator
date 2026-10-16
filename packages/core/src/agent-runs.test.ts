@@ -25,20 +25,31 @@ assert.deepEqual(agentRunTurnIntent({
 }, undefined, cancelled), {
   kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record",
 });
-for (const status of [AgentRunStatus.Pending, AgentRunStatus.Running, AgentRunStatus.Failed,
-  AgentRunStatus.Interrupted, AgentRunStatus.Lost]) {
+for (const status of [AgentRunStatus.Pending, AgentRunStatus.Running]) {
   assert.match(agentRunResumeError({ ...completed, status }, {
     existingResumeRunId: null, activeRunId: null,
-  }) ?? "", /can only be resumed/);
+  }) ?? "", /cannot be resumed while/);
 }
+for (const status of [AgentRunStatus.Failed, AgentRunStatus.Interrupted, AgentRunStatus.Lost]) {
+  assert.equal(agentRunResumeError({ ...completed, status, promptSubmitted: true }, {
+    existingResumeRunId: null, activeRunId: null,
+  }), null, `${status} with a saved conversation accepts new instructions`);
+  assert.equal(agentRunResumeError({ ...completed, status, promptSubmitted: false }, {
+    existingResumeRunId: null, activeRunId: null,
+  }), null, `${status} can reload a saved session before prompt acknowledgement`);
+}
+const failedRetryBeforePrompt = { ...completed, status: AgentRunStatus.Failed,
+  promptSubmitted: false, retryOfRunId: "earlier-failed" };
+assert.equal(agentRunResumeError(failedRetryBeforePrompt, {
+  existingResumeRunId: null, activeRunId: null,
+}), null, "a failed retry inherits the earlier conversation before its own prompt");
 assert.match(agentRunRetryError(cancelled, {
   existingRetryRunId: null, activeRunId: null,
 }) ?? "", /not retryable/);
 const unsubmitted = { ...cancelled, promptSubmitted: false };
-assert.match(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activeRunId: null }) ?? "",
-  /no confirmed prompt submission/);
-assert.throws(() => agentRunTurnIntent({ ...unsubmitted, id: "invalid", resumeOfRunId: cancelled.id },
-  undefined, unsubmitted), /no confirmed prompt submission/);
+assert.equal(agentRunResumeError(unsubmitted, { existingResumeRunId: null, activeRunId: null }), null);
+assert.deepEqual(agentRunTurnIntent({ ...unsubmitted, id: "continued-before-prompt", resumeOfRunId: cancelled.id },
+  undefined, unsubmitted), { kind: "resume", childSessionId: "native-child", acpxRecordId: "acpx-record" });
 const unsubmittedSuccessor = { ...unsubmitted, id: "successor", resumeOfRunId: cancelled.id };
 assert.equal(agentRunResumeError(unsubmittedSuccessor, { existingResumeRunId: null, activeRunId: null }), null,
   "a cancelled resume successor retains the submitted conversation before its own prompt");
@@ -63,16 +74,31 @@ assert.match(
   /already been retried by exact-retry/,
 );
 assert.match(
+  agentRunRetryError(failedForRetry, {
+    existingRetryRunId: null, existingResumeRunId: "corrected-successor", activeRunId: null,
+  }) ?? "", /already been resumed by corrected-successor/,
+);
+assert.match(
   agentRunRetryError(failedForRetry, { existingRetryRunId: null, activeRunId: "other-active" }) ?? "",
   /already has active run other-active/,
 );
-assert.match(
+assert.equal(
   agentRunRetryError(
     { ...failedForRetry, childSessionId: null },
     { existingRetryRunId: null, activeRunId: null },
-  ) ?? "",
-  /no child session identity/,
+  ), null, "startup failure can explicitly retry in a fresh conversation",
 );
+assert.deepEqual(agentRunTurnIntent({
+  ...failedForRetry, id: "startup-retry", status: AgentRunStatus.Pending,
+  childSessionId: null, retryOfRunId: failedForRetry.id,
+}, { ...failedForRetry, childSessionId: null }, undefined), { kind: "fresh" });
+assert.deepEqual(agentRunTurnIntent({
+  ...failedForRetry, id: "recovered-retry", status: AgentRunStatus.Pending,
+  childSessionId: "recovered-child", acpxRecordId: failedForRetry.id,
+  retryOfRunId: failedForRetry.id,
+}, { ...failedForRetry, childSessionId: null }, undefined), {
+  kind: "retry", childSessionId: "recovered-child", acpxRecordId: failedForRetry.id,
+});
 
 assert.equal(
   agentRunResumeError(completed, { existingResumeRunId: null, activeRunId: null }),
@@ -82,6 +108,11 @@ assert.equal(
 assert.match(
   agentRunResumeError(completed, { existingResumeRunId: "next", activeRunId: null }) ?? "",
   /already been resumed by next/,
+);
+assert.match(
+  agentRunResumeError({ ...failedForRetry, acpxRecordId: "saved-record" }, {
+    existingResumeRunId: null, existingRetryRunId: "retried-successor", activeRunId: null,
+  }) ?? "", /already been retried by retried-successor/,
 );
 assert.match(
   agentRunResumeError(completed, { existingResumeRunId: null, activeRunId: "active" }) ?? "",

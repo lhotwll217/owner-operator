@@ -65,10 +65,12 @@ try {
   const cancelledBeforeSubmission = await cancellation;
   assert.equal(cancelledBeforeSubmission.status, AgentRunStatus.Cancelled);
   assert.equal(promptsSent, 0);
-  assert.equal(deriveParentAgentStateWithEnvironment([cancelledBeforeSubmission]).runs[0].canResume, false,
-    "startup cancellation with session ids but no submitted prompt must not be resumable");
-  assert.throws(() => executor.resume(startup.id, "continue"), /no confirmed prompt submission/);
-  assert.equal(state.listAgentRuns().length, 1, "refusal creates no successor");
+  assert.equal(deriveParentAgentStateWithEnvironment([cancelledBeforeSubmission]).runs[0].canResume, true,
+    "saved session identities permit continuation before prompt acknowledgement");
+  const startupSuccessor = executor.resume(startup.id, "continue after startup cancellation");
+  assert.equal(startupSuccessor.resumeOfRunId, startup.id);
+  assert.equal(startupSuccessor.childSessionId, cancelledBeforeSubmission.childSessionId);
+  assert.equal((await executor.wait(startupSuccessor.id, 5_000)).status, AgentRunStatus.Completed);
 
   const original = launch();
   const queued = launch();
@@ -100,7 +102,7 @@ try {
   assert.deepEqual(state.agentRunById(original.id), cancelled);
   assert.throws(() => executor.resume(original.id, "branch"), /already been resumed/);
   assert.throws(() => executor.retry(original.id), /not retryable/);
-  process.stdout.write("ok - startup cancellation refuses resume; submitted cancelled prompts retain continuation\n");
+  process.stdout.write("ok - startup and submitted cancellations retain the saved conversation\n");
 } finally {
   await executor.stop();
   state.close();

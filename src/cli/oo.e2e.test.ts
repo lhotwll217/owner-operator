@@ -14,6 +14,7 @@ import { NOUNS } from "./operations";
 const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
 process.env.OO_HOME = ooHome; // in-process store seam (the --done seed) targets the same hermetic home
+delete process.env.OO_AGENT_RUN_LEASE_ID;
 const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: { ...process.env, OO_HOME: ooHome } } as const;
 let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
 
@@ -72,6 +73,8 @@ try {
     assert.equal(refused.status, 2, `OO_AGENT=1 refuses \`oo ${argv.join(" ")}\` (stderr: ${refused.stderr})`);
     assert.match(refused.stderr, /agents reach Owner Operator through `oo <noun> <verb>`/);
   }
+  const leased = spawnSync(ooBin, ["daemon"], { ...opts, env: { ...opts.env, OO_AGENT_RUN_LEASE_ID: "acp-lease" } });
+  assert.equal(leased.status, 2, "an ACP child cannot start a replacement daemon");
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "refused agent forms start no daemon");
   // A discovery file the agent cannot reach names the cause instead of claiming no daemon runs.
   const discovery = (pid: number) => writeFileSync(join(ooHome, "daemon.json"), JSON.stringify({

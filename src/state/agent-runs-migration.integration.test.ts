@@ -47,6 +47,7 @@ try {
   const legacyRun = migrated.agentRunById("legacy-run");
   assert.equal(legacyRun?.effort, null, "migration never backfills an invented effort");
   assert.equal(legacyRun?.effortApplied, false, "legacy null effort is distinguishably unapplied");
+  assert.deepEqual(legacyRun?.completionRunIds, [], "legacy rows have no recorded child delivery");
   migrated.close();
 } finally {
   rmSync(legacyDir, { recursive: true, force: true });
@@ -253,8 +254,8 @@ try {
   const migrated = after.agentRunById("legacy-cancelled")!;
   assert.equal(migrated.promptSubmitted, false, "migration cannot infer submission from child identity");
   assert.equal(migrated.childSessionId, "child");
-  assert.match(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }) ?? "",
-    /no confirmed prompt submission/);
+  assert.equal(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }), null,
+    "legacy submission uncertainty does not block reloading a saved conversation");
   after.close();
 } finally {
   rmSync(submissionDir, { recursive: true, force: true });

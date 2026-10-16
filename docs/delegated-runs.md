@@ -64,25 +64,28 @@ owns transcript identity and discovery.
 
 - **Terminal states are monotonic.** Retry and resume each create a new row; reopening a terminal
   row would erase one paid turn's history. Retry links the new row to the unsuccessful run whose
-  task it reruns; resume links the new row to the completed or cancelled run after which it sends a new task.
+  task it reruns; resume links the new row to the terminal run after which it sends a new task.
   The exact ledger-column contract lives in
   [schema docs](../src/state/schema-docs.ts). The
   [domain contract](../packages/core/src/agent-runs.ts) derives runtime turn intent from those
   relationships and fails closed when either is inconsistent.
 - **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
-  `interrupted`, or `lost`; resume requires a new task after `completed` or `cancelled`. The
+  `interrupted`, or `lost`; resume requires a new task after any terminal outcome. The
   [`oo runs` verbs](../src/cli/operations/runs.ts) own their inputs, while the
   [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
-- **Resume is the default way to continue cancelled work.** Supply a new task, including an
+- **Resume continues saved work after any terminal outcome.** Supply a new task, including an
   instruction to continue when the goal is unchanged. Both saved conversation identities and the
-  original workspace must still be available. A cancelled run requires either its own confirmed
-  prompt submission, recorded from ACPX `promptStarted`, or a `resume_of_run_id` relationship to
-  an existing conversation. A resume successor cancelled while queued or loading can itself be
-  resumed even though its new prompt was never submitted. Its `prompt_submitted` stays false.
-  Fresh startup cancellations and legacy cancellations without either form of evidence cannot
-  be resumed. Session creation alone is insufficient.
-  Use the latest run in the conversation; an already resumed run cannot branch it.
+  original workspace must still be available. Prompt acknowledgement is per-turn evidence, not
+  a continuation prerequisite: a run cancelled or failed after saving a session can resume even
+  when `prompt_submitted` is false. ACP reload must validate the exact saved record and child identity.
+  A startup failure with no saved session cannot resume.
+  Use the latest run in the conversation; an already retried or resumed run cannot branch it.
   A reload failure stays explicit. Starting a fresh delegate is a separate decision.
+- **Startup retry checks for a saved ACP record.** A failed run without a recorded child identity
+  may still have an ACP record saved before the run row was updated. Retry recovers that identity
+  and reloads the conversation. If no record exists, the explicit retry starts a fresh conversation
+  with the original task. A present but invalid record fails with its cause instead of silently
+  starting fresh. Resume never substitutes a fresh conversation.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
 - **`interrupted`** is retryable: a graceful daemon shutdown mid-run, or a restart reconciling a
@@ -94,7 +97,7 @@ owns transcript identity and discovery.
 
 ### Harness continuation
 
-Resume attempts to load the saved conversation after an eligible run is cancelled.
+Resume attempts to load the saved conversation after any eligible terminal run.
 Conversation retention has the harness-specific proof levels below. Resume uses the same
 ACP loading path as a follow-up after completion. OO checks both conversation identities after
 loading and fails with the harness and session in the error if loading fails. It never sends the
@@ -176,12 +179,19 @@ resource retains the run projection. Pi completion delivery uses the shared comp
 
 ## Execution
 
-- **Background by default for the Operator.** Under `OO_AGENT=1`, `oo runs delegate` records the
+- **Background by default for agents.** Under `OO_AGENT=1` or an ACP run lease, `oo runs delegate` records the
   durable `pending` row and returns immediately; the parent session is never frozen. The result is
-  carried by the ledger, not the parent bash call, and completion arrives through the parent
-  subscription. The Operator does not poll after delegation. Status reads remain only for explicit
-  owner requests. Owner and outside callers stream the child until it finishes unless they pass
-  `--no-wait`.
+  carried by the ledger, not the parent bash call. Completion reaches the Operator through its
+  subscription, without polling. An ACP parent receives the pending child id and can finish that
+  turn with work still pending. When its nested child conversations finish, the daemon resumes the
+  same saved parent conversation with bounded, untrusted child evidence. The follow-up includes
+  outcome counts and scoped `oo runs` retrieval instructions when details exceed its total budget.
+  The ledger records which child run IDs the follow-up carries; prompt submission confirms delivery
+  for restart-safe deduplication. An interrupted follow-up that never submitted its prompt gets one
+  automatic retry. Failed starts retain evidence for explicit retry or corrected resume; owner
+  cancellations retain it for explicit resume and never restart automatically. The follow-up waits
+  for an active parent turn to end. Owner and outside callers stream the child until it finishes unless they
+  pass `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
   [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
   [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available record/session identity
@@ -196,15 +206,16 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   mismatched selection fails closed. An explicit absolute `--cwd` remains exact, and a relative
   one resolves from the shell cwd. The initial child row records the resolved absolute path, and
   retry/resume copy that immutable cwd from the original run lineage.
-- **Concurrency** is capped (default 3 running daemon-wide); launches beyond the cap stay
+- **Concurrency** is capped at 50 running daemon-wide; launches beyond the cap stay
   `pending` and start as slots free, claimed one row at a time under the cap in a single
   transaction so a race can never overshoot.
 - **Owner Operator owns the deadline.** The executor aborts on its own per-run timeout so a
   launcher-side timeout after partial output can never read as success.
-- **Depth is 1**, enforced not just structurally. The executor rejects a launch whose parent
-  thread is itself a delegated run's child (`AGENT_RUN_MAX_DEPTH`). Every child prompt also tells
-  the child to complete the work directly without nested or background agents, including
-  harness-native sub-agents.
+- **Depth is capped at 5.** An Operator launch is depth 1. A child may delegate through
+  `OO_AGENT=1 oo runs delegate --from-session <its child session id>` at the next depth; the executor
+  rejects depth 6. The child prompt includes its confirmed session id when nesting is available.
+  A depth-5 child, or a child without a confirmed session id, is told to work directly.
+  Untracked harness-native and background agents remain outside the delegated-run ledger.
 - **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)

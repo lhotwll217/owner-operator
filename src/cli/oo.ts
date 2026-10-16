@@ -13,6 +13,7 @@ import { ensureOwnerOperatorWorkspace, isOnboarded } from "@owner-operator/core"
 import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
+import { agentCaller } from "../shared/agent-caller";
 
 const usage = async (): Promise<string> => (await import("./help")).rootHelp();
 
@@ -34,7 +35,7 @@ if (cli.kind === "usage-error") {
 // An agent's bash (OO_AGENT=1, set by the privacy guard) reaches Owner Operator through operations
 // only. These forms start or replace the daemon, which may be hosting the agent, or open a nested
 // paid Operator session.
-if (process.env.OO_AGENT === "1" && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
+if (agentCaller() && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
   process.stderr.write("oo: agents reach Owner Operator through `oo <noun> <verb>`; this form starts a daemon or an Operator session\n");
   process.exit(2);
 }
