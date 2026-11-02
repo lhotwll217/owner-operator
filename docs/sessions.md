@@ -41,7 +41,9 @@ context. This product store never authorizes or reports access to standalone Pi 
 scan cannot displace external sessions.
 
 The monitor respects the configured active window and updates all candidates in that window
-without the old per-source count cap. Widget visibility retains the existing window rules,
+without the old per-source count cap. A full scan also re-observes, by transcript path, every
+visible row the window passed, so an old needs-you or snoozed row keeps a current deep link and
+workspace diff. A transcript Codex has compressed to `.jsonl.zst` cannot be re-observed. Widget visibility retains the existing window rules,
 including outstanding owner attention and active delegated children. Reconciliation selects
 only visible working, idle, or needs-you rows. It does not queue quiet history outside the widget window.
 Codex guardian source metadata identifies approval machinery rather than independent owner work.

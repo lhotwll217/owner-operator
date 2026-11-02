@@ -256,12 +256,10 @@ function pickDiffBase(git) {
     const base = mergeBase(git, ref);
     if (base) return base;
   }
-  // If a configured base exists but is unavailable, or a default branch exists but this
-  // branch has no explicit base, do not guess. A hidden badge is better than a misleading
-  // "vs main" badge for stacked branches.
   if (configuredRefs.length) return null;
   for (const ref of [...baseRefCandidates(remoteHead(git)), "origin/main", "origin/master"]) {
-    if (mergeBase(git, ref)) return null;
+    const base = mergeBase(git, ref);
+    if (base) return base;
   }
   return "HEAD";
 }
@@ -269,9 +267,7 @@ function pickDiffBase(git) {
 // ---------- git workspace delta (per unique cwd, cached) ----------
 // +/- line totals from the repo's base branch to the WORKING TREE — committed + staged +
 // unstaged in one number. Prefer branch-local Git config (`branch.<name>.base`,
-// `gh-merge-base`, or a non-self tracking ref). If the branch's base is unknown but a
-// default branch exists, omit the badge instead of guessing "main". No branch refs → HEAD
-// (uncommitted only). Best-effort fact about the workspace: not a repo / dir gone → no badge.
+// `gh-merge-base`, or a non-self tracking ref). Best-effort fact about the workspace: not a repo / dir gone → no badge.
 const diffCache = new Map();
 function gitDiffStat(cwd) {
   if (!cwd || cwd === "(unknown)") return null;

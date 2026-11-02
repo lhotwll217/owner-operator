@@ -464,7 +464,11 @@ export class ThreadDb {
 
   private migrateThreadLink(): void {
     const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => row.name));
-    if (!threads.has("link")) this.db.exec("ALTER TABLE threads ADD COLUMN link TEXT");
+    if (threads.has("link")) return;
+    this.db.exec("ALTER TABLE threads ADD COLUMN link TEXT");
+    // Codex compresses old transcripts to .jsonl.zst, so a thread last observed before this
+    // column existed may never be re-observed.
+    this.db.exec("UPDATE threads SET link = 'codex://threads/' || id WHERE source = 'codex' AND app IN ('Codex App', 'Codex CLI')");
   }
 
   private migrateRetiredScheduleTools(): void {
@@ -833,6 +837,15 @@ export class ThreadDb {
       ...(row.statusSummary != null ? { statusSummary: row.statusSummary } : {}),
       ...(row.priority != null ? { priority: row.priority } : {}),
     }]));
+  }
+
+  transcriptPaths(threadIds: readonly string[]): string[] {
+    if (!threadIds.length) return [];
+    const rows = this.db.prepare(
+      `SELECT transcript_path AS path FROM threads
+       WHERE transcript_path IS NOT NULL AND id IN (${threadIds.map(() => "?").join(", ")})`,
+    ).all(...threadIds) as unknown as Array<{ path: string }>;
+    return rows.map((row) => row.path);
   }
 
   resolutionRow(threadId: string): ThreadResolutionRow | undefined {

@@ -39,6 +39,8 @@ export interface SessionMonitorLogRecord {
   error: string;
 }
 
+const NO_CUTOFF = "1970-01-01";
+
 async function scanTranscripts(since: string, limit: number, files: readonly string[] = []): Promise<ScanRow[]> {
   if (!isOnboarded()) return [];
   const parsed = await runTranscriptScan([
@@ -95,11 +97,12 @@ export class SessionMonitor {
     this.polling = true;
     try {
       this.armWatchers();
-      const rows = await (this.options.scan ?? scanTranscripts)(
-        this.options.since ?? loadActiveWindow(),
-        this.options.limit ?? 0,
-        files,
-      );
+      const scan = this.options.scan ?? scanTranscripts;
+      const rows = await scan(this.options.since ?? loadActiveWindow(), this.options.limit ?? 0, files);
+      if (!files.length) {
+        const missedByWindow = this.state.visibleTranscriptPathsExcept(new Set(rows.flatMap((row) => row.transcriptPath ?? [])));
+        if (missedByWindow.length) rows.push(...await scan(NO_CUTOFF, 0, missedByWindow));
+      }
       const claudeIds = rows.filter((row) => row.source === "claude").map((row) => row.id);
       const desktop = this.claudeDesktop && claudeIds.length ? await this.claudeDesktop.links(claudeIds) : new Map<string, string>();
       this.state.recordPoll(desktop.size ? rows.map((row) => {

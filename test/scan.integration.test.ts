@@ -130,8 +130,8 @@ writeFileSync(
   JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Feature change is ready on the release stack." }] } }) + "\n",
 );
 
-// Same branch shape, but no branch.<name>.base metadata. The scanner should omit the badge
-// instead of guessing origin/main and showing a misleading delta.
+// Same branch shape, but no branch.<name>.base metadata. The scanner measures from the merge-base
+// with origin/main, so the release branch's own line counts too.
 const unknownBaseRepoDir = join(home, "dev", "unknown-base-feature");
 mkdirSync(unknownBaseRepoDir, { recursive: true });
 const unknownGit = (...a: string[]) => execFileSync("git", ["-C", unknownBaseRepoDir, ...a], {
@@ -334,8 +334,8 @@ try {
   );
   assert.deepEqual(
     [byId(fresh, unknownBaseId)?.diffAdded, byId(fresh, unknownBaseId)?.diffDeleted],
-    [undefined, undefined],
-    "unknown-base workspace omits the badge instead of guessing origin/main",
+    [2, 0],
+    "unknown-base workspace measures from the default branch",
   );
 
   // The PostHog Code finder: ACP log → thread. taskRunId is the id, cwd → repo, first prompt

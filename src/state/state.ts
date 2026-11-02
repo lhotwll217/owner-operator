@@ -125,6 +125,10 @@ export class State {
     });
   }
 
+  visibleTranscriptPathsExcept(scanned: ReadonlySet<string>): string[] {
+    return this.db.transcriptPaths(this.listCurrentSessionState().map((row) => row.id)).filter((path) => !scanned.has(path));
+  }
+
   listEnrichmentCandidates(): EnrichmentCandidate[] {
     const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
     return this.db.listEnrichmentCandidates().filter((row) => visible.has(row.id));
