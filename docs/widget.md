@@ -15,7 +15,7 @@ verified deep link exists (Codex, Claude desktop); other rows are inert.
 
 Every row shows a title from the moment its work is visible, its repo, and its latest status
 summary in full — including a working row, which is where the owner reads what is happening right
-now. A row whose workspace has a code diff shows its `+N −N` under the time. Hovering a root
+now. A row whose workspace has a code diff shows its `+N −N` at its bottom-right. Hovering a root
 swaps that right column for snooze and done; the column is never narrower than those buttons, so
 they never cover the summary.
 A delegated child's status summary stays folded until the owner opens it, and a child row is a
@@ -24,7 +24,8 @@ smaller line under its parent with no actions of its own.
 Rows arrive in display order from `arrangeSessionState`
 ([`packages/core/src/session-state.ts`](../packages/core/src/session-state.ts)), the one order
 the panel, `oo-widget --once`, and `oo session-state list` share. Sections run Needs you, Working,
-Idle, then a collapsed Snoozed; done rows leave the panel. Needs-you, idle, and snoozed rows sort
+Idle, then Snoozed; every section folds from its header, and Snoozed starts folded. Done rows
+leave the panel. Needs-you, idle, and snoozed rows sort
 by latest message, newest first, so a row moves when work comes back to the owner; working rows
 sort by creation, newest first, so they never shuffle. A delegated child follows its parent, in
 the parent's section, at any depth.

@@ -10,7 +10,7 @@ import SwiftUI
 struct WidgetRoot: View {
     @EnvironmentObject var client: DaemonClient
     @State private var expanded = false
-    @State private var snoozedOpen = false
+    @State private var collapsed: Set<SessionSection> = [.snoozed]
 
     private var listMaxHeight: CGFloat { (NSScreen.main?.visibleFrame.height ?? 900) * 0.7 }
 
@@ -18,7 +18,6 @@ struct WidgetRoot: View {
         VStack(spacing: 0) {
             CompactBar(expanded: $expanded)
             if expanded {
-                Divider()
                 if !client.online {
                     offline
                 } else if client.setupRequired {
@@ -29,14 +28,14 @@ struct WidgetRoot: View {
                             ForEach(client.snapshot.sections) { section in
                                 // Needs you always shows, so an empty panel still answers the question.
                                 if section.kind == .needsYou || !section.rows.isEmpty {
-                                    SectionView(
-                                        section: section,
-                                        open: section.kind == .snoozed ? $snoozedOpen : .constant(true)
-                                    )
+                                    SectionView(section: section, open: Binding(
+                                        get: { !collapsed.contains(section.kind) },
+                                        set: { if $0 { collapsed.remove(section.kind) } else { collapsed.insert(section.kind) } }
+                                    ))
                                 }
                             }
                         }
-                        .padding(.horizontal, 6).padding(.top, 4).padding(.bottom, 8)
+                        .padding(.horizontal, 6).padding(.bottom, 8)
                     }
                     .frame(maxHeight: listMaxHeight)
                 }
@@ -96,21 +95,24 @@ struct CompactBar: View {
             if client.online && client.setupRequired {
                 Text("setup required").font(.system(size: 11)).foregroundStyle(.yellow)
                 Spacer(minLength: 6)
-            } else if client.online {
+            } else if client.online && !expanded {
+                // Expanded, the section headers carry these counts.
                 needsYouCount
                 if client.working > 0 {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 6, height: 6)
-                        Text("\(client.working)")
+                        Text(verbatim: "\(client.working)")
                     }
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green)
                 }
-                if !expanded && !fresh.isEmpty {
+                if !fresh.isEmpty {
                     FreshTicker(items: fresh)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Spacer(minLength: 6)
                 }
+            } else if client.online {
+                Spacer(minLength: 6)
             } else {
                 Text("daemon offline").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer(minLength: 6)
@@ -118,21 +120,24 @@ struct CompactBar: View {
             Button { expanded.toggle() } label: {
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    .frame(width: 24, height: 18)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(expanded ? "Collapse the panel" : "Expand the panel")
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, 10).padding(.top, 7).padding(.bottom, expanded ? 0 : 7)
         .contentShape(Rectangle())
         .dragsPanel()
     }
 
     private var needsYouCount: some View {
         let count = client.needsYou
-        return Text("\(count)")
-            .font(.system(size: 11, weight: .bold))
+        return Text(verbatim: "\(count)")
+            .font(.system(size: 11, weight: .bold).monospacedDigit())
             .foregroundStyle(count > 0 ? Color.black.opacity(0.85) : Color.secondary)
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .frame(minWidth: 20)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 18, minHeight: 18)
             .background(Capsule().fill(count > 0 ? Color.yellow : Color.primary.opacity(0.12)))
     }
 
@@ -260,35 +265,45 @@ private struct TickerTextWidthKey: PreferenceKey {
 }
 
 
-/// One section: a Title 3 header with its root count, then its rows in daemon order. Snoozed
-/// toggles open from its header and starts collapsed.
+/// Where a section's rows line up: the header text's leading edge, past the chevron.
+private enum SectionInset {
+    static let edge: CGFloat = 8
+    static let chevron: CGFloat = 10
+    static let gap: CGFloat = 6
+    static let text = edge + chevron + gap
+}
+
+/// One section: a small caps header with its root count, ruled off from its rows while open, then
+/// its rows in daemon order. Every section folds from its header; Snoozed starts folded.
 struct SectionView: View {
     @EnvironmentObject var client: DaemonClient
     let section: SectionRows
     @Binding var open: Bool
 
-    private var collapsible: Bool { section.kind == .snoozed }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                if collapsible {
-                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11, weight: .semibold))
-                }
-                Text(section.kind.title).font(.title3.weight(.semibold))
-                Text("\(section.count)").font(.title3.weight(.medium)).foregroundStyle(.tertiary)
+            HStack(spacing: SectionInset.gap) {
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: SectionInset.chevron, height: SectionInset.chevron)
+                Text(section.kind.title.uppercased()).tracking(0.6)
+                Text(verbatim: "\(section.count)").foregroundStyle(.tertiary)
             }
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 8).padding(.top, 16).padding(.bottom, 6)
+            .padding(.horizontal, SectionInset.edge).padding(.top, 4).padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottom) { if open { Divider() } }
             .contentShape(Rectangle())
-            .onTapGesture { if collapsible { open.toggle() } }
+            .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } }
+            .padding(.top, 10) // outside the tap target, so it never reaches the panel's chevron
 
-            if section.rows.isEmpty {
-                Text("Nothing needs you").font(.system(size: 12)).foregroundStyle(.secondary)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-            }
             if open {
-                ForEach(section.rows) { row in
+                if section.rows.isEmpty {
+                    Text("Nothing needs you").font(.system(size: 12)).foregroundStyle(.secondary)
+                        .padding(.leading, SectionInset.text).padding(.vertical, 6)
+                }
+                ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
                     RowView(
                         row: row,
                         onOpen: { client.open(row) },
@@ -297,6 +312,9 @@ struct SectionView: View {
                         onDone: { withAnimation(.easeInOut(duration: 0.28)) { client.markDone(row.id) } },
                         onRename: { client.rename(row.id, to: $0) }
                     )
+                    .overlay(alignment: .top) {
+                        if index > 0 && row.depth == 0 { Divider().padding(.leading, RowView.titleInset) }
+                    }
                     .transition(.opacity)
                 }
             }
@@ -320,13 +338,18 @@ struct RowView: View {
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
 
+    static let badgeSize: CGFloat = 16
+    static let badgeGap: CGFloat = 10
+    /// A root row's title edge, where its divider starts.
+    static let titleInset = SectionInset.text + badgeSize + badgeGap
+
     private var isChild: Bool { row.depth > 0 }
     private var showActions: Bool { hovering && !isChild && !editing }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AppBadge(app: row.app, size: 16)
-                .frame(width: 16, height: 16, alignment: .leading)
+        HStack(alignment: .top, spacing: Self.badgeGap) {
+            AppBadge(app: row.app, size: Self.badgeSize)
+                .frame(width: Self.badgeSize, height: Self.badgeSize, alignment: .leading)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -343,8 +366,9 @@ struct RowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             rightColumn
         }
+        .fixedSize(horizontal: false, vertical: true) // lets the right column span the row's height
         .padding(.vertical, isChild ? 4 : 8)
-        .padding(.leading, 8 + CGFloat(row.depth) * 26)
+        .padding(.leading, SectionInset.text + CGFloat(row.depth) * 26)
         .padding(.trailing, 8)
         .background(RoundedRectangle(cornerRadius: 8).fill(hovering ? Color.primary.opacity(0.06) : Color.clear))
         .contentShape(Rectangle())
@@ -417,16 +441,20 @@ struct RowView: View {
                 Text(verbatim: "+\(row.diffAdded ?? 0)").foregroundStyle(.green)
                 Text(verbatim: "−\(row.diffDeleted ?? 0)").foregroundStyle(.red)
             }
-            .font(.system(size: 12))
+            .font(.system(size: 10.5).monospacedDigit())
         }
     }
 
     private var rightColumn: some View {
         ZStack(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: 0) {
                 timeColumn.padding(.top, 2)
-                if !isChild { diff }
+                if !isChild {
+                    Spacer(minLength: 3)
+                    diff
+                }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
             .opacity(showActions ? 0 : 1)
             if !isChild {
                 actions.opacity(showActions ? 1 : 0).allowsHitTesting(showActions)
