@@ -30,7 +30,7 @@ Behavior and wire ownership live in [`docs/widget.md`](../../docs/widget.md).
 ## Notes
 
 - Read-only over your sessions. Owner actions write only owner state: mark done and snooze
-  (hover a row), and rename (double-click a title; your title shows instead of the AI's — which
+  (hover a row), and rename (the row's context menu; your title shows instead of the AI's — which
   keeps titling underneath as an audit trail — until you clear the rename via an empty title or
-  the row's context menu). Clicking a row opens its thread when it has a link.
+  Use AI title). Clicking a row opens its thread when it has a link.
 - Not WidgetKit — can't float on top or hold a live connection.

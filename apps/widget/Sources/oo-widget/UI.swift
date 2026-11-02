@@ -383,8 +383,8 @@ struct RowView: View {
         }
     }
 
-    /// The title, or its inline editor while renaming. Return commits, Escape cancels. A double
-    /// click renames; a single click falls through to opening the thread.
+    /// The title, or its inline editor while renaming. Return commits, Escape cancels. Renaming
+    /// starts from the row's context menu; a click falls through to opening the thread.
     @ViewBuilder private var title: some View {
         if editing {
             TextField("title", text: $draft, axis: .vertical)
@@ -399,7 +399,6 @@ struct RowView: View {
                 .font(.system(size: isChild ? 13 : 14, weight: !isChild && row.section == .needsYou ? .semibold : .regular))
                 .foregroundStyle(isChild ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 .lineLimit(1).truncationMode(.tail)
-                .gesture(TapGesture(count: 2).onEnded { startEditing() }.exclusively(before: TapGesture().onEnded { onOpen() }))
         }
     }
 
