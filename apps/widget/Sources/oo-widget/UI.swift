@@ -79,6 +79,8 @@ struct WidgetRoot: View {
                 .buttonStyle(.borderless).font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .dragsPanel()
     }
 }
 
@@ -121,6 +123,7 @@ struct CompactBar: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .contentShape(Rectangle())
+        .dragsPanel()
     }
 
     private var needsYouCount: some View {
@@ -135,6 +138,30 @@ struct CompactBar: View {
 
     /// Threads whose turn finished in the last 5 min — what the soft pulse cycles through.
     private var fresh: [SessionStateRow] { client.freshNeedsYou() }
+}
+
+extension View {
+    /// Drags the floating panel from this view: background dragging (`isMovableByWindowBackground`)
+    /// does not move the panel when the press lands on SwiftUI content.
+    func dragsPanel() -> some View { modifier(PanelDrag()) }
+}
+
+private struct PanelDrag: ViewModifier {
+    @State private var start: (panel: NSPoint, mouse: NSPoint)?
+
+    func body(content: Content) -> some View {
+        content.gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { _ in
+                    guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+                    let mouse = NSEvent.mouseLocation
+                    let from = start ?? (panel.frame.origin, mouse)
+                    start = from
+                    panel.setFrameOrigin(NSPoint(x: from.panel.x + mouse.x - from.mouse.x, y: from.panel.y + mouse.y - from.mouse.y))
+                }
+                .onEnded { _ in start = nil }
+        )
+    }
 }
 
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
@@ -305,28 +332,21 @@ struct RowView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     title
                     statusSummaryDisclosure
-                    Spacer(minLength: 8)
-                    timeColumn.opacity(showActions ? 0 : 1)
                 }
                 if !isChild {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        line2
-                        Spacer(minLength: 8)
-                        diff.opacity(showActions ? 0 : 1)
-                    }
+                    line2
                 } else if let statusSummary = shownChildStatusSummary {
                     Text(statusSummary).font(.system(size: 12)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            rightColumn
         }
         .padding(.vertical, isChild ? 4 : 8)
         .padding(.leading, 8 + CGFloat(row.depth) * 26)
         .padding(.trailing, 8)
         .background(RoundedRectangle(cornerRadius: 8).fill(hovering ? Color.primary.opacity(0.06) : Color.clear))
-        .overlay(alignment: .trailing) {
-            if showActions { actions.padding(.trailing, 8) }
-        }
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
         .onHover { hovering = $0 }
@@ -387,20 +407,33 @@ struct RowView: View {
             var summary = AttributeContainer(); summary.foregroundColor = .secondary
             out.append(AttributedString("  \(statusSummary)", attributes: summary))
         }
-        return Text(out).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
+        return Text(out).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private var diff: some View {
         if row.diffAdded != nil || row.diffDeleted != nil {
             HStack(spacing: 4) {
-                Text("+\(row.diffAdded ?? 0)").foregroundStyle(.green)
-                Text("−\(row.diffDeleted ?? 0)").foregroundStyle(.red)
+                // Verbatim: a localized interpolation groups digits ("2 037").
+                Text(verbatim: "+\(row.diffAdded ?? 0)").foregroundStyle(.green)
+                Text(verbatim: "−\(row.diffDeleted ?? 0)").foregroundStyle(.red)
             }
             .font(.system(size: 12))
         }
     }
 
-    /// Snooze (or wake, in Snoozed) and done, over the right column only.
+    private var rightColumn: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .trailing, spacing: 3) {
+                timeColumn.padding(.top, 2)
+                if !isChild { diff }
+            }
+            .opacity(showActions ? 0 : 1)
+            if !isChild {
+                actions.opacity(showActions ? 1 : 0).allowsHitTesting(showActions)
+            }
+        }
+    }
+
     private var actions: some View {
         HStack(spacing: 4) {
             if row.section == .snoozed {
@@ -501,6 +534,7 @@ struct AppBadge: View {
         ("Grok", "grok", true),
         ("opencode", "opencode", true),
         ("pi", "pi", true),
+        ("Owner Operator", "owner-operator", true),
     ]
     private static var cache: [String: (image: NSImage, template: Bool)] = [:]
 

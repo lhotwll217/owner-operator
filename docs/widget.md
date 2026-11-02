@@ -14,7 +14,10 @@ or mark it done without opening its harness. Clicking a row opens the thread in 
 verified deep link exists (Codex, Claude desktop); other rows are inert.
 
 Every row shows a title from the moment its work is visible, its repo, and its latest status
-summary — including a working row, which is where the owner reads what is happening right now.
+summary in full — including a working row, which is where the owner reads what is happening right
+now. A row whose workspace has a code diff shows its `+N −N` under the time. Hovering a root
+swaps that right column for snooze and done; the column is never narrower than those buttons, so
+they never cover the summary.
 A delegated child's status summary stays folded until the owner opens it, and a child row is a
 smaller line under its parent with no actions of its own.
 
