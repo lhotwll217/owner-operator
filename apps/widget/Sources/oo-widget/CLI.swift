@@ -6,39 +6,36 @@ import Foundation
 /// ANSI helper: wrap `s` in SGR code(s).
 private func sgr(_ code: Int, _ s: String) -> String { "\u{1b}[\(code)m\(s)\u{1b}[0m" }
 
-private func glyphColored(_ st: ThreadState) -> String {
-    switch st {
-    case .needsYou: return sgr(33, st.glyph) // yellow
-    case .working:  return sgr(32, st.glyph) // green
-    default:        return sgr(90, st.glyph) // grey
+/// The right column, as the panel shows it: age (yellow when it needs you, a green dot while
+/// working), or the wake time of a snoozed row; then the diff.
+private func rightColumn(_ r: SessionStateRow, now: Date) -> String {
+    let age = shortAge(r.lastActive)
+    let when: String
+    switch r.section {
+    case .needsYou: when = sgr(33, age)
+    case .working: when = sgr(32, "●") + " " + sgr(90, age)
+    case .idle: when = sgr(90, age)
+    case .snoozed: when = sgr(90, r.snooze.map { "until \(snoozeLabel($0, now: now))" } ?? age)
     }
+    guard r.depth == 0, r.diffAdded != nil || r.diffDeleted != nil else { return when }
+    return when + "  " + sgr(32, "+\(r.diffAdded ?? 0)") + " " + sgr(31, "−\(r.diffDeleted ?? 0)")
 }
 
-func renderText(rows: [SessionStateRow], port: Int) -> String {
-    let (groups, counts) = buildSessionState(rows: rows)
-    let total = groups.reduce(0) { $0 + $1.rows.count }
-
-    let stats: [String] = [
-        (counts[.needsYou] ?? 0) > 0 ? sgr(33, "◐ \(counts[.needsYou]!)") : nil,
-        (counts[.working] ?? 0) > 0 ? sgr(32, "● \(counts[.working]!)") : nil,
-        (counts[.idle] ?? 0) > 0 ? sgr(90, "○ \(counts[.idle]!)") : nil,
-    ].compactMap { $0 }
-
+func renderText(rows: [SessionStateRow], port: Int, now: Date = Date()) -> String {
+    let snapshot = buildSnapshot(rows: rows)
     var lines: [String] = []
-    lines.append(sgr(1, "Threads") + "  \(total)    " + stats.joined(separator: "  "))
-    lines.append("")
-    if groups.isEmpty { lines.append(sgr(90, "(no active threads)")) }
-    for g in groups {
-        lines.append(sgr(36, "▾ \(g.repo)") + sgr(90, "  \(g.rows.count)"))
-        for r in g.rows {
-            let badge = r.priority.map { sgr(33, "P\($0)") + " " } ?? ""
-            let age = sgr(90, shortAge(r.lastActive))
-            let indent = String(repeating: "  ", count: r.nestingDepth)
-            lines.append("  \(indent)\(glyphColored(r.state)) \(badge)\(r.title)  \(age)")
-            if let statusSummary = r.displayStatusSummary { lines.append(sgr(90, "      \(indent)→ \(statusSummary)\(r.statusSummaryPending ? " ·" : "")")) }
+    for section in snapshot.sections where section.kind == .needsYou || !section.rows.isEmpty {
+        lines.append(sgr(1, section.kind.title) + sgr(90, "  \(section.count)"))
+        if section.rows.isEmpty { lines.append(sgr(90, "  Nothing needs you")) }
+        for r in section.rows {
+            let indent = String(repeating: "  ", count: r.depth)
+            lines.append("  \(indent)\(r.title)  \(rightColumn(r, now: now))")
+            if r.depth == 0 {
+                lines.append("    " + sgr(34, r.repo) + (r.displayStatusSummary.map { sgr(90, "  \($0)") } ?? ""))
+            }
         }
+        lines.append("")
     }
-    lines.append("")
     lines.append(sgr(2, "127.0.0.1:\(port)"))
     return lines.joined(separator: "\n")
 }
