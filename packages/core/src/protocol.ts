@@ -3,6 +3,7 @@ import type { DelegatedBaseline, DelegatedBaselineApproval } from "./delegated-b
 import type { ParentAgentStateView } from "./agent-state";
 import type { GatewayEvent } from "./events";
 import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./scheduling";
+import type { SessionSection, Snooze } from "./session-state";
 import type { ThreadState } from "./status";
 import type {
   ResolveWorktreeCwdRequest,
@@ -69,6 +70,14 @@ export interface SessionStateRow {
   diffDeleted: number | null;
   /** Set when this thread is a delegated run's child session: the delegating thread's id. */
   parentThreadId: string | null;
+  /** Display section. Rows arrive in display order; a child carries its parent's section. */
+  section: SessionSection;
+  /** Nesting under a visible delegated parent; 0 for a root. */
+  depth: number;
+  /** The owner's snooze while it holds; null otherwise. */
+  snooze: Snooze | null;
+  /** Deep link that opens this session in its own app; null when none is verified. */
+  link: string | null;
 }
 
 export interface EnrichmentCandidate extends SessionStateRow {

@@ -10,6 +10,7 @@ import {
   type EnrichmentCandidate,
 } from "@owner-operator/core";
 import type { State } from "../state/state";
+import { ClaudeDesktopSessions } from "./claude-desktop-sessions";
 import { runTranscriptScan } from "./scan";
 
 export interface SessionMonitorOptions {
@@ -23,6 +24,8 @@ export interface SessionMonitorOptions {
   enrich?: (candidate: EnrichmentCandidate) => Promise<ThreadEnrichment>;
   canEnrich?: () => boolean;
   logger?: (record: SessionMonitorLogRecord) => void;
+  /** Claude desktop session records, the source of Claude rows' deep links. */
+  claudeDesktop?: Pick<ClaudeDesktopSessions, "links">;
 }
 
 export enum SessionMonitorLogEvent {
@@ -35,6 +38,8 @@ export interface SessionMonitorLogRecord {
   event: SessionMonitorLogEvent;
   error: string;
 }
+
+const NO_CUTOFF = "1970-01-01";
 
 async function scanTranscripts(since: string, limit: number, files: readonly string[] = []): Promise<ScanRow[]> {
   if (!isOnboarded()) return [];
@@ -73,10 +78,14 @@ export class SessionMonitor {
   private enriching = false;
   private enrichAgain = false;
   private readonly logger: (record: SessionMonitorLogRecord) => void;
+  private readonly claudeDesktop: Pick<ClaudeDesktopSessions, "links"> | null;
   current: SessionStateRow[] = [];
 
   constructor(private readonly state: State, private readonly options: SessionMonitorOptions = {}) {
     this.logger = options.logger ?? (() => undefined);
+    // The desktop index reads the owner's real records, so by default it rides with the real
+    // transcript scan; an injected scan is a fixture and gets no links unless they are injected too.
+    this.claudeDesktop = options.claudeDesktop ?? (options.scan ? null : new ClaudeDesktopSessions());
   }
 
   /** A full scan of every monitored store, or with `files` only the transcripts that changed. */
@@ -88,12 +97,18 @@ export class SessionMonitor {
     this.polling = true;
     try {
       this.armWatchers();
-      const rows = await (this.options.scan ?? scanTranscripts)(
-        this.options.since ?? loadActiveWindow(),
-        this.options.limit ?? 0,
-        files,
-      );
-      this.state.recordPoll(rows);
+      const scan = this.options.scan ?? scanTranscripts;
+      const rows = await scan(this.options.since ?? loadActiveWindow(), this.options.limit ?? 0, files);
+      if (!files.length) {
+        const missedByWindow = this.state.visibleTranscriptPathsExcept(new Set(rows.flatMap((row) => row.transcriptPath ?? [])));
+        if (missedByWindow.length) rows.push(...await scan(NO_CUTOFF, 0, missedByWindow));
+      }
+      const claudeIds = rows.filter((row) => row.source === "claude").map((row) => row.id);
+      const desktop = this.claudeDesktop && claudeIds.length ? await this.claudeDesktop.links(claudeIds) : new Map<string, string>();
+      this.state.recordPoll(desktop.size ? rows.map((row) => {
+        const link = desktop.get(row.id);
+        return link ? { ...row, link } : row;
+      }) : rows);
       this.current = this.state.listCurrentSessionState();
       this.scheduleEnrichment();
       return this.current;

@@ -1,6 +1,7 @@
 // The widget's SwiftUI content, hosted inside the floating panel. Collapsed = a small always-on
-// bar (status dot · counts · the freshest needs-you leaf). Expanded in place = the full session state,
-// grouped by repo in the daemon's order. Nothing here computes state — it renders the daemon's snapshot.
+// bar (needs-you and working counts · the fresh needs-you ticker). Expanded in place = the
+// session state in the daemon's sections and order. Nothing here computes state or order — it
+// renders the daemon's snapshot.
 
 import SwiftUI
 
@@ -9,40 +10,40 @@ import SwiftUI
 struct WidgetRoot: View {
     @EnvironmentObject var client: DaemonClient
     @State private var expanded = false
+    @State private var collapsed: Set<SessionSection> = [.snoozed]
+
+    private var listMaxHeight: CGFloat { (NSScreen.main?.visibleFrame.height ?? 900) * 0.7 }
 
     var body: some View {
         VStack(spacing: 0) {
             CompactBar(expanded: $expanded)
             if expanded {
-                Divider()
                 if !client.online {
                     offline
                 } else if client.setupRequired {
                     setupRequired
-                } else if client.groups.isEmpty {
-                    Text("no active threads")
-                        .foregroundStyle(.secondary).font(.system(size: 11)).padding(12)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(client.groups) { group in
-                                GroupView(group: group, onDone: { id in
-                                    withAnimation(.easeInOut(duration: 0.28)) { client.markDone(id) }
-                                }, onRename: { id, title in
-                                    client.rename(id, to: title)
-                                })
-                                .transition(.move(edge: .top).combined(with: .opacity))
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(client.snapshot.sections) { section in
+                                // Needs you always shows, so an empty panel still answers the question.
+                                if section.kind == .needsYou || !section.rows.isEmpty {
+                                    SectionView(section: section, open: Binding(
+                                        get: { !collapsed.contains(section.kind) },
+                                        set: { if $0 { collapsed.remove(section.kind) } else { collapsed.insert(section.kind) } }
+                                    ))
+                                }
                             }
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .padding(.horizontal, 6).padding(.bottom, 8)
                     }
-                    .frame(maxHeight: 360)
+                    .frame(maxHeight: listMaxHeight)
                 }
                 Divider()
                 footer
             }
         }
-        .frame(width: 300)
+        .frame(width: 440)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08)))
         .contextMenu {
@@ -77,12 +78,14 @@ struct WidgetRoot: View {
                 .buttonStyle(.borderless).font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .dragsPanel()
     }
 }
 
-/// The always-visible small component: the state counts and (collapsed) the loudest needs-you
-/// title — the one "what to do next" leaf. The chevron toggles the expansion; the rest of the bar
-/// stays draggable so the panel can be repositioned.
+/// The always-visible small component: the yellow needs-you count, the green working count, and
+/// (collapsed) the ticker of rows that just came back to the owner. The chevron toggles the
+/// expansion; the rest of the bar stays draggable so the panel can be repositioned.
 struct CompactBar: View {
     @EnvironmentObject var client: DaemonClient
     @Binding var expanded: Bool
@@ -92,17 +95,24 @@ struct CompactBar: View {
             if client.online && client.setupRequired {
                 Text("setup required").font(.system(size: 11)).foregroundStyle(.yellow)
                 Spacer(minLength: 6)
-            } else if client.online {
-                CountsRow(counts: client.counts)
-                if !expanded && !fresh.isEmpty {
+            } else if client.online && !expanded {
+                // Expanded, the section headers carry these counts.
+                needsYouCount
+                if client.working > 0 {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text(verbatim: "\(client.working)")
+                    }
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green)
+                }
+                if !fresh.isEmpty {
                     FreshTicker(items: fresh)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                } else if !expanded, let top = topNeedsYou {
-                    lineText(top).font(.system(size: 11)).lineLimit(1)
-                    Spacer(minLength: 6)
                 } else {
                     Spacer(minLength: 6)
                 }
+            } else if client.online {
+                Spacer(minLength: 6)
             } else {
                 Text("daemon offline").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer(minLength: 6)
@@ -110,20 +120,53 @@ struct CompactBar: View {
             Button { expanded.toggle() } label: {
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    .frame(width: 24, height: 18)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(expanded ? "Collapse the panel" : "Expand the panel")
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, 10).padding(.top, 7).padding(.bottom, expanded ? 0 : 7)
         .contentShape(Rectangle())
+        .dragsPanel()
     }
 
-    /// Surface the loudest needs-you row, including a delegated child nested below its parent.
-    private var topNeedsYou: SessionStateRow? {
-        client.groups.lazy.flatMap(\.rows).first { $0.state == .needsYou }
+    private var needsYouCount: some View {
+        let count = client.needsYou
+        return Text(verbatim: "\(count)")
+            .font(.system(size: 11, weight: .bold).monospacedDigit())
+            .foregroundStyle(count > 0 ? Color.black.opacity(0.85) : Color.secondary)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(Capsule().fill(count > 0 ? Color.yellow : Color.primary.opacity(0.12)))
     }
 
     /// Threads whose turn finished in the last 5 min — what the soft pulse cycles through.
     private var fresh: [SessionStateRow] { client.freshNeedsYou() }
+}
+
+extension View {
+    /// Drags the floating panel from this view: background dragging (`isMovableByWindowBackground`)
+    /// does not move the panel when the press lands on SwiftUI content.
+    func dragsPanel() -> some View { modifier(PanelDrag()) }
+}
+
+private struct PanelDrag: ViewModifier {
+    @State private var start: (panel: NSPoint, mouse: NSPoint)?
+
+    func body(content: Content) -> some View {
+        content.gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { _ in
+                    guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+                    let mouse = NSEvent.mouseLocation
+                    let from = start ?? (panel.frame.origin, mouse)
+                    start = from
+                    panel.setFrameOrigin(NSPoint(x: from.panel.x + mouse.x - from.mouse.x, y: from.panel.y + mouse.y - from.mouse.y))
+                }
+                .onEnded { _ in start = nil }
+        )
+    }
 }
 
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
@@ -221,98 +264,117 @@ private struct TickerTextWidthKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-/// The stats line: nonzero state counts, colored (◐ needs-you · ● working · ○ idle). Done is
-/// omitted — once it's done it's done; the glance is for what still wants attention.
-struct CountsRow: View {
-    let counts: [ThreadState: Int]
-    private let order: [ThreadState] = [.needsYou, .working, .idle]
+
+/// Where a section's rows line up: the header text's leading edge, past the chevron.
+private enum SectionInset {
+    static let edge: CGFloat = 8
+    static let chevron: CGFloat = 10
+    static let gap: CGFloat = 6
+    static let text = edge + chevron + gap
+}
+
+/// One section: a small caps header with its root count, ruled off from its rows while open, then
+/// its rows in daemon order. Every section folds from its header; Snoozed starts folded.
+struct SectionView: View {
+    @EnvironmentObject var client: DaemonClient
+    let section: SectionRows
+    @Binding var open: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(order, id: \.self) { st in
-                if let n = counts[st], n > 0 {
-                    Text("\(st.glyph) \(n)").foregroundStyle(st.color).font(.system(size: 11))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: SectionInset.gap) {
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: SectionInset.chevron, height: SectionInset.chevron)
+                Text(section.kind.title.uppercased()).tracking(0.6)
+                Text(verbatim: "\(section.count)").foregroundStyle(.tertiary)
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, SectionInset.edge).padding(.top, 4).padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottom) { if open { Divider() } }
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } }
+            .padding(.top, 10) // outside the tap target, so it never reaches the panel's chevron
+
+            if open {
+                if section.rows.isEmpty {
+                    Text("Nothing needs you").font(.system(size: 12)).foregroundStyle(.secondary)
+                        .padding(.leading, SectionInset.text).padding(.vertical, 6)
+                }
+                ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
+                    RowView(
+                        row: row,
+                        onOpen: { client.open(row) },
+                        onSnooze: { wake in withAnimation(.easeInOut(duration: 0.28)) { client.snooze(row.id, until: wake) } },
+                        onWake: { withAnimation(.easeInOut(duration: 0.28)) { client.wake(row.id) } },
+                        onDone: { withAnimation(.easeInOut(duration: 0.28)) { client.markDone(row.id) } },
+                        onRename: { client.rename(row.id, to: $0) }
+                    )
+                    .overlay(alignment: .top) {
+                        if index > 0 && row.depth == 0 { Divider().padding(.leading, RowView.titleInset) }
+                    }
+                    .transition(.opacity)
                 }
             }
         }
     }
 }
 
-struct GroupView: View {
-    let group: RepoGroup
-    let onDone: (String) -> Void
-    let onRename: (String, String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Text("▾ \(group.repo)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.cyan)
-                Text("\(group.rows.count)").foregroundStyle(.secondary).font(.system(size: 11))
-            }
-            ForEach(group.rows) { row in
-                RowView(row: row, onDone: { onDone(row.id) }, onRename: { onRename(row.id, $0) })
-                    .padding(.leading, CGFloat(row.nestingDepth * 18))
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-    }
-}
-
+/// A session row as the approved mock lays it out: logo; title and time on line 1; blue repo,
+/// status summary, and diff on line 2. Hovering a root swaps the right column for snooze (or
+/// wake) and done buttons. A delegated child is one indented line with no actions.
 struct RowView: View {
     let row: SessionStateRow
+    let onOpen: () -> Void
+    let onSnooze: (Date?) -> Void
+    let onWake: () -> Void
     let onDone: () -> Void
     let onRename: (String) -> Void
     @State private var hovering = false
-    @State private var rowHovering = false
     @State private var editing = false
     @State private var statusSummaryExpanded = false
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
 
-    /// A delegated child is a line under its parent, not a peer: smaller type, the state dot,
-    /// and no priority, diff, or app badge of its own.
-    private var isChild: Bool { row.nestingDepth > 0 }
+    static let badgeSize: CGFloat = 16
+    static let badgeGap: CGFloat = 10
+    /// A root row's title edge, where its divider starts.
+    static let titleInset = SectionInset.text + badgeSize + badgeGap
+
+    private var isChild: Bool { row.depth > 0 }
+    private var showActions: Bool { hovering && !isChild && !editing }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text(row.state.glyph)
-                .foregroundStyle(row.state.color).font(.system(size: isChild ? 9 : 12))
-                .frame(width: 12, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    if let p = row.priority, !isChild {
-                        Text("P\(p)").foregroundStyle(priorityColor(p)).font(.system(size: 10, weight: .bold))
-                    }
+        HStack(alignment: .top, spacing: Self.badgeGap) {
+            AppBadge(app: row.app, size: Self.badgeSize)
+                .frame(width: Self.badgeSize, height: Self.badgeSize, alignment: .leading)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     title
-                    titleAffordance
                     statusSummaryDisclosure
-                    Spacer(minLength: 6)
-                    if row.hasOldAttention() {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow).font(.system(size: 10))
-                            .accessibilityLabel("Old needs-you status")
-                            .help("No messages for at least 3 days. This needs-you status may be stale.")
-                    }
-                    Text(shortAge(row.lastActive)).foregroundStyle(.secondary).font(.system(size: 10))
-                    doneCheck
                 }
-                if let statusSummary = shownStatusSummary {
-                    Text("→ \(statusSummary)\(row.statusSummaryPending ? " ·" : "")")
-                        .foregroundStyle(.secondary).font(.system(size: isChild ? 10 : 11))
+                if !isChild {
+                    line2
+                } else if let statusSummary = shownChildStatusSummary {
+                    Text(statusSummary).font(.system(size: 12)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .help(row.statusSummaryPending ? "This status summary is being refreshed for newer activity." : "")
                 }
-                if !isChild { HStack(spacing: 6) {
-                    if row.diffAdded != nil || row.diffDeleted != nil {
-                        Text("+\(row.diffAdded ?? 0)").foregroundStyle(.green).font(.system(size: 10))
-                        Text("-\(row.diffDeleted ?? 0)").foregroundStyle(.red).font(.system(size: 10))
-                    }
-                    Spacer()
-                    AppBadge(app: row.app)
-                } }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            rightColumn
         }
-        .onHover { rowHovering = $0 }
+        .fixedSize(horizontal: false, vertical: true) // lets the right column span the row's height
+        .padding(.vertical, isChild ? 4 : 8)
+        .padding(.leading, SectionInset.text + CGFloat(row.depth) * 26)
+        .padding(.trailing, 8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(hovering ? Color.primary.opacity(0.06) : Color.clear))
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+        .onHover { hovering = $0 }
+        .help(row.link == nil ? "" : "Open in \(row.app)")
         .contextMenu {
             Button("Rename…") { startEditing() }
             if row.isRenamed {
@@ -321,15 +383,115 @@ struct RowView: View {
         }
     }
 
-    /// The status summary this row shows, if any. A delegated child keeps its own folded away
-    /// until the owner opens it, so a parent's list of children stays scannable.
-    private var shownStatusSummary: String? {
-        guard !row.statusSummaryStartsCollapsed || statusSummaryExpanded else { return nil }
-        return row.displayStatusSummary
+    /// The title, or its inline editor while renaming. Return commits, Escape cancels. Renaming
+    /// starts from the row's context menu; a click falls through to opening the thread.
+    @ViewBuilder private var title: some View {
+        if editing {
+            TextField("title", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain).font(.system(size: isChild ? 13 : 14))
+                .fixedSize(horizontal: false, vertical: true)
+                .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.08)).padding(-2))
+                .focused($titleFocused)
+                .onSubmit { editing = false; commit() }
+                .onExitCommand { editing = false }
+        } else {
+            Text(row.title)
+                .font(.system(size: isChild ? 13 : 14, weight: !isChild && row.section == .needsYou ? .semibold : .regular))
+                .foregroundStyle(isChild ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .lineLimit(1).truncationMode(.tail)
+        }
     }
 
-    /// The child row's fixed-width toggle. It holds its slot so opening a status summary never
-    /// reflows the title beside it.
+    /// Age, yellow when the row needs you and behind a green dot while it works; a snoozed row
+    /// shows when it comes back instead.
+    @ViewBuilder private var timeColumn: some View {
+        let age = shortAge(row.lastActive)
+        Group {
+            if row.section == .snoozed && !isChild {
+                Text(row.snooze.map { snoozeLabel($0) } ?? age).foregroundStyle(.secondary)
+            } else if isChild ? row.state == .working : row.section == .working {
+                HStack(spacing: 5) {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                    Text(age).foregroundStyle(.secondary)
+                }
+            } else if !isChild && row.section == .needsYou {
+                Text(age).foregroundStyle(.yellow).fontWeight(.semibold)
+            } else {
+                Text(age).foregroundStyle(.secondary)
+            }
+        }
+        .font(.system(size: 12))
+    }
+
+    private var line2: some View {
+        var repo = AttributeContainer(); repo.foregroundColor = projectBlue
+        var out = AttributedString(row.repo, attributes: repo)
+        if let statusSummary = row.displayStatusSummary {
+            var summary = AttributeContainer(); summary.foregroundColor = .secondary
+            out.append(AttributedString("  \(statusSummary)", attributes: summary))
+        }
+        return Text(out).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var diff: some View {
+        if row.diffAdded != nil || row.diffDeleted != nil {
+            HStack(spacing: 4) {
+                // Verbatim: a localized interpolation groups digits ("2 037").
+                Text(verbatim: "+\(row.diffAdded ?? 0)").foregroundStyle(.green)
+                Text(verbatim: "−\(row.diffDeleted ?? 0)").foregroundStyle(.red)
+            }
+            .font(.system(size: 10.5).monospacedDigit())
+        }
+    }
+
+    private var rightColumn: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .trailing, spacing: 0) {
+                timeColumn.padding(.top, 2)
+                if !isChild {
+                    Spacer(minLength: 3)
+                    diff
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .opacity(showActions ? 0 : 1)
+            if !isChild {
+                actions.opacity(showActions ? 1 : 0).allowsHitTesting(showActions)
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 4) {
+            if row.section == .snoozed {
+                IconButton(systemName: "arrow.up.to.line", help: "Wake now", action: onWake)
+            } else {
+                Menu {
+                    ForEach(SnoozePreset.available()) { preset in
+                        Button(menuTitle(preset)) { onSnooze(preset.wake()) }
+                    }
+                } label: {
+                    Image(systemName: "clock").font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08)))
+                .help("Snooze")
+            }
+            IconButton(systemName: "checkmark", help: "Mark done", action: onDone)
+        }
+    }
+
+    private func menuTitle(_ preset: SnoozePreset) -> String {
+        guard let wake = preset.wake() else { return preset.label }
+        return "\(preset.label)    \(snoozeLabel(.until(wake)))"
+    }
+
+    /// A delegated child keeps its status summary folded until the owner opens it.
+    private var shownChildStatusSummary: String? {
+        statusSummaryExpanded ? row.displayStatusSummary : nil
+    }
+
     @ViewBuilder private var statusSummaryDisclosure: some View {
         if row.statusSummaryStartsCollapsed, row.displayStatusSummary != nil {
             Button { statusSummaryExpanded.toggle() } label: {
@@ -340,48 +502,6 @@ struct RowView: View {
             .frame(width: 10)
             .help(statusSummaryExpanded ? "Hide this delegated run's status summary" : "Show this delegated run's status summary")
         }
-    }
-
-    /// The title, or its inline editor while renaming. The editor wraps exactly like the
-    /// title text (no reflow on entry) and carries a quiet fill so edit mode reads as a mode.
-    /// Return commits, Escape cancels.
-    @ViewBuilder private var title: some View {
-        if editing {
-            TextField("title", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain).font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-                .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.08)).padding(-2))
-                .focused($titleFocused)
-                .onSubmit { editing = false; commit() }
-                .onExitCommand { editing = false }
-        } else {
-            Text(row.title).font(.system(size: isChild ? 11 : 12)).fixedSize(horizontal: false, vertical: true)
-                .onTapGesture(count: 2) { startEditing() }
-        }
-    }
-
-    /// One FIXED slot beside the title — pencil on row hover, an explicit commit check while
-    /// editing, invisible otherwise. It always occupies its frame so the title's wrap width
-    /// never changes across idle/hover/edit (HIG edit-in-place stability; WCAG 3.2.1/3.2.2 —
-    /// no layout change on focus or input).
-    private var titleAffordance: some View {
-        Group {
-            if editing {
-                Button(action: { editing = false; commit() }) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-                .help("Save title (Return commits, Escape cancels)")
-            } else {
-                Button(action: startEditing) {
-                    Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .opacity(rowHovering ? 1 : 0)
-                .help("Rename — your title shows instead of the AI's until you clear it")
-            }
-        }
-        .frame(width: 12, alignment: .leading)
     }
 
     private func startEditing() {
@@ -395,18 +515,26 @@ struct RowView: View {
         // Empty clears the rename (AI titles resume); an unchanged title is a no-op.
         if t != row.title { onRename(t) }
     }
+}
 
-    /// Mark-done affordance: a quiet grey check that lights green on hover; click resolves the
-    /// thread (the row then collapses away). Read-only stays honest — it just sets owner state.
-    private var doneCheck: some View {
-        Button(action: onDone) {
-            Image(systemName: hovering ? "checkmark.circle.fill" : "checkmark.circle")
-                .font(.system(size: 12))
-                .foregroundStyle(hovering ? Color.green : Color.secondary)
+/// A 24pt icon button, the mock's hover action.
+struct IconButton: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName).font(.system(size: 12, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering ? 0.18 : 0.08)))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .foregroundStyle(hovering ? .primary : .secondary)
         .onHover { hovering = $0 }
-        .help("Mark done")
+        .help(help)
     }
 }
 
@@ -419,6 +547,7 @@ struct RowView: View {
 /// plain text tag.
 struct AppBadge: View {
     let app: String
+    var size: CGFloat = 11
 
     /// resource name + whether it's a monochrome template mark (tinted) vs a full-color mark.
     private static let logos: [(prefix: String, resource: String, template: Bool)] = [
@@ -432,6 +561,7 @@ struct AppBadge: View {
         ("Grok", "grok", true),
         ("opencode", "opencode", true),
         ("pi", "pi", true),
+        ("Owner Operator", "owner-operator", true),
     ]
     private static var cache: [String: (image: NSImage, template: Bool)] = [:]
 
@@ -466,7 +596,7 @@ struct AppBadge: View {
             Image(nsImage: m.image)
                 .renderingMode(m.template ? .template : .original)
                 .resizable().interpolation(.high).scaledToFit()
-                .frame(width: 11, height: 11)
+                .frame(width: size, height: size)
                 .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
                 .onHover { hovering = $0 }
                 .overlay(alignment: .trailing) {
@@ -475,7 +605,7 @@ struct AppBadge: View {
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(RoundedRectangle(cornerRadius: 3).fill(.background))
                             .fixedSize()
-                            .offset(x: -14) // float just left of the mark
+                            .offset(x: -(size + 3)) // float just left of the mark
                             .allowsHitTesting(false)
                     }
                 }

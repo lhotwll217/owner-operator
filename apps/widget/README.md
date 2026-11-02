@@ -21,7 +21,7 @@ Needs the loopback daemon + a GUI session. SwiftPM — no Xcode project, no sign
 make run       # launch
 make once      # print the session state and exit — headless smoke test
 make install   # installs widget + daemon LaunchAgents; make uninstall removes both
-swift test     # unit tests — session state grouping, decode, fresh-window
+swift test     # unit tests — sections, decode, owner writes, snooze presets, fresh-window
 ```
 
 `swift test` needs XCTest (Xcode, not CLT): `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`.
@@ -29,7 +29,8 @@ Behavior and wire ownership live in [`docs/widget.md`](../../docs/widget.md).
 
 ## Notes
 
-- Read-only over your sessions. Owner actions write only owner state: mark done, and rename
-  (double-click a title; your title shows instead of the AI's — which keeps titling underneath
-  as an audit trail — until you clear the rename via an empty title or the row's context menu).
+- Read-only over your sessions. Owner actions write only owner state: mark done and snooze
+  (hover a row), and rename (the row's context menu; your title shows instead of the AI's — which
+  keeps titling underneath as an audit trail — until you clear the rename via an empty title or
+  Use AI title). Clicking a row opens its thread when it has a link.
 - Not WidgetKit — can't float on top or hold a live connection.

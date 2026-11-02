@@ -12,26 +12,26 @@ struct LiveSummaryProof {
         let client = DaemonClient.shared
         client.start()
         let host = NSHostingView(rootView: WidgetRoot().environmentObject(client))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 32), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 32), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
         window.orderFrontRegardless()
         let deadline = Date().addingTimeInterval(20)
         while Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-            let rows = client.groups.flatMap(\.rows)
+            let rows = client.snapshot.rows
             if client.online && expected.allSatisfy({ want in rows.contains { $0.id == want.id && $0.statusSummary == want.statusSummary && $0.title == want.title && $0.state == want.state } }) { break }
         }
-        let rows = client.groups.flatMap(\.rows)
+        let rows = client.snapshot.rows
         precondition(client.online, "Native DaemonClient must connect to the isolated Gateway")
         precondition(rows.count == expected.count, "Native client must receive every visible row")
         for want in expected {
             guard let row = rows.first(where: { $0.id == want.id }) else { fatalError("Missing native row \(want.id)") }
             precondition(row.statusSummary == want.statusSummary, "Native status summary differs for \(want.id)")
             precondition(row.title == want.title && row.state == want.state, "Native presentation or lifecycle differs for \(want.id)")
-            if row.parentThreadId != nil { precondition(row.nestingDepth > 0, "Child must render nested") }
+            if row.parentThreadId != nil { precondition(row.depth > 0, "Child must render nested") }
             precondition(!row.title.isEmpty, "Every row carries a title while it is on screen")
             precondition(row.displayStatusSummary == row.statusSummary, "Every visible row shows its status summary, for \(want.id)")
-            print("NATIVE \(row.id) \(row.state.rawValue) pending=\(row.statusSummaryPending) \(row.title) | \(row.displayStatusSummary ?? "(none yet)")")
+            print("NATIVE \(row.id) \(row.state.rawValue) \(row.title) | \(row.displayStatusSummary ?? "(none yet)")")
         }
         func capture(_ suffix: String) throws {
             window.setContentSize(host.fittingSize)
@@ -42,7 +42,7 @@ struct LiveSummaryProof {
         }
         try capture("-collapsed")
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: 284, y: host.bounds.midY), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: 424, y: host.bounds.midY), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
             window.sendEvent(event)
         }
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))

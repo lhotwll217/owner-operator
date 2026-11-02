@@ -1,11 +1,9 @@
-import type { MarkThreadsDoneResult, SessionStateRow, ThreadState } from "@owner-operator/core";
+import { SESSION_SECTIONS, type MarkThreadsDoneResult, type SessionSection, type SessionStateRow } from "@owner-operator/core";
 import { emit, gateway, UsageError, type Noun } from "./operation";
-
-const STATES: readonly ThreadState[] = ["needs-you", "working", "idle", "done"];
 
 // Row numbers are widget positions, so a filtered list keeps the numbers the owner sees.
 const rowLine = (row: SessionStateRow, position: number): string =>
-  `${String(position).padStart(3)}. ${row.state.padEnd(9)} ${row.app} · ${row.repo} · ${row.topic}  ${row.id}`;
+  `${String(position).padStart(3)}. ${row.section.padEnd(9)} ${row.app} · ${row.repo} · ${row.topic}  ${row.id}`;
 
 export const sessionState: Noun = {
   summary: "the owner's current session rows, as the widget shows them",
@@ -24,7 +22,7 @@ export const sessionState: Noun = {
       summary: "current rows (GET /session-state); state is authoritative, even when empty. Rows "
         + "index sessions: take an id to `oo search` for what changed, why, or proof",
       options: {
-        state: { type: "string", help: `only rows in this exact state: ${STATES.join(", ")}` },
+        state: { type: "string", help: `only rows in this widget section: ${SESSION_SECTIONS.join(", ")}` },
       },
       examples: [
         "oo session-state list",
@@ -33,12 +31,13 @@ export const sessionState: Noun = {
       ],
       async run({ values, json }) {
         const state = values.state as string | undefined;
-        if (state !== undefined && !STATES.includes(state as ThreadState)) {
-          throw new UsageError(`--state must be one of ${STATES.join(", ")}`);
+        if (state !== undefined && !SESSION_SECTIONS.includes(state as SessionSection)) {
+          throw new UsageError(`--state must be one of ${SESSION_SECTIONS.join(", ")}`);
         }
         const rows = (await (await gateway()).sessionState())
           .map((row, index) => ({ row, position: index + 1 }))
-          .filter(({ row }) => !state || row.state === state);
+          // Attention is the widget section: a snoozed row keeps its state but needs nobody yet.
+          .filter(({ row }) => !state || row.section === state);
         await emit(json, rows.map(({ row }) => row), () => rows.length
           ? rows.map(({ row, position }) => rowLine(row, position)).join("\n")
           : state ? `no sessions in state ${state}` : "no sessions");

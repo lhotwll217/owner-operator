@@ -3,8 +3,9 @@
 // so changes land instantly. The poll is the heartbeat (covers SSE gaps + offline→online); the SSE
 // frame is just a "refetch now" nudge, so the GET path stays the single source of shape.
 
-import Foundation
+import AppKit
 import Combine
+import Foundation
 
 @MainActor
 final class DaemonClient: ObservableObject {
@@ -12,22 +13,27 @@ final class DaemonClient: ObservableObject {
 
     typealias DiscoverGateway = @Sendable () -> Discovery?
     typealias FetchData = @Sendable (_ path: String, _ discovery: Discovery) async throws -> Data
+    typealias PostData = @Sendable (_ path: String, _ body: Data, _ discovery: Discovery) async throws -> Void
 
     private let discover: DiscoverGateway
     private let fetchData: FetchData
+    private let postData: PostData
 
     nonisolated init(
         discover: @escaping DiscoverGateway = { DaemonClient.discoverGateway() },
         fetchData: @escaping FetchData = { path, discovery in
             try await DaemonClient.data(path, discovery: discovery)
+        },
+        postData: @escaping PostData = { path, body, discovery in
+            try await DaemonClient.post(path, body: body, discovery: discovery)
         }
     ) {
         self.discover = discover
         self.fetchData = fetchData
+        self.postData = postData
     }
 
-    @Published var groups: [RepoGroup] = []
-    @Published var counts: [ThreadState: Int] = [:]
+    @Published var snapshot = WidgetSnapshot()
     @Published var online = false
     @Published var setupRequired = false
     @Published var port = defaultPort
@@ -46,22 +52,23 @@ final class DaemonClient: ObservableObject {
     private var started = false
     private var refreshInFlight = false
     private var refreshDirty = false
+    private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
 
-    // The last payload the daemon gave us (the truth we render), plus ids the owner marked done
-    // locally but the daemon hasn't confirmed yet — hidden until it does.
+    // The last payload the daemon gave us (the truth we render), plus the rows hidden while an
+    // owner write (done, snooze, wake) is in flight, counted per id so overlapping writes nest.
     private var lastRows: [SessionStateRow] = []
-    private var pendingDone: Set<String> = []
+    private var pendingWrites: [String: Int] = [:]
     private var pendingRenames: [String: String] = [:]
 
-    var needsYou: Int { counts[.needsYou] ?? 0 }
-    var working: Int { counts[.working] ?? 0 }
-    var activeTotal: Int { groups.reduce(0) { $0 + $1.rows.count } }
+    var needsYou: Int { snapshot.count(.needsYou) }
+    var working: Int { snapshot.count(.working) }
 
-    /// Threads whose turn JUST completed — now needs-you and entered that state within `window`
-    /// seconds. Most-recently-finished first. The set the collapsed HUD softly pulses through.
+    /// Threads whose turn JUST completed — in the needs-you section and entered needs-you within
+    /// `window` seconds. Most-recently-finished first. The set the collapsed HUD softly pulses
+    /// through; a snoozed row is never in it.
     func freshNeedsYou(window: TimeInterval = 300) -> [SessionStateRow] {
         let now = Date()
-        return groups.flatMap { $0.rows }
+        return snapshot.section(.needsYou).rows
             .filter { $0.state == .needsYou }
             .filter {
                 guard let since = parseISODate($0.stateSince) else { return false }
@@ -116,6 +123,17 @@ final class DaemonClient: ObservableObject {
             await refreshOnce()
         } while refreshDirty
         refreshInFlight = false
+        let waiters = refreshWaiters
+        refreshWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// A refetch that reads after this call, even when a read is already in flight: an owner
+    /// write must not un-hide its row on a payload fetched before the write landed.
+    private func refetch() async {
+        guard refreshInFlight else { return await refresh() }
+        refreshDirty = true
+        await withCheckedContinuation { refreshWaiters.append($0) }
     }
 
     private func refreshOnce() async {
@@ -156,23 +174,53 @@ final class DaemonClient: ObservableObject {
         }
     }
 
-    /// Mark a thread done: hide it immediately (optimistic), then tell the daemon. The daemon owns
-    /// the truth — its next state payload confirms it; a failed POST un-hides it so we never lie.
-    func markDone(_ id: String) {
-        pendingDone.insert(id)
-        rebuild()
-        Task { await postDone(id) }
+    /// Open the thread in its own app; a row without a verified link is inert.
+    func open(_ row: SessionStateRow) {
+        guard let link = row.link else { return }
+        NSWorkspace.shared.open(link)
     }
 
-    private func postDone(_ id: String) async {
-        guard let discovery = Self.discoverGateway() else { pendingDone.remove(id); rebuild(); return }
-        do {
-            try await Self.postJSON("/done", discovery: discovery, body: ["ids": [id]])
-            await refresh()
-        } catch {
-            pendingDone.remove(id)
-            rebuild()
+    func markDone(_ id: String) {
+        hideThenWrite(id, "/done", ["ids": [id]])
+    }
+
+    /// Snooze until `wake`, or until the next message when nil.
+    func snooze(_ id: String, until wake: Date?) {
+        let snooze: [String: Any] = wake.map { ["kind": "until", "until": isoString($0)] } ?? ["kind": "next-message"]
+        hideThenWrite(id, "/snooze", ["id": id, "snooze": snooze])
+    }
+
+    func wake(_ id: String) {
+        hideThenWrite(id, "/snooze", ["id": id, "snooze": NSNull()])
+    }
+
+    /// Done, snooze, and wake share one mechanism: hide the row and its subtree while the request
+    /// runs, then refetch and let the daemon place it — gone, snoozed, woken, or where it was if
+    /// the write failed. Nothing is moved or matched on the client.
+    func write(_ id: String, _ path: String, _ body: [String: Any]) async {
+        hide(id)
+        await send(id, path, body)
+    }
+
+    /// The hide happens synchronously so a caller's animation covers it.
+    private func hideThenWrite(_ id: String, _ path: String, _ body: [String: Any]) {
+        hide(id)
+        Task { await send(id, path, body) }
+    }
+
+    private func hide(_ id: String) {
+        pendingWrites[id, default: 0] += 1
+        rebuild()
+    }
+
+    private func send(_ id: String, _ path: String, _ body: [String: Any]) async {
+        if let discovery = discover(), let data = try? JSONSerialization.data(withJSONObject: body) {
+            try? await postData(path, data, discovery)
         }
+        await refetch()
+        pendingWrites[id, default: 1] -= 1
+        if pendingWrites[id] == 0 { pendingWrites.removeValue(forKey: id) }
+        rebuild()
     }
 
     /// Rename a thread: show the new title immediately (optimistic), then tell the daemon. An
@@ -185,13 +233,14 @@ final class DaemonClient: ObservableObject {
     }
 
     private func postRename(_ id: String, to title: String) async {
-        guard let discovery = Self.discoverGateway() else {
+        guard let discovery = discover(),
+              let body = try? JSONSerialization.data(withJSONObject: ["id": id, "title": title]) else {
             if pendingRenames[id] == title { pendingRenames.removeValue(forKey: id) }
             rebuild()
             return
         }
         do {
-            try await Self.postJSON("/rename", discovery: discovery, body: ["id": id, "title": title])
+            try await postData("/rename", body, discovery)
             await refresh()
         } catch {
             if pendingRenames[id] == title { pendingRenames.removeValue(forKey: id) }
@@ -199,11 +248,8 @@ final class DaemonClient: ObservableObject {
         }
     }
 
-    /// Re-render groups/counts from the last daemon payload, hiding still-pending dones. Pending ids
-    /// the daemon no longer reports active are confirmed → dropped from the pending set.
+    /// Re-render the snapshot from the last daemon payload, hiding rows with a write in flight.
     private func rebuild() {
-        let active = Set(lastRows.map { $0.id })
-        pendingDone.formIntersection(active)
         // A pending rename the daemon now reports back (or a cleared one it reports gone) is
         // confirmed → dropped, so the gateway title takes over seamlessly.
         for r in lastRows {
@@ -211,9 +257,7 @@ final class DaemonClient: ObservableObject {
             let cleared = pendingRenames[r.id] == "" && (r.ownerTitle ?? "").isEmpty
             if confirmed || cleared { pendingRenames.removeValue(forKey: r.id) }
         }
-        let built = buildSessionState(rows: lastRows, hidden: pendingDone, renames: pendingRenames)
-        groups = built.groups
-        counts = built.counts
+        snapshot = buildSnapshot(rows: lastRows, hidden: Set(pendingWrites.keys), renames: pendingRenames)
     }
 
     /// A short-lived GET against the loopback daemon.
@@ -232,14 +276,14 @@ final class DaemonClient: ObservableObject {
     }
 
     /// A short-lived POST of a JSON body against the loopback daemon.
-    nonisolated static func postJSON(_ path: String, discovery: Discovery, body: [String: Any]) async throws {
+    nonisolated static func post(_ path: String, body: Data, discovery: Discovery) async throws {
         let url = URL(string: "http://127.0.0.1:\(discovery.port)\(path)")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 4
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(discovery.authToken)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = body
         let (_, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
     }

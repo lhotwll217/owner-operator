@@ -23,6 +23,7 @@ import {
   type Blacklist,
   type MarkThreadsDoneResult,
   type RegisteredWorktree,
+  type Snooze,
 } from "@owner-operator/core";
 import { randomUUID } from "node:crypto";
 import { PartialAgentRunSweepError, ThreadDb, type AgentRunInsert, type AgentRunLogEntry, type SessionStateRow } from "./database";
@@ -91,6 +92,7 @@ export class State {
       state,
       diffAdded: row.diffAdded,
       diffDeleted: row.diffDeleted,
+      link: row.link ?? null,
     });
 
     if (result.added || result.stateChanged || changedMessage) {
@@ -121,6 +123,10 @@ export class State {
     return this.db.listSessionState({
       activeSince: new Date(cutoffMs ?? nowMs - 24 * 60 * 60 * 1_000).toISOString(),
     });
+  }
+
+  visibleTranscriptPathsExcept(scanned: ReadonlySet<string>): string[] {
+    return this.db.transcriptPaths(this.listCurrentSessionState().map((row) => row.id)).filter((path) => !scanned.has(path));
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
@@ -209,6 +215,25 @@ export class State {
       });
     }
     return true;
+  }
+
+  /** Set or clear (`null`) the owner snooze. A timed snooze must end after the current instant;
+   * its instant is stored in canonical ISO so it compares against the injected clock. */
+  snoozeThread(threadId: string, snooze: Snooze | null): "applied" | "missing" | "past" {
+    const stored = snooze?.kind === "until" ? { kind: "until" as const, until: new Date(snooze.until).toISOString() } : snooze;
+    if (stored?.kind === "until" && stored.until <= this.now()) return "past";
+    if (!this.db.setSnooze(threadId, stored)) return "missing";
+    const current = this.db.resolutionRow(threadId);
+    if (current) {
+      this.publish({
+        kind: DomainEventKind.ThreadChanged,
+        threadId,
+        state: current.state,
+        lastMessageAt: current.lastMessageAt,
+        needsEnrichment: false,
+      });
+    }
+    return "applied";
   }
 
   saveSchedule(schedule: ScheduleDefinition): ScheduleDefinition {

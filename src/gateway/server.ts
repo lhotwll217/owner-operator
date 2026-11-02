@@ -22,6 +22,7 @@ import {
   type HarnessDetailsRequest,
   type SessionSearchRequest,
   type SessionSearchResult,
+  type Snooze,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
@@ -116,6 +117,16 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   });
 }
 
+/** The snooze request body's `snooze`, or undefined when it is not one of the accepted shapes. */
+function parseSnooze(value: unknown): Snooze | null | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { kind, until } = value as { kind?: unknown; until?: unknown };
+  if (kind === "next-message") return { kind };
+  if (kind === "until" && typeof until === "string" && Number.isFinite(Date.parse(until))) return { kind, until };
+  return undefined;
+}
+
 const invalidationFor = (kind: DomainEventKind): GatewayEvent => {
   if (kind === DomainEventKind.ScheduleChanged) return { kind: GatewayEventKind.ScheduleChanged };
   if (kind === DomainEventKind.ScheduleRunChanged) return { kind: GatewayEventKind.ScheduleRunChanged };
@@ -189,6 +200,19 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return options.state.renameThread(body.id, body.title)
           ? respond(200, { ok: true })
           : respond(404, { error: "no such thread" });
+      }
+
+      if (route === "POST /snooze") {
+        const body = await readBody(request) as { id?: unknown; snooze?: unknown } | null;
+        const snooze = parseSnooze(body?.snooze);
+        if (typeof body?.id !== "string" || !body.id || snooze === undefined) {
+          return respond(400, {
+            error: 'id must be a string and snooze null, {kind:"next-message"}, or {kind:"until",until:<ISO instant>}',
+          });
+        }
+        const outcome = options.state.snoozeThread(body.id, snooze);
+        if (outcome === "past") return respond(400, { error: "snooze until must be a future instant" });
+        return outcome === "missing" ? respond(404, { error: "no such thread" }) : respond(200, { ok: true });
       }
 
       if (route === "GET /events") {

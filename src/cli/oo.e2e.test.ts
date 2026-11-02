@@ -177,9 +177,17 @@ try {
   const filteredOut = await runOo(["session-state", "list", "--state", otherState]);
   assert.equal(filteredOut.status, 0, `an empty filter is an answer, not a failure (stderr: ${filteredOut.stderr})`);
   assert.equal(filteredOut.stdout, `no sessions in state ${otherState}\n`);
+  assert.equal(daemon.state.snoozeThread("e2e-done-1", { kind: "next-message" }), "applied");
+  assert.equal((await runOo(["session-state", "list", "--state", seededState])).stdout, `no sessions in state ${seededState}\n`,
+    "--state filters on the widget section, so a snoozed row never reports in its state");
+  assert.match((await runOo(["session-state", "list"])).stdout, /1\. snoozed .*e2e-done-1/, "text list prints the section");
+  assert.deepEqual(JSON.parse((await runOo(["session-state", "list", "--state", "snoozed", "--json"])).stdout).map((r: { id: string }) => r.id),
+    ["e2e-done-1"], "--state snoozed lists the snoozed row");
+  daemon.state.snoozeThread("e2e-done-1", null);
   const badState = await runOo(["session-state", "list", "--state", "blocked"]);
   assert.equal(badState.status, 2, `unknown --state exits 2 (got ${badState.status})`);
-  assert.match(badState.stderr, /needs-you, working, idle, done/, "names the valid states");
+  assert.match(badState.stderr, /needs-you, working, idle, snoozed/, "names the valid sections");
+  assert.equal((await runOo(["session-state", "list", "--state", "done"])).status, 2, "done is not a section, so --state done exits 2");
 
   const done = await runOo(["session-state", "done", "e2e-done-1", "ghost-id"]);
   assert.equal(done.status, 1, `done with a ghost id exits 1 (got ${done.status}; stderr: ${done.stderr})`);

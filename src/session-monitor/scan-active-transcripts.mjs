@@ -170,7 +170,8 @@ function detectUi(source, cwd, entrypoint, meta = {}) {
 //  - Codex session run on its own        → codex://threads/<id>  ✅ (verified live)
 //  - Codex session spawned in Conductor   → the worktree lives in Conductor (which has NO
 //    deep-link), so a codex:// link would point at the wrong GUI → no link.
-//  - Claude (desktop/Conductor)           → no confirmed deep-link → no link.
+//  - Claude                               → no link here; the monitor adds the desktop app's
+//    link from its session records (src/session-monitor/claude-desktop-sessions.ts).
 function guiLink(source, id, cwd) {
   if (sessionHostForCwd(cwd, sessionHosts)) return null; // rooted host owns the worktree, not Codex
   if (source === "codex") return `codex://threads/${id}`;
@@ -255,12 +256,10 @@ function pickDiffBase(git) {
     const base = mergeBase(git, ref);
     if (base) return base;
   }
-  // If a configured base exists but is unavailable, or a default branch exists but this
-  // branch has no explicit base, do not guess. A hidden badge is better than a misleading
-  // "vs main" badge for stacked branches.
   if (configuredRefs.length) return null;
   for (const ref of [...baseRefCandidates(remoteHead(git)), "origin/main", "origin/master"]) {
-    if (mergeBase(git, ref)) return null;
+    const base = mergeBase(git, ref);
+    if (base) return base;
   }
   return "HEAD";
 }
@@ -268,9 +267,8 @@ function pickDiffBase(git) {
 // ---------- git workspace delta (per unique cwd, cached) ----------
 // +/- line totals from the repo's base branch to the WORKING TREE — committed + staged +
 // unstaged in one number. Prefer branch-local Git config (`branch.<name>.base`,
-// `gh-merge-base`, or a non-self tracking ref). If the branch's base is unknown but a
-// default branch exists, omit the badge instead of guessing "main". No branch refs → HEAD
-// (uncommitted only). Best-effort fact about the workspace: not a repo / dir gone → no badge.
+// `gh-merge-base`, or a non-self tracking ref). A clean workspace reports 0/0 so a stored badge
+// clears; not a repo / dir gone → null, which leaves the stored badge as it was.
 const diffCache = new Map();
 function gitDiffStat(cwd) {
   if (!cwd || cwd === "(unknown)") return null;
@@ -288,7 +286,7 @@ function gitDiffStat(cwd) {
       const m = /^(\d+)\t(\d+)\t/.exec(line); // binary files show "-\t-" and are skipped
       if (m) { added += +m[1]; deleted += +m[2]; }
     }
-    stat = added || deleted ? { added, deleted } : null;
+    stat = { added, deleted };
   } catch { /* not a git repo / no commits / cwd gone */ }
   diffCache.set(cwd, stat);
   return stat;
@@ -733,7 +731,7 @@ if (asJson) {
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);
       console.log(`  State         : ${t.state}`);
-      if (t.diffAdded != null) console.log(`  Diff          : +${t.diffAdded} -${t.diffDeleted}`);
+      if (t.diffAdded || t.diffDeleted) console.log(`  Diff          : +${t.diffAdded} -${t.diffDeleted}`);
       console.log(`  Created       : ${rel(t.secondsSinceCreated)}`);
       console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)}`);
       console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);
