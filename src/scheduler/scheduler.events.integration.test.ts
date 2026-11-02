@@ -124,7 +124,19 @@ try {
   state.recordObservation(idle);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(contexts.length, 4, "rename, resummary, and scan do not duplicate a handled message");
-  process.stdout.write("ok — needs-you event batching, model attention, dedupe, and active-child suppression\n");
+
+  state.recordObservation(row("snoozed-decision", "2026-07-09T10:06:00.000Z"));
+  assert.equal(state.snoozeThread("snoozed-decision", { kind: "next-message" }), "applied");
+  assert.ok(state.appendEnrichment("snoozed-decision", owed("Choose the retention period."), "2026-07-09T10:06:00.000Z"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 4, "a snoozed needs-you row never triggers a schedule");
+  assert.equal(state.snoozeThread("snoozed-decision", null), "applied");
+  await waitFor(() => contexts.length === 5, 1_000, "waking a snoozed needs-you row triggers the schedule");
+  assert.deepEqual(contexts[4], {
+    threadIds: ["snoozed-decision"],
+    observedThrough: "2026-07-09T10:06:00.000Z",
+  });
+  process.stdout.write("ok — needs-you event batching, model attention, dedupe, and active-child and snooze suppression\n");
 } finally {
   await scheduler.stop();
   state.close();

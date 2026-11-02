@@ -1570,9 +1570,9 @@ export class ThreadDb {
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND NOT ${HAS_ACTIVE_CHILD_SQL}
+         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
        ORDER BY t.last_message_at ASC`,
-    ).all() as Array<{ threadId: string; lastMessageAt: string }>;
+    ).all({ now: this.now() }) as Array<{ threadId: string; lastMessageAt: string }>;
   }
 
   claimNeedsYouScheduleRun(params: {
@@ -1588,10 +1588,11 @@ export class ThreadDb {
         `SELECT 1 FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
           AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
          WHERE t.id = ? AND t.last_message_at = ? AND detail.state = 'needs-you'
-           AND NOT ${HAS_ACTIVE_CHILD_SQL}`,
+           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
       );
+      const now = this.now();
       const fresh = params.changes.filter((change) => {
-        if (!eligible.get(change.threadId, change.lastMessageAt)) return false;
+        if (!eligible.get({ now }, change.threadId, change.lastMessageAt)) return false;
         const prior = read.get(params.schedule.id, change.threadId) as { lastMessageAt: string } | undefined;
         return prior?.lastMessageAt !== change.lastMessageAt;
       });
