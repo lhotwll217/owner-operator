@@ -28,6 +28,7 @@ import {
   type ScheduledPromptPayload,
   type ScheduleTrigger,
   type SessionStateRow,
+  type Snooze,
   type ThreadDetails,
   type ThreadEnrichment,
   type ThreadState,
@@ -59,6 +60,12 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
   ELSE detail.state
 END`;
+
+/** An owner snooze holds until its instant passes on the injected clock (`$now`) or a message
+ * newer than the one it was set against lands, the same release rule as owner Done. */
+const SNOOZE_HOLDS_SQL = `(t.snoozed_through_message_at IS NOT NULL
+  AND COALESCE(t.last_message_at, '') <= t.snoozed_through_message_at
+  AND (t.snoozed_until IS NULL OR t.snoozed_until > $now))`;
 
 const CHILD_EVIDENCE_SQL = `(SELECT json_group_array(json_object(
   'id', id, 'source', source, 'lastMessageAt', last_message_at, 'runId', run_id, 'status', status
@@ -146,6 +153,8 @@ CREATE TABLE IF NOT EXISTS threads (
   diff_deleted INTEGER,
   raw_topic TEXT,
   owner_title TEXT,
+  snoozed_until TEXT,
+  snoozed_through_message_at TEXT,
   enriched_through_message_at TEXT,
   enriched_while_working INTEGER NOT NULL DEFAULT 0,
   enrichment_contract INTEGER NOT NULL DEFAULT 0,
@@ -396,6 +405,7 @@ export class ThreadDb {
     this.migrateAgentRunPromptSubmission();
     this.migrateAgentRunCompletionReceipts();
     this.migrateRetiredScheduleTools();
+    this.migrateOwnerSnooze();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -437,6 +447,14 @@ export class ThreadDb {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private migrateOwnerSnooze(): void {
+    const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => row.name));
+    if (!threads.has("snoozed_until")) this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_until TEXT");
+    if (!threads.has("snoozed_through_message_at")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_through_message_at TEXT");
     }
   }
 
@@ -823,10 +841,12 @@ export class ThreadDb {
   }
 
   listSessionState(options: { activeSince?: string } = {}): SessionStateRow[] {
+    // A held snooze stays visible because the Snoozed section is the only place to find or wake
+    // it; a snooze that ended by time keeps its row visible for one window after the wake.
     const where = options.activeSince
       ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
-           AND (t.last_active_at >= ? OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
-             OR ${HAS_ACTIVE_CHILD_SQL})`
+           AND (t.last_active_at >= $since OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
+             OR ${HAS_ACTIVE_CHILD_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source,
@@ -848,7 +868,8 @@ export class ThreadDb {
               t.diff_added AS diffAdded, t.diff_deleted AS diffDeleted,
               (SELECT run.parent_thread_id FROM agent_runs run
                 WHERE run.child_session_id = t.id AND run.parent_thread_id IS NOT NULL
-                ORDER BY run.created_at DESC LIMIT 1) AS parentThreadId
+                ORDER BY run.created_at DESC LIMIT 1) AS parentThreadId,
+              ${SNOOZE_HOLDS_SQL} AS snoozeHolds, t.snoozed_until AS snoozedUntil
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        LEFT JOIN thread_worktrees selection ON selection.thread_id = t.id
@@ -856,21 +877,25 @@ export class ThreadDb {
        ${where}
        ORDER BY t.id`,
     );
-    const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
+    const now = this.now();
+    const rows = statement.all(options.activeSince ? { now, since: options.activeSince } : { now }) as unknown as
       Array<Omit<SessionStateRow, "lastActive" | "section" | "depth" | "snooze" | "link"> & {
         state: Exclude<ThreadState, "done">;
+        snoozeHolds: number;
+        snoozedUntil: string | null;
       }>;
-    const nowMs = Date.parse(this.now());
+    const nowMs = Date.parse(now);
     return arrangeSessionState(rows
       // Generated/owner titles are deliberate user-facing labels. Apply the legacy
       // transport-noise classifier only to raw topics; its broad scan-time patterns must
       // never hide a real title produced after inspecting the conversation.
       .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
-      .map((row) => ({
+      .map(({ snoozeHolds, snoozedUntil, ...row }) => ({
         ...row,
         statusSummaryPending: Boolean(row.statusSummaryPending),
         lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
-        snooze: null,
+        snooze: !snoozeHolds ? null
+          : snoozedUntil ? { kind: "until" as const, until: snoozedUntil } : { kind: "next-message" as const },
         link: null,
       })));
   }
@@ -935,6 +960,17 @@ export class ThreadDb {
       throw error;
     }
     return { markedIds, alreadyDoneIds, missingIds };
+  }
+
+  /** Set, overwrite, or clear (`null`) the owner snooze. The message watermark is captured in the
+   * same statement, so the next newer message wakes the row. False when no such thread. */
+  setSnooze(threadId: string, snooze: Snooze | null): boolean {
+    const statement = snooze
+      ? this.db.prepare(`UPDATE threads SET snoozed_until = ?,
+          snoozed_through_message_at = COALESCE(last_message_at, '') WHERE id = ?`)
+      : this.db.prepare("UPDATE threads SET snoozed_until = NULL, snoozed_through_message_at = NULL WHERE id = ?");
+    const params = snooze ? [snooze.kind === "until" ? snooze.until : null, threadId] : [threadId];
+    return Number(statement.run(...params).changes) > 0;
   }
 
   setOwnerTitle(threadId: string, title: string): boolean {

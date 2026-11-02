@@ -177,6 +177,11 @@ try {
   const filteredOut = await runOo(["session-state", "list", "--state", otherState]);
   assert.equal(filteredOut.status, 0, `an empty filter is an answer, not a failure (stderr: ${filteredOut.stderr})`);
   assert.equal(filteredOut.stdout, `no sessions in state ${otherState}\n`);
+  assert.equal(daemon.state.snoozeThread("e2e-done-1", { kind: "next-message" }), "applied");
+  assert.equal((await runOo(["session-state", "list", "--state", seededState])).stdout, `no sessions in state ${seededState}\n`,
+    "--state filters on the widget section, so a snoozed row never reports in its state");
+  assert.match((await runOo(["session-state", "list"])).stdout, /1\. snoozed .*e2e-done-1/, "text list prints the section");
+  daemon.state.snoozeThread("e2e-done-1", null);
   const badState = await runOo(["session-state", "list", "--state", "blocked"]);
   assert.equal(badState.status, 2, `unknown --state exits 2 (got ${badState.status})`);
   assert.match(badState.stderr, /needs-you, working, idle, done/, "names the valid states");

@@ -105,6 +105,7 @@ const APP_ONLY: Record<string, string> = {
   "GET /ready": "readiness probe (gateway/client.ts probeGateway, widget DaemonClient.swift)",
   "GET /events": "SSE invalidation stream for the widget (DaemonClient.swift) and GatewayApi.subscribe",
   "POST /rename": "widget row rename (DaemonClient.swift)",
+  "POST /snooze": "widget action; no oo verb until the owner asks to snooze through Operator (deferred scope, 2026-11-02)",
   "POST /poll": "monitor rescan trigger; GatewayApi.poll has no product caller beyond Gateway tests",
   "GET /agent-state": "parent-run projection; the TUI and completion delivery derive it in-process (agent-runs/agent-state-projection.ts), only daemon e2e tests call the route",
 };
