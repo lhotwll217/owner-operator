@@ -56,7 +56,13 @@ SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its 
 writer. The active `/session-state` response is a projection over `threads`, the latest dense
 `thread_details` version, and active delegated-child relationships; there is no stored snapshot or
 embedded client store. A root with a pending or running child projects as `working` without
-rewriting its transcript-derived state. Once a root has a worktree selection, the projection uses
+rewriting its transcript-derived state. An owner snooze is the same kind of read-time overlay: two
+`threads` columns evaluated against the injected clock, never cleared at expiry. While it holds,
+the row projects in the snoozed section with its state unchanged; done outranks it, and it
+outranks an active child. The projection's rows leave `State` already arranged into sections and
+display order. The monitor stores each thread's deep link on `threads.link`, replaced on every
+observation: Codex's from the scan, Claude's from the desktop app's session records
+(`src/session-monitor/claude-desktop-sessions.ts`), which fail closed. Once a root has a worktree selection, the projection uses
 that registered worktree's repository and path for `repo` and `project`; without a selection it
 retains transcript provenance. Projection does not inspect path availability, so an unavailable
 selection stays visible for diagnosis.
