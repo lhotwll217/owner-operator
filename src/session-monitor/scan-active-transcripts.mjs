@@ -170,7 +170,8 @@ function detectUi(source, cwd, entrypoint, meta = {}) {
 //  - Codex session run on its own        → codex://threads/<id>  ✅ (verified live)
 //  - Codex session spawned in Conductor   → the worktree lives in Conductor (which has NO
 //    deep-link), so a codex:// link would point at the wrong GUI → no link.
-//  - Claude (desktop/Conductor)           → no confirmed deep-link → no link.
+//  - Claude                               → no link here; the monitor adds the desktop app's
+//    link from its session records (src/session-monitor/claude-desktop-sessions.ts).
 function guiLink(source, id, cwd) {
   if (sessionHostForCwd(cwd, sessionHosts)) return null; // rooted host owns the worktree, not Codex
   if (source === "codex") return `codex://threads/${id}`;

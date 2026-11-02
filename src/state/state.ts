@@ -92,6 +92,7 @@ export class State {
       state,
       diffAdded: row.diffAdded,
       diffDeleted: row.diffDeleted,
+      link: row.link ?? null,
     });
 
     if (result.added || result.stateChanged || changedMessage) {

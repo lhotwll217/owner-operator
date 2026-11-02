@@ -95,6 +95,8 @@ export interface ThreadObservation {
   state: ThreadState;
   diffAdded?: number;
   diffDeleted?: number;
+  /** Deep link into the session's own app. Every observation replaces it; absent clears it. */
+  link?: string | null;
 }
 
 export interface ThreadResolutionRow {
@@ -155,6 +157,7 @@ CREATE TABLE IF NOT EXISTS threads (
   owner_title TEXT,
   snoozed_until TEXT,
   snoozed_through_message_at TEXT,
+  link TEXT,
   enriched_through_message_at TEXT,
   enriched_while_working INTEGER NOT NULL DEFAULT 0,
   enrichment_contract INTEGER NOT NULL DEFAULT 0,
@@ -406,6 +409,7 @@ export class ThreadDb {
     this.migrateAgentRunCompletionReceipts();
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
+    this.migrateThreadLink();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -456,6 +460,11 @@ export class ThreadDb {
     if (!threads.has("snoozed_through_message_at")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_through_message_at TEXT");
     }
+  }
+
+  private migrateThreadLink(): void {
+    const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => row.name));
+    if (!threads.has("link")) this.db.exec("ALTER TABLE threads ADD COLUMN link TEXT");
   }
 
   private migrateRetiredScheduleTools(): void {
@@ -674,8 +683,8 @@ export class ThreadDb {
         `INSERT INTO threads (
            id, repo, project, app, source, transcript_path, created_at,
            first_seen_at, last_seen_at, last_active_at, last_message_at,
-           last_checked_at, diff_added, diff_deleted, raw_topic
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           last_checked_at, diff_added, diff_deleted, raw_topic, link
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            repo = COALESCE(excluded.repo, threads.repo),
            project = COALESCE(excluded.project, threads.project),
@@ -689,13 +698,14 @@ export class ThreadDb {
            last_checked_at = excluded.last_checked_at,
            diff_added = COALESCE(excluded.diff_added, threads.diff_added),
            diff_deleted = COALESCE(excluded.diff_deleted, threads.diff_deleted),
-           raw_topic = COALESCE(excluded.raw_topic, threads.raw_topic)`,
+           raw_topic = COALESCE(excluded.raw_topic, threads.raw_topic),
+           link = excluded.link`,
       ).run(
         observation.id, observation.repo ?? null, observation.project ?? null,
         observation.app ?? null, observation.source ?? null, observation.transcriptPath ?? null,
         observation.createdAt ?? null, now, now, observation.lastActiveAt ?? null,
         observation.lastMessageAt ?? null, now, observation.diffAdded ?? null,
-        observation.diffDeleted ?? null, observation.rawTopic ?? null,
+        observation.diffDeleted ?? null, observation.rawTopic ?? null, observation.link ?? null,
       );
       const edge = this.appendDetailsInTx(
         observation.id,
@@ -869,7 +879,7 @@ export class ThreadDb {
               (SELECT run.parent_thread_id FROM agent_runs run
                 WHERE run.child_session_id = t.id AND run.parent_thread_id IS NOT NULL
                 ORDER BY run.created_at DESC LIMIT 1) AS parentThreadId,
-              ${SNOOZE_HOLDS_SQL} AS snoozeHolds, t.snoozed_until AS snoozedUntil
+              ${SNOOZE_HOLDS_SQL} AS snoozeHolds, t.snoozed_until AS snoozedUntil, t.link AS link
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        LEFT JOIN thread_worktrees selection ON selection.thread_id = t.id
@@ -879,7 +889,7 @@ export class ThreadDb {
     );
     const now = this.now();
     const rows = statement.all(options.activeSince ? { now, since: options.activeSince } : { now }) as unknown as
-      Array<Omit<SessionStateRow, "lastActive" | "section" | "depth" | "snooze" | "link"> & {
+      Array<Omit<SessionStateRow, "lastActive" | "section" | "depth" | "snooze"> & {
         state: Exclude<ThreadState, "done">;
         snoozeHolds: number;
         snoozedUntil: string | null;
@@ -896,7 +906,6 @@ export class ThreadDb {
         lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
         snooze: !snoozeHolds ? null
           : snoozedUntil ? { kind: "until" as const, until: snoozedUntil } : { kind: "next-message" as const },
-        link: null,
       })));
   }
 

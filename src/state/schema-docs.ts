@@ -24,6 +24,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "raw_topic", description: "Transcript-derived display fallback." },
       { name: "owner_title", description: "Owner-pinned title; NULL means generated title wins." },
       { name: "snoozed_until", description: "ISO instant an owner snooze ends; NULL with a snooze set means until the next message. Evaluated at read time; nothing writes at expiry." },
+      { name: "link", description: "Deep link that opens the session in its own app (codex://, claude://); NULL when none is verified. Replaced on every scan observation." },
       { name: "snoozed_through_message_at", description: "last_message_at when the owner snoozed ('' if none); non-NULL means a snooze was set. A newer message wakes the row." },
       { name: "enriched_through_message_at", description: "Latest message timestamp incorporated into model enrichment." },
       { name: "last_enriched_at", description: "When an assessment last landed, whether or not it changed anything. Working sessions are reassessed on a cadence from this." },
