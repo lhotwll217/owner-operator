@@ -243,6 +243,9 @@ export class Scheduler {
 
   async tick(): Promise<void> {
     if (this.stopping) return;
+    // A timed snooze ends at read time with no event, so each tick re-offers needs-you rows;
+    // the per-message watermark keeps a handled row from running twice.
+    this.reconcileNeedsYouInputs();
     const due = this.state.listDueSchedules(new Date(this.now()).toISOString());
     for (const schedule of due) {
       if (this.running.has(schedule.id)) continue;

@@ -136,6 +136,19 @@ try {
     threadIds: ["snoozed-decision"],
     observedThrough: "2026-07-09T10:06:00.000Z",
   });
+
+  state.recordObservation(row("timed-snooze", "2026-07-09T10:07:00.000Z"));
+  assert.equal(state.snoozeThread("timed-snooze", { kind: "until", until: new Date(Date.now() + 100).toISOString() }), "applied");
+  assert.ok(state.appendEnrichment("timed-snooze", owed("Choose the retention period."), "2026-07-09T10:07:00.000Z"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 5, "a held timed snooze never triggers a schedule");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await scheduler.tick();
+  await waitFor(() => contexts.length === 6, 1_000, "a timed snooze that ends without a new message triggers on the next tick");
+  assert.deepEqual(contexts[5], { threadIds: ["timed-snooze"], observedThrough: "2026-07-09T10:07:00.000Z" });
+  await scheduler.tick();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(contexts.length, 6, "later ticks do not rerun a handled row");
   process.stdout.write("ok — needs-you event batching, model attention, dedupe, and active-child and snooze suppression\n");
 } finally {
   await scheduler.stop();
