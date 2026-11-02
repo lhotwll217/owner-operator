@@ -8,6 +8,7 @@ import {
   ScheduledPayloadKind,
   ScheduleRunStatus,
   ScheduleRunTrigger,
+  arrangeSessionState,
   formatRelative,
   harnessIdentityObservation,
   isSessionBoilerplate,
@@ -853,14 +854,14 @@ export class ThreadDb {
        LEFT JOIN thread_worktrees selection ON selection.thread_id = t.id
        LEFT JOIN worktrees selected_worktree ON selected_worktree.id = selection.worktree_id
        ${where}
-       -- Rows sit where they were born: a session's place never changes with its state or its
-       -- latest message, so the owner's eye can return to it. New work enters at the top.
-       ORDER BY COALESCE(t.created_at, t.last_message_at) DESC, t.id`,
+       ORDER BY t.id`,
     );
     const rows = (options.activeSince ? statement.all(options.activeSince) : statement.all()) as unknown as
-      Array<Omit<SessionStateRow, "lastActive">>;
+      Array<Omit<SessionStateRow, "lastActive" | "section" | "depth" | "snooze" | "link"> & {
+        state: Exclude<ThreadState, "done">;
+      }>;
     const nowMs = Date.parse(this.now());
-    return rows
+    return arrangeSessionState(rows
       // Generated/owner titles are deliberate user-facing labels. Apply the legacy
       // transport-noise classifier only to raw topics; its broad scan-time patterns must
       // never hide a real title produced after inspecting the conversation.
@@ -869,7 +870,9 @@ export class ThreadDb {
         ...row,
         statusSummaryPending: Boolean(row.statusSummaryPending),
         lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
-      }));
+        snooze: null,
+        link: null,
+      })));
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {

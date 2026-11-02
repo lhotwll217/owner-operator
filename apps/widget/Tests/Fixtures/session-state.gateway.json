@@ -19,6 +19,10 @@
     "lastMessageAt": "2026-07-09T09:59:00.000Z",
     "diffAdded": null,
     "diffDeleted": null,
-    "parentThreadId": null
+    "parentThreadId": null,
+    "section": "needs-you",
+    "depth": 0,
+    "snooze": null,
+    "link": null
   }
 ]

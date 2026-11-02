@@ -146,7 +146,7 @@ export type { SessionHostCandidate } from "./onboarding.mjs";
 export * from "./status";
 
 // Session-state data model: digest metadata + live status (+ cached model details), with the
-// default-visible filter and grouping all surfaces share. See session-state.ts.
+// display order all surfaces share. See session-state.ts.
 export * from "./session-state";
 
 // Typed schedules, payloads, tool ids, and durable run outcomes.
