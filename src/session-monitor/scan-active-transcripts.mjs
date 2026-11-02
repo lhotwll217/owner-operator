@@ -267,7 +267,8 @@ function pickDiffBase(git) {
 // ---------- git workspace delta (per unique cwd, cached) ----------
 // +/- line totals from the repo's base branch to the WORKING TREE — committed + staged +
 // unstaged in one number. Prefer branch-local Git config (`branch.<name>.base`,
-// `gh-merge-base`, or a non-self tracking ref). Best-effort fact about the workspace: not a repo / dir gone → no badge.
+// `gh-merge-base`, or a non-self tracking ref). A clean workspace reports 0/0 so a stored badge
+// clears; not a repo / dir gone → null, which leaves the stored badge as it was.
 const diffCache = new Map();
 function gitDiffStat(cwd) {
   if (!cwd || cwd === "(unknown)") return null;
@@ -285,7 +286,7 @@ function gitDiffStat(cwd) {
       const m = /^(\d+)\t(\d+)\t/.exec(line); // binary files show "-\t-" and are skipped
       if (m) { added += +m[1]; deleted += +m[2]; }
     }
-    stat = added || deleted ? { added, deleted } : null;
+    stat = { added, deleted };
   } catch { /* not a git repo / no commits / cwd gone */ }
   diffCache.set(cwd, stat);
   return stat;
@@ -730,7 +731,7 @@ if (asJson) {
       console.log(`  Repo Name     : ${t.repo}`);
       console.log(`  App           : ${t.ui}`);
       console.log(`  State         : ${t.state}`);
-      if (t.diffAdded != null) console.log(`  Diff          : +${t.diffAdded} -${t.diffDeleted}`);
+      if (t.diffAdded || t.diffDeleted) console.log(`  Diff          : +${t.diffAdded} -${t.diffDeleted}`);
       console.log(`  Created       : ${rel(t.secondsSinceCreated)}`);
       console.log(`  Last message  : ${rel(t.secondsSinceLastMessage)}`);
       console.log(`  ${t.messageCount} msgs${t.link ? ` · open: ${t.link}` : ""}`);

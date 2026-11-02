@@ -700,8 +700,10 @@ export class ThreadDb {
            last_active_at = COALESCE(excluded.last_active_at, threads.last_active_at),
            last_message_at = COALESCE(excluded.last_message_at, threads.last_message_at),
            last_checked_at = excluded.last_checked_at,
-           diff_added = COALESCE(excluded.diff_added, threads.diff_added),
-           diff_deleted = COALESCE(excluded.diff_deleted, threads.diff_deleted),
+           diff_added = CASE WHEN excluded.diff_added = 0 AND excluded.diff_deleted = 0 THEN NULL
+             ELSE COALESCE(excluded.diff_added, threads.diff_added) END,
+           diff_deleted = CASE WHEN excluded.diff_added = 0 AND excluded.diff_deleted = 0 THEN NULL
+             ELSE COALESCE(excluded.diff_deleted, threads.diff_deleted) END,
            raw_topic = COALESCE(excluded.raw_topic, threads.raw_topic),
            link = excluded.link`,
       ).run(

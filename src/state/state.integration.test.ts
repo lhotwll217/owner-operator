@@ -43,6 +43,15 @@ try {
   });
 
   state.recordObservation(row("2026-07-09T09:59:00.000Z"));
+  const diffOf = () => {
+    const item = state.listSessionState().find((thread) => thread.id === "thread-1");
+    return [item?.diffAdded, item?.diffDeleted];
+  };
+  state.recordObservation({ ...row("2026-07-09T09:59:00.000Z"), diffAdded: 12, diffDeleted: 3 });
+  state.recordObservation(row("2026-07-09T09:59:00.000Z"));
+  assert.deepStrictEqual(diffOf(), [12, 3], "an observation without a diff (git inspection failed) keeps the badge");
+  state.recordObservation({ ...row("2026-07-09T09:59:00.000Z"), diffAdded: 0, diffDeleted: 0 });
+  assert.deepStrictEqual(diffOf(), [null, null], "a clean workspace clears the badge");
   state.recordObservation({
     ...row("2026-07-09T09:57:00.000Z"),
     id: "oo-root",
