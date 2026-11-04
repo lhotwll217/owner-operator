@@ -47,24 +47,16 @@ async function skim(threadId: string, maxChars: number): Promise<{ stdout: strin
   return { stdout, position: Number.isInteger(messages) && messages > 0 ? messages - 1 : null };
 }
 
-/** Injected text that arrives in the owner's role but was not written by the owner. */
-const INJECTED_OWNER_TEXT = ["<system-reminder", "<task-notification", "Another Claude session sent", "<command-", "<local-command", "[Request interrupted", "Caveat:"];
-
 /** The owner's last two messages and the agent's last two, oldest first, each kept whole: the
  * evidence the Need You classifier reads. Tool calls and results are left out. Two of each
  * reaches the request a side question followed; more messages scored no better. */
-export async function sampleTurns(threadId: string, perRole = 2): Promise<Turn[]> {
+export async function sampleTurns(threadId: string): Promise<Turn[]> {
   const scan = await runTranscriptScan([
-    "--thread", threadId, "--sample", "40", "--truncate", "1000000000", "--since", "1970-01-01",
+    "--thread", threadId, "--last-per-role", "2", "--truncate", "1000000000", "--since", "1970-01-01",
   ]);
   const thread = scan.threads[0];
   if (scan.threads.length !== 1 || thread.id !== threadId) throw new Error(`expected one authorized transcript for ${threadId}`);
-  const turns = [...(thread.firstMessages ?? []), ...(thread.recentMessages ?? [])]
-    .filter((message) => message.role === "assistant" || !INJECTED_OWNER_TEXT.some((prefix) => message.text.trimStart().startsWith(prefix)))
-    .map((message): Turn => ({ role: message.role === "user" ? "owner" : "agent", text: message.text }));
-  const last = (role: Turn["role"]) => turns.flatMap((turn, index) => turn.role === role ? [index] : []).slice(-perRole);
-  const kept = new Set([...last("owner"), ...last("agent")]);
-  return turns.filter((_, index) => kept.has(index));
+  return thread.recentMessages.map((message): Turn => ({ role: message.role === "user" ? "owner" : "agent", text: message.text }));
 }
 
 export interface EnrichmentSample {

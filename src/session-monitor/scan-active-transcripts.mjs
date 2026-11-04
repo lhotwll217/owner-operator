@@ -16,6 +16,8 @@
 //                               [--limit 40] [--all] [--json] [--truncate 280]
 //   --limit N        caps external and product-owned slices; 0 returns every candidate
 //   --sample N       keeps the first N + most-recent N messages of each thread
+//   --last-per-role N  instead keeps the owner's last N messages and the agent's last N, from the
+//                    whole conversation, in order; text injected in the owner's role is not the owner's
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
 //   --file <path>    parses only that transcript (repeatable) plus files sharing its session id
@@ -37,7 +39,7 @@ import {
   sessionHostForCwd,
 } from "../../packages/core/src/session-hosts.mjs";
 import { loadActiveWindow, parseWindowMs } from "../../packages/core/src/settings.mjs";
-import { isSessionBoilerplate } from "../../packages/core/src/session-text.mjs";
+import { isInjectedOwnerText, isSessionBoilerplate } from "../../packages/core/src/session-text.mjs";
 import { ownerOperatorProvenance } from "../../packages/core/src/session-cwd.mjs";
 
 // Every catalog format must be named here and exercised by its parser fixture. A catalog-only
@@ -65,6 +67,7 @@ const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 const sinceArg = String(val("since", null) ?? loadActiveWindow(ooHome));
 // How many messages to keep from each end of a thread (opening N + most-recent N).
 const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10);
+const lastPerRole = parseInt(val("last-per-role", "0"), 10);
 // Drill into ONE thread by id (prefix ok). Expands just that thread — pair with a bigger
 // --sample — without re-scanning/reprinting everything. Bypasses the automated/limit cuts.
 const threadArg = val("thread", val("id", null));
@@ -612,7 +615,14 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
   // whole tail, so it gets its own branch.
   const shape = (m) => ({ role: m.role, text: clip(m.text), at: m.ts ? iso(m.ts) : null });
   let firstMessages, recentMessages, omittedMessageCount;
-  if (sampleSize <= 0) { firstMessages = []; recentMessages = []; omittedMessageCount = convo.length; }
+  if (lastPerRole > 0) {
+    const authored = convo.filter((m) => m.role !== "user" || !isInjectedOwnerText(m.text));
+    const kept = new Set(["user", "assistant"].flatMap((role) =>
+      authored.flatMap((m, i) => (m.role === role ? [i] : [])).slice(-lastPerRole)));
+    firstMessages = [];
+    recentMessages = authored.filter((_, i) => kept.has(i)).map(shape);
+    omittedMessageCount = convo.length - recentMessages.length;
+  } else if (sampleSize <= 0) { firstMessages = []; recentMessages = []; omittedMessageCount = convo.length; }
   else if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
   else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
 
