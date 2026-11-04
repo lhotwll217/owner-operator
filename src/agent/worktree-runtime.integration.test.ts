@@ -184,22 +184,22 @@ try {
   });
   assert.equal(sameRuntime.cwd, fallbackCwd);
   const unchangedSession = sameRuntime.session;
-  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled" });
+  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled", aborted: false });
   assert.equal(sameRuntime.session, unchangedSession, "a settle with no selection change does not rebind");
   // `oo worktrees select` in the turn's bash changes the durable selection; no tool result signals it.
   sameRuntimeSelected = true;
   sameRuntimeResolutionError = new Error("selected path disappeared");
   const survivingSession = sameRuntime.session;
-  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled" });
+  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled", aborted: false });
   assert.equal(sameRuntime.session, survivingSession,
     "failed preflight does not dispose the current session before Pi's replacement factory runs");
   assert.equal(sameRuntime.cwd, fallbackCwd,
     "failed preflight leaves the current cwd-bound services usable");
   sameRuntimeResolutionError = undefined;
-  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled" });
+  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled", aborted: false });
   assert.equal(sameRuntime.cwd, selectedCwd, "the next settle after a bash selection rebuilds cwd-bound services");
   const reboundSession = sameRuntime.session;
-  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled" });
+  await sameRuntime.session.extensionRunner.emit({ type: "agent_settled", aborted: false });
   assert.equal(sameRuntime.session, reboundSession, "a settle whose selection already matches the runtime cwd does not rebind again");
   assert.equal(sameRuntime.session.sessionManager.getSessionId(), "same-runtime",
     "post-turn replacement reopens the same stable session instead of forking identity");

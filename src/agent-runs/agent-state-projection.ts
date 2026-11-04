@@ -69,7 +69,7 @@ function canRecoverResume(run: AgentRun, runs: readonly AgentRun[]): boolean {
   }
 }
 
-/** Reuse ACPX's retained initialize evidence, not a second capability store. Its pinned 0.13.2
+/** Reuse ACPX's retained initialize evidence, not a second capability store. Its pinned 0.21.0
  * file contract is documented in docs/delegated-runs.md. Keep this read synchronous alongside
  * the executor's eligibility check/row creation, and fail closed on absent or mismatched records. */
 export function openCodeContinuationError(run: AgentRun): string | null {

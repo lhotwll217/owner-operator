@@ -152,7 +152,7 @@ try {
     const row = await request<AgentRun>(`/agent-runs/${retried.id}`);
     return isTerminalAgentRunStatus(row.status) ? row : undefined;
   }, "retried Claude turn", 300_000);
-  assert.equal(finished.status, AgentRunStatus.Completed);
+  assert.equal(finished.status, AgentRunStatus.Completed, finished.error ?? undefined);
   assert.equal(finished.error, null);
   assert.equal(finished.childSessionId, originalChildSessionId, "retry preserves native child identity");
   assert.match(finished.resultTail ?? "", /OO_ACP_LIVE_OK/);

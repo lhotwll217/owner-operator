@@ -103,10 +103,11 @@ last-match-wins contract
 Its Bash safety floors can raise opaque or execution-wrapper commands from `allow` to `ask`
 ([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/docs/configuration.md#L319-L331));
 headless calls cannot approve those prompts.
-Project rules still resolve from the task cwd
-([source](https://github.com/gotgenes/pi-packages/blob/a9fc65d8878cc8265d5fc952e9e3dc057a1a7c81/packages/pi-permission-system/src/permission-manager.ts#L388-L401));
-project rules are therefore trusted task policy and may override the global baseline and generated
-Pi path rules.
+Project rules load only in a project Pi reports as trusted
+([source](https://github.com/gotgenes/pi-packages/blob/fc7f7fbf83cd7ea1ea261473d091d74869cb3e42/packages/pi-permission-system/README.md#L135)).
+Owner Operator creates sessions with `projectTrusted: false`
+([`agent.ts`](../src/agent/agent.ts)), so a task repository's rules are not loaded and cannot
+override the global baseline or generated Pi path rules.
 
 The direct `tool_call` privacy guard remains authoritative for explicit paths, repository names,
 symlink resolution, and traversal that could reach a blacklisted descendant. OS enforcement for Bash

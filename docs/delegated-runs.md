@@ -355,8 +355,8 @@ For OpenCode controls, OO additionally reads the same child's retained ACPX init
 before offering or creating retry/resume. Either `loadSession: true` or an advertised
 `sessionCapabilities.resume` object permits continuation, matching ACPX's preference for resume.
 Missing, mismatched or unreadable records, or absence of both methods, fail closed without a new
-run row. This reuses ACPX 0.13.2's [file store](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/runtime/public/file-session-store.ts#L9-L45)
-and [record encoding](https://github.com/openclaw/acpx/blob/fd173f04aa1b56f9e3f5ca5190c034ddcae28792/src/session/persistence/serialize.ts#L1-L45);
+run row. This reuses ACPX 0.21.0's [file store](https://github.com/openclaw/acpx/blob/c0b9dfdfad12ed4fc000b8ef2efc4b5644f1c3dc/src/runtime/public/file-session-store.ts#L9-L47)
+and [record encoding](https://github.com/openclaw/acpx/blob/c0b9dfdfad12ed4fc000b8ef2efc4b5644f1c3dc/src/session/persistence/serialize.ts#L1-L47);
 there is no second capability store or ledger migration. The synchronous environment check keeps
 eligibility and row creation together. At execution ACPX checks the current backend again, and OO
 rejects a changed child identity. A capability change since the retained observation can still
