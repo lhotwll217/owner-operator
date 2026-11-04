@@ -22,8 +22,8 @@ try {
   const db = new ThreadDb(dbPath, { now: () => "2026-07-07T10:00:00.000Z" });
   db.recordScan({ id: "t1", repo: "demo", app: "Claude CLI", source: "claude", state: "needs-you", rawTopic: "ship it" });
   db.recordScan({ id: "t2", repo: "demo", app: "Codex CLI", source: "codex", state: "working" });
-  db.appendModelDetails("t1", { priority: 4, topic: "Ship the fix" });
-  db.appendModelDetails("t1", { priority: 2, topic: "Shipped; verify CI" });
+  db.appendModelDetails("t1", { topic: "Ship the fix" });
+  db.appendModelDetails("t1", { topic: "Shipped; verify CI" });
   db.close();
 
   const tables = listTables(dbPath);
@@ -41,12 +41,12 @@ try {
 
   // The audit-trail query the tool exists for: one thread's story, in version order.
   const audit = runQuery(
-    "SELECT version, priority, topic FROM thread_details WHERE thread_id = 't1' AND written_by = 'model' ORDER BY version",
+    "SELECT version, topic FROM thread_details WHERE thread_id = 't1' AND written_by = 'model' ORDER BY version",
     dbPath,
   );
   assert.deepEqual(
-    audit.rows.map((r) => [r.version, r.priority, r.topic]),
-    [[2, 4, "Ship the fix"], [3, 2, "Shipped; verify CI"]],
+    audit.rows.map((r) => [r.version, r.topic]),
+    [[2, "Ship the fix"], [3, "Shipped; verify CI"]],
     "enrichment history readable in version order, attributable via written_by",
   );
   assert.equal(audit.truncated, false);

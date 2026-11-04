@@ -25,7 +25,7 @@ try {
   assert.equal(rows[0].topic, scanned.topic, "a title shows from the first observation");
   assert.equal(rows[0].statusSummary, null, "no recap is invented before one is generated");
 
-  finishEnrichment({ topic: "Daemon foundation", statusSummary: "Review the state seam", priority: 2, attention: "needs-you" as const });
+  finishEnrichment({ topic: "Daemon foundation", statusSummary: "Review the state seam", attention: "needs-you" as const });
   await waitFor(
     () => state.listSessionState()[0]?.statusSummary === "Review the state seam",
     1_000,
@@ -65,7 +65,7 @@ try {
       peakInFlight = Math.max(peakInFlight, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 20));
       inFlight--;
-      return { topic: "Parallel", statusSummary: "Enriched.", priority: 3, attention: "idle" as const };
+      return { topic: "Parallel", statusSummary: "Enriched.", attention: "idle" as const };
     },
     enrichConcurrency: 4,
   });
@@ -81,7 +81,7 @@ try {
     scan: async () => midDrainRows,
     enrich: async (candidate) => {
       if (candidate.id === "mid-drain-a") await gate;
-      return { topic: "Mid drain", statusSummary: "Enriched.", priority: 3, attention: "idle" as const };
+      return { topic: "Mid drain", statusSummary: "Enriched.", attention: "idle" as const };
     },
   });
   await midDrain.poll();
@@ -115,7 +115,7 @@ try {
     scan: async () => [fakeScanRow({ lastMessageAt: "2026-06-09T10:05:00.000Z" })],
     enrich: async () => {
       gatedEnrichmentCalls += 1;
-      return { topic: "should not run", statusSummary: "should not run", priority: 2, attention: "needs-you" as const };
+      return { topic: "should not run", statusSummary: "should not run", attention: "needs-you" as const };
     },
     canEnrich: () => false,
   });

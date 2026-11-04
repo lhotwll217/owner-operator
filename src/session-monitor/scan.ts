@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ScanActiveTranscriptsResult } from "./scan-active-transcripts.mjs";
 import { AgentRunStatus, type EnrichmentCandidate } from "@owner-operator/core";
+import type { Turn } from "../agent/needs-you";
 
 const execFileAsync = promisify(execFile);
 const scanScript = fileURLToPath(new URL("./scan-active-transcripts.mjs", import.meta.url));
@@ -46,57 +47,21 @@ async function skim(threadId: string, maxChars: number): Promise<{ stdout: strin
   return { stdout, position: Number.isInteger(messages) && messages > 0 ? messages - 1 : null };
 }
 
-interface RelatedEvidenceCandidate {
-  id: string;
-  source: string;
-  index: number;
-  timestamp?: string;
-  match: unknown;
-}
+/** Injected text that arrives in the owner's role but was not written by the owner. */
+const INJECTED_OWNER_TEXT = ["<system-reminder", "<task-notification", "Another Claude session sent", "<command-", "<local-command", "[Request interrupted", "Caveat:"];
 
-export function relatedOwnerActionQuery(ownerAction: string, primaryEvidence: string): string {
-  const referencedNumbers = new Set([...ownerAction.matchAll(/#(\d+)/g)].map((match) => match[1]));
-  return [...primaryEvidence.matchAll(/https?:\/\/github\.com\/[^\s)"']+\/(?:pull|issues)\/(\d+)/g)]
-    .find((match) => referencedNumbers.has(match[1]))?.[0]
-    .replace(/^https?:\/\/github\.com\//, "") ?? ownerAction;
-}
-
-/** Search other authorized sessions for evidence that may have settled a provisional owner
- * action. The enrichment model receives bounded matches and must keep ambiguous actions. */
-export async function sampleRelatedOwnerAction(
-  ownerAction: string,
-  threadId: string,
-  primaryEvidence = "",
-  maxChars = 12_000,
-): Promise<string | null> {
-  const query = relatedOwnerActionQuery(ownerAction, primaryEvidence);
-  const { stdout } = await execFileAsync(process.execPath, [
-    searchScript,
-    "--query", query,
-    "--any",
-    "--candidates",
-    "--include-tools",
-    "--json",
-    "--limit", "8",
-    "--max-chars", "4000",
-  ], { encoding: "utf8", maxBuffer: 128 * 1024 });
-  const result = JSON.parse(stdout) as {
-    query: string;
-    wordHits?: Record<string, number>;
-    candidates?: RelatedEvidenceCandidate[];
-  };
-  const candidates = (result.candidates ?? [])
-    .filter((match) => match.id !== threadId)
-    .slice(0, 5);
-  if (!candidates.length) return null;
-  const perSessionChars = Math.max(1_000, Math.floor((maxChars - 4_000) / candidates.length));
-  const related = await Promise.all(candidates.map(async ({ id, source, index, timestamp, match }) => {
-    const { stdout: sample } = await execFileAsync(process.execPath, [
-      searchScript, "--skim", id, "--include-tools", "--max-chars", String(perSessionChars),
-    ], { encoding: "utf8", maxBuffer: 128 * 1024 });
-    return { id, source, index, ...(timestamp ? { timestamp } : {}), match, sample };
-  }));
-  return JSON.stringify({ query: result.query, wordHits: result.wordHits, candidates: related });
+/** The last owner and agent messages of a session, oldest first, each kept whole: the evidence
+ * the Need You classifier reads. Tool calls and results are left out. */
+export async function sampleTurns(threadId: string, limit = 12): Promise<Turn[]> {
+  const scan = await runTranscriptScan([
+    "--thread", threadId, "--sample", String(limit * 3), "--truncate", "1000000000", "--since", "1970-01-01",
+  ]);
+  const thread = scan.threads[0];
+  if (scan.threads.length !== 1 || thread.id !== threadId) throw new Error(`expected one authorized transcript for ${threadId}`);
+  return [...(thread.firstMessages ?? []), ...(thread.recentMessages ?? [])]
+    .filter((message) => message.role === "assistant" || !INJECTED_OWNER_TEXT.some((prefix) => message.text.trimStart().startsWith(prefix)))
+    .slice(-limit)
+    .map((message): Turn => ({ role: message.role === "user" ? "owner" : "agent", text: message.text }));
 }
 
 export interface EnrichmentSample {

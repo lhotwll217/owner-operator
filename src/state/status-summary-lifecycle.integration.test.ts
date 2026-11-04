@@ -11,10 +11,9 @@ let clock = "2026-06-09T12:00:00.000Z";
 const at = (iso: string) => { clock = iso; };
 const state = new State(join(dir, "state.db"), { now: () => clock });
 
-const assessment = (over: Partial<{ topic: string; statusSummary: string; priority: number; attention: "idle" | "needs-you"; bookmark: { index: number; messageAt: string } }> = {}) => ({
+const assessment = (over: Partial<{ topic: string; statusSummary: string; attention: "idle" | "needs-you"; bookmark: { index: number; messageAt: string } }> = {}) => ({
   topic: "Export retention policy",
   statusSummary: "Retention policy chosen. Export implementation in progress.",
-  priority: 3,
   attention: "idle" as const,
   ...over,
 });
@@ -41,7 +40,7 @@ try {
   state.recordObservation(progressed);
   assert.ok(state.listEnrichmentCandidates().some((row) => row.id === thread.id), "new activity asks for a reassessment");
   assert.equal(
-    state.appendEnrichment(thread.id, assessment({ priority: 5, bookmark: { index: 52, messageAt: progressed.lastMessageAt } }), progressed.lastMessageAt),
+    state.appendEnrichment(thread.id, assessment({ bookmark: { index: 52, messageAt: progressed.lastMessageAt } }), progressed.lastMessageAt),
     true,
     "the reassessment lands",
   );

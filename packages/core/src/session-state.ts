@@ -4,11 +4,12 @@ import { isActiveState, type ThreadState, type ThreadStatus } from "./status";
 export interface ThreadDetails {
   topic?: string;
   statusSummary?: string;
-  priority?: number;
 }
 
-export interface ThreadEnrichment extends Required<ThreadDetails> {
-  attention: "idle" | "needs-you";
+/** One assessment of a session. Each part is decided by its own call, so each may be absent:
+ * `attention` while the session is working, the title and status summary when their call failed. */
+export interface ThreadEnrichment extends ThreadDetails {
+  attention?: "idle" | "needs-you";
   /**
    * Where the evidence for this assessment ended: the message index a tool-inclusive read
    * reached, and that message's time. The composition that samples the transcript fills it in;
@@ -22,7 +23,6 @@ export interface ThreadEnrichment extends Required<ThreadDetails> {
 export interface SessionStateThread extends ThreadStatus {
   generatedTopic?: string;
   statusSummary?: string;
-  priority?: number;
   /** False once status is `done`; done rows leave the active view. */
   active: boolean;
 }
@@ -47,7 +47,6 @@ export function toSessionStateThreads(
       ...t,
       generatedTopic: d?.topic,
       statusSummary: d?.statusSummary,
-      priority: d?.priority,
       active,
     };
   });

@@ -124,7 +124,6 @@ export interface DetailsRow {
   createdAt: string;
   writtenBy: "poll" | "model" | "owner";
   state: ThreadState;
-  priority: number | null;
   topic: string | null;
   statusSummary: string | null;
   /** Message index this revision was written from, under a tool-inclusive read. */
@@ -170,7 +169,6 @@ CREATE TABLE IF NOT EXISTS thread_details (
   created_at TEXT NOT NULL,
   written_by TEXT NOT NULL CHECK (written_by IN ('poll', 'model', 'owner')),
   state TEXT NOT NULL CHECK (state IN ('needs-you', 'working', 'idle', 'done')),
-  priority INTEGER,
   topic TEXT,
   status_summary TEXT,
   bookmark_index INTEGER,
@@ -379,7 +377,6 @@ function toAgentRun(row: AgentRunDbRow | undefined): AgentRun | undefined {
 
 type DetailsPatch = Partial<{
   state: ThreadState;
-  priority: number | null;
   topic: string | null;
   statusSummary: string | null;
   bookmark: { index: number; messageAt: string } | null;
@@ -447,6 +444,8 @@ export class ThreadDb {
         if (columns.has("next_steps")) this.db.exec("ALTER TABLE thread_details DROP COLUMN next_steps");
         if (columns.has("state_reason")) this.db.exec("ALTER TABLE thread_details DROP COLUMN state_reason");
       }
+      // Priority was retired with the owner-action assessment (#196); nothing reads it.
+      if (columns.has("priority")) this.db.exec("ALTER TABLE thread_details DROP COLUMN priority");
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -649,14 +648,12 @@ export class ThreadDb {
     const latest = this.latestDetails(threadId);
     const merged = {
       state: patch.state ?? latest?.state ?? "idle",
-      priority: "priority" in patch ? patch.priority ?? null : latest?.priority ?? null,
       topic: "topic" in patch ? patch.topic ?? null : latest?.topic ?? null,
       statusSummary: "statusSummary" in patch ? patch.statusSummary ?? null : latest?.statusSummary ?? null,
       bookmark: "bookmark" in patch ? patch.bookmark ?? null : null,
     };
     // A revision is a change of meaning: the lifecycle state, the title, or the status summary.
-    // A reassessment that lands on the same understanding, even with a different urgency, keeps
-    // the existing revision and the position it was written from.
+    // A reassessment that lands on the same understanding keeps the existing revision and the position it was written from.
     if (
       latest && latest.state === merged.state &&
       latest.topic === merged.topic && latest.statusSummary === merged.statusSummary
@@ -665,11 +662,11 @@ export class ThreadDb {
     this.db.prepare(
       `INSERT INTO thread_details (
          thread_id, version, created_at, written_by, state,
-         priority, topic, status_summary, bookmark_index, bookmark_message_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         topic, status_summary, bookmark_index, bookmark_message_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       threadId, version, this.now(), writtenBy, merged.state,
-      merged.priority, merged.topic, merged.statusSummary,
+      merged.topic, merged.statusSummary,
       merged.bookmark?.index ?? null, merged.bookmark?.messageAt ?? null,
     );
     return { version, from: latest?.state ?? null, to: merged.state };
@@ -736,7 +733,6 @@ export class ThreadDb {
       this.db.prepare("INSERT OR IGNORE INTO threads (id, first_seen_at, last_seen_at) VALUES (?, ?, ?)")
         .run(threadId, now, now);
       const edge = this.appendDetailsInTx(threadId, {
-        priority: details.priority ?? null,
         topic: details.topic ?? null,
         statusSummary: details.statusSummary ?? null,
       }, "model");
@@ -762,13 +758,13 @@ export class ThreadDb {
     try {
       const current = this.resolutionRow(threadId);
       const working = current?.state === "working" || this.hasActiveChild(threadId);
-      // Guards that reject an assessment: the owner closed the thread, the assessment is not a
+      // Guards that reject an assessment: the owner closed the thread, a stopped session has no
       // lifecycle answer, or it was made against evidence that has since moved. A repeat
       // assessment of the same evidence is accepted — it advances the reassessment clock and
       // writes a revision only if the meaning changed.
       if (
         !current || current.state === "done" ||
-        (details.attention !== "idle" && details.attention !== "needs-you") ||
+        (!working && details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
         JSON.stringify(children) !== current.childrenEvidence ||
         (current.enrichedThroughMessageAt ?? "") > throughMessageAt
@@ -781,14 +777,18 @@ export class ThreadDb {
       // Enrichment repeats the current title verbatim unless the task's identity changed
       // categorically, and a different string is what marks that change.
       const currentTitle = this.latestDetails(threadId)?.topic ?? null;
+      const account = details.statusSummary !== undefined;
       const edge = this.appendDetailsInTx(threadId, {
         ...(!working ? { state: details.attention } : {}),
-        priority: details.priority,
-        topic: details.topic || currentTitle,
-        statusSummary: details.statusSummary,
-        bookmark: details.bookmark ?? null,
+        ...(account ? {
+          topic: details.topic || currentTitle,
+          statusSummary: details.statusSummary,
+          bookmark: details.bookmark ?? null,
+        } : {}),
       }, "model");
-      this.db.prepare(
+      // Without a title and status summary the thread stays a candidate, so the account is
+      // retried while the lifecycle answer it arrived with already shows.
+      if (account) this.db.prepare(
         `UPDATE threads SET enriched_through_message_at = ?, enriched_while_working = ?,
            enriched_children = ?, enrichment_contract = ?, last_enriched_at = ? WHERE id = ?`,
       ).run(
@@ -810,7 +810,7 @@ export class ThreadDb {
   latestDetails(threadId: string): DetailsRow | undefined {
     return this.db.prepare(
       `SELECT thread_id AS threadId, version, created_at AS createdAt,
-              written_by AS writtenBy, state, priority, topic, status_summary AS statusSummary,
+              written_by AS writtenBy, state, topic, status_summary AS statusSummary,
               bookmark_index AS bookmarkIndex, bookmark_message_at AS bookmarkMessageAt
        FROM thread_details WHERE thread_id = ? ORDER BY version DESC LIMIT 1`,
     ).get(threadId) as unknown as DetailsRow | undefined;
@@ -830,14 +830,13 @@ export class ThreadDb {
 
   latestDetailsMap(): Map<string, ThreadDetails> {
     const rows = this.db.prepare(
-      `SELECT thread_id AS threadId, priority, topic, status_summary AS statusSummary
+      `SELECT thread_id AS threadId, topic, status_summary AS statusSummary
        FROM thread_details detail
        WHERE version = (SELECT MAX(version) FROM thread_details WHERE thread_id = detail.thread_id)`,
     ).all() as unknown as Array<DetailsRow>;
     return new Map(rows.map((row) => [row.threadId, {
       ...(row.topic != null ? { topic: row.topic } : {}),
       ...(row.statusSummary != null ? { statusSummary: row.statusSummary } : {}),
-      ...(row.priority != null ? { priority: row.priority } : {}),
     }]));
   }
 
@@ -885,7 +884,7 @@ export class ThreadDb {
                      AND t.enriched_children = ${CHILD_EVIDENCE_SQL}
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
                      AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
-                   THEN 0 ELSE 1 END AS statusSummaryPending, detail.priority,
+                   THEN 0 ELSE 1 END AS statusSummaryPending,
               ${EFFECTIVE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,

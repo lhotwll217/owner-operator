@@ -71,7 +71,7 @@ try {
   const oldState = new State(join(dir, "old.db"), { now: () => "2026-06-20T10:00:00.000Z", activeWindow: "1d" });
   const old = fakeScanRow({ id: "old-row", source: "claude", transcriptPath: "/transcripts/old-row.jsonl" });
   oldState.recordPoll([old]);
-  oldState.appendEnrichment("old-row", { topic: "Old", statusSummary: "Waits on the owner.", priority: 2, attention: "needs-you" }, old.lastMessageAt);
+  oldState.appendEnrichment("old-row", { topic: "Old", statusSummary: "Waits on the owner.", attention: "needs-you" }, old.lastMessageAt);
   const scans: string[][] = [];
   const oldMonitor = new SessionMonitor(oldState, {
     scan: async (_since, _limit, files = []) => {
