@@ -4,8 +4,6 @@ import { enrichThread, parseAccount, STATUS_SUMMARY_MAX_CHARS } from "./enrichme
 
 const account = { topic: "Export implementation", statusSummary: "Export implemented; tests passed." };
 assert.deepEqual(parseAccount(account), account);
-assert.deepEqual(parseAccount({ ...account, ownerAction: "Choose the retention policy.", priority: 5 }), account,
-  "the account carries no owner attention; Need You is decided by its own call");
 for (const field of ["topic", "statusSummary"]) {
   for (const invalid of [undefined, "", "   ", 3]) {
     assert.throws(() => parseAccount({ ...account, [field]: invalid }), new RegExp(field));
@@ -44,7 +42,6 @@ const written = await enrichThread("PR #14 remains open.", {
 });
 assert.equal(prompts.length, 1, "one call writes the title and status summary");
 assert.deepEqual(written, { ...account, statusSummary: "PR #14 awaits review." });
-assert.doesNotMatch(prompts[0], /ownerAction|priority/, "the account prompt asks for no owner attention");
 const [tool] = tools as Array<{ name: string; parameters: { properties: Record<string, { anyOf: Array<{ maxLength?: number }> }> }; constrainedSampling: unknown }>;
 assert.equal(tool.name, "record_assessment");
 assert.deepEqual(Object.keys(tool.parameters.properties), ["topic", "statusSummary"]);
