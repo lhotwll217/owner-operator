@@ -23,7 +23,7 @@ try {
 
   // A timed snooze holds until its instant passes on the injected clock; state is untouched.
   state.recordObservation(row("timed", "2026-07-09T09:59:00.000Z"));
-  state.appendEnrichment("timed", { topic: "Pick a retention policy", statusSummary: "Asks which policy.", priority: 3, attention: "needs-you" }, "2026-07-09T09:59:00.000Z");
+  state.appendEnrichment("timed", { topic: "Pick a retention policy", statusSummary: "Asks which policy.", attention: "needs-you" }, "2026-07-09T09:59:00.000Z");
   assert.equal(state.snoozeThread("timed", { kind: "until", until: "2026-07-09T14:00:00+02:00" }), "applied");
   assert.deepEqual(
     { section: visible("timed")?.section, state: visible("timed")?.state, snooze: visible("timed")?.snooze },

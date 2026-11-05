@@ -77,22 +77,27 @@ The bus wakes consumers; clients refetch truth rather than consuming event paylo
 domain events to four typed SSE invalidations—state, schedule, schedule-run, or agent-run changed—and
 clients refetch SQLite-backed truth.
 
-Enrichment sends only bounded transcript samples to the model, read through
-application-owned scan/search modules. Claude, Codex, and Pi samples include bounded tool
-evidence through the privacy-aware session-search helper; other formats retain the scan sample.
-Every visible `needs-you`, `idle`, or `working` row is eligible for enrichment, including parents
-with active delegated children. `ThreadEnrichment` separates required presentation fields
-`topic`, `statusSummary`, and `priority` from an `idle` or `needs-you` attention assessment.
-State applies attention only to settled rows. Working status remains deterministic and does
-not require model agreement, while `needs-you` comes only from that assessment: a scan sees a
-turn end, not whether anything was asked of the owner. Completed work stays visible until an explicit Done action.
-The model records its assessment through one strict-schema tool call: the prompt carries the
-alignment examples and the 120-character target, the schema carries a backstop above it, and
-`null` keeps the current title or status summary unchanged. What the model returns is shown; there
-is no length gate and no retry. The model also reads the thread's last three recorded
-status-summary revisions with their positions, so a new revision continues that account. A
-provisional owner action triggers one bounded privacy-aware search across other authorized
-sessions before the assessment lands, so later evidence can clear an already-settled obligation.
+Enrichment makes two independent calls per thread, each reading through application-owned
+scan/search modules. Every visible `needs-you`, `idle`, or `working` row is eligible, including
+parents with active delegated children.
+
+- **Need You** ([needs-you.ts](../src/agent/needs-you.ts)) is asked only of a stopped session: a
+  running turn or an active delegated child is already `working`, deterministically. It sends the
+  owner's last two messages and the agent's last two, whole and without tool calls, to one Jev question: did the
+  agent stop with the current task unfinished? A score at or above the threshold is `needs-you`,
+  otherwise `idle`. A scan alone sees a turn end, not whether the task is done, so `needs-you`
+  comes only from this call.
+- **Title and status summary** ([enrichment.ts](../src/agent/enrichment.ts)) read a bounded sample:
+  Claude, Codex, and Pi samples include bounded tool evidence through the privacy-aware
+  session-search helper; other formats retain the scan sample. The model records them through one
+  strict-schema tool call: the prompt carries the alignment examples and the 120-character
+  target, the schema carries a backstop above it, and `null` keeps the current title or status
+  summary unchanged. What the model returns is shown; there is no length gate. The model also
+  reads the thread's last three recorded status-summary revisions with their positions, so a new
+  revision continues that account. This call never sets state; when it fails, the Need You answer
+  still lands and the row stays eligible until a title and status summary do.
+
+Completed work stays visible until an explicit Done action.
 Enrichment runs several threads at once, bounded by `enrichConcurrency` (default 10). A poll
 that lands while a pass is running gets its own pass afterwards, so a turn ending or a child
 starting is reassessed within one model call rather than at the next tick.

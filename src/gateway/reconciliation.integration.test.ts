@@ -11,10 +11,10 @@ const { dir, cleanup } = tempOoHome("oo-gateway-reconciliation");
 const state = new State(join(dir, "state.db"), { now: () => "2026-06-09T12:00:00.000Z" });
 const row = fakeScanRow({ secondsSinceLastMessage: 4000 });
 state.recordObservation(row);
-state.appendEnrichment(row.id, { topic: "Thread cleanup", statusSummary: "Review the cleanup", priority: 2, attention: "needs-you" as const }, row.lastMessageAt);
+state.appendEnrichment(row.id, { topic: "Thread cleanup", statusSummary: "Review the cleanup", attention: "needs-you" as const }, row.lastMessageAt);
 const monitor = new SessionMonitor(state, {
   scan: async () => [row],
-  enrich: async () => ({ topic: "Thread cleanup", attention: "idle", statusSummary: "The requested cleanup completed without an outstanding question.", priority: 2 }),
+  enrich: async () => ({ topic: "Thread cleanup", attention: "idle", statusSummary: "The requested cleanup completed without an outstanding question." }),
 });
 const gateway = await startGateway({
   authToken: "test-token", state, monitor, port: 0,

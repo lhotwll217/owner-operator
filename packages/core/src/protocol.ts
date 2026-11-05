@@ -59,7 +59,6 @@ export interface SessionStateRow {
   statusSummary: string | null;
   /** A newer message, child, or working change is not reflected in `statusSummary` yet. */
   statusSummaryPending: boolean;
-  priority: number | null;
   state: ThreadState;
   stateSince: string;
   lastActive: string;

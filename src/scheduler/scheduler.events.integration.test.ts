@@ -14,7 +14,6 @@ import {
 import { waitFor } from "../gateway/test/helpers";
 import { State } from "../state/state";
 import { Scheduler } from "./scheduler";
-import { parseDetails } from "../agent/enrichment";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-scheduler-events-"));
 const state = new State(join(dir, "state.db"));
@@ -45,12 +44,10 @@ try {
   });
   scheduler.start();
 
-  const owed = (statusSummary: string) => parseDetails({
-    topic: "Retention decision", statusSummary, priority: 2, ownerAction: "Choose the retention period",
-  });
+  const owed = (statusSummary: string) => ({ topic: "Retention decision", statusSummary, attention: "needs-you" as const });
 
-  // A scan alone never says the owner owes anything, so nothing fires until enrichment finds
-  // the owner action in the conversation. Both findings land in one tick and batch into one run.
+  // A scan alone never says the owner owes anything, so nothing fires until the classifier
+  // finds the session needs its owner. Both findings land in one tick and batch into one run.
   state.recordPoll([
     row("a", "2026-07-09T10:00:00.000Z"),
     row("b", "2026-07-09T10:01:00.000Z"),
@@ -108,14 +105,14 @@ try {
   const idle = { ...row("model-attention", "2026-07-09T10:04:00.000Z"), lastRole: "user", secondsSinceLastMessage: 7200, secondsSinceActivity: 7200 };
   state.recordObservation(idle);
   assert.equal(state.listSessionState().find((item) => item.id === idle.id)?.state, "idle");
-  const noAction = parseDetails({ topic: "CSV escaping review", statusSummary: "The agent reports completion but CSV verification evidence is missing. No owner action.", priority: 2, ownerAction: null, attention: "needs-you" });
+  const noAction = { topic: "CSV escaping review", statusSummary: "The agent reports completion but CSV verification evidence is missing.", attention: "idle" as const };
   assert.ok(state.appendEnrichment(idle.id, noAction, idle.lastMessageAt));
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(contexts.length, 3, "verification uncertainty without a human action cannot trigger a schedule");
+  assert.equal(contexts.length, 3, "an Idle verdict cannot trigger a schedule");
   assert.equal(state.listScheduleRuns(job.id).length, 3);
   idle.lastMessageAt = "2026-07-09T10:05:00.000Z";
   state.recordObservation(idle);
-  const details = { topic: "Retention decision", statusSummary: "Choose the retention period.", priority: 2, attention: "needs-you" as const };
+  const details = { topic: "Retention decision", statusSummary: "Choose the retention period.", attention: "needs-you" as const };
   assert.ok(state.appendEnrichment(idle.id, details, idle.lastMessageAt));
   await waitFor(() => contexts.length === 4, 1_000, "model attention triggers needs-you schedule");
   state.renameThread(idle.id, "Pinned decision");

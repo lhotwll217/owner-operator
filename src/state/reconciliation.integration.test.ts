@@ -14,7 +14,7 @@ const monitor = new SessionMonitor(state, {
   enrich: async () => {
     attempts++;
     if (attempts === 1) throw new Error("temporary model outage");
-    return { topic: "Completed repair", attention: "idle" as const, statusSummary: "The requested repair and verification are complete.", priority: 2 };
+    return { topic: "Completed repair", attention: "idle" as const, statusSummary: "The requested repair and verification are complete." };
   },
 });
 try {
@@ -27,14 +27,14 @@ try {
   await waitFor(() => state.listSessionState()[0]?.generatedTopic === "Completed repair", 1000, "completed task receives an updated title");
   assert.equal(state.listSessionState()[0]?.state, "idle", "reported completion stays visible until explicitly marked done");
   assert.deepEqual(state.requestEnrichment([{ id: row.id, lastMessageAt: row.lastMessageAt }]), [row.id]);
-  assert.equal(state.appendEnrichment(row.id, { attention: "done", statusSummary: "Complete", topic: "Session progress", priority: 2 } as unknown as ThreadEnrichment, row.lastMessageAt), false, "even a fresh eligible assessment cannot mark work done");
+  assert.equal(state.appendEnrichment(row.id, { attention: "done", statusSummary: "Complete", topic: "Session progress" } as unknown as ThreadEnrichment, row.lastMessageAt), false, "even a fresh eligible assessment cannot mark work done");
   state.markThreadsDone([row.id]);
   await monitor.poll();
   assert.equal(state.listSessionState().length, 0, "poll preserves explicit done");
 
   const unresolved = fakeScanRow({ id: "unresolved", secondsSinceLastMessage: 4000 });
   state.recordObservation(unresolved);
-  const decision = { attention: "needs-you" as const, statusSummary: "The owner has not answered the behavior question.", topic: "Session progress", priority: 2 };
+  const decision = { attention: "needs-you" as const, statusSummary: "The owner has not answered the behavior question.", topic: "Session progress" };
   assert.equal(state.appendEnrichment(unresolved.id, decision, unresolved.lastMessageAt), true);
   state.recordObservation(unresolved);
   assert.equal(state.listCurrentSessionState()[0]?.state, "needs-you", "genuine old decisions survive polling");
@@ -71,11 +71,11 @@ try {
   state.recordObservation(worker);
   assert.equal(state.listCurrentSessionState().find((r) => r.id === "worker")?.state, "working", "active work is visible under the configured window");
   assert.ok(state.listEnrichmentCandidates().some((r) => r.id === "worker"), "a working row is eligible for its first summary");
-  assert.equal(state.appendEnrichment("worker", { attention: "idle", statusSummary: "Settled.", topic: "Session progress", priority: 2 }, worker.lastMessageAt), true, "attention does not gate a working summary");
+  assert.equal(state.appendEnrichment("worker", { attention: "idle", statusSummary: "Settled.", topic: "Session progress" }, worker.lastMessageAt), true, "attention does not gate a working summary");
   state.requestEnrichment([{ id: "worker", lastMessageAt: worker.lastMessageAt }]);
-  assert.equal(state.appendEnrichment("worker", { attention: "needs-you", statusSummary: "Question.", topic: "Session progress", priority: 2 }, worker.lastMessageAt), true, "attention cannot change working lifecycle state");
+  assert.equal(state.appendEnrichment("worker", { attention: "needs-you", statusSummary: "Question.", topic: "Session progress" }, worker.lastMessageAt), true, "attention cannot change working lifecycle state");
   state.requestEnrichment([{ id: "worker", lastMessageAt: worker.lastMessageAt }]);
-  assert.equal(state.appendEnrichment("worker", { attention: "idle", topic: "Export implementation", priority: 3, statusSummary: "Implementing the export." }, worker.lastMessageAt), true, "a working affirmation lands the title and current-activity summary");
+  assert.equal(state.appendEnrichment("worker", { attention: "idle", topic: "Export implementation", statusSummary: "Implementing the export." }, worker.lastMessageAt), true, "a working affirmation lands the title and current-activity summary");
   const summarizedWorker = state.listCurrentSessionState().find((r) => r.id === "worker");
   assert.equal(summarizedWorker?.state, "working", "summarization preserves the working lifecycle state");
   assert.equal(summarizedWorker?.generatedTopic, "Export implementation");
@@ -84,7 +84,7 @@ try {
   const settled = fakeScanRow({ id: "settled", lastMessageAt: "2026-06-09T11:50:00.000Z", secondsSinceLastMessage: 4000, secondsSinceActivity: 4000 });
   state.recordObservation(settled);
   assert.equal(state.listCurrentSessionState().find((r) => r.id === "settled")?.state, "idle");
-  assert.equal(state.appendEnrichment("settled", { attention: "idle", statusSummary: "Active.", topic: "Session progress", priority: 2 }, settled.lastMessageAt), true, "progress descriptions cannot activate a settled row");
+  assert.equal(state.appendEnrichment("settled", { attention: "idle", statusSummary: "Active.", topic: "Session progress" }, settled.lastMessageAt), true, "progress descriptions cannot activate a settled row");
   assert.equal(state.listSessionState().find(({ id }) => id === "settled")?.state, "idle");
   console.log("ok - failed enrichment recovers while idle, explicit done persists, unresolved decisions survive");
 } finally {

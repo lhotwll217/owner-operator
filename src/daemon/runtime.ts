@@ -9,8 +9,8 @@ import {
   isOnboarded,
 } from "@owner-operator/core";
 import { startGateway, type GatewayHarness, type RunningGateway } from "../gateway/server";
-import { SessionMonitor, type SessionMonitorOptions } from "../session-monitor/monitor";
-import { sampleEnrichment, sampleRelatedOwnerAction } from "../session-monitor/scan";
+import { SessionMonitor, SessionMonitorLogEvent, type SessionMonitorOptions } from "../session-monitor/monitor";
+import { sampleEnrichment, sampleTurns } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
@@ -66,24 +66,46 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   const state = new State(dbPath);
   modules.state = true;
   const worktrees = new WorktreeService(state, { ooHome: ownerOperatorHome() });
+  const monitorLogger: NonNullable<SessionMonitorOptions["logger"]> = options.monitor?.logger ?? ((record) => {
+    process.stderr.write(`${JSON.stringify({ component: "session-monitor", ...record })}\n`);
+  });
   const monitor = new SessionMonitor(state, {
     ...options.monitor,
     canEnrich: options.monitor?.canEnrich ?? (() => isOnboarded()),
-    logger: options.monitor?.logger ?? ((record) => {
-      process.stderr.write(`${JSON.stringify({ component: "session-monitor", ...record })}\n`);
-    }),
+    logger: monitorLogger,
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
       : { enrich: options.monitor?.enrich ?? (async (candidate) => {
-          const { sample, bookmark } = await sampleEnrichment(candidate);
-          const { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } = await import("../agent/enrichment");
-          const assessment = await enrichThread(sample, {
-            currentTitle: candidate.generatedTopic,
-            statusSummaries: state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
-            resolveOwnerAction: (ownerAction, primaryEvidence) =>
-              sampleRelatedOwnerAction(ownerAction, candidate.id, primaryEvidence),
-          });
-          return { ...assessment, ...(bookmark ? { bookmark } : {}) };
+          // Two calls with one job each. Need You decides the row's state and is only asked of
+          // a stopped session; the title and status summary may fail without holding it back.
+          const working = candidate.state === "working";
+          const [needsYou, account] = await Promise.allSettled([
+            working ? undefined : (async () => {
+              const { classifyNeedsYou } = await import("../agent/needs-you");
+              return classifyNeedsYou(await sampleTurns(candidate.id));
+            })(),
+            (async () => {
+              const { sample, bookmark } = await sampleEnrichment(candidate);
+              const { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } = await import("../agent/enrichment");
+              const written = await enrichThread(sample, {
+                currentTitle: candidate.generatedTopic,
+                statusSummaries: state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
+              });
+              return { ...written, ...(bookmark ? { bookmark } : {}) };
+            })(),
+          ]);
+          if (needsYou.status === "rejected") throw needsYou.reason;
+          if (account.status === "rejected") {
+            if (working) throw account.reason;
+            monitorLogger({
+              event: SessionMonitorLogEvent.EnrichmentFailed,
+              error: `${candidate.id}: title and status summary: ${account.reason instanceof Error ? account.reason.message : String(account.reason)}`,
+            });
+          }
+          return {
+            ...(needsYou.value === undefined ? {} : { attention: needsYou.value ? "needs-you" as const : "idle" as const }),
+            ...(account.status === "fulfilled" ? account.value : {}),
+          };
         }) }),
   });
   modules.sessionMonitor = true;
