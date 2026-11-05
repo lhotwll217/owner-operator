@@ -130,7 +130,7 @@ skills, extensions, modes); check its toolbox first. Tracked implementations:
 | `@earendil-works/pi-coding-agent` | `src/agent/` and `src/cli/interactive.ts` — session build, tools, skills, saved sessions, and pi interactive mode |
 | `@earendil-works/pi-ai` | typed model calls + `Type` schemas for the agent tools (`src/agent/agent.ts`) |
 | [`croner`](https://github.com/Hexagon/croner) | `src/scheduler/schedule.ts` — cron expression and IANA time-zone math only |
-| [`acpx`](https://github.com/openclaw/acpx) (MIT, pinned `0.13.2`) | `src/agent-runs/acp-launcher.ts` — the Agent Client Protocol wire runtime for delegated children (spawn, handshake, resume, typed event stream) on the official ACP SDK. Effort uses the generic runtime's adapter-advertised [`configOptionKeys` and `setConfigOption`](https://github.com/openclaw/acpx/blob/2d735cf18220e539bf7961a996bff0aceefcf3b0/src/runtime.ts#L282-L318), not a harness-specific path. Owner Operator keeps the control plane (`agent_runs`) and resolves directly pinned adapter entrypoints for [`@agentclientprotocol/claude-agent-acp` `0.81.0`](https://github.com/agentclientprotocol/claude-agent-acp/blob/d571358e267ed21ed0ec9ec2622fda8935535d57/package.json#L1-L26) and [`@agentclientprotocol/codex-acp` `1.13.1`](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/package.json#L1-L16), so the package lock—not an `npx` range cache—owns adapter compatibility. |
+| [`acpx`](https://github.com/openclaw/acpx) (MIT, pinned `0.21.0`) | `src/agent-runs/acp-launcher.ts` — the Agent Client Protocol wire runtime for delegated children (spawn, handshake, resume, typed event stream) on the official ACP SDK. Effort uses the generic runtime's adapter-advertised [`configOptionKeys` and `setConfigOption`](https://github.com/openclaw/acpx/blob/2d735cf18220e539bf7961a996bff0aceefcf3b0/src/runtime.ts#L282-L318), not a harness-specific path. Owner Operator keeps the control plane (`agent_runs`) and resolves directly pinned adapter entrypoints for [`@agentclientprotocol/claude-agent-acp` `0.95.0`](https://github.com/agentclientprotocol/claude-agent-acp/blob/ebfbfbdaa9c2a6a8bd9eb0a4965b521009152350/package.json#L1-L26) and [`@agentclientprotocol/codex-acp` `2.2.2`](https://github.com/agentclientprotocol/codex-acp/blob/202e66e63343ec4f5a5e35ab590251d813d129ca/package.json#L1-L16), so the package lock—not an `npx` range cache—owns adapter compatibility. |
 | `jsonc-parser` | `packages/core/src/permissions.mjs` — parse and locate Pi's comment-bearing config ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L100-L114)), then apply targeted edits without replacing the document ([source](https://github.com/microsoft/node-jsonc-parser/blob/3c9b4203d663061d87d4d34dd0004690aef94db5/src/main.ts#L400-L423)) |
 
 Issue #89's separate raw-tool expansion follows Pi's expandable-component contract: tool rows
@@ -143,15 +143,15 @@ expansion, so Owner Operator keeps the existing construction-site shim narrow: i
 row's `render` method and leaves execution, updates, ordering, and expansion ownership with Pi.
 
 Issue #131's root cwd restoration adapts the exact installed
-`@earendil-works/pi-coding-agent` 0.87.1 runtime contract: OO resolves its State/Git selection before
+`@earendil-works/pi-coding-agent` 1.4.0 runtime contract: OO resolves its State/Git selection before
 the shared runtime factory constructs services, and reopens the same session through Pi's
-[`switchSession`](https://github.com/earendil-works/pi/blob/f07218c4d4bbc12bef056a7058c3dd49dfe41abe/packages/coding-agent/src/core/agent-session-runtime.ts#L196-L224)
+[`switchSession`](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/coding-agent/src/core/agent-session-runtime.ts#L196-L224)
 only after Pi's
-[`agent_settled`](https://github.com/earendil-works/pi/blob/f07218c4d4bbc12bef056a7058c3dd49dfe41abe/packages/coding-agent/src/core/agent-session.ts#L870-L891)
+[`agent_settled`](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/coding-agent/src/core/agent-session.ts#L1078-L1100)
 event. OO preserves Pi's teardown-before-rebuild ordering and stable session ID, while deliberately
 keeping the Pi header as install-root lookup identity rather than task assignment. The manager's
 supported
-[`create`/`open` cwd contract](https://github.com/earendil-works/pi/blob/f07218c4d4bbc12bef056a7058c3dd49dfe41abe/packages/coding-agent/src/core/session-manager.ts#L1746-L1783)
+[`create`/`open` cwd contract](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/coding-agent/src/core/session-manager.ts#L1755-L1786)
 is used without introducing a separate runtime or session store.
 
 Permission gating is adopted wholesale from

@@ -26,7 +26,7 @@ import { ownerOperatorCustomTools, ownerOperatorTools } from "./tools";
 
 const permissionPackage = "@gotgenes/pi-permission-system";
 const { getPermissionsService } = await import(permissionPackage) as {
-  getPermissionsService(): {
+  getPermissionsService(sessionId: string): {
     checkPermission(toolName: string, input: string): { state: string };
     getToolPermission(toolName: string): string;
   } | undefined;
@@ -142,7 +142,7 @@ try {
     onError(error): void { extensionErrors.push(error); },
   });
   assert.deepEqual(extensionErrors, [], "permission extensions start without runtime errors");
-  const permissions = getPermissionsService();
+  const permissions = getPermissionsService(session.sessionManager.getSessionId());
   assert.ok(permissions, "the permission service is published when a session starts");
   const markDoneGate = await session.extensionRunner.emitToolCall({
     type: "tool_call",
@@ -170,7 +170,7 @@ try {
     "deny",
     "a specific global Pi rule remains stronger than the managed wildcard default",
   );
-  assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "deny", "task project rules refine global defaults");
+  assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "ask", "an untrusted task project's rules do not refine global defaults");
   assert.equal(permissions.checkPermission("bash", "oo db query x").state, "allow", "the agent's own CLI is allowed in ask mode");
   // The `oo *` allow rule covers one command, not a chain: the real gate judges every command.
   for (const command of ["oo db query x; rm -rf build", "oo db query x && gh issue create --title t", "oo $(rm -rf build)"]) {
@@ -195,8 +195,8 @@ try {
   );
   assert.equal(
     permissions.checkPermission("path", projectPrivatePath).state,
-    "allow",
-    "trusted task repositories can deliberately override global blacklist path rules",
+    "deny",
+    "an untrusted task repository cannot override global blacklist path rules",
   );
   assert.equal(
     permissions.checkPermission("path", protectedAlias).state,
@@ -226,7 +226,7 @@ try {
   savePermissionMode(ooHome, "allow");
   assert.equal(permissions.checkPermission("bash", "gh issue list -R lhotwll217/owner-operator").state, "allow");
   assert.equal(permissions.checkPermission("bash", "gh issue create --title test").state, "deny");
-  assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "deny", "project-specific denies survive global mode changes");
+  assert.equal(permissions.checkPermission("bash", "rm -rf build").state, "allow", "an untrusted task project's denies stay unloaded across mode changes");
   assert.equal(permissions.checkPermission("bash", "oo schedules delete x").state, "deny", "owner `oo` narrowing survives mode changes");
 
   savePermissionMode(ooHome, "read-only");
