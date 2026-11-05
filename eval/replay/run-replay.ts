@@ -44,8 +44,9 @@ import { evalSandboxPath } from "../sandbox.mjs";
 import { buildReplayHome } from "./build-replay-home.mjs";
 import { prefixAt, shiftTo } from "./transcript-positions.mjs";
 import { startDaemon } from "../../src/daemon/runtime.ts";
-import { sampleEnrichment, sampleRelatedOwnerAction } from "../../src/session-monitor/scan.ts";
+import { sampleEnrichment, sampleTurns } from "../../src/session-monitor/scan.ts";
 import { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } from "../../src/agent/enrichment.ts";
+import { classifyNeedsYou } from "../../src/agent/needs-you.ts";
 import { statusSummaryShape } from "../../src/agent/status-summary.ts";
 import type { SessionMonitorLogRecord } from "../../src/session-monitor/monitor.ts";
 
@@ -360,12 +361,15 @@ try {
         if (has("sample-only")) { attempts.push(attempt); continue; }
         const modelStart = Date.now();
         attempt.currentTitle = candidate.generatedTopic;
-        const details = await enrichThread(sample, {
-          currentTitle: candidate.generatedTopic,
-          statusSummaries: daemon.state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
-          resolveOwnerAction: (ownerAction, primaryEvidence) =>
-            sampleRelatedOwnerAction(ownerAction, candidate.id, primaryEvidence),
-        });
+        // The daemon's two calls (runtime.ts): Need You only for a stopped session, then the account.
+        const needsYou = candidate.state === "working" ? undefined : await classifyNeedsYou(await sampleTurns(candidate.id));
+        const details = {
+          ...(await enrichThread(sample, {
+            currentTitle: candidate.generatedTopic,
+            statusSummaries: daemon.state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
+          })),
+          ...(needsYou === undefined ? {} : { attention: needsYou ? "needs-you" as const : "idle" as const }),
+        };
         attempt.modelMs = Date.now() - modelStart;
         attempt.details = details;
         attempt.applied = daemon.state.appendEnrichment(

@@ -20,10 +20,10 @@ export const IDLE_AFTER_SECONDS = 30 * 60;
  * mtime forever fresh, which made 8-hour-old threads read "2m ago" and never idle.
  * Otherwise: user spoke last → `working`; an assistant turn that yielded → `idle`.
  *
- * `needs-you` is never derived here. It states that the OWNER has an unresolved action, and a
- * transcript scan sees only that a turn ended — not whether anything was asked of the owner.
- * Enrichment reads the conversation and promotes a thread to `needs-you` when the evidence
- * shows an actual owner action; a yielded turn alone leaves the thread quietly idle.
+ * `needs-you` is never derived here. It states that the current task is unfinished and the next
+ * move is the owner's, and a transcript scan sees only that a turn ended — not whether the task
+ * is done. Enrichment asks Jev of each stopped session (src/agent/needs-you.ts) and promotes it to
+ * `needs-you`; until that answer lands, a yielded turn reads idle.
  */
 export function deriveState(row) {
   if (row.working) return "working";
