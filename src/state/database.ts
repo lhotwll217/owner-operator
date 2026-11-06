@@ -61,6 +61,15 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   ELSE detail.state
 END`;
 
+/** What the owner sees. A stopped agent awaiting its own running work shows as working until a
+ * message newer than the one it was assessed at lands, the release rule snooze uses; there is
+ * no timer. Enrichment keeps reading the effective state, so the row is still asked as a
+ * stopped session and is not reassessed on the working cadence. */
+const PROJECTED_THREAD_STATE_SQL = `CASE
+  WHEN detail.state != 'done' AND t.awaiting_through_message_at = t.last_message_at THEN 'working'
+  ELSE ${EFFECTIVE_THREAD_STATE_SQL}
+END`;
+
 /** An owner snooze holds until its instant passes on the injected clock (`$now`) or a message
  * newer than the one it was set against lands, the same release rule as owner Done. */
 const SNOOZE_HOLDS_SQL = `(t.snoozed_through_message_at IS NOT NULL
@@ -156,6 +165,7 @@ CREATE TABLE IF NOT EXISTS threads (
   owner_title TEXT,
   snoozed_until TEXT,
   snoozed_through_message_at TEXT,
+  awaiting_through_message_at TEXT,
   link TEXT,
   enriched_through_message_at TEXT,
   enriched_while_working INTEGER NOT NULL DEFAULT 0,
@@ -407,6 +417,7 @@ export class ThreadDb {
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
     this.migrateThreadLink();
+    this.migrateAwaitingWork();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -458,6 +469,13 @@ export class ThreadDb {
     if (!threads.has("snoozed_until")) this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_until TEXT");
     if (!threads.has("snoozed_through_message_at")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_through_message_at TEXT");
+    }
+  }
+
+  private migrateAwaitingWork(): void {
+    const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => row.name));
+    if (!threads.has("awaiting_through_message_at")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN awaiting_through_message_at TEXT");
     }
   }
 
@@ -786,6 +804,8 @@ export class ThreadDb {
           bookmark: details.bookmark ?? null,
         } : {}),
       }, "model");
+      if (!working) this.db.prepare("UPDATE threads SET awaiting_through_message_at = ? WHERE id = ?")
+        .run(details.awaiting ? throughMessageAt : null, threadId);
       // Without a title and status summary the thread stays a candidate, so the account is
       // retried while the lifecycle answer it arrived with already shows.
       if (account) this.db.prepare(
@@ -897,7 +917,7 @@ export class ThreadDb {
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
                      AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
                    THEN 0 ELSE 1 END AS statusSummaryPending,
-              ${EFFECTIVE_THREAD_STATE_SQL} AS state,
+              ${PROJECTED_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
               t.created_at AS createdAt, t.last_message_at AS lastMessageAt,
@@ -959,8 +979,10 @@ export class ThreadDb {
     return ids.flatMap(({ id }) => {
       const row = rows.get(id);
       const resolution = this.resolutionRow(id);
-      return row ? [{
+      return row && resolution ? [{
         ...row,
+        // The projected state can show awaiting work as working; enrichment asks the session as it is.
+        state: this.hasActiveChild(id) ? "working" : resolution.state as typeof row.state,
         enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null,
         children: JSON.parse(resolution?.childrenEvidence ?? "[]") as EnrichmentCandidate["children"],
       }] : [];

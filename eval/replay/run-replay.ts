@@ -46,7 +46,7 @@ import { prefixAt, shiftTo } from "./transcript-positions.mjs";
 import { startDaemon } from "../../src/daemon/runtime.ts";
 import { sampleEnrichment, sampleTurns } from "../../src/session-monitor/scan.ts";
 import { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } from "../../src/agent/enrichment.ts";
-import { classifyNeedsYou, SUMMARY_LIMIT } from "../../src/agent/needs-you.ts";
+import { classifyStoppedSession, SUMMARY_LIMIT } from "../../src/agent/needs-you.ts";
 import { statusSummaryShape } from "../../src/agent/status-summary.ts";
 import type { SessionMonitorLogRecord } from "../../src/session-monitor/monitor.ts";
 
@@ -362,7 +362,7 @@ try {
         const modelStart = Date.now();
         attempt.currentTitle = candidate.generatedTopic;
         // The daemon's two calls (runtime.ts): Need You only for a stopped session, then the account.
-        const needsYou = candidate.state === "working" ? undefined : await classifyNeedsYou({
+        const needsYou = candidate.state === "working" ? undefined : await classifyStoppedSession({
           turns: await sampleTurns(candidate.id),
           statusSummaries: daemon.state.recentStatusSummaries(candidate.id, SUMMARY_LIMIT),
         });
@@ -371,7 +371,10 @@ try {
             currentTitle: candidate.generatedTopic,
             statusSummaries: daemon.state.statusSummaryHistory(candidate.id, STATUS_SUMMARY_HISTORY_LIMIT),
           })),
-          ...(needsYou === undefined ? {} : { attention: needsYou ? "needs-you" as const : "idle" as const }),
+          ...(needsYou === undefined ? {} : {
+            attention: needsYou.needsYou ? "needs-you" as const : "idle" as const,
+            awaiting: needsYou.awaiting,
+          }),
         };
         attempt.modelMs = Date.now() - modelStart;
         attempt.details = details;

@@ -88,7 +88,11 @@ parents with active delegated children.
   the current task unfinished? Work handed to the owner for review counts as unfinished; work the
   owner stopped does not. A score at or above the threshold is `needs-you`,
   otherwise `idle`. A scan alone sees a turn end, not whether the task is done, so `needs-you`
-  comes only from this call.
+  comes only from this call. The same call asks whether the agent stopped to wait for work it
+  started that will report back, such as a harness-native sub-agent or a background command,
+  which the scan cannot see. Above its threshold the row projects as `working`, over its stored
+  `needs-you` or `idle`, until a newer message lands; there is no timer, so work that never
+  reports back holds the row until the next message. Enrichment still reads the stored state.
 - **Title and status summary** ([enrichment.ts](../src/agent/enrichment.ts)) read a bounded sample:
   Claude, Codex, and Pi samples include bounded tool evidence through the privacy-aware
   session-search helper; other formats retain the scan sample. The model records them through one
