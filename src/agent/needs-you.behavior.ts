@@ -11,11 +11,13 @@ const cases: Array<{ name: string; needsYou: boolean; turns: Turn[] }> = [
   { name: "stopped partway", needsYou: true, turns: [owner("Implement and verify the export."), agent("I have started reading the files.")] },
   { name: "done with an optional offer", needsYou: false, turns: [owner("Open the video."), agent("The video is open in your default player. If you'd rather scrub through it, Studio is still running.")] },
   { name: "own work left undone", needsYou: true, turns: [owner("Upgrade Pi and review the result."), agent("Pi is updated and the tests pass. Nothing committed. My diff review remains; live verification is still a gap.")] },
+  { name: "draft ready for owner review", needsYou: true, turns: [owner("Write the skill and let me review it."), owner("Go ahead, five rules is fine."), agent("Keeping five. Writing it now."), agent("The skill is ready for you at http://127.0.0.1:5000/. It is a single SKILL.md with five rules and five steps. The file is uncommitted and hasn't been run on any case yet.")] },
+  { name: "owner stopped the work", needsYou: false, turns: [owner("Research why teams leave Next.js and check the reasons against our code."), agent("I'm sending a research agent to collect the cited reasons, and I'll match them against the code myself."), owner("No, let's stop here."), agent("Stopped before anything ran. No research agent went out and no files changed. The notes folder has the goal and the findings as they stand now.")] },
   { name: "replacement completed", needsYou: false, turns: [owner("Fix and verify the app."), agent("The first agent failed. Choose an agent to resume."), owner("Use the replacement and complete it."), agent("The replacement fixed the app. The requested tests and browser verification passed. All requested work is complete.")] },
 ];
 const wrong: string[] = [];
 for (const test of cases) {
-  const score = await scoreNeedsYou(test.turns);
+  const score = await scoreNeedsYou({ turns: test.turns });
   console.log(JSON.stringify({ name: test.name, needsYou: test.needsYou, score }));
   if ((score >= NEEDS_YOU_THRESHOLD) !== test.needsYou) wrong.push(`${test.name}: ${score}`);
 }

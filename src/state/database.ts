@@ -828,6 +828,18 @@ export class ThreadDb {
     ).all(threadId, limit) as unknown as StatusSummaryRevision[];
   }
 
+  /** The latest distinct status summaries, newest first. Revisions repeat a summary whenever only
+   * the state changed. */
+  recentStatusSummaries(threadId: string, limit: number): string[] {
+    return (this.db.prepare(
+      `SELECT d.status_summary AS statusSummary
+       FROM thread_details d JOIN threads t ON t.id = d.thread_id
+       WHERE d.thread_id = ? AND d.written_by = 'model' AND d.status_summary IS NOT NULL
+         AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
+       GROUP BY d.status_summary ORDER BY MAX(d.version) DESC LIMIT ?`,
+    ).all(threadId, limit) as Array<{ statusSummary: string }>).map((row) => row.statusSummary);
+  }
+
   latestDetailsMap(): Map<string, ThreadDetails> {
     const rows = this.db.prepare(
       `SELECT thread_id AS threadId, topic, status_summary AS statusSummary
