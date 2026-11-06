@@ -15,14 +15,14 @@ const QUESTIONS = {
   ),
 };
 
-/** Missing a Need You costs the owner more than a false one. On 42 labeled turn ends this
- * question scored every Need You at 0.56 or above, and Jev's scores move by about 0.05 between
- * runs of the same input. */
+/** Missing a Need You costs the owner more than a false one. On the 42 labeled turn ends
+ * from #202, relabeled in #204, this question scored every Need You at 0.56 or above, and
+ * Jev's scores move by about 0.05 between runs of the same input. */
 export const NEEDS_YOU_THRESHOLD = 0.5;
 
 /** Earlier summaries name a task the last turns may not, such as one set before a side question.
- * One summary lost that task on the labeled turn ends; three kept it. */
-const SUMMARY_LIMIT = 3;
+ * One summary lost that task on the labeled turn ends; three kept it (#204). */
+export const SUMMARY_LIMIT = 3;
 
 export type Turn = { role: "owner" | "agent"; text: string };
 

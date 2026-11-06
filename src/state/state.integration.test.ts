@@ -256,6 +256,16 @@ try {
     ),
     true,
   );
+  assert.deepEqual(
+    state.recentStatusSummaries("thread-1", 3)[0],
+    "Confirm the retention policy.",
+    "the latest status summary comes first",
+  );
+  assert.equal(
+    new Set(state.recentStatusSummaries("thread-1", 10)).size,
+    state.recentStatusSummaries("thread-1", 10).length,
+    "each status summary appears once",
+  );
   assert.ok(state.claimNeedsYouScheduleRun(needsYouSchedule, [
     { threadId: "thread-1", lastMessageAt: "2026-07-09T10:02:00.000Z" },
   ]));

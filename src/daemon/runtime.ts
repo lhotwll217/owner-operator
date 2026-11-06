@@ -81,9 +81,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
           const working = candidate.state === "working";
           const [needsYou, account] = await Promise.allSettled([
             working ? undefined : (async () => {
-              const { classifyNeedsYou } = await import("../agent/needs-you");
-              // Repeated revisions share a summary; ten rows hold three distinct ones in practice.
-              const statusSummaries = state.statusSummaryHistory(candidate.id, 10).map((revision) => revision.statusSummary);
+              const { classifyNeedsYou, SUMMARY_LIMIT } = await import("../agent/needs-you");
+              const statusSummaries = state.recentStatusSummaries(candidate.id, SUMMARY_LIMIT);
               return classifyNeedsYou({ turns: await sampleTurns(candidate.id), statusSummaries });
             })(),
             (async () => {
