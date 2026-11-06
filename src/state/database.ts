@@ -61,11 +61,7 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   ELSE detail.state
 END`;
 
-/** What the owner sees. A stopped agent awaiting its own running work shows as working until a
- * message newer than the one it was assessed at lands, the release rule snooze uses; there is
- * no timer. Enrichment keeps reading the effective state, so the row is still asked as a
- * stopped session and is not reassessed on the working cadence. */
-const PROJECTED_THREAD_STATE_SQL = `CASE
+const OWNER_VISIBLE_THREAD_STATE_SQL = `CASE
   WHEN detail.state != 'done' AND t.awaiting_through_message_at = t.last_message_at THEN 'working'
   ELSE ${EFFECTIVE_THREAD_STATE_SQL}
 END`;
@@ -917,7 +913,7 @@ export class ThreadDb {
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
                      AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
                    THEN 0 ELSE 1 END AS statusSummaryPending,
-              ${PROJECTED_THREAD_STATE_SQL} AS state,
+              ${OWNER_VISIBLE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
               t.created_at AS createdAt, t.last_message_at AS lastMessageAt,
@@ -958,7 +954,7 @@ export class ThreadDb {
   listEnrichmentCandidates(): EnrichmentCandidate[] {
     const reassessWorkingBefore = new Date(Date.parse(this.now()) - WORKING_REASSESS_MS).toISOString();
     const ids = this.db.prepare(
-      `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
+      `SELECT t.id, ${EFFECTIVE_THREAD_STATE_SQL} AS state FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at
@@ -974,15 +970,14 @@ export class ThreadDb {
        -- with no title yet is showing raw prompt text, so it goes before rows that are only
        -- refreshing a title they already have; within each group, newest work first.
        ORDER BY (COALESCE(t.owner_title, detail.topic) IS NOT NULL) ASC, t.last_message_at DESC`,
-    ).all(reassessWorkingBefore) as Array<{ id: string }>;
+    ).all(reassessWorkingBefore) as Array<{ id: string; state: EnrichmentCandidate["state"] }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));
-    return ids.flatMap(({ id }) => {
+    return ids.flatMap(({ id, state }) => {
       const row = rows.get(id);
       const resolution = this.resolutionRow(id);
-      return row && resolution ? [{
+      return row ? [{
         ...row,
-        // The projected state can show awaiting work as working; enrichment asks the session as it is.
-        state: this.hasActiveChild(id) ? "working" : resolution.state as typeof row.state,
+        state,
         enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null,
         children: JSON.parse(resolution?.childrenEvidence ?? "[]") as EnrichmentCandidate["children"],
       }] : [];

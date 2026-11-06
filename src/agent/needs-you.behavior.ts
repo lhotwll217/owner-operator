@@ -5,7 +5,6 @@ import { AWAITING_THRESHOLD, NEEDS_YOU_THRESHOLD, scoreStoppedSession, type Turn
 const owner = (text: string): Turn => ({ role: "owner", text });
 const agent = (text: string): Turn => ({ role: "agent", text });
 
-// `awaiting` is false unless set. A case that sets it alone judges only the awaiting answer.
 const cases: Array<{ name: string; needsYou?: boolean; awaiting?: boolean; turns: Turn[] }> = [
   { name: "completed cleanup", needsYou: false, turns: [owner("Clean up completed threads."), agent("I checked the evidence and marked 12 completed threads done. Uncertain threads remain visible. The cleanup is complete.")] },
   { name: "unresolved decision", needsYou: true, turns: [owner("Build the export."), agent("The data has conflicting retention requirements. Which retention policy should the export use? This choice is required before I can implement it.")] },

@@ -31,7 +31,7 @@ const QUESTIONS = {
 export const NEEDS_YOU_THRESHOLD = 0.5;
 
 /** Awaiting shows the row as Working, which hides a Need You, so a false one costs more than a
- * miss. On 52 labeled turn ends that were not awaiting, none scored 0.7 or above; at 0.5 one did. */
+ * miss. On 52 labeled turn ends that were not awaiting (#205), none scored 0.7 or above; at 0.5 one did. */
 export const AWAITING_THRESHOLD = 0.7;
 
 /** Earlier summaries name a task the last turns may not, such as one set before a side question.
