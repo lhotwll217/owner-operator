@@ -61,8 +61,10 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   ELSE detail.state
 END`;
 
+const AWAITING_HOLDS_SQL = `COALESCE(t.awaiting_through_message_at = t.last_message_at, 0)`;
+
 const OWNER_VISIBLE_THREAD_STATE_SQL = `CASE
-  WHEN detail.state != 'done' AND t.awaiting_through_message_at = t.last_message_at THEN 'working'
+  WHEN detail.state != 'done' AND ${AWAITING_HOLDS_SQL} THEN 'working'
   ELSE ${EFFECTIVE_THREAD_STATE_SQL}
 END`;
 
@@ -898,7 +900,7 @@ export class ThreadDb {
     const where = options.activeSince
       ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
            AND (t.last_active_at >= $since OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
-             OR ${HAS_ACTIVE_CHILD_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
+             OR ${HAS_ACTIVE_CHILD_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source,
@@ -1600,7 +1602,7 @@ export class ThreadDb {
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
+         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
        ORDER BY t.last_message_at ASC`,
     ).all({ now: this.now() }) as Array<{ threadId: string; lastMessageAt: string }>;
   }
@@ -1618,7 +1620,7 @@ export class ThreadDb {
         `SELECT 1 FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
           AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
          WHERE t.id = ? AND t.last_message_at = ? AND detail.state = 'needs-you'
-           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
+           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
       );
       const now = this.now();
       const fresh = params.changes.filter((change) => {

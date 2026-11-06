@@ -92,7 +92,8 @@ parents with active delegated children.
   started that will report back, such as a harness-native sub-agent or a background command,
   which the scan cannot see. Above its threshold the row projects as `working`, over its stored
   `needs-you` or `idle`, until a newer message lands; there is no timer, so work that never
-  reports back holds the row until the next message. Enrichment still reads the stored state.
+  reports back holds the row until the next message. Need You schedules skip the row while it
+  shows `working`. Enrichment still reads the stored state.
 - **Title and status summary** ([enrichment.ts](../src/agent/enrichment.ts)) read a bounded sample:
   Claude, Codex, and Pi samples include bounded tool evidence through the privacy-aware
   session-search helper; other formats retain the scan sample. The model records them through one

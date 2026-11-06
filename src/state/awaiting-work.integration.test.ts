@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { ScheduleKind, ScheduledPayloadKind, type ScheduleDefinition } from "@owner-operator/core";
 import { State } from "./state";
 import { fakeScanRow, tempOoHome } from "../gateway/test/helpers";
 
 const { dir, cleanup } = tempOoHome("oo-awaiting-work");
-const state = new State(join(dir, "state.db"), { now: () => "2026-06-09T12:00:00.000Z" });
+let clock = "2026-06-09T12:00:00.000Z";
+const state = new State(join(dir, "state.db"), { now: () => clock, activeWindow: "1d" });
+const schedule: ScheduleDefinition = {
+  id: "on-needs-you", name: "On Need You", enabled: true, trigger: { kind: ScheduleKind.NeedsYou },
+  payload: { kind: ScheduledPayloadKind.Prompt, prompt: "Triage." }, cwd: dir, timeoutSeconds: 60, revision: 1,
+  createdAt: clock, updatedAt: clock, nextRunAt: null,
+};
 const row = (id: string) => state.listCurrentSessionState().find((r) => r.id === id);
 try {
   const stopped = fakeScanRow({ id: "awaiting", secondsSinceLastMessage: 4000 });
@@ -15,6 +22,16 @@ try {
   state.recordObservation(stopped);
   assert.equal(row(stopped.id)?.state, "working", "polling the same message keeps the model's answer");
   assert.deepEqual(state.listEnrichmentCandidates().map((r) => r.id), [], "an awaiting row is not reassessed until a new message");
+  state.saveSchedule(schedule);
+  assert.deepEqual(state.listNeedsYouMessageVersions(), [], "a row shown as Working is not offered to Need You schedules");
+  assert.equal(state.claimNeedsYouScheduleRun(schedule, [{ threadId: stopped.id, lastMessageAt: stopped.lastMessageAt }]), null,
+    "a Need You schedule does not run for a row shown as Working");
+  const background = fakeScanRow({ id: "awaiting-idle", secondsSinceLastMessage: 60 });
+  state.recordObservation(background);
+  state.appendEnrichment(background.id, { ...answer, attention: "idle" }, background.lastMessageAt);
+  clock = "2026-06-10T13:00:00.000Z";
+  assert.equal(row(background.id)?.state, "working", "awaiting work stays visible past the active window, with no timer");
+  clock = "2026-06-09T12:00:00.000Z";
 
   const reported = { ...stopped, lastMessageAt: "2026-06-09T12:05:00.000Z" };
   state.recordObservation(reported);
