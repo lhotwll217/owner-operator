@@ -146,10 +146,20 @@ const clip = (s, n = truncate) => {
   s = String(s ?? "").replace(/\s+/g, " ").trim();
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 };
+// The Claude desktop app shows a turn's recap and closing question in a next-step box; the
+// transcript records them only as the input of this tool call.
+const NEXT_STEP_BOX_TOOL = "mcp__ccd_turn__wrap_up";
+
 function claudeText(content) {
   if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.filter((c) => c && c.type === "text").map((c) => c.text).join(" ");
-  return "";
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((c) => {
+    if (c?.type === "text") return [c.text];
+    if (c?.type === "tool_use" && c.name === NEXT_STEP_BOX_TOOL) {
+      return [c.input?.recap, c.input?.ask].filter((part) => typeof part === "string" && part.trim());
+    }
+    return [];
+  }).join(" ");
 }
 
 // Which GUI the thread lives in — the CANONICAL APP NAMES, a fixed display vocabulary:
