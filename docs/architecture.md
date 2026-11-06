@@ -83,8 +83,10 @@ parents with active delegated children.
 
 - **Need You** ([needs-you.ts](../src/agent/needs-you.ts)) is asked only of a stopped session: a
   running turn or an active delegated child is already `working`, deterministically. It sends the
-  owner's last two messages and the agent's last two, whole and without tool calls, to one Jev question: did the
-  agent stop with the current task unfinished? A score at or above the threshold is `needs-you`,
+  owner's last two messages and the agent's last two, whole and without tool calls, with the
+  thread's three latest distinct status summaries, to one Jev question: did the agent stop with
+  the current task unfinished? Work handed to the owner for review counts as unfinished; work the
+  owner stopped does not. A score at or above the threshold is `needs-you`,
   otherwise `idle`. A scan alone sees a turn end, not whether the task is done, so `needs-you`
   comes only from this call.
 - **Title and status summary** ([enrichment.ts](../src/agent/enrichment.ts)) read a bounded sample:

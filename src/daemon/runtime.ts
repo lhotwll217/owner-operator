@@ -82,7 +82,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
           const [needsYou, account] = await Promise.allSettled([
             working ? undefined : (async () => {
               const { classifyNeedsYou } = await import("../agent/needs-you");
-              return classifyNeedsYou(await sampleTurns(candidate.id));
+              // Repeated revisions share a summary; ten rows hold three distinct ones in practice.
+              const statusSummaries = state.statusSummaryHistory(candidate.id, 10).map((revision) => revision.statusSummary);
+              return classifyNeedsYou({ turns: await sampleTurns(candidate.id), statusSummaries });
             })(),
             (async () => {
               const { sample, bookmark } = await sampleEnrichment(candidate);

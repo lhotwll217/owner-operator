@@ -17,7 +17,7 @@ const cases: Array<{ name: string; needsYou: boolean; turns: Turn[] }> = [
 ];
 const wrong: string[] = [];
 for (const test of cases) {
-  const score = await scoreNeedsYou(test.turns);
+  const score = await scoreNeedsYou({ turns: test.turns });
   console.log(JSON.stringify({ name: test.name, needsYou: test.needsYou, score }));
   if ((score >= NEEDS_YOU_THRESHOLD) !== test.needsYou) wrong.push(`${test.name}: ${score}`);
 }

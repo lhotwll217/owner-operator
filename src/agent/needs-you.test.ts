@@ -19,13 +19,16 @@ const jev = (status: number, body: unknown) => new TypeSafeClient({
 });
 const scored = (noul: number) => jev(200, { model: "jev-test", answers: { needs_you: { type: "noul", noul } } });
 
-assert.equal(await scoreNeedsYou(turns, scored(0.73)), 0.73);
+assert.equal(await scoreNeedsYou({ turns }, scored(0.73)), 0.73);
 assert.equal(requests[0].url, "https://api.typesafe.ai/v1/systemone");
 assert.deepEqual(requests[0].body.state, { turns }, "the turns go to Jev whole");
 assert.deepEqual(Object.keys(requests[0].body.questions), ["needs_you"], "one classification question");
 
-assert.equal(await classifyNeedsYou(turns, scored(NEEDS_YOU_THRESHOLD)), true, "a score at the threshold is Need You: a miss costs more than a false one");
-assert.equal(await classifyNeedsYou(turns, scored(NEEDS_YOU_THRESHOLD - 0.01)), false);
-await assert.rejects(classifyNeedsYou(turns, jev(401, { error: "bad key" })), "a rejected call fails instead of reading as Idle");
+await scoreNeedsYou({ turns, statusSummaries: ["Draft ready for review.", "Draft underway.", "Draft underway.", "Rules agreed.", "Task set."] }, scored(0.5));
+assert.deepEqual(requests[1].body.state, { statusSummaries: ["Rules agreed.", "Draft underway.", "Draft ready for review."], turns }, "the three latest distinct summaries go first, oldest first");
+
+assert.equal(await classifyNeedsYou({ turns }, scored(NEEDS_YOU_THRESHOLD)), true, "a score at the threshold is Need You: a miss costs more than a false one");
+assert.equal(await classifyNeedsYou({ turns }, scored(NEEDS_YOU_THRESHOLD - 0.01)), false);
+await assert.rejects(classifyNeedsYou({ turns }, jev(401, { error: "bad key" })), "a rejected call fails instead of reading as Idle");
 
 console.log("ok - needs-you posts the turns to Jev's System One API and returns its score");
