@@ -61,6 +61,13 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   ELSE detail.state
 END`;
 
+const AWAITING_HOLDS_SQL = `COALESCE(t.awaiting_through_message_at = t.last_message_at, 0)`;
+
+const OWNER_VISIBLE_THREAD_STATE_SQL = `CASE
+  WHEN detail.state != 'done' AND ${AWAITING_HOLDS_SQL} THEN 'working'
+  ELSE ${EFFECTIVE_THREAD_STATE_SQL}
+END`;
+
 /** An owner snooze holds until its instant passes on the injected clock (`$now`) or a message
  * newer than the one it was set against lands, the same release rule as owner Done. */
 const SNOOZE_HOLDS_SQL = `(t.snoozed_through_message_at IS NOT NULL
@@ -156,6 +163,7 @@ CREATE TABLE IF NOT EXISTS threads (
   owner_title TEXT,
   snoozed_until TEXT,
   snoozed_through_message_at TEXT,
+  awaiting_through_message_at TEXT,
   link TEXT,
   enriched_through_message_at TEXT,
   enriched_while_working INTEGER NOT NULL DEFAULT 0,
@@ -407,6 +415,7 @@ export class ThreadDb {
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
     this.migrateThreadLink();
+    this.migrateAwaitingWork();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -458,6 +467,13 @@ export class ThreadDb {
     if (!threads.has("snoozed_until")) this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_until TEXT");
     if (!threads.has("snoozed_through_message_at")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN snoozed_through_message_at TEXT");
+    }
+  }
+
+  private migrateAwaitingWork(): void {
+    const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => row.name));
+    if (!threads.has("awaiting_through_message_at")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN awaiting_through_message_at TEXT");
     }
   }
 
@@ -786,6 +802,8 @@ export class ThreadDb {
           bookmark: details.bookmark ?? null,
         } : {}),
       }, "model");
+      if (!working) this.db.prepare("UPDATE threads SET awaiting_through_message_at = ? WHERE id = ?")
+        .run(details.awaiting ? throughMessageAt : null, threadId);
       // Without a title and status summary the thread stays a candidate, so the account is
       // retried while the lifecycle answer it arrived with already shows.
       if (account) this.db.prepare(
@@ -882,7 +900,7 @@ export class ThreadDb {
     const where = options.activeSince
       ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
            AND (t.last_active_at >= $since OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
-             OR ${HAS_ACTIVE_CHILD_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
+             OR ${HAS_ACTIVE_CHILD_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source,
@@ -897,7 +915,7 @@ export class ThreadDb {
                      AND t.enriched_while_working = (${EFFECTIVE_THREAD_STATE_SQL} = 'working')
                      AND t.enrichment_contract = ${CURRENT_ENRICHMENT_CONTRACT}
                    THEN 0 ELSE 1 END AS statusSummaryPending,
-              ${EFFECTIVE_THREAD_STATE_SQL} AS state,
+              ${OWNER_VISIBLE_THREAD_STATE_SQL} AS state,
               detail.created_at AS stateSince,
               t.last_active_at AS lastActiveAt,
               t.created_at AS createdAt, t.last_message_at AS lastMessageAt,
@@ -938,7 +956,7 @@ export class ThreadDb {
   listEnrichmentCandidates(): EnrichmentCandidate[] {
     const reassessWorkingBefore = new Date(Date.parse(this.now()) - WORKING_REASSESS_MS).toISOString();
     const ids = this.db.prepare(
-      `SELECT t.id FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
+      `SELECT t.id, ${EFFECTIVE_THREAD_STATE_SQL} AS state FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state IN ('needs-you', 'idle', 'working') AND t.last_message_at IS NOT NULL
          AND (t.enriched_through_message_at IS NULL OR t.enriched_through_message_at < t.last_message_at
@@ -954,13 +972,14 @@ export class ThreadDb {
        -- with no title yet is showing raw prompt text, so it goes before rows that are only
        -- refreshing a title they already have; within each group, newest work first.
        ORDER BY (COALESCE(t.owner_title, detail.topic) IS NOT NULL) ASC, t.last_message_at DESC`,
-    ).all(reassessWorkingBefore) as Array<{ id: string }>;
+    ).all(reassessWorkingBefore) as Array<{ id: string; state: EnrichmentCandidate["state"] }>;
     const rows = new Map(this.listSessionState().map((row) => [row.id, row]));
-    return ids.flatMap(({ id }) => {
+    return ids.flatMap(({ id, state }) => {
       const row = rows.get(id);
       const resolution = this.resolutionRow(id);
       return row ? [{
         ...row,
+        state,
         enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null,
         children: JSON.parse(resolution?.childrenEvidence ?? "[]") as EnrichmentCandidate["children"],
       }] : [];
@@ -1583,7 +1602,7 @@ export class ThreadDb {
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
+         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
        ORDER BY t.last_message_at ASC`,
     ).all({ now: this.now() }) as Array<{ threadId: string; lastMessageAt: string }>;
   }
@@ -1601,7 +1620,7 @@ export class ThreadDb {
         `SELECT 1 FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
           AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
          WHERE t.id = ? AND t.last_message_at = ? AND detail.state = 'needs-you'
-           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
+           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
       );
       const now = this.now();
       const fresh = params.changes.filter((change) => {
