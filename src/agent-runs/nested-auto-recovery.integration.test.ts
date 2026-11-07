@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus, type AgentRunLaunchRequest, type AgentRunLaunchResult } from "@owner-operator/core";
 import { State } from "../state/state";
-import { AgentRunExecutor, NESTED_COMPLETION_TASK_MAX_BYTES } from "./executor";
+import { AgentRunExecutor } from "./executor";
+import { NESTED_COMPLETION_TASK_MAX_BYTES } from "./nested-planner";
 
 const root = mkdtempSync(join(tmpdir(), "oo-nested-auto-recovery-"));
 const priorHome = process.env.OO_HOME;
