@@ -48,8 +48,7 @@ export interface ParentAgentStateView {
 export interface DeriveParentAgentStateOptions {
   now?: string;
   recentLimit?: number;
-  /** Retry and Resume eligibility for a visible run. The Node runtime decides it from the saved
-   * ACPX record and the filesystem, which browser-safe core cannot observe. */
+  /** Retry and Resume eligibility for a visible run, decided by the caller. */
   continuation: (run: AgentRun) => Pick<AgentRunView, "canRetry" | "canResume">;
 }
 

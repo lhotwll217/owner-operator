@@ -56,23 +56,19 @@ export interface Continuations {
 /** Retry and Resume eligibility over one snapshot of runs. Verdicts read the saved ACPX record and
  * the run's cwd synchronously, so the executor can check and create the successor row atomically. */
 export function continuationsOf(runs: readonly AgentRun[]): Continuations {
-  const retrySuccessor = firstBy(runs, (run) => run.retryOfRunId);
-  const resumeSuccessor = firstBy(runs, (run) => run.resumeOfRunId);
-  const activeByChild = firstBy(runs, (run) => isTerminalAgentRunStatus(run.status) ? null : run.childSessionId);
+  const lineage: Lineage = {
+    retrySuccessor: firstBy(runs, (run) => run.retryOfRunId),
+    resumeSuccessor: firstBy(runs, (run) => run.resumeOfRunId),
+    activeByChild: firstBy(runs, (run) => isTerminalAgentRunStatus(run.status) ? null : run.childSessionId),
+  };
   return {
     retry(run) {
-      const retried = retrySuccessor.get(run.id);
+      const retried = lineage.retrySuccessor.get(run.id);
       if (retried && !isTerminalAgentRunStatus(retried.status)) return { kind: "in-flight", successor: retried };
       const identity = recoveredIdentity(run);
       if (typeof identity === "string") return refused(identity);
       const candidate = { ...run, ...identity };
-      const reason = !AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)
-        ? `agent run ${run.id} is not retryable from status ${run.status}`
-        : candidate.childSessionId && !AGENT_RUN_CAPABILITIES[run.harness]?.loadSession
-          ? cannotLoad(run)
-          : alreadyRetried(run, retried) ?? alreadyResumed(run, resumeSuccessor.get(run.id))
-            ?? childBusy(candidate, activeByChild)
-            ?? (candidate.childSessionId ? openCodeContinuationError(candidate) : null);
+      const reason = retryRefusal(candidate, lineage);
       if (reason) return refused(reason);
       return { kind: "eligible", successor: {
         ...inherited(run),
@@ -87,16 +83,7 @@ export function continuationsOf(runs: readonly AgentRun[]): Continuations {
       const identity = recoveredIdentity(run);
       if (typeof identity === "string") return refused(identity);
       const candidate = { ...run, ...identity };
-      const reason = !AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)
-        ? `agent run ${run.id} cannot be resumed while ${run.status}`
-        : !AGENT_RUN_CAPABILITIES[run.harness]?.loadSession
-          ? cannotLoad(run)
-          : !candidate.childSessionId
-            ? `agent run ${run.id} has no child session identity to resume`
-            : !candidate.acpxRecordId
-              ? `agent run ${run.id} has no acpx session-record identity to resume`
-              : alreadyResumed(run, resumeSuccessor.get(run.id)) ?? alreadyRetried(run, retrySuccessor.get(run.id))
-                ?? childBusy(candidate, activeByChild) ?? resumeCwdError(run.cwd) ?? openCodeContinuationError(candidate);
+      const reason = resumeRefusal(candidate, lineage);
       if (reason) return refused(reason);
       return { kind: "eligible", successor: {
         ...inherited(run),
@@ -123,6 +110,38 @@ export function deriveParentAgentStateWithEnvironment(
   });
 }
 
+interface Lineage {
+  retrySuccessor: ReadonlyMap<string, AgentRun>;
+  resumeSuccessor: ReadonlyMap<string, AgentRun>;
+  /** Pending or running runs by child session. */
+  activeByChild: ReadonlyMap<string, AgentRun>;
+}
+
+/** The first refusal in the order the owner sees it; `run` already carries any recovered identity. */
+function retryRefusal(run: AgentRun, lineage: Lineage): string | null {
+  if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
+    return `agent run ${run.id} is not retryable from status ${run.status}`;
+  }
+  if (run.childSessionId && !AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) return cannotLoad(run);
+  const retried = lineage.retrySuccessor.get(run.id);
+  if (retried) return `agent run ${run.id} has already been retried by ${retried.id}`;
+  const resumed = lineage.resumeSuccessor.get(run.id);
+  if (resumed) return `agent run ${run.id} has already been resumed by ${resumed.id}`;
+  return childBusy(run, lineage) ?? (run.childSessionId ? openCodeContinuationError(run) : null);
+}
+
+function resumeRefusal(run: AgentRun, lineage: Lineage): string | null {
+  if (!AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)) return `agent run ${run.id} cannot be resumed while ${run.status}`;
+  if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) return cannotLoad(run);
+  if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
+  if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
+  const resumed = lineage.resumeSuccessor.get(run.id);
+  if (resumed) return `agent run ${run.id} has already been resumed by ${resumed.id}`;
+  const retried = lineage.retrySuccessor.get(run.id);
+  if (retried) return `agent run ${run.id} has already been retried by ${retried.id}`;
+  return childBusy(run, lineage) ?? resumeCwdError(run.cwd) ?? openCodeContinuationError(run);
+}
+
 function firstBy(runs: readonly AgentRun[], key: (run: AgentRun) => string | null): Map<string, AgentRun> {
   const index = new Map<string, AgentRun>();
   for (const run of runs) {
@@ -146,14 +165,8 @@ const inherited = (run: AgentRun): Inherited => ({
 
 const cannotLoad = (run: AgentRun): string => `harness ${run.harness} does not support loading an existing session`;
 
-const alreadyRetried = (run: AgentRun, successor: AgentRun | undefined): string | null =>
-  successor ? `agent run ${run.id} has already been retried by ${successor.id}` : null;
-
-const alreadyResumed = (run: AgentRun, successor: AgentRun | undefined): string | null =>
-  successor ? `agent run ${run.id} has already been resumed by ${successor.id}` : null;
-
-function childBusy(run: AgentRun, activeByChild: ReadonlyMap<string, AgentRun>): string | null {
-  const active = run.childSessionId ? activeByChild.get(run.childSessionId) : undefined;
+function childBusy(run: AgentRun, lineage: Lineage): string | null {
+  const active = run.childSessionId ? lineage.activeByChild.get(run.childSessionId) : undefined;
   return active ? `child session ${run.childSessionId} already has active run ${active.id}` : null;
 }
 
