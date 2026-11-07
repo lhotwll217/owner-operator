@@ -64,6 +64,26 @@ function restart(name: string, onLaunch: (request: AgentRunLaunchRequest) => Age
   return { state, executor, launches };
 }
 
+/** A completed parent under an executor that never launches, so the hook under test alone
+ * creates the follow-up. `settle` claims the oldest queued run and finishes it. */
+function quietParent(name: string, now?: () => number) {
+  const state = openState(name);
+  const executor = new AgentRunExecutor(state, { maxConcurrent: 0, logger: () => undefined,
+    launcher: async () => { throw new Error("unexpected launch"); }, ...(now ? { now } : {}) });
+  const queue = (task: string, parentThreadId?: string) =>
+    executor.launch({ harness: AgentRunHarness.Codex, model: "controlled", cwd: root, task, parentThreadId });
+  const settle = (status: AgentRunStatus.Completed, resultTail: string) => {
+    const run = state.claimNextPendingAgentRun(99)!;
+    return state.finishAgentRun(run.id, { status, resultTail, error: null })!;
+  };
+  const parent = queue("parent");
+  state.claimNextPendingAgentRun(99);
+  state.recordAgentRunActivity(parent.id, { childSessionId: "parent-session", acpxRecordId: parent.id });
+  state.finishAgentRun(parent.id, { status: AgentRunStatus.Completed, resultTail: "parent done", error: null });
+  const followUpOf = () => state.listAgentRuns().filter((run) => run.resumeOfRunId === parent.id);
+  return { state, executor, parent, queue, settle, followUpOf };
+}
+
 try {
   const delivered = parentWithChild("delivered", async (request) => {
     request.onActivity({ promptSubmitted: true });
@@ -120,7 +140,40 @@ try {
   assert.match(corrected.task, /CHILD_TOKEN_189/);
   await recovered.executor.stop();
   recovered.state.close();
-  process.stdout.write("ok - the executor applies nested follow-ups after child completion, on restart, and on resume\n");
+
+  const fleet = quietParent("fleet");
+  const finished = Array.from({ length: 20 }, (_, index) => {
+    fleet.queue(`child ${index}`, "parent-session");
+    return fleet.settle(AgentRunStatus.Completed, `RESULT_${index}_` + "r".repeat(4_000));
+  });
+  const queued = fleet.queue("queued child", "parent-session");
+  await fleet.executor.cancel(queued.id);
+  const [batch] = fleet.followUpOf();
+  assert.ok(batch, "cancelling the last queued child continues the parent");
+  assert.deepEqual([...batch.completionRunIds].sort(), [...finished.map(({ id }) => id), queued.id].sort(),
+    "the follow-up records a receipt for every child, including those its evidence omits");
+  assert.ok(JSON.parse(batch.task.split("\n\n")[1]!).omitted > 0, "the batch exceeds the evidence budget");
+  fleet.state.claimNextPendingAgentRun(99);
+  fleet.state.recordAgentRunActivity(batch.id, { promptSubmitted: true });
+  fleet.state.finishAgentRun(batch.id, { status: AgentRunStatus.Completed, resultTail: "handled", error: null });
+  await fleet.executor.stop();
+  const fleetRestart = new AgentRunExecutor(fleet.state, { maxConcurrent: 0, logger: () => undefined,
+    launcher: async () => { throw new Error("unexpected launch"); } });
+  fleetRestart.start();
+  await fleetRestart.stop();
+  assert.equal(fleet.followUpOf().length, 1, "restart owes nothing for children the batch received");
+  fleet.state.close();
+
+  const swept = quietParent("swept", () => Date.parse("2026-10-17T00:00:00.000Z"));
+  const stale = swept.queue("stale child", "parent-session");
+  swept.state.claimNextPendingAgentRun(99);
+  swept.executor.sweepLostRuns();
+  assert.equal(swept.state.agentRunById(stale.id)?.status, AgentRunStatus.Lost);
+  assert.deepEqual(swept.followUpOf().map(({ completionRunIds }) => completionRunIds), [[stale.id]],
+    "the lost sweep continues the parent with the lost child");
+  await swept.executor.stop();
+  swept.state.close();
+  process.stdout.write("ok - the executor applies nested follow-ups after child completion, cancel, lost sweep, restart, and resume\n");
 } finally {
   if (priorHome === undefined) delete process.env.OO_HOME;
   else process.env.OO_HOME = priorHome;

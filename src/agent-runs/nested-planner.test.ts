@@ -25,6 +25,10 @@ assert.deepEqual(owed(child("second", AgentRunStatus.Running), child("first", Ag
 for (const status of [AgentRunStatus.Cancelled, AgentRunStatus.Interrupted, AgentRunStatus.Lost]) {
   assert.deepEqual(owed(child("ended", status), parent), [["parent", ["ended"]]], `a ${status} child has finished`);
 }
+for (const status of Object.values(AgentRunStatus).filter((status) => status !== AgentRunStatus.Completed)) {
+  assert.deepEqual(owed(child("done", AgentRunStatus.Completed), { ...parent, status }), [],
+    `a ${status} parent is never continued`);
+}
 assert.deepEqual(owed(parent), [], "a parent with no children owes nothing");
 assert.deepEqual(owed(run("orphan", AgentRunStatus.Completed)), [], "children of an unknown session owe nothing");
 assert.deepEqual(owed(child("only", AgentRunStatus.Completed), { ...parent, depth: 5 }),
@@ -65,7 +69,12 @@ const leaf = run("leaf", AgentRunStatus.Completed, { parentThreadId: "middle-ses
 assert.deepEqual(owed({ ...leaf, status: AgentRunStatus.Running }, middle, root), [],
   "an active grandchild holds every ancestor");
 assert.deepEqual(owed(leaf, middle, root), [["middle", ["leaf"]]],
-  "a chain continues from the deepest finished conversation first");
+  "an ancestor waits while its child conversation continues");
+const rootTurn = run("root-turn", AgentRunStatus.Completed, {
+  childSessionId: "root-session", resumeOfRunId: "root", promptSubmitted: true,
+});
+assert.deepEqual(owed(rootTurn, leaf, middle, root), [["root-turn", ["middle"]], ["middle", ["leaf"]]],
+  "known gap: an ancestor whose newest turn is newer than its child's is planned first, with the child's older turn");
 const middleFollowUp = run("middle-follow-up", AgentRunStatus.Completed, {
   parentThreadId: "root-session", childSessionId: "middle-session", depth: 2,
   resumeOfRunId: "middle", promptSubmitted: true, completionRunIds: ["leaf"],

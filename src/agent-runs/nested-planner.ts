@@ -48,7 +48,9 @@ export function owedContinuations(runs: readonly AgentRun[]): NestedContinuation
       if (!latestChildren.has(key)) latestChildren.set(key, child.childSessionId ? latestByChild.get(key)! : child);
     }
     const children = [...latestChildren.values()].filter((child) => !delivered.get(session)?.has(child.id));
-    // A child conversation that is about to continue, or still waits on its own children, is not done.
+    // A child conversation that still waits on its own children, or that this pass already
+    // continued, is not done. Sessions are visited newest first, so a child conversation older
+    // than its parent's newest turn is not yet continued here, and the parent gets its older turn.
     const settled = (child: AgentRun): boolean => isTerminalAgentRunStatus(child.status)
       && (!child.childSessionId || (!continuing.has(child.childSessionId) && !withActiveChildren.has(child.childSessionId)));
     if (!awaitsChildren(parent) || !children.length || !children.every(settled)) continue;
