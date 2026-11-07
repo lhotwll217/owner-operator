@@ -6,8 +6,6 @@ import {
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
-  agentRunRetryError,
-  agentRunResumeError,
   agentRunTurnIntent,
   isAgentRunEffort,
   isTerminalAgentRunStatus,
@@ -21,7 +19,7 @@ import {
 } from "@owner-operator/core";
 import { createAgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import type { State } from "../state/state";
-import { openCodeContinuationError, recoverSavedSessionIdentity, resumeCwdError } from "./agent-state-projection";
+import { continuationsOf } from "./continuation";
 import { resolveAgentRunLaunch } from "./launch-config";
 
 const RESULT_TAIL_BYTES = 32 * 1024;
@@ -213,40 +211,11 @@ export class AgentRunExecutor {
     if (this.stopping) throw new Error("agent-run executor has been stopped");
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
-    const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
-    const existingResume = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
-    if (existingRetry && !isTerminalAgentRunStatus(existingRetry.status)) return existingRetry;
-    const recoveredIdentity = recoverSavedSessionIdentity(run);
-    const childSessionId = recoveredIdentity?.childSessionId ?? run.childSessionId;
-    const inflight = childSessionId
-      ? this.state.nonterminalAgentRunByChildSession(childSessionId)
-      : undefined;
-    const domainError = agentRunRetryError({ ...run, ...recoveredIdentity }, {
-      existingRetryRunId: existingRetry?.id ?? null,
-      existingResumeRunId: existingResume?.id ?? null,
-      activeRunId: inflight?.id ?? null,
-    });
-    if (domainError) throw new Error(domainError);
-    // retry()/createAgentRun() are synchronous over DatabaseSync, so eligibility checks and
-    // row creation are atomic in the single-process daemon.
-    const capabilityError = run.childSessionId || recoveredIdentity
-      ? openCodeContinuationError({ ...run, ...recoveredIdentity })
-      : null;
-    if (capabilityError) throw new Error(capabilityError);
-    const retried = this.state.createAgentRun({
-      harness: run.harness,
-      task: run.task,
-      cwd: run.cwd,
-      parentThreadId: run.parentThreadId,
-      model: run.model,
-      effort: run.effort,
-      depth: run.depth,
-      timeoutSeconds: run.timeoutSeconds,
-      retryOfRunId: run.id,
-      completionRunIds: run.completionRunIds,
-      childSessionId: recoveredIdentity?.childSessionId ?? run.childSessionId,
-      acpxRecordId: recoveredIdentity?.acpxRecordId ?? run.acpxRecordId,
-    });
+    // Synchronous over DatabaseSync, so the verdict and the row it licenses are atomic.
+    const verdict = continuationsOf(this.state.listAgentRuns()).retry(run);
+    if (verdict.kind === "in-flight") return verdict.successor;
+    if (verdict.kind === "refused") throw new Error(verdict.reason);
+    const retried = this.state.createAgentRun(verdict.successor);
     this.pump();
     return retried;
   }
@@ -272,37 +241,9 @@ export class AgentRunExecutor {
     const run = this.state.agentRunById(id);
     if (!run) throw new Error(`no such agent run: ${id}`);
     const followUpTask = validateAgentRunResumeTask(task);
-    const existingResume = this.state.listAgentRuns().find(({ resumeOfRunId }) => resumeOfRunId === run.id);
-    const existingRetry = this.state.listAgentRuns().find(({ retryOfRunId }) => retryOfRunId === run.id);
-    const recoveredIdentity = recoverSavedSessionIdentity(run);
-    const childSessionId = recoveredIdentity?.childSessionId ?? run.childSessionId;
-    const inflight = childSessionId
-      ? this.state.nonterminalAgentRunByChildSession(childSessionId)
-      : undefined;
-    const domainError = agentRunResumeError({ ...run, ...recoveredIdentity }, {
-      existingResumeRunId: existingResume?.id ?? null,
-      existingRetryRunId: existingRetry?.id ?? null,
-      activeRunId: inflight?.id ?? null,
-    });
-    if (domainError) throw new Error(domainError);
-    const cwdError = resumeCwdError(run.cwd);
-    if (cwdError) throw new Error(cwdError);
-    const capabilityError = openCodeContinuationError({ ...run, ...recoveredIdentity });
-    if (capabilityError) throw new Error(capabilityError);
-    const resumed = this.state.createAgentRun({
-      harness: run.harness,
-      task: followUpTask,
-      cwd: run.cwd,
-      parentThreadId: run.parentThreadId,
-      model: run.model,
-      effort: run.effort,
-      depth: run.depth,
-      timeoutSeconds: run.timeoutSeconds,
-      resumeOfRunId: run.id,
-      completionRunIds,
-      childSessionId: recoveredIdentity?.childSessionId ?? run.childSessionId,
-      acpxRecordId: recoveredIdentity?.acpxRecordId ?? run.acpxRecordId,
-    });
+    const verdict = continuationsOf(this.state.listAgentRuns()).resume(run);
+    if (verdict.kind === "refused") throw new Error(verdict.reason);
+    const resumed = this.state.createAgentRun({ ...verdict.successor, task: followUpTask, completionRunIds });
     this.pump();
     return resumed;
   }
