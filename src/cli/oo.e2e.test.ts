@@ -1,5 +1,4 @@
-// e2e: regular `oo` owns the headless/resume contract. Failure paths exit before any
-// model session is built, so this stays hermetic and fast.
+// e2e: drive the oo launcher with an isolated Gateway and a loopback model fixture.
 import assert from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -8,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
 import { markOnboarded } from "@owner-operator/core";
-import { CALLER_SESSION_ENV } from "../shared/caller-session";
 import { helpTree, rootHelp } from "./help";
 import { NOUNS } from "./operations";
 
@@ -16,12 +14,13 @@ const ooBin = join(repoRoot, "oo");
 const ooHome = mkdtempSync(join(tmpdir(), "oo-cli-e2e-"));
 process.env.OO_HOME = ooHome; // in-process store seam (the --done seed) targets the same hermetic home
 delete process.env.OO_AGENT_RUN_LEASE_ID;
-const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: { ...process.env, OO_HOME: ooHome } } as const;
+const cliEnv = { PATH: process.env.PATH, HOME: ooHome, OO_HOME: ooHome, PI_OFFLINE: "1" };
+const opts = { cwd: repoRoot, encoding: "utf8", timeout: 60_000, env: cliEnv } as const;
 let daemon: Awaited<ReturnType<typeof import("../daemon/runtime")["startDaemon"]>> | null = null;
 
 const runOo = async (
   args: readonly string[],
-  { cwd = repoRoot, env = process.env }: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  { cwd = repoRoot, env = cliEnv }: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ status: number | null; stdout: string; stderr: string }> =>
   await new Promise((resolve, reject) => {
     const child = spawn(ooBin, args, { cwd, env: { ...env, OO_HOME: ooHome } });
@@ -118,7 +117,7 @@ try {
   assert.equal(offlinePrompt.status, 1, `a nested prompt reports a connection failure (stderr: ${offlinePrompt.stderr})`);
   assert.match(offlinePrompt.stderr, /daemon is not running; agents do not start it/);
   assert.equal(existsSync(join(ooHome, "daemon.log")), false, "a nested prompt cannot spawn the daemon");
-  for (const argv of [[], ["daemon"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
+  for (const argv of [[], ["daemon"], ["-i", "-p", "hi"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
     assert.equal(spawnSync(ooBin, argv, { ...opts, env: operatorParent }).status, 2);
   }
   for (const env of [
@@ -172,9 +171,25 @@ try {
     monitor: { scan: async () => [], intervalMs: 60_000 },
     scheduler: { tickMs: 60_000 },
   });
-  const provider = createServer((_req, res) => {
+  const provider = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const { role, content } = JSON.parse(body).messages.at(-1);
+    const message = JSON.stringify(content);
+    let delta;
+    if (role === "user" && (message.includes("start-fixture") || message.includes("second-fixture"))) {
+      const command = message.includes("start-fixture") ? "oo --prompt second-fixture" : "oo -p third-fixture";
+      delta = { role: "assistant", tool_calls: [{
+        index: 0, id: "ask_oo", type: "function", function: { name: "bash", arguments: JSON.stringify({ command }) },
+      }] };
+    } else {
+      const text = message.includes("agents reach Owner Operator") ? "nested prompt refused"
+        : message.includes("nested prompt refused") ? "parent received child reply" : "unexpected turn";
+      delta = { role: "assistant", content: text };
+    }
+    const choice = { index: 0, delta, finish_reason: delta.tool_calls ? "tool_calls" : "stop" };
     res.writeHead(200, { "Content-Type": "text/event-stream" });
-    res.end('data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"child reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+    res.end(`data: ${JSON.stringify({ choices: [choice] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
   try {
@@ -186,12 +201,22 @@ try {
       models: [{ id: "local" }],
     } } }));
     writeFileSync(join(piDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "local" }));
-    const reply = await runOo(["--prompt", "hello"], { env: operatorParent });
+    const reply = await runOo(["-p", "start-fixture"]);
     assert.equal(reply.status, 0, reply.stderr);
-    assert.equal(reply.stdout.trim(), "child reply");
-    const [{ id, name }] = await (await import("../agent/agent")).listOoSessions();
-    assert.match(reply.stderr, new RegExp(`\\[oo\\] session ${id}`));
-    assert.match(name ?? "", /chat ← operator-parent @/);
+    assert.equal(reply.stdout.trim(), "parent received child reply");
+    const parentId = /\[oo\] session (\S+)/.exec(reply.stderr)?.[1];
+    assert.ok(parentId, reply.stderr);
+    const sessions = await (await import("../agent/agent")).listOoSessions();
+    assert.equal(sessions.length, 2, "only the root and its fresh child run");
+    assert.match(sessions.find((session) => session.id !== parentId)?.name ?? "", new RegExp(`chat ← ${parentId} @`));
+    for (const env of [
+      { ...cliEnv, OO_EVAL_READ_ONLY: "1" },
+      { ...cliEnv, OO_EVAL_BASELINE_PROMPT: join(repoRoot, "src", "prompts", "owner-operator.md") },
+    ]) {
+      const restricted = await runOo(["-p", "second-fixture"], { env });
+      assert.equal(restricted.status, 0, restricted.stderr);
+      assert.equal(restricted.stdout.trim(), "nested prompt refused", "a restricted eval cannot open another Operator");
+    }
   } finally {
     provider.close();
   }
@@ -245,19 +270,17 @@ try {
   for (const argv of [["init", "-q"], ["-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"]]) {
     assert.equal(spawnSync("git", argv, { cwd: repository }).status, 0, `git ${argv.at(-1)}`);
   }
-  const anonymous = Object.fromEntries(Object.entries(process.env)
-    .filter(([name]) => name !== "OO_CURRENT_SESSION_ID" && !(CALLER_SESSION_ENV as readonly string[]).includes(name)));
-  const noSession = await runOo(["worktrees", "list"], { env: anonymous });
+  const noSession = await runOo(["worktrees", "list"]);
   assert.equal(noSession.status, 2, `a worktree verb with no session exits 2 (stderr: ${noSession.stderr})`);
   assert.match(noSession.stderr, /no session to act for: pass --from-session/);
-  const operatorBash = { ...anonymous, OO_CURRENT_SESSION_ID: "e2e-root" };
+  const operatorBash = { ...cliEnv, OO_CURRENT_SESSION_ID: "e2e-root" };
   const created = await runOo(["worktrees", "create", "--repository", ".", "--name", "e2e-wt", "--json"], { cwd: repository, env: operatorBash });
   assert.equal(created.status, 0, `worktrees create exits 0 (stderr: ${created.stderr})`);
   const createdOut = JSON.parse(created.stdout) as { action: string; created: boolean; worktree: { id: string; path: string; selected: boolean } };
   assert.equal(createdOut.action, "create", "create --json returns the POST /worktrees/use payload");
   assert.equal(createdOut.worktree.selected, true, "create selects the worktree for the Operator session running the bash");
   assert.equal(daemon.state.selectedWorktree("e2e-root")?.id, createdOut.worktree.id, "selection is durable under the session id");
-  const listedWorktrees = await runOo(["worktrees", "list", "--from-session", "e2e-other"], { env: anonymous });
+  const listedWorktrees = await runOo(["worktrees", "list", "--from-session", "e2e-other"]);
   assert.match(listedWorktrees.stdout, new RegExp(`^${createdOut.worktree.id}\\s+available\\s+repo\\s+${createdOut.worktree.path}$`, "m"),
     "text list shows one line per worktree, unselected for another session");
   const selected = await runOo(["worktrees", "select", createdOut.worktree.id, "--from-session", "e2e-other"], { env: operatorBash });
