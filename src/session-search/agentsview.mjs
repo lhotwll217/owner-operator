@@ -126,7 +126,8 @@ function isToolResult(message) {
 }
 
 /** A test for whether a transcript message contains an agentsview hit: the query for literal and
- * regex modes, otherwise a stretch of agentsview's snippet. Whitespace and case are ignored. */
+ * regex modes, otherwise a stretch of agentsview's snippet. Whitespace and case are ignored. A
+ * hit whose snippet is empty matches no message. */
 export function hitMatcher({ mode, query }) {
   const flat = (text) => String(text).replace(/\s+/g, " ").toLowerCase();
   if (mode === "substring") {
@@ -142,6 +143,6 @@ export function hitMatcher({ mode, query }) {
     // Snippets are windows cut mid-word: drop the partial words at each end.
     const words = flat(String(hit.snippet ?? "").replace(/^\.{3}|\.{3}$/g, "")).trim().split(" ");
     const probe = words.slice(1, -1).join(" ").slice(0, 60).trim() || words.join(" ").slice(0, 60);
-    return (text) => !probe || flat(text).includes(probe);
+    return (text) => !!probe && flat(text).includes(probe);
   };
 }
