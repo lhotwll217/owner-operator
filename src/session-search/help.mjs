@@ -32,6 +32,9 @@ Query flags:
   --sort newest|oldest|file output order, default newest (--any ranks by score first)
   --include-tools           also match tool calls and results
   --include-skill-bodies    also match injected skill documentation
+  --semantic                rank by meaning, for a paraphrase with no verbatim anchor
+  --hybrid                  rank by meaning and exact words together
+                            (both need the agentsview backend; on session-grep they run as --any)
 Scope and output:
   --owner-operator          Owner Operator history only
   --target-type claude|codex|pi|all   one transcript format (--source is an alias)
@@ -41,6 +44,17 @@ Scope and output:
   --max-chars N             output budget, default 8000, minimum 500
   --json                    machine-readable results
   --from-session ID         the calling coding session, excluded from discovery
+  --backend auto|agentsview|session-grep
+                            discovery engine, default auto (see Backends)
+
+Backends: a discovery query (--query without --session) runs on agentsview when its daemon is
+running, otherwise on session-grep. The header names the backend and, after a fallback, its
+backend_note. --any, --case-sensitive, --include-skill-bodies, --sort oldest|file, --target-root,
+--owner-operator, --skim, and --session always run on session-grep. agentsview reports lower
+bounds instead of totals (message_matches_at_least or candidate_sessions_at_least, plus
+more_available) and counts the hits it cannot point at (tool_hits_dropped,
+outside_sources_dropped, unmapped_dropped). Every hit's id and idx open with
+--session ID --at IDX on either backend; use --backend session-grep for exact totals.
 
 Choose the lightest mode:
   Known session          use its stable id directly: a scoped query for one fact, --skim for a
@@ -55,7 +69,9 @@ Choose the lightest mode:
                          topic label is not a verbatim anchor merely because it is hyphenated;
                          treat paraphrasable wording as ambiguous.
   Ambiguous target       several independent lexical anchors with --any, grouped with
-                         --candidates --limit 8, then drill into promising pointers.
+                         --candidates --limit 8, then drill into promising pointers. On the
+                         agentsview backend, a paraphrased question goes to --hybrid
+                         --candidates --limit 8 instead.
   Exhaustive claim       explicit time and source scope. Put independent anchor variants into one
                          --any query and use its word_hits, match totals, and omissions as the
                          coverage report. Search again only when retrieved evidence grounds a new

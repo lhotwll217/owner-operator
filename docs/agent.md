@@ -59,7 +59,8 @@ product-owned Pi-format store, independently of standalone Pi transcript authori
   [`plugins/mattpocock-skills/skills/productivity/writing-for-agents`](https://github.com/lhotwll217/skills/tree/main/plugins/mattpocock-skills/skills/productivity/writing-for-agents)
   in `lhotwll217/skills`. Change it there, then copy it here. Its `scripts/jev-lint.py` needs the `jev` CLI.
 - `session-search` uses Pi's native `bash` to run `oo search`; the daemon runs the shared policy
-  wrapper, which executes the pinned upstream `session-grep` CLI. The bash tool puts this
+  wrapper, which executes the pinned upstream `session-grep` CLI, or queries a running
+  agentsview daemon for discovery ([README](../README.md#optional-agentsview-search-backend)). The bash tool puts this
   checkout's `oo` first on `PATH` and supplies the current and caller session ids. The wrapper owns local source mapping, blacklist
   policy, and caller exclusion; caller identity comes from provenance, and the caller-visible
   behavior is in [cli.md](cli.md). Search internals live with the vendored primitive under
