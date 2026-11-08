@@ -68,13 +68,15 @@ try {
   assert.match(agentWithoutDaemon.stderr, /daemon is not running; agents do not start it\. Ask the owner to start it \(`oo status`/);
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "OO_AGENT=1 never spawns a daemon");
   assert.equal(existsSync(join(ooHome, "daemon.log")), false, "OO_AGENT=1 never launches a daemon process");
+  const agentRefusal = /^oo: agents reach Owner Operator through `oo <noun> <verb>`/;
   for (const argv of [[], ["daemon"], ["-p", "hi"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
     const refused = spawnSync(ooBin, argv, { ...opts, env: { ...opts.env, OO_AGENT: "1" } });
     assert.equal(refused.status, 2, `OO_AGENT=1 refuses \`oo ${argv.join(" ")}\` (stderr: ${refused.stderr})`);
-    assert.match(refused.stderr, /agents reach Owner Operator through `oo <noun> <verb>`/);
+    assert.match(refused.stderr, agentRefusal);
   }
   const leased = spawnSync(ooBin, ["daemon"], { ...opts, env: { ...opts.env, OO_AGENT_RUN_LEASE_ID: "acp-lease" } });
   assert.equal(leased.status, 2, "an ACP child cannot start a replacement daemon");
+  assert.match(leased.stderr, agentRefusal);
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "refused agent forms start no daemon");
   // A discovery file the agent cannot reach names the cause instead of claiming no daemon runs.
   const discovery = (pid: number) => writeFileSync(join(ooHome, "daemon.json"), JSON.stringify({
@@ -117,15 +119,22 @@ try {
   assert.equal(offlinePrompt.status, 1, `a nested prompt reports a connection failure (stderr: ${offlinePrompt.stderr})`);
   assert.match(offlinePrompt.stderr, /daemon is not running; agents do not start it/);
   assert.equal(existsSync(join(ooHome, "daemon.log")), false, "a nested prompt cannot spawn the daemon");
-  for (const argv of [[], ["daemon"], ["-i", "-p", "hi"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
-    assert.equal(spawnSync(ooBin, argv, { ...opts, env: operatorParent }).status, 2);
+  const mixedPrompt = spawnSync(ooBin, ["-i", "-p", "hi"], { ...opts, env: operatorParent });
+  assert.equal(mixedPrompt.status, 2, mixedPrompt.stderr);
+  assert.match(mixedPrompt.stderr, /^oo: -i\/--interactive is only valid by itself/);
+  for (const argv of [[], ["daemon"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
+    const refused = spawnSync(ooBin, argv, { ...opts, env: operatorParent });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, agentRefusal);
   }
   for (const env of [
     { ...operatorParent, OO_CAN_PROMPT: "0" },
     { ...operatorParent, OO_CURRENT_SESSION_ID: "" },
     { ...operatorParent, OO_AGENT_RUN_LEASE_ID: "acp-lease" },
   ]) {
-    assert.equal(spawnSync(ooBin, ["-p", "hi"], { ...opts, env }).status, 2);
+    const refused = spawnSync(ooBin, ["-p", "hi"], { ...opts, env });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, agentRefusal);
   }
 
   const barePrompt = spawnSync(ooBin, ["what", "changed"], opts);
