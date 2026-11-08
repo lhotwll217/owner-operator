@@ -231,7 +231,7 @@ try {
         ? { applied: true, sessionIds: discoverySessionIds }
         : directRead
           ? { applied: false, reason: "explicit stable-session scope; session exclusion is discovery-only" }
-          : { applied: false, reason: "current OO and external caller session ids unavailable" };
+          : { applied: false, reason: "current OO and caller session ids unavailable" };
       if (blacklistedDropped) output.blacklistedDropped = blacklistedDropped;
 
       process.stdout.write(withinBudget(output, (fitted) => json

@@ -41,16 +41,11 @@ if [ "$(cat "$STAMP" 2>/dev/null)" != "$(lockfile_sum)" ]; then
   rmdir "$GUARD"; trap - EXIT INT TERM
 fi
 
-if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
+if [ "$#" -eq 1 ] && { [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; }; then
   shift
 fi
 
-if [ "$#" -eq 0 ] && [ "${OO_AGENT:-}" = "1" ]; then
-  echo "oo: agents reach Owner Operator through \`oo <noun> <verb>\`; this form starts a daemon or an Operator session" >&2
-  exit 2
-fi
-
-if [ "$#" -gt 0 ]; then
+if [ "$#" -gt 0 ] || [ "${OO_AGENT:-}" = "1" ] || [ -n "${OO_AGENT_RUN_LEASE_ID:-}" ]; then
   ENTRY="$DIR/src/cli/oo.ts"
 else
   ENTRY="$DIR/src/cli/interactive.ts"

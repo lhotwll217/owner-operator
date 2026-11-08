@@ -46,13 +46,14 @@ the search wrapper's own flags, which are its contract.
 noun. The Operator's system prompt embeds the whole help tree (`helpTree()`: root, every noun, every
 verb) exactly as `oo … --help` prints it, so the Operator starts with all of it while outside agents
 drill down from `oo --help`; `oo.e2e.test.ts` fails when a printed page and the embedded copy differ.
-The agent reaches Owner Operator
-through `oo` from its bash ([ADR 0001](../adr/0001-agent-uses-its-own-cli.md)). The agent's bash exports
-`OO_AGENT=1` ([`privacy-tools.ts`](../src/agent/privacy-tools.ts)), which makes every operation
-connect-only: it fails with the cause (not running, still starting, or unreachable from this shell)
-instead of starting or replacing the daemon (`gateway()` in `operation.ts`). Under `OO_AGENT=1` the
-forms that start a daemon or a nested Operator (`oo`, `oo -p`, `oo --continue`, `oo --session`,
-`oo daemon`) exit 2 (`oo.ts` and the `oo` launcher).
+The Operator runs `oo` from bash. Agent calls connect to the existing daemon and report when it
+is missing, still starting, or unreachable. [ADR 0001](../adr/0001-agent-uses-its-own-cli.md)
+
+In a root Operator chat, `oo -p "<question>"` asks a fresh Operator session for one answer.
+The answer returns to the parent's bash on stdout. The child uses the same daemon and always
+records the calling Operator's session ID, even if the command supplies `--from-session`.
+This is one level of headless chat. Agent shells refuse
+interactive sessions, session resumes, and `oo daemon`.
 
 | Noun | Covers |
 |---|---|
@@ -94,7 +95,8 @@ never mixed with coding sessions, and labeled with its surface and caller repo.
 - Agents pass `--from-session <id>` (or `OO_FROM_SESSION`) so the audit trail
   records who called. Codex, Claude Code and Cursor callers are detected from their own session
   variables (`CALLER_SESSION_ENV`); OpenCode exports none, so OpenCode callers pass the flag.
-- Open-ended transcript discovery excludes both the current oo thread and its external
-  coding-session caller; explicit stable-ID retrieval remains available.
+- Open-ended transcript discovery excludes the current OO thread and its immediate caller
+  when their IDs are known. In a child prompt the caller is the parent Operator.
+  Explicit stable-ID retrieval remains available.
 - Transcript discovery searches configured coding history and oo's saved conversations by
   default while retaining their source namespaces. `--owner-operator` narrows to oo history.
