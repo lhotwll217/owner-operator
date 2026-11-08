@@ -64,7 +64,9 @@ export function stableIdOf(agentsviewSessionId) {
  * (session-grep.mjs `messagesFrom`): one index per JSONL record whose text is non-empty with
  * tool entries included. `text` honors includeTools the way the primitive's search view does,
  * and an injected skill body is reduced to session-grep's placeholder (`reduceSkillBody`) and
- * flagged `skillBody`, since session-grep does not search it without --include-skill-bodies. */
+ * flagged `skillBody`, since session-grep does not search it without --include-skill-bodies.
+ * test/sessions-agentsview-parity.integration.test.ts fails when this copy and the primitive
+ * disagree. */
 export function transcriptMessages(file, type, { includeTools }) {
   const adapter = ADAPTERS[type];
   const out = [];

@@ -435,12 +435,14 @@ async function agentsviewOutput(url) {
     output.candidateSessionsAtLeast = sessions.size;
   } else {
     const shown = located.slice(0, limit);
-    const preview = previewChars(shown.length, before + after);
     output.matches = shown.map(({ hit, id, transcript, messages, message }) => {
       const view = messages.filter((candidate) => candidate.text);
       const at = view.findIndex((candidate) => candidate.index >= message.index);
       const end = at < 0 ? view.length : at;
       const context = (candidate) => ({ role: candidate.role, text: truncate(candidate.text, CONTEXT_PREVIEW_CHARS), timestamp: candidate.timestamp });
+      const preceding = view.slice(Math.max(0, end - before), end).map(context);
+      const following = view.slice(view[end]?.index === message.index ? end + 1 : end).slice(0, after).map(context);
+      const preview = previewChars(shown.length, preceding.length + following.length);
       return {
         source: transcript.type,
         id,
@@ -448,9 +450,9 @@ async function agentsviewOutput(url) {
         timestamp: message.timestamp,
         ...(hit.score != null ? { score: hit.score } : {}),
         path: transcript.file,
-        before: view.slice(Math.max(0, end - before), end).map(context),
+        before: preceding,
         match: { role: message.role, text: keepSpan(message.text, terms(hit), preview), timestamp: message.timestamp },
-        after: view.slice(view[end]?.index === message.index ? end + 1 : end).slice(0, after).map(context),
+        after: following,
         ...sourceIdentity(transcript.file),
       };
     });
@@ -465,7 +467,9 @@ async function agentsviewOutput(url) {
 }
 
 // The primitive's per-entry preview budget (session-grep.mjs CONTEXT_PREVIEW_CHARS and the
-// matchPreviewChars arithmetic), so both engines spend --max-chars alike.
+// matchPreviewChars arithmetic), charged for the context messages an entry actually carries, so
+// both engines spend --max-chars alike. test/sessions-agentsview-parity.integration.test.ts
+// fails when this copy and the primitive disagree.
 function previewChars(count, contextMessages) {
   const competing = Math.max(1, count);
   const fairShare = Math.floor((maxChars - 300) / competing);
@@ -505,6 +509,7 @@ function valueOf(flag) {
 }
 
 // session-grep's --since/--until grammar (session-grep.mjs parseSince/parseUntil): local days.
+// test/sessions-agentsview-parity.integration.test.ts fails when this copy and the primitive disagree.
 function parseSince(value) {
   const now = new Date();
   if (value === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
