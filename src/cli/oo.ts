@@ -13,7 +13,7 @@ import { ensureOwnerOperatorWorkspace, isOnboarded } from "@owner-operator/core"
 import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
-import { agentCaller } from "../shared/agent-caller";
+import { agentCaller, childPromptParent } from "../shared/agent-caller";
 
 const usage = async (): Promise<string> => (await import("./help")).rootHelp();
 
@@ -32,11 +32,10 @@ if (cli.kind === "usage-error") {
   process.exit(2);
 }
 
-// An agent's bash (OO_AGENT=1, set by the privacy guard) reaches Owner Operator through operations
-// only. These forms start or replace the daemon, which may be hosting the agent, or open a nested
-// paid Operator session.
-if (agentCaller() && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
-  process.stderr.write("oo: agents reach Owner Operator through `oo <noun> <verb>`; this form starts a daemon or an Operator session\n");
+const freshPrompt = cli.kind === "chat" && cli.prompt && !cli.continue && !cli.session;
+const promptParent = freshPrompt ? childPromptParent() : undefined;
+if (agentCaller() && !promptParent && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
+  process.stderr.write('oo: agents reach Owner Operator through `oo <noun> <verb>`; a root Operator can also start a fresh child with `oo -p "prompt"`\n');
   process.exit(2);
 }
 
@@ -90,7 +89,7 @@ const {
   shutdownSessionExtensions,
 } = await import("../agent/agent");
 
-const provenance = ooProvenance("chat", chat.fromSession);
+const provenance = ooProvenance("chat", promptParent ?? chat.fromSession);
 
 async function resolveSessionManager(): Promise<SessionManager> {
   const ref = chat.session;
@@ -113,12 +112,17 @@ async function resolveSessionManager(): Promise<SessionManager> {
 }
 
 const sessionManager = await resolveSessionManager();
-await (await import("../daemon/ensure")).ensureDaemon();
+const { gateway, reportFailure, flushStdio } = await import("./operations/operation");
 const { resolveOwnerOperatorTaskCwd } = await import("../agent/worktree-runtime");
 const cwd = await resolveOwnerOperatorTaskCwd(
   sessionManager,
   (await import("../agent/agent")).ownerOperatorTaskCwd(),
-);
+  { resolveGateway: gateway },
+).catch(async (error: unknown) => {
+  reportFailure(error, false);
+  await flushStdio();
+  process.exit(1);
+});
 const { session, modelLabel, toolNames } = await createOwnerOperatorSession("chat", {
   sessionManager,
   cwd,
