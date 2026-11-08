@@ -7,7 +7,7 @@ Privacy-aware transcript search, run by the daemon. Search transcripts only thro
 reading transcript files directly or calling the vendored primitive bypasses the privacy policy.
 Discovery searches configured coding-agent stores plus Owner Operator history by default,
 preserves each result's namespace and transcript format, and excludes the current Owner Operator
-session and its external coding-agent caller when their stable ids are available. The query header
+session and its immediate caller when their stable ids are available. The query header
 reports \`discovery_session_exclusions=applied:ID,...\` or \`unavailable\`, so prompt-echo risk is
 explicit.
 

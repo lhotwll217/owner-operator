@@ -35,7 +35,7 @@ if (cli.kind === "usage-error") {
 const freshPrompt = cli.kind === "chat" && cli.prompt && !cli.continue && !cli.session;
 const promptParent = freshPrompt ? childPromptParent() : undefined;
 if (agentCaller() && !promptParent && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
-  process.stderr.write('oo: agents reach Owner Operator through `oo <noun> <verb>`; a root Operator can also start a fresh child with `oo -p "prompt"`\n');
+  process.stderr.write('oo: agents reach Owner Operator through `oo <noun> <verb>`. A root Operator can also start a fresh child with `oo -p "prompt"`.\n');
   process.exit(2);
 }
 
