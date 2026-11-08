@@ -6,6 +6,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS } from "./flags.mjs";
 import { SEARCH_HELP } from "./help.mjs";
+import {
+  detectAgentsview,
+  hitMatcher,
+  messageForHit,
+  searchAgentsview,
+  stableIdOf,
+  transcriptMessages,
+} from "./agentsview.mjs";
 import { loadBlacklist, isBlacklisted, pathSlugs } from "../../packages/core/src/blacklist.mjs";
 import {
   loadSessionSources,
@@ -17,6 +25,8 @@ import {
   resolveRepo,
 } from "../../packages/core/src/session-cwd.mjs";
 
+// session-grep.mjs CONTEXT_PREVIEW_CHARS: the preview length of a hit's neighboring messages.
+const CONTEXT_PREVIEW_CHARS = 180;
 const primitive = fileURLToPath(new URL("./vendor/session-grep/session-grep.mjs", import.meta.url));
 const ooHome = process.env.OO_HOME ?? path.join(os.homedir(), ".owner-operator");
 const callerSessionId = process.env.OO_CALLER_SESSION_ID?.trim() || null;
@@ -34,6 +44,10 @@ let hasQuery = false;
 let hasSession = false;
 let hasSkim = false;
 let hasAt = false;
+let backend = "auto";
+let semantic = false;
+let hybrid = false;
+let sourceFile = null;
 const passthrough = [];
 for (let index = 0; index < input.length; index += 1) {
   const arg = input[index];
@@ -46,6 +60,9 @@ for (let index = 0; index < input.length; index += 1) {
   else if (arg === "--target-root") targetRoot = takeValue(arg, ++index);
   else if (arg === "--limit") limit = Number(takeValue(arg, ++index));
   else if (arg === "--max-chars") maxChars = Number(takeValue(arg, ++index));
+  else if (arg === "--backend") backend = takeValue(arg, ++index);
+  else if (arg === "--semantic") semantic = true;
+  else if (arg === "--hybrid") hybrid = true;
   else if (SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS.includes(arg)) {
     if (arg === "--query") hasQuery = true;
     if (arg === "--session") hasSession = true;
@@ -65,6 +82,10 @@ for (let index = 0; index < input.length; index += 1) {
 if (!["all", "claude", "codex", "pi"].includes(targetType)) fail("--target-type must be all, claude, codex, or pi");
 if (!Number.isInteger(limit) || limit < 1) fail("--limit must be a positive integer");
 if (!Number.isInteger(maxChars) || maxChars < 500) fail("--max-chars must be an integer of at least 500");
+if (!["auto", "agentsview", "session-grep"].includes(backend)) fail("--backend must be auto, agentsview, or session-grep");
+if (semantic && hybrid) fail("--semantic and --hybrid are mutually exclusive");
+if ((semantic || hybrid) && !hasQuery) fail("--semantic and --hybrid need --query");
+if ((semantic || hybrid) && passthrough.includes("--regex")) fail("--regex cannot be combined with --semantic or --hybrid");
 const codingSources = loadSessionSources(ooHome)
   .filter((source) => ["claude", "codex", "pi"].includes(source.source))
   .map((source) => ({ type: source.source, root: source.root, namespace: "coding" }));
@@ -87,7 +108,7 @@ if (targetRoot) {
   }
   passthrough.push("--target-root", wanted);
 }
-const sourceFile = path.join(os.tmpdir(), `oo-session-search-${process.pid}.json`);
+sourceFile = path.join(os.tmpdir(), `oo-session-search-${process.pid}.json`);
 fs.writeFileSync(sourceFile, JSON.stringify(sources));
 
 const blacklist = loadBlacklist(ooHome);
@@ -155,6 +176,12 @@ if (!directRead) {
   excludePatterns.push(...discoverySessionIds.map((sessionId) =>
     `(?:^|[/_])${escapeRegex(sessionId)}\\.jsonl$`));
 }
+// Discovery queries go to agentsview when its daemon is running and the request needs nothing
+// agentsview cannot answer; everything else, and every fallback, runs session-grep as before.
+const engine = browse ? { name: "session-grep" }
+  : scopedQuery ? { name: "session-grep", ...(semantic || hybrid ? { reason: "agentsview does not support --session" } : {}) }
+  : chooseEngine();
+if (engine.name === "session-grep" && (semantic || hybrid)) passthrough.push("--any");
 const sourceArgs = ["--sources-file", sourceFile];
 const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType];
 const excludeArgs = excludePatterns.flatMap((pattern) => ["--exclude-re", pattern]);
@@ -175,58 +202,72 @@ try {
     process.stderr.write(result.stderr);
     process.exitCode = result.status ?? 1;
   } else {
-    const fetchLimit = limit * (candidates ? 5 : 3);
-    const result = runPrimitive([
-      ...passthrough.filter((arg) => arg !== "--json"),
-      "--json",
-      "--limit", String(fetchLimit),
-      // Let the primitive's aperture remain authoritative. The wrapper may return fewer
-      // rows after its cwd blacklist, but must not refill them by silently tripling context.
-      "--max-chars", String(maxChars),
-      ...sourceArgs,
-      ...typeArgs,
-      ...sessionExcludeArgs,
-      ...excludeArgs,
-    ]);
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (result.status !== 0) {
-      process.exitCode = result.status ?? 1;
-    } else {
-      const output = JSON.parse(result.stdout);
-      if (output.session) output.session = stableSessionId(output.session);
-      const allowed = [];
-      let blacklistedDropped = 0;
-      const entries = candidates ? output.candidates ?? [] : output.matches ?? [];
-      for (const entry of entries) {
-        const file = transcriptFileFor(entry);
-        if (!file || fileBlacklisted(file)) {
-          blacklistedDropped += 1;
-          continue;
-        }
-        const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(file) };
-        if (candidates) {
-          let repo = null;
-          try { repo = resolveRepo(searchCwdFromFile(file)); } catch { /* best effort label */ }
-          allowed.push({ ...identified, repo });
-        } else {
-          allowed.push(identified);
-        }
+    let output = null;
+    let blacklistedDropped = 0;
+    let fallbackReason = engine.reason ?? null;
+    if (engine.name === "agentsview") {
+      try {
+        ({ output, blacklistedDropped } = await agentsviewOutput(engine.url));
+      } catch (error) {
+        if (backend === "agentsview") fail(`agentsview search failed: ${error.message}`);
+        fallbackReason = `agentsview search failed: ${error.message}`;
+        if (semantic || hybrid) passthrough.push("--any");
       }
-      if (candidates) {
-        output.candidates = allowed.slice(0, limit);
-        output.shown = output.candidates.length;
-        // The primitive's total is exact before the wrapper's cwd-based privacy filter.
-        // If that second layer drops a returned row, an exact post-policy total would
-        // require eagerly parsing the entire corpus. Expose an honest lower bound instead.
-        if (blacklistedDropped) {
-          output.totalCandidateSessionsBeforePolicy = output.totalCandidateSessions;
-          output.candidateSessionsAfterPolicyAtLeast = allowed.length;
-          delete output.totalCandidateSessions;
-        }
+    }
+    if (!output) {
+      const fetchLimit = limit * (candidates ? 5 : 3);
+      const result = runPrimitive([
+        ...passthrough.filter((arg) => arg !== "--json"),
+        "--json",
+        "--limit", String(fetchLimit),
+        // Let the primitive's aperture remain authoritative. The wrapper may return fewer
+        // rows after its cwd blacklist, but must not refill them by silently tripling context.
+        "--max-chars", String(maxChars),
+        ...sourceArgs,
+        ...typeArgs,
+        ...sessionExcludeArgs,
+        ...excludeArgs,
+      ]);
+      if (result.stderr) process.stderr.write(result.stderr);
+      if (result.status !== 0) {
+        process.exitCode = result.status ?? 1;
       } else {
-        output.matches = allowed.slice(0, limit);
-        output.shown = output.matches.length;
+        output = JSON.parse(result.stdout);
+        if (output.session) output.session = stableSessionId(output.session);
+        const allowed = [];
+        const entries = candidates ? output.candidates ?? [] : output.matches ?? [];
+        for (const entry of entries) {
+          const file = transcriptFileFor(entry);
+          if (!file || fileBlacklisted(file)) {
+            blacklistedDropped += 1;
+            continue;
+          }
+          const identified = { ...entry, id: stableSessionId(entry.id), ...sourceIdentity(file) };
+          allowed.push(candidates ? { ...identified, repo: repoOf(file) } : identified);
+        }
+        if (candidates) {
+          output.candidates = allowed.slice(0, limit);
+          output.shown = output.candidates.length;
+          // The primitive's total is exact before the wrapper's cwd-based privacy filter.
+          // If that second layer drops a returned row, an exact post-policy total would
+          // require eagerly parsing the entire corpus. Expose an honest lower bound instead.
+          if (blacklistedDropped) {
+            output.totalCandidateSessionsBeforePolicy = output.totalCandidateSessions;
+            output.candidateSessionsAfterPolicyAtLeast = allowed.length;
+            delete output.totalCandidateSessions;
+          }
+        } else {
+          output.matches = allowed.slice(0, limit);
+          output.shown = output.matches.length;
+        }
+        const note = [
+          fallbackReason,
+          semantic || hybrid ? `--${semantic ? "semantic" : "hybrid"} ran as --any` : null,
+        ].filter(Boolean).join("; ");
+        output.backend = { name: "session-grep", ...(note ? { note } : {}) };
       }
+    }
+    if (output) {
       output.discoverySessionExclusions = sessionExcludeArgs.length
         ? { applied: true, sessionIds: discoverySessionIds }
         : directRead
@@ -241,6 +282,230 @@ try {
   }
 } finally {
   try { fs.unlinkSync(sourceFile); } catch { /* best effort */ }
+}
+
+function chooseEngine() {
+  if (backend === "session-grep") return { name: "session-grep" };
+  const unsupported = ownerOperator ? "--owner-operator"
+    : targetRoot ? "--target-root"
+    : passthrough.includes("--any") && !semantic && !hybrid ? "--any"
+    : passthrough.includes("--case-sensitive") ? "--case-sensitive"
+    : passthrough.includes("--include-skill-bodies") ? "--include-skill-bodies"
+    : (valueOf("--sort") ?? "newest") !== "newest" ? `--sort ${valueOf("--sort")}`
+    : null;
+  if (unsupported) {
+    if (backend === "agentsview") fail(`--backend agentsview does not support ${unsupported}`);
+    return { name: "session-grep", reason: `agentsview does not support ${unsupported}` };
+  }
+  const detected = detectAgentsview();
+  if (detected.url) return { name: "agentsview", url: detected.url };
+  if (backend === "agentsview") fail(`--backend agentsview: agentsview ${detected.unavailable}`);
+  return { name: "session-grep", reason: `agentsview ${detected.unavailable}` };
+}
+
+/** Discovery through agentsview, shaped like the primitive's JSON so the wrapper's budget and
+ * rendering stay shared. agentsview ranks the hits; each one is located in Owner Operator's own
+ * transcript stores, checked against the blacklist, and numbered as session-grep numbers it, so
+ * its id and idx open the same message with `--session ID --at IDX`. Hits that cannot be located
+ * or numbered are dropped and counted, never shown without a working pointer. */
+async function agentsviewOutput(url) {
+  const query = valueOf("--query");
+  const regex = passthrough.includes("--regex");
+  const includeTools = passthrough.includes("--include-tools");
+  const role = valueOf("--role") ?? "all";
+  const before = Number(valueOf("--before") ?? 1);
+  const after = Number(valueOf("--after") ?? 1);
+  const since = valueOf("--since");
+  const until = valueOf("--until");
+  const sinceTime = since == null ? null : parseSince(since);
+  const untilTime = until == null ? null : parseUntil(until);
+  if (since != null && sinceTime == null) fail("--since must be today, Nd, or YYYY-MM-DD");
+  if (until != null && untilTime == null) fail("--until must be today, Nd, or YYYY-MM-DD");
+  const mode = semantic ? "semantic" : hybrid ? "hybrid" : regex ? "regex" : "substring";
+  const request = {
+    // session-grep regexes are case-insensitive unless --case-sensitive, which stays on session-grep.
+    query: regex && !query.startsWith("(?i)") ? `(?i)${query}` : query,
+    mode,
+    limit: Math.min(500, limit * (candidates ? 5 : 3)),
+    agent: targetType === "all" ? "claude,codex,pi" : targetType,
+    includeTools,
+    // agentsview filters by session activity, a superset of the messages in the window; the
+    // per-message bounds below make the window exact.
+    activeSince: sinceTime == null ? null : new Date(sinceTime).toISOString(),
+  };
+
+  const matcherFor = hitMatcher({ mode, query });
+  const transcripts = transcriptIndex();
+  const parsed = new Map();
+  const seen = new Set();
+  const located = [];
+  let blacklistedDropped = 0;
+  let outsideSourcesDropped = 0;
+  let unmappedDropped = 0;
+  let toolHitsDropped = 0;
+  // Policy and mapping drop hits after agentsview ranks them, so read a few more pages, as the
+  // session-grep path over-fetches for its blacklist, rather than return a short page.
+  let cursor = 0;
+  let pages = 0;
+  const wanted = () => candidates ? new Set(located.map((entry) => entry.id)).size : located.length;
+  do {
+    const page = await searchAgentsview(url, { ...request, cursor });
+    cursor = page.nextCursor;
+    pages += 1;
+    locate(page.matches);
+  } while (cursor && pages < 4 && wanted() < limit);
+
+  function locate(hits) {
+  for (const hit of hits) {
+    const id = stableIdOf(hit.session_id);
+    if (discoverySessionIds.includes(id)) continue;
+    const transcript = transcripts.get(id);
+    if (!transcript) {
+      outsideSourcesDropped += 1;
+      continue;
+    }
+    if (fileBlacklisted(transcript.file)) {
+      blacklistedDropped += 1;
+      continue;
+    }
+    if (!parsed.has(transcript.file)) {
+      parsed.set(transcript.file, transcriptMessages(transcript.file, transcript.type, { includeTools }));
+    }
+    const messages = parsed.get(transcript.file);
+    const found = messageForHit(messages, hit, matcherFor(hit));
+    if (!found) {
+      unmappedDropped += 1;
+      continue;
+    }
+    if (found.hidden) {
+      toolHitsDropped += 1;
+      continue;
+    }
+    const { message } = found;
+    if (role !== "all" && message.role !== role) continue;
+    if (sinceTime != null && !(message.time >= sinceTime)) continue;
+    if (untilTime != null && !(message.time < untilTime)) continue;
+    const key = `${id}\0${message.index}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    located.push({ hit, id, transcript, messages, message });
+  }
+  }
+
+  const terms = (hit) => [String(hit.snippet ?? "").replace(/^\.{3}|\.{3}$/g, "").trim().slice(0, 40), regex ? "" : query]
+    .filter(Boolean);
+  const output = {
+    query,
+    backend: { name: "agentsview", mode },
+    ...(regex ? { regex: true } : {}),
+    moreAvailable: !!cursor,
+  };
+  if (candidates) {
+    const sessions = new Map();
+    for (const entry of located) {
+      const session = sessions.get(entry.id);
+      if (session) session.hitCount += 1;
+      else sessions.set(entry.id, { ...entry, hitCount: 1 });
+    }
+    const shown = [...sessions.values()].slice(0, limit);
+    const preview = previewChars(shown.length, 0);
+    output.candidates = shown.map(({ hit, id, transcript, message, hitCount }) => ({
+      source: transcript.type,
+      id,
+      index: message.index,
+      timestamp: message.timestamp,
+      hitCount,
+      ...(hit.score != null ? { score: hit.score } : {}),
+      path: transcript.file,
+      match: { role: message.role, text: keepSpan(message.text, terms(hit), preview), timestamp: message.timestamp },
+      ...sourceIdentity(transcript.file),
+      repo: repoOf(transcript.file),
+    }));
+    output.candidateSessionsAtLeast = sessions.size;
+  } else {
+    const shown = located.slice(0, limit);
+    const preview = previewChars(shown.length, before + after);
+    output.matches = shown.map(({ hit, id, transcript, messages, message }) => {
+      const view = messages.filter((candidate) => candidate.text);
+      const at = view.findIndex((candidate) => candidate.index >= message.index);
+      const end = at < 0 ? view.length : at;
+      const context = (candidate) => ({ role: candidate.role, text: truncate(candidate.text, CONTEXT_PREVIEW_CHARS), timestamp: candidate.timestamp });
+      return {
+        source: transcript.type,
+        id,
+        index: message.index,
+        timestamp: message.timestamp,
+        ...(hit.score != null ? { score: hit.score } : {}),
+        path: transcript.file,
+        before: view.slice(Math.max(0, end - before), end).map(context),
+        match: { role: message.role, text: keepSpan(message.text, terms(hit), preview), timestamp: message.timestamp },
+        after: view.slice(view[end]?.index === message.index ? end + 1 : end).slice(0, after).map(context),
+        ...sourceIdentity(transcript.file),
+      };
+    });
+    output.matchesAtLeast = located.length;
+  }
+  output.shown = (output.candidates ?? output.matches).length;
+  if (outsideSourcesDropped) output.outsideSourcesDropped = outsideSourcesDropped;
+  if (unmappedDropped) output.unmappedDropped = unmappedDropped;
+  if (toolHitsDropped) output.toolHitsDropped = toolHitsDropped;
+  return { output, blacklistedDropped };
+}
+
+// The primitive's per-entry preview budget (session-grep.mjs CONTEXT_PREVIEW_CHARS and the
+// matchPreviewChars arithmetic), so both engines spend --max-chars alike.
+function previewChars(count, contextMessages) {
+  const competing = Math.max(1, count);
+  const fairShare = Math.floor((maxChars - 300) / competing);
+  const maxHitShare = competing > 1 ? Math.max(300, Math.floor(maxChars / 3)) : Math.max(300, maxChars - 300);
+  const entryShare = Math.min(maxHitShare, Math.max(300, fairShare));
+  return Math.max(300, entryShare - 220 - contextMessages * (CONTEXT_PREVIEW_CHARS + 20));
+}
+
+function truncate(text, chars) {
+  const flat = String(text).replace(/\s+/g, " ").trim();
+  return flat.length > chars ? `${flat.slice(0, chars - 3)}...` : flat;
+}
+
+/** Every transcript in the configured sources by the stable id Owner Operator and agentsview
+ * share: the filename stem, the UUID ending a Codex rollout name, or the id after Pi's timestamp. */
+function transcriptIndex() {
+  const index = new Map();
+  for (const { type, root } of sources) {
+    for (const file of walk(root)) {
+      const stem = path.basename(file, ".jsonl");
+      const id = type === "codex"
+        ? /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(stem)?.[1] ?? stem
+        : stableSessionId(stem);
+      if (!index.has(id)) index.set(id, { file, type });
+    }
+  }
+  return index;
+}
+
+function repoOf(file) {
+  try { return resolveRepo(searchCwdFromFile(file)); } catch { return null; /* best effort label */ }
+}
+
+function valueOf(flag) {
+  const at = passthrough.indexOf(flag);
+  return at < 0 ? undefined : passthrough[at + 1];
+}
+
+// session-grep's --since/--until grammar (session-grep.mjs parseSince/parseUntil): local days.
+function parseSince(value) {
+  const now = new Date();
+  if (value === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const days = /^(\d+)d$/.exec(value);
+  if (days) return now.getTime() - Number(days[1]) * 86_400_000;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return Date.parse(`${value}T00:00:00`);
+  return null;
+}
+
+function parseUntil(value) {
+  const start = parseSince(value);
+  if (start == null) return null;
+  return /^\d+d$/.test(value) ? start : start + 86_400_000;
 }
 
 function runPrimitive(args) {
@@ -360,7 +625,24 @@ function renderText(output, context) {
       ? ` candidate_sessions=${output.totalCandidateSessions}`
       : ` candidate_sessions_at_least=${output.candidateSessionsAfterPolicyAtLeast ?? output.candidates.length}` +
         ` pre_policy_candidate_sessions=${output.totalCandidateSessionsBeforePolicy ?? "unknown"}`;
-  say(
+  const backendNote = output.backend?.note ? ` backend_note=${JSON.stringify(output.backend.note)}` : "";
+  if (output.backend?.name === "agentsview") {
+    // agentsview pages results without totals: report what this page proved, not a total.
+    say(
+      `query=${JSON.stringify(output.query ?? "")} backend=agentsview mode=${output.backend.mode} shown=${output.shown ?? 0}` +
+      (output.candidates
+        ? ` candidate_sessions_at_least=${output.candidateSessionsAtLeast ?? 0}`
+        : ` message_matches_at_least=${output.matchesAtLeast ?? 0}`) +
+      ` more_available=${output.moreAvailable ? "true" : "false"}` +
+      `${output.regex ? " regex=true" : ""}` +
+      `${output.outsideSourcesDropped ? ` outside_sources_dropped=${output.outsideSourcesDropped}` : ""}` +
+      `${output.unmappedDropped ? ` unmapped_dropped=${output.unmappedDropped}` : ""}` +
+      `${output.toolHitsDropped ? ` tool_hits_dropped=${output.toolHitsDropped} (add --include-tools)` : ""}` +
+      `${context.targetType !== "all" ? ` target_type=${context.targetType}` : ""}` +
+      `${context.blacklistedDropped ? ` blacklisted_dropped=${context.blacklistedDropped}` : ""} ` +
+      `discovery_session_exclusions=${sessionExclusions}`,
+    );
+  } else say(
     `query=${JSON.stringify(output.query ?? "")} total_message_matches=${output.totalMatches ?? 0} ` +
     `files_with_matches=${output.filesWithMatches ?? 0} shown=${output.shown ?? 0}` +
     `${output.session ? ` session=${output.session}` : ""}${output.any ? " any=true" : ""}` +
@@ -370,7 +652,8 @@ function renderText(output, context) {
     candidateCount +
     `${context.targetType !== "all" ? ` target_type=${context.targetType}` : ""}` +
     `${context.blacklistedDropped ? ` blacklisted_dropped=${context.blacklistedDropped}` : ""} ` +
-    `discovery_session_exclusions=${sessionExclusions}`,
+    `discovery_session_exclusions=${sessionExclusions}` +
+    `${output.backend ? ` backend=session-grep${backendNote}` : ""}`,
   );
   if (output.wordHits) {
     say(`word_hits: ${Object.entries(output.wordHits).map(([word, hits]) => `${word}=${hits}`).join(" ")}` +
@@ -391,7 +674,9 @@ function renderText(output, context) {
     say(`  BEST ${candidate.match.role}: ${candidate.match.text}`);
   }
   for (const [index, match] of (output.matches ?? []).entries()) {
-    const rank = match.matchedWords ? ` matched=[${match.matchedWords.join(",")}] score=${match.score}` : "";
+    const rank = match.matchedWords
+      ? ` matched=[${match.matchedWords.join(",")}] score=${match.score}`
+      : match.score != null ? ` score=${Number(match.score).toFixed(4)}` : "";
     const forks = match.forkCopies ? ` +${match.forkCopies} forked copies` : "";
     say(`\n[${index + 1}] namespace=${match.namespace} source=${match.source} id=${match.id} idx=${match.index} ts=${match.timestamp ?? ""}${rank}${forks}`);
     for (const before of match.before ?? []) say(`  before ${before.role}: ${before.text}`);
@@ -402,7 +687,9 @@ function renderText(output, context) {
     say("\nhint: a match preview was truncated; use --session ID --at IDX for fuller context around that hit");
   }
   if (output.candidates?.length) {
-    say("\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
+    say(output.backend?.name === "agentsview"
+      ? "\nhint: candidates group the hits agentsview returned by stable session id; use --skim ID or --session ID --at BEST_IDX to inspect one"
+      : "\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -464,6 +751,7 @@ function escapeRegex(value) {
 }
 
 function fail(message) {
+  if (sourceFile) try { fs.unlinkSync(sourceFile); } catch { /* best effort */ }
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
