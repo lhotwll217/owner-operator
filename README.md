@@ -82,14 +82,8 @@ Known limits:
 
 - agentsview indexes every session it finds, including blacklisted ones. Owner Operator still
   drops blacklisted results before showing them.
-- agentsview reports lower bounds, not totals, so exhaustive counts need `--backend session-grep`.
-- Hits that `oo search --session ID --at IDX` cannot reopen are dropped and counted in the
-  header: tool input agentsview files as message text (`tool_hits_dropped`), sessions with no
-  readable `.jsonl` in Owner Operator's sources, such as Codex's compressed `.jsonl.zst`
-  transcripts (`outside_sources_dropped`), and records session-grep does not index, such as
-  Claude's queued-command records (`unmapped_dropped`).
-- `--any`, `--case-sensitive`, `--include-skill-bodies`, `--sort oldest|file`, `--target-root`,
-  `--owner-operator`, `--skim`, and `--session` always run on session-grep.
+- How results differ between backends, and which flags always run on session-grep:
+  `oo search --help`, section Backends.
 
 ## Talking to the agent
 

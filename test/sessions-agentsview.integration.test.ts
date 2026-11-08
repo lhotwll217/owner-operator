@@ -38,7 +38,9 @@ writeFileSync(join(claudeDir, `${claudeId}.jsonl`),
   line({ type: "assistant", cwd: okCwd, timestamp: "2026-10-01T10:00:05.000Z", message: { role: "assistant", content: [{ type: "text", text: `We landed on ${NEEDLE} for the launch agent.` }] } }) +
   line({ type: "assistant", cwd: okCwd, timestamp: "2026-10-01T10:00:07.250Z", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] } }) +
   line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:00:08.000Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "README.md" }] } }) +
-  line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:01:00.000Z", message: { role: "user", content: "thanks" } }));
+  line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:01:00.000Z", message: { role: "user", content: "thanks" } }) +
+  // An injected skill body, which session-grep does not search without --include-skill-bodies.
+  line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:02:00.000Z", message: { role: "user", content: `Base directory for this skill: /skills/demo\n\nUse ${NEEDLE} carefully.` } }));
 
 // Blacklisted: same shape, cwd inside the private tree.
 const privateRoot = join(home, "Private");
@@ -47,6 +49,13 @@ const privateId = "bbbb1111-2222-3333-4444-555555555555";
 mkdirSync(join(home, ".claude", "projects", "misc"), { recursive: true });
 writeFileSync(join(home, ".claude", "projects", "misc", `${privateId}.jsonl`),
   line({ type: "user", cwd: join(privateRoot, "x"), timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: `private ${NEEDLE}` } }));
+
+// Blacklisted by project folder alone: no record carries a cwd, as in some Claude transcripts.
+const slugId = "ffff1111-2222-3333-4444-555555555555";
+const slugDir = join(home, ".claude", "projects", privateRoot.replace(/[^A-Za-z0-9-]/g, "-"));
+mkdirSync(slugDir, { recursive: true });
+writeFileSync(join(slugDir, `${slugId}.jsonl`),
+  line({ type: "user", timestamp: "2026-10-02T11:00:00.000Z", message: { role: "user", content: `folder ${NEEDLE}` } }));
 
 // Codex: a custom tool call agentsview files as message text; session-grep calls it a tool entry.
 const codexId = "cccc1111-2222-3333-4444-555555555555";
@@ -64,18 +73,38 @@ writeFileSync(join(ooHome, "sessions", `2026-10-04T10-00-00-000Z_${ooId}.jsonl`)
   line({ type: "session", version: 3, id: ooId, timestamp: "2026-10-04T10:00:00.000Z", cwd: okCwd }) +
   line({ type: "message", id: "m1", parentId: null, timestamp: "2026-10-04T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: `Owner Operator saw ${NEEDLE}` }] } }));
 
+// Owner Operator history with tool output: agentsview attaches each result to its call and
+// stamps a result hit with the call's time, so the result record comes after the hit.
+const toolsId = "dddd2222-2222-3333-4444-555555555555";
+const piMessage = (id: string, timestamp: string, message: object) => line({ type: "message", id, parentId: null, timestamp, message });
+writeFileSync(join(ooHome, "sessions", `2026-10-06T10-00-00-000Z_${toolsId}.jsonl`),
+  line({ type: "session", version: 3, id: toolsId, timestamp: "2026-10-06T10:00:00.000Z", cwd: okCwd }) +
+  piMessage("t0", "2026-10-06T10:00:01.000Z", { role: "user", content: [{ type: "text", text: "sign the request" }] }) +
+  piMessage("t1", "2026-10-06T10:00:02.000Z", { role: "assistant", content: [{ type: "toolCall", id: "p1", name: "bash", arguments: { command: "sign" } }] }) +
+  piMessage("t2", "2026-10-06T10:00:02.400Z", { role: "toolResult", toolCallId: "p1", content: [{ type: "text", text: "scope ZZRESULTNEEDLEZZ" }] }) +
+  piMessage("t3", "2026-10-06T10:00:03.000Z", { role: "assistant", content: [{ type: "text", text: "signed" }] }) +
+  piMessage("t4", "2026-10-06T10:00:04.000Z", { role: "user", content: [{ type: "text", text: "again" }] }) +
+  piMessage("t5", "2026-10-06T10:00:05.000Z", { role: "assistant", content: [{ type: "toolCall", id: "p2", name: "bash", arguments: { command: "sign" } }] }) +
+  piMessage("t6", "2026-10-06T10:00:05.300Z", { role: "toolResult", toolCallId: "p2", content: [{ type: "text", text: "scope ZZLATERNEEDLEZZ" }] }));
+const resultHit = { session_id: `pi:${toolsId}`, agent: "pi", location: "tool_result", role: "assistant", tool_name: "bash", ordinal: 1, timestamp: "2026-10-06T10:00:02Z" };
+
 const hits = [
   // agentsview stamps the merged turn with its last record and trims trailing zeros.
   { session_id: claudeId, agent: "claude", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-01T10:00:07.25Z", snippet: `landed on ${NEEDLE} for the` },
   { session_id: privateId, agent: "claude", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-02T10:00:00Z", snippet: `private ${NEEDLE}` },
   { session_id: `codex:${codexId}`, agent: "codex", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-03T10:00:02Z", snippet: `echo ${NEEDLE}` },
   { session_id: `pi:${ooId}`, agent: "pi", location: "message", role: "assistant", ordinal: 0, timestamp: "2026-10-04T10:00:01Z", snippet: `saw ${NEEDLE}` },
+  { session_id: claudeId, agent: "claude", location: "message", role: "user", ordinal: 4, timestamp: "2026-10-01T10:02:00Z", snippet: `Use ${NEEDLE} carefully` },
+  { session_id: slugId, agent: "claude", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-02T11:00:00Z", snippet: `folder ${NEEDLE}` },
   { session_id: "codex:eeee1111-2222-3333-4444-555555555555", agent: "codex", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-05T10:00:00Z", snippet: NEEDLE },
 ];
 
 const requests: URL[] = [];
 const intents: (string | undefined)[] = [];
 let failSemantic = false;
+let malformed = false;
+// A test-specific answer to one request; the default serves every hit on a single page.
+let respond: ((url: URL) => object) | null = null;
 const server = createServer((req: IncomingMessage, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   requests.push(url);
@@ -86,7 +115,7 @@ const server = createServer((req: IncomingMessage, res) => {
     res.end(JSON.stringify({ error: "semantic search is not enabled" }));
     return;
   }
-  res.end(JSON.stringify({ matches: hits, next_cursor: 0 }));
+  res.end(JSON.stringify(malformed ? { unexpected: "shape" } : respond ? respond(url) : { matches: hits, next_cursor: 0 }));
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -95,14 +124,20 @@ const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const fakeBin = join(bins, "running");
 const stoppedBin = join(bins, "stopped");
 const noBin = join(bins, "absent");
-for (const dir of [fakeBin, stoppedBin, noBin]) {
+const refusedBin = join(bins, "refused");
+for (const dir of [fakeBin, stoppedBin, noBin, refusedBin]) {
   mkdirSync(dir);
   symlinkSync(rg, join(dir, "rg"));
 }
 writeFileSync(join(fakeBin, "agentsview"), `#!/bin/sh\necho "agentsview running at ${apiUrl}"\n`);
 writeFileSync(join(stoppedBin, "agentsview"), "#!/bin/sh\necho \"No agentsview server is running.\"\n");
-chmodSync(join(fakeBin, "agentsview"), 0o755);
-chmodSync(join(stoppedBin, "agentsview"), 0o755);
+// `serve status` reports a daemon whose port refuses connections (a stale status, or a crash).
+const closed = createServer();
+await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+const closedUrl = `http://127.0.0.1:${(closed.address() as AddressInfo).port}`;
+await new Promise<void>((resolve) => closed.close(() => resolve()));
+writeFileSync(join(refusedBin, "agentsview"), `#!/bin/sh\necho "agentsview running at ${closedUrl}"\n`);
+for (const dir of [fakeBin, stoppedBin, refusedBin]) chmodSync(join(dir, "agentsview"), 0o755);
 
 const run = (bin: string, args: string[]) => new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
   execFile(process.execPath, [WRAPPER, ...args], {
@@ -133,7 +168,9 @@ try {
   const oo = byId.get(ooId) as { source: string; namespace: string };
   assert.deepEqual([oo.source, oo.namespace], ["pi", "owner-operator"], "a pi: id resolves to Owner Operator's store by its stable id");
   assert.ok(!byId.has(privateId), "blacklisted transcripts are dropped");
-  assert.equal(found.blacklistedDropped, 1);
+  assert.equal(found.blacklistedDropped, 2, "a blacklisted project folder is dropped even without a cwd");
+  assert.ok(!byId.has(slugId));
+  assert.equal(found.skillBodyHitsDropped, 1, "an injected skill body stays out, as on session-grep");
   assert.ok(!byId.has(codexId), "tool input agentsview files as message text stays out without --include-tools");
   assert.equal(found.toolHitsDropped, 1);
   assert.equal(found.outsideSourcesDropped, 1, "a session with no readable transcript in the configured sources is dropped");
@@ -154,6 +191,99 @@ try {
   await json(fakeBin, ["--query", "launch agent", "--hybrid"]);
   assert.equal(requests.at(-1)!.searchParams.get("mode"), "hybrid");
   assert.equal(intents.at(-1), "semantic", "semantic and hybrid requests carry agentsview's intent header");
+
+  await json(fakeBin, ["--query", NEEDLE, "--until", "2026-10-02"]);
+  assert.equal(requests.at(-1)!.searchParams.get("date_to"), new Date(2026, 9, 3).toISOString().slice(0, 10),
+    "--until scopes agentsview's sessions, so older matches are not paged away");
+
+  // Paging: hits dropped by policy or mapping make the wrapper read the next page.
+  const outside = (n: number) => ({ ...hits[6], session_id: `codex:eeee${n}111-2222-3333-4444-555555555555` });
+  let mark = requests.length;
+  respond = (url) => {
+    const cursor = Number(url.searchParams.get("cursor") ?? 0);
+    return cursor < 2 ? { matches: [outside(cursor)], next_cursor: cursor + 1 } : { matches: [hits[0]], next_cursor: 0 };
+  };
+  const paged = await json(fakeBin, ["--query", NEEDLE, "--limit", "1"]);
+  assert.deepEqual(requests.slice(mark).map((url) => url.searchParams.get("cursor")), [null, "1", "2"],
+    "each page sends the previous page's next_cursor");
+  assert.deepEqual(paged.matches.map((match: { id: string }) => match.id), [claudeId], "a hit on a later page is found");
+  assert.equal(paged.outsideSourcesDropped, 2, "drops are counted across pages");
+  assert.equal(paged.moreAvailable, false, "the last page reports no more results");
+
+  mark = requests.length;
+  respond = (url) => ({ matches: [outside(1)], next_cursor: Number(url.searchParams.get("cursor") ?? 0) + 1 });
+  const capped = await run(fakeBin, ["--query", NEEDLE]);
+  assert.equal(requests.length - mark, 4, "paging stops after four pages");
+  assert.match(capped.stdout, / shown=0 message_matches_at_least=0 more_available=true /,
+    "a capped search reports that agentsview has more");
+
+  mark = requests.length;
+  respond = () => ({ matches: [hits[0]], next_cursor: 9 });
+  const satisfied = await json(fakeBin, ["--query", NEEDLE, "--limit", "1"]);
+  assert.equal(requests.length - mark, 1, "paging stops once --limit hits are located");
+  assert.equal(satisfied.moreAvailable, true);
+  respond = null;
+
+  // Request parameters for the flags agentsview filters on.
+  await json(fakeBin, ["--query", NEEDLE, "--since", "2026-10-01"]);
+  assert.equal(requests.at(-1)!.searchParams.get("active_since"), new Date(2026, 9, 1).toISOString(),
+    "--since sends the local start of that day as active_since");
+  await json(fakeBin, ["--query", "ZZAGENTS.*NEEDLE", "--regex"]);
+  assert.deepEqual([requests.at(-1)!.searchParams.get("mode"), requests.at(-1)!.searchParams.get("pattern")],
+    ["regex", "(?i)ZZAGENTS.*NEEDLE"], "--regex runs case-insensitive, as session-grep does");
+  await json(fakeBin, ["--query", "(?i)ZZAGENTS.*NEEDLE", "--regex"]);
+  assert.equal(requests.at(-1)!.searchParams.get("pattern"), "(?i)ZZAGENTS.*NEEDLE", "an explicit (?i) is not doubled");
+  const codexOnly = await json(fakeBin, ["--query", NEEDLE, "--target-type", "codex", "--include-tools"]);
+  assert.equal(requests.at(-1)!.searchParams.get("agent"), "codex", "--target-type narrows agentsview's agent filter");
+  assert.equal(codexOnly.backend.name, "agentsview");
+  // agentsview's content search has no role filter, so --role is applied to each located message.
+  const assistant = await json(fakeBin, ["--query", NEEDLE, "--role", "assistant"]);
+  const user = await json(fakeBin, ["--query", NEEDLE, "--role", "user"]);
+  assert.ok(assistant.matches.some((match: { id: string }) => match.id === claudeId));
+  assert.ok(!user.matches.some((match: { id: string }) => match.id === claudeId), "--role drops hits on the other role");
+
+  respond = () => ({ matches: [{ ...resultHit, snippet: "scope ZZRESULTNEEDLEZZ" }], next_cursor: 0 });
+  const forward = await json(fakeBin, ["--query", "ZZRESULTNEEDLEZZ", "--include-tools"]);
+  assert.deepEqual(forward.matches.map((match: { id: string; index: number }) => [match.id, match.index]), [[toolsId, 2]],
+    "a tool result hit stamped with its call's time maps forward to the result record");
+  // The same call-time stamp on text that only a later turn holds must not reach that turn.
+  respond = () => ({ matches: [{ ...resultHit, snippet: "scope ZZLATERNEEDLEZZ" }], next_cursor: 0 });
+  const nextTurn = await json(fakeBin, ["--query", "ZZLATERNEEDLEZZ", "--include-tools"]);
+  assert.deepEqual(nextTurn.matches, [], "the forward walk stops at the owner's next message");
+  assert.equal(nextTurn.unmappedDropped, 1);
+  // Semantic hits are cut from agentsview's rendering of the merged turn, which writes a tool
+  // call as `[Bash: description]` text no transcript record holds; the hit carries the time of
+  // the turn's last record, the tool call.
+  respond = () => ({ matches: [{ ...hits[0], snippet: "...the launch agent.\n[Bash: List files]\n$ ls", score: 0.8 }], next_cursor: 0 });
+  const rendered = await json(fakeBin, ["--query", "list the files", "--semantic"]);
+  assert.deepEqual(rendered.matches, []);
+  assert.deepEqual([rendered.toolHitsDropped, rendered.unmappedDropped], [1, undefined],
+    "a rendered tool call is a tool hit session-grep would hide, not an unmapped one");
+  respond = null;
+
+  // A semantic hit whose snippet carries no text cannot be located; it must not map to whatever
+  // message sits at its timestamp.
+  respond = () => ({ matches: [{ ...hits[0], timestamp: "2026-10-01T10:01:00Z", snippet: "" }], next_cursor: 0 });
+  const blank = await json(fakeBin, ["--query", "where we landed", "--semantic"]);
+  assert.deepEqual(blank.matches, [], "a hit with an empty snippet is not mapped to an arbitrary message");
+  assert.equal(blank.unmappedDropped, 1, "it is dropped and counted");
+  respond = null;
+
+  const refused = await json(refusedBin, ["--query", NEEDLE]);
+  assert.equal(refused.backend.name, "session-grep", "a reported daemon that refuses connections falls back");
+  assert.match(refused.backend.note, /^agentsview search failed: /);
+  assert.ok(refused.matches.some((match: { id: string }) => match.id === claudeId));
+
+  const sent = requests.length;
+  const noQuery = await run(fakeBin, ["--since", "30d"]);
+  assert.equal(requests.length, sent, "a search without --query never reaches agentsview");
+  assert.doesNotMatch(noQuery.stdout, /backend=agentsview/);
+
+  malformed = true;
+  const badBody = await json(fakeBin, ["--query", NEEDLE]);
+  assert.equal(badBody.backend.name, "session-grep", "a response without matches falls back instead of reading as no hits");
+  assert.match(badBody.backend.note, /unexpected search response/);
+  malformed = false;
 
   failSemantic = true;
   const semanticFailed = await json(fakeBin, ["--query", NEEDLE, "--semantic"]);
