@@ -44,7 +44,9 @@ export async function searchAgentsview(url, { query, mode, limit, agent, include
   if (cursor) params.set("cursor", String(cursor));
   const response = await fetch(`${url.replace(/\/$/, "")}/api/v1/search/content?${params}`, {
     headers: { "X-AgentsView-Search-Intent": "semantic" },
-    signal: AbortSignal.timeout(60_000),
+    // Owner ruling 2026-11-08: 10 s. Measured searches took 0.8-2.6 s under load; a hung daemon
+    // then costs 10 s before the session-grep fallback instead of a minute.
+    signal: AbortSignal.timeout(10_000),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error ?? body.detail ?? `HTTP ${response.status}`);
