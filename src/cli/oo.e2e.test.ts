@@ -3,6 +3,7 @@
 import assert from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "../shared/repo-root";
@@ -110,6 +111,24 @@ try {
   assert.equal(setupRequired.stdout, "");
   markOnboarded(ooHome, { via: "e2e" });
 
+  const operatorParent = {
+    ...opts.env, OO_AGENT: "1", OO_CAN_PROMPT: "1", OO_CURRENT_SESSION_ID: "operator-parent",
+  };
+  const offlinePrompt = spawnSync(ooBin, ["-p", "hi"], { ...opts, env: operatorParent });
+  assert.equal(offlinePrompt.status, 1, `a nested prompt reports a connection failure (stderr: ${offlinePrompt.stderr})`);
+  assert.match(offlinePrompt.stderr, /daemon is not running; agents do not start it/);
+  assert.equal(existsSync(join(ooHome, "daemon.log")), false, "a nested prompt cannot spawn the daemon");
+  for (const argv of [[], ["daemon"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
+    assert.equal(spawnSync(ooBin, argv, { ...opts, env: operatorParent }).status, 2);
+  }
+  for (const env of [
+    { ...operatorParent, OO_CAN_PROMPT: "0" },
+    { ...operatorParent, OO_CURRENT_SESSION_ID: "" },
+    { ...operatorParent, OO_AGENT_RUN_LEASE_ID: "acp-lease" },
+  ]) {
+    assert.equal(spawnSync(ooBin, ["-p", "hi"], { ...opts, env }).status, 2);
+  }
+
   const barePrompt = spawnSync(ooBin, ["what", "changed"], opts);
   assert.equal(barePrompt.status, 2, `bare prompt exits 2 (got ${barePrompt.status}; stderr: ${barePrompt.stderr})`);
   assert.match(barePrompt.stderr, /unknown command "what".*oo -p "what changed"/, "bare prompt names -p");
@@ -153,6 +172,30 @@ try {
     monitor: { scan: async () => [], intervalMs: 60_000 },
     scheduler: { tickMs: 60_000 },
   });
+  const provider = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.end('data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"child reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  });
+  await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = provider.address();
+    assert.ok(address && typeof address === "object");
+    const piDir = join(ooHome, "pi");
+    writeFileSync(join(piDir, "models.json"), JSON.stringify({ providers: { fixture: {
+      baseUrl: `http://127.0.0.1:${address.port}/v1`, api: "openai-completions", apiKey: "fixture",
+      models: [{ id: "local" }],
+    } } }));
+    writeFileSync(join(piDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "local" }));
+    const reply = await runOo(["--prompt", "hello"], { env: operatorParent });
+    assert.equal(reply.status, 0, reply.stderr);
+    assert.equal(reply.stdout.trim(), "child reply");
+    const [{ id, name }] = await (await import("../agent/agent")).listOoSessions();
+    assert.match(reply.stderr, new RegExp(`\\[oo\\] session ${id}`));
+    assert.match(name ?? "", /chat ← operator-parent @/);
+  } finally {
+    provider.close();
+  }
+
   const recent = new Date(Date.now() - 5 * 60_000).toISOString();
   daemon.state.recordObservation({
     id: "e2e-done-1", source: "claude", repo: "demo", app: "Claude CLI", topic: "ship it",
