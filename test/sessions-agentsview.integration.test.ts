@@ -73,6 +73,21 @@ writeFileSync(join(ooHome, "sessions", `2026-10-04T10-00-00-000Z_${ooId}.jsonl`)
   line({ type: "session", version: 3, id: ooId, timestamp: "2026-10-04T10:00:00.000Z", cwd: okCwd }) +
   line({ type: "message", id: "m1", parentId: null, timestamp: "2026-10-04T10:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: `Owner Operator saw ${NEEDLE}` }] } }));
 
+// Owner Operator history with tool output: agentsview attaches each result to its call and
+// stamps a result hit with the call's time, so the result record comes after the hit.
+const toolsId = "dddd2222-2222-3333-4444-555555555555";
+const piMessage = (id: string, timestamp: string, message: object) => line({ type: "message", id, parentId: null, timestamp, message });
+writeFileSync(join(ooHome, "sessions", `2026-10-06T10-00-00-000Z_${toolsId}.jsonl`),
+  line({ type: "session", version: 3, id: toolsId, timestamp: "2026-10-06T10:00:00.000Z", cwd: okCwd }) +
+  piMessage("t0", "2026-10-06T10:00:01.000Z", { role: "user", content: [{ type: "text", text: "sign the request" }] }) +
+  piMessage("t1", "2026-10-06T10:00:02.000Z", { role: "assistant", content: [{ type: "toolCall", id: "p1", name: "bash", arguments: { command: "sign" } }] }) +
+  piMessage("t2", "2026-10-06T10:00:02.400Z", { role: "toolResult", toolCallId: "p1", content: [{ type: "text", text: "scope ZZRESULTNEEDLEZZ" }] }) +
+  piMessage("t3", "2026-10-06T10:00:03.000Z", { role: "assistant", content: [{ type: "text", text: "signed" }] }) +
+  piMessage("t4", "2026-10-06T10:00:04.000Z", { role: "user", content: [{ type: "text", text: "again" }] }) +
+  piMessage("t5", "2026-10-06T10:00:05.000Z", { role: "assistant", content: [{ type: "toolCall", id: "p2", name: "bash", arguments: { command: "sign" } }] }) +
+  piMessage("t6", "2026-10-06T10:00:05.300Z", { role: "toolResult", toolCallId: "p2", content: [{ type: "text", text: "scope ZZLATERNEEDLEZZ" }] }));
+const resultHit = { session_id: `pi:${toolsId}`, agent: "pi", location: "tool_result", role: "assistant", tool_name: "bash", ordinal: 1, timestamp: "2026-10-06T10:00:02Z" };
+
 const hits = [
   // agentsview stamps the merged turn with its last record and trims trailing zeros.
   { session_id: claudeId, agent: "claude", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-01T10:00:07.25Z", snippet: `landed on ${NEEDLE} for the` },
@@ -226,6 +241,25 @@ try {
   const user = await json(fakeBin, ["--query", NEEDLE, "--role", "user"]);
   assert.ok(assistant.matches.some((match: { id: string }) => match.id === claudeId));
   assert.ok(!user.matches.some((match: { id: string }) => match.id === claudeId), "--role drops hits on the other role");
+
+  respond = () => ({ matches: [{ ...resultHit, snippet: "scope ZZRESULTNEEDLEZZ" }], next_cursor: 0 });
+  const forward = await json(fakeBin, ["--query", "ZZRESULTNEEDLEZZ", "--include-tools"]);
+  assert.deepEqual(forward.matches.map((match: { id: string; index: number }) => [match.id, match.index]), [[toolsId, 2]],
+    "a tool result hit stamped with its call's time maps forward to the result record");
+  // The same call-time stamp on text that only a later turn holds must not reach that turn.
+  respond = () => ({ matches: [{ ...resultHit, snippet: "scope ZZLATERNEEDLEZZ" }], next_cursor: 0 });
+  const nextTurn = await json(fakeBin, ["--query", "ZZLATERNEEDLEZZ", "--include-tools"]);
+  assert.deepEqual(nextTurn.matches, [], "the forward walk stops at the owner's next message");
+  assert.equal(nextTurn.unmappedDropped, 1);
+  // Semantic hits are cut from agentsview's rendering of the merged turn, which writes a tool
+  // call as `[Bash: description]` text no transcript record holds; the hit carries the time of
+  // the turn's last record, the tool call.
+  respond = () => ({ matches: [{ ...hits[0], snippet: "...the launch agent.\n[Bash: List files]\n$ ls", score: 0.8 }], next_cursor: 0 });
+  const rendered = await json(fakeBin, ["--query", "list the files", "--semantic"]);
+  assert.deepEqual(rendered.matches, []);
+  assert.deepEqual([rendered.toolHitsDropped, rendered.unmappedDropped], [1, undefined],
+    "a rendered tool call is a tool hit session-grep would hide, not an unmapped one");
+  respond = null;
 
   // A semantic hit whose snippet carries no text cannot be located; it must not map to whatever
   // message sits at its timestamp.

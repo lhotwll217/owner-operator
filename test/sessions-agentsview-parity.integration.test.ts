@@ -11,7 +11,7 @@
 // Needs ripgrep, like the wrapper.
 import assert from "node:assert";
 import { execFile, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -98,9 +98,29 @@ const long = `${"lorem ipsum dolor ".repeat(400)}${NEEDLE}${" sit amet consectet
 writeFileSync(windowFile, instants.map((time, index) =>
   claudeRecord(index % 2 ? "assistant" : "user", new Date(time).toISOString(), index === instants.length - 1 ? long : `window ${index} ${NEEDLE}`)).join(""));
 
-// A fake agentsview whose daemon answers, newest first, with every message that contains the query.
-const hitsFor = (query: string) => [[claudeId, claudeFile], [windowId, windowFile]].flatMap(([id, file]) =>
-  transcriptMessages(file, "claude", { includeTools: true })
+// Messages without a timestamp: one falls back to its session's first message time, one to its
+// file's mtime. Each is followed by a timestamped record of the same turn.
+const firstFallbackId = "eeee3333-2222-3333-4444-555555555555";
+const firstFallbackFile = join(dirname(claudeFile), `${firstFallbackId}.jsonl`);
+const unstamped = (role: string, content: string) => line({ type: role, cwd, message: { role, content } });
+writeFileSync(firstFallbackFile,
+  claudeRecord("user", new Date(midnight(2026, 9, 20) - 1000).toISOString(), `first ${NEEDLE}`) +
+  unstamped("assistant", `unstamped ${NEEDLE}`) +
+  claudeRecord("assistant", new Date(midnight(2026, 9, 20) + 1000).toISOString(), "reply"));
+const mtimeFallbackId = "eeee4444-2222-3333-4444-555555555555";
+const mtimeFallbackFile = join(dirname(claudeFile), `${mtimeFallbackId}.jsonl`);
+writeFileSync(mtimeFallbackFile,
+  unstamped("user", `unstamped ${NEEDLE}`) +
+  claudeRecord("assistant", new Date(midnight(2026, 9, 22) + 43_200_000).toISOString(), "reply"));
+utimesSync(mtimeFallbackFile, new Date(2026, 9, 25, 12), new Date(2026, 9, 25, 12));
+
+// A fake agentsview whose daemon answers, newest first, with every message that contains the
+// query. agentsview leaves a record without a timestamp unstamped, so its hit carries the time
+// of the turn's next timestamped record, as a merged turn's does.
+const hitsFor = (query: string) => [[claudeId, claudeFile], [windowId, windowFile], [firstFallbackId, firstFallbackFile], [mtimeFallbackId, mtimeFallbackFile]]
+  .flatMap(([id, file]) => transcriptMessages(file, "claude", { includeTools: true })
+    .map((message: { timestamp?: string }, index: number, messages: { timestamp?: string }[]) =>
+      ({ ...message, timestamp: messages.slice(index).find((next) => next.timestamp)?.timestamp }))
     .filter((message: { fullText: string }) => message.fullText.toLowerCase().includes(query.toLowerCase()))
     .map((message: { role: string; timestamp: string }) => ({ session_id: id, agent: "claude", role: message.role, timestamp: message.timestamp, snippet: query })))
   .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
@@ -152,9 +172,12 @@ try {
     }
   }
 
-  const located = (matches: Match[]) => matches.filter((match) => match.id === windowId).map((match) => match.index).sort((a, b) => a - b);
+  const located = (matches: Match[]) => matches.filter((match) => [windowId, firstFallbackId, mtimeFallbackId].includes(match.id))
+    .map((match) => `${match.id}:${match.index}`).sort();
   for (const window of [["--since", "2026-10-10"], ["--until", "2026-10-10"], ["--since", "2026-10-10", "--until", "2026-10-10"],
-    ["--since", "2d"], ["--until", "2d"], ["--since", "today"], ["--until", "today"]]) {
+    ["--since", "2d"], ["--until", "2d"], ["--since", "today"], ["--until", "today"],
+    // A message without a timestamp is dated by the primitive's fallbacks.
+    ["--until", "2026-10-20"], ["--since", "2026-10-20", "--until", "2026-10-24"], ["--since", "2026-10-24", "--until", "2026-10-26"]]) {
     // A budget wide enough that neither backend omits a match.
     const args = [...window, "--limit", "50", "--max-chars", "100000"];
     assert.deepEqual(located(await search("agentsview", args)), located(await search("session-grep", args)),
