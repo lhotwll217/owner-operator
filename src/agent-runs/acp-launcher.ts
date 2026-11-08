@@ -108,6 +108,11 @@ export function createLeasedAcpRuntime(params: {
   try {
     const agentCommand = (params.resolveAgentCommand ?? defaultAgentCommand)(capability.acpAgent);
     const sessionStore = createRuntimeStore({ stateDir: params.stateDir ?? agentRunStateDir() });
+    // acpx starts Claude ACP sessions without the user setting source, so a Claude child would
+    // miss the owner's ~/.claude settings, plugins, and skills. Owner ruling 2026-11-08: Claude
+    // children load them, as launching Claude Code directly does. acpx reads only this variable,
+    // from process.env; an explicit value set by the owner wins.
+    process.env.ACPX_CLAUDE_INCLUDE_USER_SETTINGS ??= "1";
     const runtime = createAcpRuntime({
       cwd: ownerOperatorHome(),
       sessionStore,
