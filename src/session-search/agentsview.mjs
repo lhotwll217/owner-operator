@@ -5,6 +5,7 @@
 // output budget, rendering, and `--session ID --at IDX` drill-in apply unchanged.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import claude from "./vendor/session-grep/adapters/claude.mjs";
 import codex from "./vendor/session-grep/adapters/codex.mjs";
 import pi from "./vendor/session-grep/adapters/pi.mjs";
@@ -24,7 +25,7 @@ export function detectAgentsview() {
 /** One page of agentsview content-search hits, newest or best first, and the cursor of the next
  * page (0 when there is none). Throws with agentsview's own error text (for example semantic
  * search not enabled, or an RE2-incompatible regex). */
-export async function searchAgentsview(url, { query, mode, limit, agent, includeTools, activeSince, cursor = 0 }) {
+export async function searchAgentsview(url, { query, mode, limit, agent, includeTools, activeSince, activeUntil, cursor = 0 }) {
   const params = new URLSearchParams({
     pattern: query,
     mode,
@@ -39,6 +40,7 @@ export async function searchAgentsview(url, { query, mode, limit, agent, include
   // results only on request. agentsview's semantic, hybrid, and FTS modes index messages only.
   if ((mode === "substring" || mode === "regex") && !includeTools) params.set("in", "messages,thinking");
   if (activeSince) params.set("active_since", activeSince);
+  if (activeUntil) params.set("date_to", activeUntil);
   if (cursor) params.set("cursor", String(cursor));
   const response = await fetch(`${url.replace(/\/$/, "")}/api/v1/search/content?${params}`, {
     headers: { "X-AgentsView-Search-Intent": "semantic" },
@@ -46,6 +48,9 @@ export async function searchAgentsview(url, { query, mode, limit, agent, include
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error ?? body.detail ?? `HTTP ${response.status}`);
+  // A body without a matches list is not agentsview's search answer; reading it as zero hits
+  // would report a false absence instead of falling back.
+  if (!Array.isArray(body.matches)) throw new Error("unexpected search response");
   return { matches: body.matches ?? [], nextCursor: body.next_cursor ?? 0 };
 }
 
@@ -57,7 +62,9 @@ export function stableIdOf(agentsviewSessionId) {
 
 /** Every message in a transcript, numbered exactly as session-grep numbers them
  * (session-grep.mjs `messagesFrom`): one index per JSONL record whose text is non-empty with
- * tool entries included. `text` honors includeTools the way the primitive's search view does. */
+ * tool entries included. `text` honors includeTools the way the primitive's search view does,
+ * and an injected skill body is reduced to session-grep's placeholder (`reduceSkillBody`) and
+ * flagged `skillBody`, since session-grep does not search it without --include-skill-bodies. */
 export function transcriptMessages(file, type, { includeTools }) {
   const adapter = ADAPTERS[type];
   const out = [];
@@ -70,24 +77,34 @@ export function transcriptMessages(file, type, { includeTools }) {
     if (!full || !full.text.trim()) continue;
     const index = position++;
     const visible = includeTools ? full : adapter.message(record, { includeTools: false });
+    const skill = visible?.text.trim() ? skillBodyName(visible.text) : null;
     out.push({
       index,
       role: full.role,
       timestamp: full.timestamp,
       time: Date.parse(full.timestamp),
-      text: visible?.text.trim() ? visible.text : null,
+      text: skill ? `[skill body omitted: ${skill}]` : visible?.text.trim() ? visible.text : null,
       fullText: full.text,
+      ...(skill ? { skillBody: true } : {}),
     });
   }
   return out;
 }
 
+// session-grep.mjs `reduceSkillBody`: Claude Code opens an injected SKILL.md with its base
+// directory; Codex wraps it in <skill><name>.
+function skillBodyName(text) {
+  const claude = /^\s*Base directory for this skill:\s*(\S+)/.exec(text);
+  if (claude) return path.basename(claude[1]);
+  return /^\s*<skill>\s*<name>([^<]+)<\/name>/.exec(text)?.[1].trim() ?? null;
+}
+
 /** The message an agentsview hit points at: `{ message }`, `{ hidden: true }` when it is a tool
  * entry the requested view leaves out, or null. agentsview and session-grep number messages
- * differently: agentsview folds an assistant turn's text, tool calls, and tool results into one
- * message stamped with its last record's time, and files some tool input (Codex custom tool
- * calls) as message text, where session-grep counts each record and treats tool input as a tool
- * entry. So start at the last record at or before the hit's instant (agentsview drops trailing
+ * differently: agentsview merges consecutive Claude assistant records that share a message id
+ * into one message stamped with its last record's time, attaches a Codex tool call's output to
+ * the call, and files some tool input (Codex custom tool calls) as message text, where
+ * session-grep counts each record and treats tool input as a tool entry. So start at the last record at or before the hit's instant (agentsview drops trailing
  * zeros from milliseconds, so compare instants) and walk back through that turn, stopping at the
  * owner's previous message, to the nearest record that `contains` the hit. */
 export function messageForHit(messages, hit, contains) {

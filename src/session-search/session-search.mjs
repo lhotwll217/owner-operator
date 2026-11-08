@@ -116,6 +116,8 @@ const excludePatterns = pathSlugs(blacklist).map((slug) => {
   const escaped = escapeRegex(slug);
   return `(?:^|/)${escaped}(?:-[^/]*)?/[^/]+\\.jsonl$`;
 });
+// The same project-folder rule, for transcripts agentsview names (they bypass the primitive).
+const slugExclusions = excludePatterns.map((pattern) => new RegExp(pattern));
 const cwdCache = new Map();
 const fileBlacklisted = (file) => {
   if (cwdCache.has(file)) return cwdCache.get(file);
@@ -179,7 +181,9 @@ if (!directRead) {
 // Discovery queries go to agentsview when its daemon is running and the request needs nothing
 // agentsview cannot answer; everything else, and every fallback, runs session-grep as before.
 const engine = browse ? { name: "session-grep" }
-  : scopedQuery ? { name: "session-grep", ...(semantic || hybrid ? { reason: "agentsview does not support --session" } : {}) }
+  : scopedQuery ? { name: "session-grep", ...(semantic || hybrid ? { reason: "--session runs on session-grep" } : {}) }
+  // With no --query there is nothing to send agentsview; session-grep reports the usage error.
+  : !hasQuery ? { name: "session-grep" }
   : chooseEngine();
 if (engine.name === "session-grep" && (semantic || hybrid)) passthrough.push("--any");
 const sourceArgs = ["--sources-file", sourceFile];
@@ -332,6 +336,8 @@ async function agentsviewOutput(url) {
     // agentsview filters by session activity, a superset of the messages in the window; the
     // per-message bounds below make the window exact.
     activeSince: sinceTime == null ? null : new Date(sinceTime).toISOString(),
+    // date_to is an inclusive UTC calendar day, so the cutoff's day covers every message before it.
+    activeUntil: untilTime == null ? null : new Date(untilTime).toISOString().slice(0, 10),
   };
 
   const matcherFor = hitMatcher({ mode, query });
@@ -343,6 +349,7 @@ async function agentsviewOutput(url) {
   let outsideSourcesDropped = 0;
   let unmappedDropped = 0;
   let toolHitsDropped = 0;
+  let skillBodyHitsDropped = 0;
   // Policy and mapping drop hits after agentsview ranks them, so read a few more pages, as the
   // session-grep path over-fetches for its blacklist, rather than return a short page.
   let cursor = 0;
@@ -364,7 +371,7 @@ async function agentsviewOutput(url) {
       outsideSourcesDropped += 1;
       continue;
     }
-    if (fileBlacklisted(transcript.file)) {
+    if (fileBlacklisted(transcript.file) || slugExclusions.some((pattern) => pattern.test(transcript.file))) {
       blacklistedDropped += 1;
       continue;
     }
@@ -382,6 +389,10 @@ async function agentsviewOutput(url) {
       continue;
     }
     const { message } = found;
+    if (message.skillBody) {
+      skillBodyHitsDropped += 1;
+      continue;
+    }
     if (role !== "all" && message.role !== role) continue;
     if (sinceTime != null && !(message.time >= sinceTime)) continue;
     if (untilTime != null && !(message.time < untilTime)) continue;
@@ -449,6 +460,7 @@ async function agentsviewOutput(url) {
   if (outsideSourcesDropped) output.outsideSourcesDropped = outsideSourcesDropped;
   if (unmappedDropped) output.unmappedDropped = unmappedDropped;
   if (toolHitsDropped) output.toolHitsDropped = toolHitsDropped;
+  if (skillBodyHitsDropped) output.skillBodyHitsDropped = skillBodyHitsDropped;
   return { output, blacklistedDropped };
 }
 
@@ -638,6 +650,7 @@ function renderText(output, context) {
       `${output.outsideSourcesDropped ? ` outside_sources_dropped=${output.outsideSourcesDropped}` : ""}` +
       `${output.unmappedDropped ? ` unmapped_dropped=${output.unmappedDropped}` : ""}` +
       `${output.toolHitsDropped ? ` tool_hits_dropped=${output.toolHitsDropped} (add --include-tools)` : ""}` +
+      `${output.skillBodyHitsDropped ? ` skill_body_hits_dropped=${output.skillBodyHitsDropped} (add --include-skill-bodies)` : ""}` +
       `${context.targetType !== "all" ? ` target_type=${context.targetType}` : ""}` +
       `${context.blacklistedDropped ? ` blacklisted_dropped=${context.blacklistedDropped}` : ""} ` +
       `discovery_session_exclusions=${sessionExclusions}`,

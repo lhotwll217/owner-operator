@@ -38,7 +38,9 @@ writeFileSync(join(claudeDir, `${claudeId}.jsonl`),
   line({ type: "assistant", cwd: okCwd, timestamp: "2026-10-01T10:00:05.000Z", message: { role: "assistant", content: [{ type: "text", text: `We landed on ${NEEDLE} for the launch agent.` }] } }) +
   line({ type: "assistant", cwd: okCwd, timestamp: "2026-10-01T10:00:07.250Z", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] } }) +
   line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:00:08.000Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "README.md" }] } }) +
-  line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:01:00.000Z", message: { role: "user", content: "thanks" } }));
+  line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:01:00.000Z", message: { role: "user", content: "thanks" } }) +
+  // An injected skill body, which session-grep does not search without --include-skill-bodies.
+  line({ type: "user", cwd: okCwd, timestamp: "2026-10-01T10:02:00.000Z", message: { role: "user", content: `Base directory for this skill: /skills/demo\n\nUse ${NEEDLE} carefully.` } }));
 
 // Blacklisted: same shape, cwd inside the private tree.
 const privateRoot = join(home, "Private");
@@ -47,6 +49,13 @@ const privateId = "bbbb1111-2222-3333-4444-555555555555";
 mkdirSync(join(home, ".claude", "projects", "misc"), { recursive: true });
 writeFileSync(join(home, ".claude", "projects", "misc", `${privateId}.jsonl`),
   line({ type: "user", cwd: join(privateRoot, "x"), timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: `private ${NEEDLE}` } }));
+
+// Blacklisted by project folder alone: no record carries a cwd, as in some Claude transcripts.
+const slugId = "ffff1111-2222-3333-4444-555555555555";
+const slugDir = join(home, ".claude", "projects", privateRoot.replace(/[^A-Za-z0-9-]/g, "-"));
+mkdirSync(slugDir, { recursive: true });
+writeFileSync(join(slugDir, `${slugId}.jsonl`),
+  line({ type: "user", timestamp: "2026-10-02T11:00:00.000Z", message: { role: "user", content: `folder ${NEEDLE}` } }));
 
 // Codex: a custom tool call agentsview files as message text; session-grep calls it a tool entry.
 const codexId = "cccc1111-2222-3333-4444-555555555555";
@@ -70,12 +79,15 @@ const hits = [
   { session_id: privateId, agent: "claude", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-02T10:00:00Z", snippet: `private ${NEEDLE}` },
   { session_id: `codex:${codexId}`, agent: "codex", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-03T10:00:02Z", snippet: `echo ${NEEDLE}` },
   { session_id: `pi:${ooId}`, agent: "pi", location: "message", role: "assistant", ordinal: 0, timestamp: "2026-10-04T10:00:01Z", snippet: `saw ${NEEDLE}` },
+  { session_id: claudeId, agent: "claude", location: "message", role: "user", ordinal: 4, timestamp: "2026-10-01T10:02:00Z", snippet: `Use ${NEEDLE} carefully` },
+  { session_id: slugId, agent: "claude", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-02T11:00:00Z", snippet: `folder ${NEEDLE}` },
   { session_id: "codex:eeee1111-2222-3333-4444-555555555555", agent: "codex", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-05T10:00:00Z", snippet: NEEDLE },
 ];
 
 const requests: URL[] = [];
 const intents: (string | undefined)[] = [];
 let failSemantic = false;
+let malformed = false;
 const server = createServer((req: IncomingMessage, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   requests.push(url);
@@ -86,7 +98,7 @@ const server = createServer((req: IncomingMessage, res) => {
     res.end(JSON.stringify({ error: "semantic search is not enabled" }));
     return;
   }
-  res.end(JSON.stringify({ matches: hits, next_cursor: 0 }));
+  res.end(JSON.stringify(malformed ? { unexpected: "shape" } : { matches: hits, next_cursor: 0 }));
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -133,7 +145,9 @@ try {
   const oo = byId.get(ooId) as { source: string; namespace: string };
   assert.deepEqual([oo.source, oo.namespace], ["pi", "owner-operator"], "a pi: id resolves to Owner Operator's store by its stable id");
   assert.ok(!byId.has(privateId), "blacklisted transcripts are dropped");
-  assert.equal(found.blacklistedDropped, 1);
+  assert.equal(found.blacklistedDropped, 2, "a blacklisted project folder is dropped even without a cwd");
+  assert.ok(!byId.has(slugId));
+  assert.equal(found.skillBodyHitsDropped, 1, "an injected skill body stays out, as on session-grep");
   assert.ok(!byId.has(codexId), "tool input agentsview files as message text stays out without --include-tools");
   assert.equal(found.toolHitsDropped, 1);
   assert.equal(found.outsideSourcesDropped, 1, "a session with no readable transcript in the configured sources is dropped");
@@ -154,6 +168,21 @@ try {
   await json(fakeBin, ["--query", "launch agent", "--hybrid"]);
   assert.equal(requests.at(-1)!.searchParams.get("mode"), "hybrid");
   assert.equal(intents.at(-1), "semantic", "semantic and hybrid requests carry agentsview's intent header");
+
+  await json(fakeBin, ["--query", NEEDLE, "--until", "2026-10-02"]);
+  assert.equal(requests.at(-1)!.searchParams.get("date_to"), new Date(2026, 9, 3).toISOString().slice(0, 10),
+    "--until scopes agentsview's sessions, so older matches are not paged away");
+
+  const sent = requests.length;
+  const noQuery = await run(fakeBin, ["--since", "30d"]);
+  assert.equal(requests.length, sent, "a search without --query never reaches agentsview");
+  assert.doesNotMatch(noQuery.stdout, /backend=agentsview/);
+
+  malformed = true;
+  const badBody = await json(fakeBin, ["--query", NEEDLE]);
+  assert.equal(badBody.backend.name, "session-grep", "a response without matches falls back instead of reading as no hits");
+  assert.match(badBody.backend.note, /unexpected search response/);
+  malformed = false;
 
   failSemantic = true;
   const semanticFailed = await json(fakeBin, ["--query", NEEDLE, "--semantic"]);

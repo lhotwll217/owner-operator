@@ -52,8 +52,8 @@ running, otherwise on session-grep. The header names the backend and, after a fa
 backend_note. --any, --case-sensitive, --include-skill-bodies, --sort oldest|file, --target-root,
 --owner-operator, --skim, and --session always run on session-grep. agentsview reports lower
 bounds instead of totals (message_matches_at_least or candidate_sessions_at_least, plus
-more_available) and counts the hits it cannot point at (tool_hits_dropped,
-outside_sources_dropped, unmapped_dropped). Every hit's id and idx open with
+more_available) and counts the hits it cannot point at or that session-grep would hide
+(tool_hits_dropped, skill_body_hits_dropped, outside_sources_dropped, unmapped_dropped). Every hit's id and idx open with
 --session ID --at IDX on either backend; use --backend session-grep for exact totals.
 
 Choose the lightest mode:
