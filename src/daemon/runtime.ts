@@ -81,8 +81,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
           const working = candidate.state === "working";
           const [needsYou, account] = await Promise.allSettled([
             working ? undefined : (async () => {
-              const { classifyNeedsYou } = await import("../agent/needs-you");
-              return classifyNeedsYou(await sampleTurns(candidate.id));
+              const { classifyNeedsYou, SUMMARY_LIMIT } = await import("../agent/needs-you");
+              const statusSummaries = state.recentStatusSummaries(candidate.id, SUMMARY_LIMIT);
+              return classifyNeedsYou({ turns: await sampleTurns(candidate.id), statusSummaries });
             })(),
             (async () => {
               const { sample, bookmark } = await sampleEnrichment(candidate);

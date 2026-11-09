@@ -159,6 +159,10 @@ export class State {
     return this.db.statusSummaryHistory(threadId, limit);
   }
 
+  recentStatusSummaries(threadId: string, limit: number): string[] {
+    return this.db.recentStatusSummaries(threadId, limit);
+  }
+
   appendEnrichment(
     threadId: string,
     details: ThreadEnrichment,

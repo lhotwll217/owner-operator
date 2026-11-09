@@ -46,7 +46,7 @@ import { prefixAt, shiftTo } from "./transcript-positions.mjs";
 import { startDaemon } from "../../src/daemon/runtime.ts";
 import { sampleEnrichment, sampleTurns } from "../../src/session-monitor/scan.ts";
 import { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } from "../../src/agent/enrichment.ts";
-import { classifyNeedsYou } from "../../src/agent/needs-you.ts";
+import { classifyNeedsYou, SUMMARY_LIMIT } from "../../src/agent/needs-you.ts";
 import { statusSummaryShape } from "../../src/agent/status-summary.ts";
 import type { SessionMonitorLogRecord } from "../../src/session-monitor/monitor.ts";
 
@@ -362,7 +362,10 @@ try {
         const modelStart = Date.now();
         attempt.currentTitle = candidate.generatedTopic;
         // The daemon's two calls (runtime.ts): Need You only for a stopped session, then the account.
-        const needsYou = candidate.state === "working" ? undefined : await classifyNeedsYou(await sampleTurns(candidate.id));
+        const needsYou = candidate.state === "working" ? undefined : await classifyNeedsYou({
+          turns: await sampleTurns(candidate.id),
+          statusSummaries: daemon.state.recentStatusSummaries(candidate.id, SUMMARY_LIMIT),
+        });
         const details = {
           ...(await enrichThread(sample, {
             currentTitle: candidate.generatedTopic,
