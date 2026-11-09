@@ -7,7 +7,7 @@ import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import { State } from "../state/state";
 import { AgentRunExecutor } from "./executor";
 import { createAcpLauncher } from "./acp-launcher";
-import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
+import { deriveParentAgentStateWithEnvironment } from "./continuation";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-resume-cancelled-"));
 const previousHome = process.env.OO_HOME;

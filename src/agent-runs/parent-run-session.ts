@@ -11,7 +11,7 @@ import {
   type AgentRunCompletionEnvelope,
   type ParentAgentStateView,
 } from "@owner-operator/core/agent-state";
-import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
+import { deriveParentAgentStateWithEnvironment } from "./continuation";
 
 /** Parent-scoped transport seam. The production Gateway and tests use the same contract. */
 export interface ParentRunAdapter {
