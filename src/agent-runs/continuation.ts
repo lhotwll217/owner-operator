@@ -56,11 +56,7 @@ export interface Continuations {
 /** Retry and Resume eligibility over one snapshot of runs. Verdicts read the saved ACPX record and
  * the run's cwd synchronously, so the executor can check and create the successor row atomically. */
 export function continuationsOf(runs: readonly AgentRun[]): Continuations {
-  const lineage: Lineage = {
-    retrySuccessor: firstBy(runs, (run) => run.retryOfRunId),
-    resumeSuccessor: firstBy(runs, (run) => run.resumeOfRunId),
-    activeByChild: firstBy(runs, (run) => isTerminalAgentRunStatus(run.status) ? null : run.childSessionId),
-  };
+  const lineage = lineageOf(runs);
   return {
     retry(run) {
       const retried = lineage.retrySuccessor.get(run.id);
@@ -110,11 +106,23 @@ export function deriveParentAgentStateWithEnvironment(
   });
 }
 
-interface Lineage {
+export interface Lineage {
   retrySuccessor: ReadonlyMap<string, AgentRun>;
   resumeSuccessor: ReadonlyMap<string, AgentRun>;
+  /** The newest run of each child session, in newest-first order. */
+  latestByChild: ReadonlyMap<string, AgentRun>;
   /** Pending or running runs by child session. */
   activeByChild: ReadonlyMap<string, AgentRun>;
+}
+
+/** Indexes a newest-first snapshot, as `listAgentRuns` returns it. */
+export function lineageOf(runs: readonly AgentRun[]): Lineage {
+  return {
+    retrySuccessor: firstBy(runs, (run) => run.retryOfRunId),
+    resumeSuccessor: firstBy(runs, (run) => run.resumeOfRunId),
+    latestByChild: firstBy(runs, (run) => run.childSessionId),
+    activeByChild: firstBy(runs, (run) => isTerminalAgentRunStatus(run.status) ? null : run.childSessionId),
+  };
 }
 
 /** The first refusal in the order the owner sees it; `run` already carries any recovered identity. */

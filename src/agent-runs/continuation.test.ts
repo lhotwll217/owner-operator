@@ -109,6 +109,9 @@ try {
   };
   assert.deepEqual(retry(failedForRetry), { kind: "eligible", successor: retrySuccessor },
     "an unsuccessful run with a durable child identity can be retried");
+  assert.deepEqual(retry({ ...failedForRetry, completionRunIds: ["undelivered-child"] }),
+    { kind: "eligible", successor: { ...retrySuccessor, completionRunIds: ["undelivered-child"] } },
+    "a retried follow-up carries its undelivered child receipts");
   const exactRetry = run("exact-retry", AgentRunStatus.Failed, {
     childSessionId: "retry-child",
     retryOfRunId: failedForRetry.id,

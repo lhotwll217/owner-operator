@@ -191,8 +191,9 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   for restart-safe deduplication. An interrupted follow-up that never submitted its prompt gets one
   automatic retry. Failed starts retain evidence for explicit retry or corrected resume; owner
   cancellations retain it for explicit resume and never restart automatically. The follow-up waits
-  for an active parent turn to end. Owner and outside callers stream the child until it finishes unless they
-  pass `--no-wait`.
+  for an active parent turn to end. The [nested planner](../src/agent-runs/nested-planner.ts) decides
+  which follow-ups are owed and builds their evidence; the executor creates them. Owner and outside
+  callers stream the child until it finishes unless they pass `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
   [executor](../src/agent-runs/executor.ts) creates the successor row that Continuation's verdict
   describes, and the [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available
