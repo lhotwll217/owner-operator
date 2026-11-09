@@ -7,12 +7,14 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { ExtensionFactory, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { isBlacklisted, loadBlacklist, pathIdentities, type Blacklist } from "@owner-operator/core";
+import { agentCaller } from "../shared/agent-caller";
 import { repoRoot } from "../shared/repo-root";
 
 type FileToolName = "read" | "grep" | "find" | "ls" | "edit" | "write";
 
 const ooHome = (): string => process.env.OO_HOME ?? path.join(homedir(), ".owner-operator");
 export interface PrivacyToolGuardOptions {
+  allowChildPrompt?: boolean;
   callerSessionId?: string;
   currentSessionId?: string;
 }
@@ -165,6 +167,7 @@ export function addOwnerOperatorBashEnvironment(command: string, opts: PrivacyTo
     `PATH=${shellQuote(repoRoot)}:"$PATH"`,
     `OO_HOME=${shellQuote(ooHome())}`,
     "OO_AGENT=1",
+    `OO_CAN_PROMPT=${opts.allowChildPrompt && !agentCaller() ? "1" : "0"}`,
   ];
   if (opts.callerSessionId) assignments.push(`OO_CALLER_SESSION_ID=${shellQuote(opts.callerSessionId)}`);
   if (opts.currentSessionId) assignments.push(`OO_CURRENT_SESSION_ID=${shellQuote(opts.currentSessionId)}`);

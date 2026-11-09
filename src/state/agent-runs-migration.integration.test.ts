@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { AgentRunHarness, AgentRunStatus, agentRunResumeError } from "@owner-operator/core";
+import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
+import { continuationsOf } from "../agent-runs/continuation";
 import { ThreadDb } from "./database";
 
 const legacyDir = mkdtempSync(join(tmpdir(), "oo-agent-run-effort-migration-"));
@@ -254,7 +255,7 @@ try {
   const migrated = after.agentRunById("legacy-cancelled")!;
   assert.equal(migrated.promptSubmitted, false, "migration cannot infer submission from child identity");
   assert.equal(migrated.childSessionId, "child");
-  assert.equal(agentRunResumeError(migrated, { existingResumeRunId: null, activeRunId: null }), null,
+  assert.equal(continuationsOf([migrated]).resume(migrated).kind, "eligible",
     "legacy submission uncertainty does not block reloading a saved conversation");
   after.close();
 } finally {

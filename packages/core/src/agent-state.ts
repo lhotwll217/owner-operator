@@ -1,7 +1,5 @@
 import {
   AgentRunStatus,
-  agentRunRetryError,
-  agentRunResumeError,
   isTerminalAgentRunStatus,
   type AgentRun,
 } from "./agent-runs";
@@ -50,9 +48,8 @@ export interface ParentAgentStateView {
 export interface DeriveParentAgentStateOptions {
   now?: string;
   recentLimit?: number;
-  /** Runtime adapter proof for resume environmental eligibility (currently: cwd exists and is a
-   * directory). Omission fails closed because browser-safe core cannot inspect a filesystem. */
-  isResumeEnvironmentEligible?: (run: AgentRun) => boolean;
+  /** Retry and Resume eligibility for a visible run, decided by the caller. */
+  continuation: (run: AgentRun) => Pick<AgentRunView, "canRetry" | "canResume">;
 }
 
 const ATTENTION_STATUSES = new Set<AgentRunStatus>([
@@ -135,17 +132,10 @@ function sortTime(run: AgentRun): number {
 function deriveRunView(
   run: AgentRun,
   now: string,
-  retryRunIds: ReadonlyMap<string, string>,
-  resumeRunIds: ReadonlyMap<string, string>,
-  activeRunIdsByChild: ReadonlyMap<string, string>,
-  isResumeEnvironmentEligible: (run: AgentRun) => boolean,
+  retriedRunIds: ReadonlySet<string>,
+  continuation: DeriveParentAgentStateOptions["continuation"],
 ): AgentRunView {
-  const category = categoryFor(run, retryRunIds);
-  const existingRetryRunId = retryRunIds.get(run.id) ?? null;
-  const existingResumeRunId = resumeRunIds.get(run.id) ?? null;
-  const activeRunId = run.childSessionId
-    ? activeRunIdsByChild.get(run.childSessionId) ?? null
-    : null;
+  const category = categoryFor(run, retriedRunIds);
   return {
     id: run.id,
     harness: run.harness,
@@ -160,31 +150,17 @@ function deriveRunView(
     retryOfRunId: run.retryOfRunId,
     resumeOfRunId: run.resumeOfRunId,
     canCancel: run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running,
-    canRetry: agentRunRetryError(run, { existingRetryRunId, existingResumeRunId, activeRunId }) === null,
-    canResume: agentRunResumeError(run, { existingRetryRunId, existingResumeRunId, activeRunId }) === null
-      && isResumeEnvironmentEligible(run),
+    ...continuation(run),
   };
 }
 
 export function deriveParentAgentState(
   runs: readonly AgentRun[],
-  options: DeriveParentAgentStateOptions = {},
+  options: DeriveParentAgentStateOptions,
 ): ParentAgentStateView {
   const now = options.now ?? new Date().toISOString();
   const recentLimit = Math.max(0, options.recentLimit ?? AGENT_STATE_RECENT_LIMIT);
-  const isResumeEnvironmentEligible = options.isResumeEnvironmentEligible ?? (() => false);
-  const resumeRunIds = new Map(
-    runs.flatMap((run) => run.resumeOfRunId === null ? [] : [[run.resumeOfRunId, run.id] as const]),
-  );
-  const retryRunIds = new Map(
-    runs.flatMap((run) => run.retryOfRunId === null ? [] : [[run.retryOfRunId, run.id] as const]),
-  );
-  const activeRunIdsByChild = new Map(
-    runs.flatMap((run) => run.childSessionId !== null
-      && (run.status === AgentRunStatus.Pending || run.status === AgentRunStatus.Running)
-      ? [[run.childSessionId, run.id] as const]
-      : []),
-  );
+  const retryRunIds = new Set(runs.flatMap((run) => run.retryOfRunId === null ? [] : [run.retryOfRunId]));
   const ordered = [...runs].sort((left, right) => {
     const categoryDifference = ["attention", "active", "recent"].indexOf(categoryFor(left, retryRunIds))
       - ["attention", "active", "recent"].indexOf(categoryFor(right, retryRunIds));
@@ -196,14 +172,7 @@ export function deriveParentAgentState(
   const attention = runs.filter((run) => categoryFor(run, retryRunIds) === "attention").length;
   return {
     counts: { queued, running, attention },
-    runs: visible.map((run) => deriveRunView(
-      run,
-      now,
-      retryRunIds,
-      resumeRunIds,
-      activeRunIdsByChild,
-      isResumeEnvironmentEligible,
-    )),
+    runs: visible.map((run) => deriveRunView(run, now, retryRunIds, options.continuation)),
   };
 }
 
