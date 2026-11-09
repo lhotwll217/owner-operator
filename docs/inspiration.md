@@ -17,6 +17,12 @@ One entry per source: a one-line identity, then bulleted **Borrowed** patterns, 
 source. Add a source once and grow its bullets; do not open a second entry for the same project.
 Why something was *not* adopted belongs in the issue/PR where that call was made, not here.
 
+- **[agentsview](https://github.com/kenn-io/agentsview/tree/65523169ae016d10112b70ed3410487204764fbc)** — local session archive
+  with substring, regex, semantic, and hybrid content search.
+  - Borrowed: its [content search API](https://github.com/kenn-io/agentsview/blob/65523169ae016d10112b70ed3410487204764fbc/internal/server/huma_routes_search.go#L39-L60) as an
+    optional `oo search` discovery backend, detected through
+    [`serve status`](https://github.com/kenn-io/agentsview/blob/65523169ae016d10112b70ed3410487204764fbc/cmd/agentsview/serve_lifecycle.go#L265-L268); hits are mapped back to
+    session-grep pointers in `src/session-search/agentsview.mjs`.
 - **[OpenClaw](https://github.com/openclaw/openclaw/tree/372b527da4a1cee5b819e7852f6e26ef11160e85)** —
   local coding-agent daemon; both the scheduler and the delegated-run substrate borrow from it.
   - Borrowed (scheduler): an explicit

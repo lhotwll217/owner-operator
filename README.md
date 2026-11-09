@@ -49,6 +49,42 @@ npm install            # once, from the repo root; needs Node 22+
 Setup walks privacy boundaries, credentials, the supported-harness review, permission mode,
 and macOS always-on services: [docs/onboarding.md](docs/onboarding.md).
 
+### Optional: agentsview search backend
+
+`oo search` uses [agentsview](https://github.com/kenn-io/agentsview) for discovery queries when
+its daemon is running, and adds `--semantic` and `--hybrid` (search by meaning) on top of
+session-grep's exact search. Without a running daemon, `oo search` behaves as before. Owner
+Operator only detects agentsview; it never installs, configures, or starts it.
+
+1. Install agentsview ([install options](https://github.com/kenn-io/agentsview/blob/65523169ae016d10112b70ed3410487204764fbc/README.md#L23-L44)) and start its daemon with
+   `DO_NOT_TRACK=1 agentsview daemon start`. agentsview sends anonymous usage telemetry unless
+   that variable (or `AGENTSVIEW_TELEMETRY_ENABLED=0`) is set in the daemon's environment
+   ([privacy](https://github.com/kenn-io/agentsview/blob/65523169ae016d10112b70ed3410487204764fbc/README.md#L804-L829)).
+2. To include Owner Operator's own history, add its store to `~/.agentsview/config.toml`,
+   using your absolute `OO_HOME` path:
+
+   ```toml
+   [[session_sources]]
+   agent = "pi"
+   dir = "/Users/<you>/.owner-operator/sessions"
+   ```
+
+3. For `--semantic` and `--hybrid`, enable `[vector]` with a local embeddings server and a model
+   of your choice; any OpenAI-compatible endpoint works (Ollama, llama.cpp `llama-server`,
+   LM Studio). Follow [Enabling `[vector]`](https://github.com/kenn-io/agentsview/blob/65523169ae016d10112b70ed3410487204764fbc/docs/semantic-search.md#L23-L65), then run
+   `agentsview embeddings build`. The first build embeds your whole history and can take hours.
+
+Check it with `oo search --query <term>`: the first line reads `backend=agentsview`, or
+`backend=session-grep backend_note="…"` with the reason it fell back. `--backend session-grep`
+pins the original engine.
+
+Known limits:
+
+- agentsview indexes every session it finds, including blacklisted ones. Owner Operator still
+  drops blacklisted results before showing them.
+- How results differ between backends, and which flags always run on session-grep:
+  `oo search --help`, section Backends.
+
 ## Talking to the agent
 
 You talk to Owner Operator through `oo`, a terminal agent. Run `oo` for an interactive

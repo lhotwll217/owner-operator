@@ -14,7 +14,7 @@ import { sampleEnrichment, sampleTurns } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
-import { deriveParentAgentStateWithEnvironment } from "../agent-runs/agent-state-projection";
+import { deriveParentAgentStateWithEnvironment } from "../agent-runs/continuation";
 import { readHarnessDetails } from "../agent-runs/harness-details";
 import { proposeDelegatedBaseline } from "../agent-runs/launch-config";
 import { runSessionSearch } from "../session-search/run";

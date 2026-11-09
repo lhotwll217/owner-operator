@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus, type AgentRunFinalStatus, type AgentRunLaunchRequest } from "@owner-operator/core";
 import { State } from "../state/state";
 import { AgentRunExecutor } from "./executor";
-import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
+import { deriveParentAgentStateWithEnvironment } from "./continuation";
 
 const dir = mkdtempSync(join(tmpdir(), "oo-issue-189-"));
 const previousHome = process.env.OO_HOME;

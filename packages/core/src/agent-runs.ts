@@ -224,67 +224,6 @@ export interface AgentRun {
   timeoutSeconds: number;
 }
 
-export interface AgentRunResumeContext {
-  existingResumeRunId: string | null;
-  existingRetryRunId?: string | null;
-  activeRunId: string | null;
-}
-
-export interface AgentRunRetryContext {
-  existingRetryRunId: string | null;
-  existingResumeRunId?: string | null;
-  activeRunId: string | null;
-}
-
-/** Pure retry eligibility shared by executor enforcement and presentation derivation. */
-export function agentRunRetryError(
-  run: AgentRun,
-  context: AgentRunRetryContext,
-): string | null {
-  if (!AGENT_RUN_RETRYABLE_STATUSES.includes(run.status)) {
-    return `agent run ${run.id} is not retryable from status ${run.status}`;
-  }
-  if (run.childSessionId && !AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
-    return `harness ${run.harness} does not support loading an existing session`;
-  }
-  if (context.existingRetryRunId) {
-    return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
-  }
-  if (context.existingResumeRunId) {
-    return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
-  }
-  if (context.activeRunId) {
-    return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
-  }
-  return null;
-}
-
-/** Pure resume eligibility shared by executor enforcement and presentation derivation.
- * Runtime-only facts such as cwd availability remain outside core. */
-export function agentRunResumeError(
-  run: AgentRun,
-  context: AgentRunResumeContext,
-): string | null {
-  if (!AGENT_RUN_RESUMABLE_STATUSES.includes(run.status)) {
-    return `agent run ${run.id} cannot be resumed while ${run.status}`;
-  }
-  if (!AGENT_RUN_CAPABILITIES[run.harness]?.loadSession) {
-    return `harness ${run.harness} does not support loading an existing session`;
-  }
-  if (!run.childSessionId) return `agent run ${run.id} has no child session identity to resume`;
-  if (!run.acpxRecordId) return `agent run ${run.id} has no acpx session-record identity to resume`;
-  if (context.existingResumeRunId) {
-    return `agent run ${run.id} has already been resumed by ${context.existingResumeRunId}`;
-  }
-  if (context.existingRetryRunId) {
-    return `agent run ${run.id} has already been retried by ${context.existingRetryRunId}`;
-  }
-  if (context.activeRunId) {
-    return `child session ${run.childSessionId} already has active run ${context.activeRunId}`;
-  }
-  return null;
-}
-
 /** Explicit runtime intent derived from the two semantic run relationships. A retry with no
  * saved child starts fresh; missing or inconsistent relationships fail. */
 export type AgentRunTurnIntent =

@@ -7,7 +7,7 @@ import { AgentRunHarness, AgentRunStatus } from "@owner-operator/core";
 import { State } from "../state/state";
 import { AgentRunExecutor } from "./executor";
 import { createAcpLauncher } from "./acp-launcher";
-import { deriveParentAgentStateWithEnvironment } from "./agent-state-projection";
+import { deriveParentAgentStateWithEnvironment } from "./continuation";
 
 for (const phase of ["queued", "loading", "failed-before-prompt"] as const) {
   const dir = mkdtempSync(join(tmpdir(), `oo-resume-successor-${phase}-`));

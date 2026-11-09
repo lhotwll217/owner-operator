@@ -71,8 +71,9 @@ owns transcript identity and discovery.
   relationships and fails closed when either is inconsistent.
 - **Retry and resume are distinct controls.** Retry reruns the same task after `failed`,
   `interrupted`, or `lost`; resume requires a new task after any terminal outcome. The
-  [`oo runs` verbs](../src/cli/operations/runs.ts) own their inputs, while the
-  [domain contract](../packages/core/src/agent-runs.ts) owns pure eligibility.
+  [`oo runs` verbs](../src/cli/operations/runs.ts) own their inputs, while
+  [Continuation](../src/agent-runs/continuation.ts) owns eligibility for both the executor and the
+  view, including saved-record recovery and the workspace check.
 - **Resume continues saved work after any terminal outcome.** Supply a new task, including an
   instruction to continue when the goal is unchanged. Both saved conversation identities and the
   original workspace must still be available. Prompt acknowledgement is per-turn evidence, not
@@ -190,14 +191,14 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   for restart-safe deduplication. An interrupted follow-up that never submitted its prompt gets one
   automatic retry. Failed starts retain evidence for explicit retry or corrected resume; owner
   cancellations retain it for explicit resume and never restart automatically. The follow-up waits
-  for an active parent turn to end. Owner and outside callers stream the child until it finishes unless they
-  pass `--no-wait`.
+  for an active parent turn to end. The [nested planner](../src/agent-runs/nested-planner.ts) decides
+  which follow-ups are owed and builds their evidence; the executor creates them. Owner and outside
+  callers stream the child until it finishes unless they pass `--no-wait`.
 - **Retry and resume re-enter the ordinary lifecycle.** The
-  [executor](../src/agent-runs/executor.ts) owns row creation and authoritative runtime validation;
-  [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available record/session identity
-  before sending the turn. For resume, the
-  [environmental projection](../src/agent-runs/agent-state-projection.ts) also prevents clients from
-  offering a control for an unavailable workspace. Both controls fail closed rather than
+  [executor](../src/agent-runs/executor.ts) creates the successor row that Continuation's verdict
+  describes, and the [ACP launcher](../src/agent-runs/acp-launcher.ts) proves exact available
+  record/session identity before sending the turn. The view reads the same verdict, so a client is
+  never offered a control the executor would refuse. Both controls fail closed rather than
   substituting a fresh context.
 - **Workspace follows the root's durable selection.** Immediately before an omitted-cwd launch
   with a parent session, `oo runs delegate` resolves that parent's selection through the Gateway

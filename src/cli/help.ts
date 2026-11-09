@@ -20,7 +20,7 @@ export function rootHelp(): string {
   return `Owner Operator (oo) — track and act on your local CLI agent sessions.
 
   oo                              embedded Pi interactive mode
-  oo -p | --prompt "<text>"       one headless turn (prose on stdout, session id on stderr)
+  oo -p | --prompt "<text>"       ask a fresh Operator, including from a root Operator chat (prose on stdout, session id on stderr)
   oo --continue [-p "<text>"]     resume the most recent oo thread
   oo --session <id> [-p "<text>"] resume a specific oo thread
   oo --from-session <id>          record which coding session is calling

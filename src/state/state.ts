@@ -456,10 +456,6 @@ export class State {
     return this.db.agentRunByChildSession(childSessionId);
   }
 
-  nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
-    return this.db.nonterminalAgentRunByChildSession(childSessionId);
-  }
-
   listAgentRuns(filter: { parentThreadId?: string } = {}): AgentRun[] {
     return this.db.listAgentRuns(filter);
   }

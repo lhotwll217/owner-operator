@@ -1240,16 +1240,6 @@ export class ThreadDb {
     return toAgentRun(row);
   }
 
-  /** A pending-or-running run for this child session, if any — the Retry/Resume active-child guard. */
-  nonterminalAgentRunByChildSession(childSessionId: string): AgentRun | undefined {
-    const row = this.db.prepare(
-      `SELECT ${AGENT_RUN_COLUMNS} FROM agent_runs
-       WHERE child_session_id = ? AND status IN (?, ?)
-       ORDER BY created_at DESC LIMIT 1`,
-    ).get(childSessionId, AgentRunStatus.Pending, AgentRunStatus.Running) as unknown as AgentRunDbRow | undefined;
-    return toAgentRun(row);
-  }
-
   /** Start the oldest pending run iff fewer than `maxRunning` rows are running — one transaction,
    * so a concurrent claim can never overshoot the cap. */
   claimNextPendingAgentRun(maxRunning: number): AgentRun | null {
