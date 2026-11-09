@@ -10,6 +10,9 @@ export interface ThreadDetails {
  * `attention` while the session is working, the title and status summary when their call failed. */
 export interface ThreadEnrichment extends ThreadDetails {
   attention?: "idle" | "needs-you";
+  /** Asked with `attention`: the stopped agent is waiting for work it started, such as a
+   * harness-native sub-agent or a background command, to report back to it. */
+  awaiting?: boolean;
   /**
    * Where the evidence for this assessment ended: the message index a tool-inclusive read
    * reached, and that message's time. The composition that samples the transcript fills it in;
