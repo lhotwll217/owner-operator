@@ -259,6 +259,14 @@ try {
   assert.ok(state.claimNeedsYouScheduleRun(needsYouSchedule, [
     { threadId: "thread-1", lastMessageAt: "2026-07-09T10:02:00.000Z" },
   ]));
+  for (const statusSummary of ["Drafting the retention policy.", "Confirm the retention policy."]) {
+    state.appendEnrichment("thread-1", { topic: "Daemon foundation", statusSummary, attention: "needs-you" as const }, "2026-07-09T10:02:00.000Z");
+  }
+  assert.deepEqual(
+    state.recentStatusSummaries("thread-1", 2),
+    ["Confirm the retention policy.", "Drafting the retention policy."],
+    "a summary that returns takes its newest position and appears once",
+  );
   state.close();
 
   writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: ["owner-operator", "issue-131"] }));

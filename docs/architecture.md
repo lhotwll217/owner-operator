@@ -83,11 +83,18 @@ parents with active delegated children.
 
 - **Need You** ([needs-you.ts](../src/agent/needs-you.ts)) is asked only of a stopped session: a
   running turn or an active delegated child is already `working`, deterministically. It sends the
-  owner's last two messages and the agent's last two, whole and without tool calls, to one Jev
-  question: did the agent stop with the current task unfinished? The one tool call kept is the
-  Claude desktop app's next-step box, whose recap and question the owner reads as the agent's. A score at or above the threshold is `needs-you`,
-  otherwise `idle`. A scan alone sees a turn end, not whether the task is done, so `needs-you`
-  comes only from this call.
+  owner's last two messages and the agent's last two, whole and without tool calls, with the
+  thread's three latest distinct status summaries, to one Jev question: did the agent stop with
+  the current task unfinished? The one tool call kept is the Claude desktop app's next-step box,
+  whose recap and question the owner reads as the agent's. Work handed to the owner for review
+  counts as unfinished; work the owner stopped does not. A score at or above the threshold is
+  `needs-you`, otherwise `idle`. A scan alone sees a turn end, not whether the task is done, so
+  `needs-you` comes only from this call. The same call asks whether the agent stopped to wait for work it
+  started that will report back, such as a harness-native sub-agent or a background command,
+  which the scan cannot see. Above its threshold the row projects as `working`, over its stored
+  `needs-you` or `idle`, until a newer message lands; there is no timer, so work that never
+  reports back holds the row until the next message. Need You schedules skip the row while it
+  shows `working`. Enrichment still reads the stored state.
 - **Title and status summary** ([enrichment.ts](../src/agent/enrichment.ts)) read a bounded sample:
   Claude, Codex, and Pi samples include bounded tool evidence through the privacy-aware
   session-search helper; other formats retain the scan sample. The model records them through one
