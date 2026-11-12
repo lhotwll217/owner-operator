@@ -13,7 +13,7 @@ import { ensureOwnerOperatorWorkspace, isOnboarded } from "@owner-operator/core"
 import { appendFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { parseOoArgs } from "./oo-args";
-import { agentCaller, childPromptParent } from "../shared/agent-caller";
+import { agentCaller } from "../shared/agent-caller";
 
 const usage = async (): Promise<string> => (await import("./help")).rootHelp();
 
@@ -32,10 +32,18 @@ if (cli.kind === "usage-error") {
   process.exit(2);
 }
 
-const freshPrompt = cli.kind === "chat" && cli.prompt && !cli.continue && !cli.session;
-const promptParent = freshPrompt ? childPromptParent() : undefined;
-if (agentCaller() && !promptParent && (cli.kind === "daemon" || cli.kind === "interactive" || cli.kind === "chat")) {
-  process.stderr.write('oo: agents reach Owner Operator through `oo <noun> <verb>`. A root Operator can also start a fresh child with `oo -p "prompt"`.\n');
+// An agent's bash (OO_AGENT=1 from the privacy guard, or a daemon-run child's lease) may ask a fresh
+// Operator with `oo -p`. It may not start or replace the daemon that hosts it, open an interactive
+// session, or resume a thread, which may be the caller's own thread mid-turn.
+if (agentCaller() && (cli.kind === "daemon" || cli.kind === "interactive"
+  || (cli.kind === "chat" && (!cli.prompt || cli.continue || cli.session !== undefined)))) {
+  process.stderr.write('oo: agents reach Owner Operator through `oo <noun> <verb>` or a fresh `oo -p "prompt"`; this form starts a daemon or an interactive session, or resumes a thread\n');
+  process.exit(2);
+}
+// The privacy guard marks the bash of a session with fewer than its full tools (`toolsAllow`, an eval
+// arm); a fresh Operator would get every tool.
+if (cli.kind === "chat" && process.env.OO_RESTRICTED_TOOLS === "1") {
+  process.stderr.write("oo: agents reach Owner Operator through `oo <noun> <verb>` here; this session's tools are restricted, and `oo -p` would open a full-tool Operator\n");
   process.exit(2);
 }
 
@@ -89,7 +97,8 @@ const {
   shutdownSessionExtensions,
 } = await import("../agent/agent");
 
-const provenance = ooProvenance("chat", promptParent ?? chat.fromSession);
+// A prompt from an Operator's bash records that Operator as its parent, ahead of `--from-session`.
+const provenance = ooProvenance("chat", (agentCaller() && process.env.OO_CURRENT_SESSION_ID?.trim()) || chat.fromSession);
 
 async function resolveSessionManager(): Promise<SessionManager> {
   const ref = chat.session;

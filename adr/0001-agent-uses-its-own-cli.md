@@ -34,8 +34,9 @@ missing from `oo`, where anyone can see it. This ADR makes the same reversal her
   `src/shared/caller-session.ts`), and the daemon drops those variables at startup so its children
   never inherit the identity of the shell that started it.
 - The privacy guard exports `OO_AGENT=1`. Agent calls use the running daemon because replacing
-  it would interrupt the work it hosts. A root Operator chat can start a fresh headless Operator
-  under the same rule. The [CLI reference](../docs/cli.md) defines the supported forms.
+  it would interrupt the work it hosts. Any agent can start a fresh headless Operator under the
+  same rule, at any nesting level, unless its own session runs with restricted tools. The
+  [CLI reference](../docs/cli.md) defines the supported forms.
 - Every permission mode writes allow rules for `oo` and `oo *` in the bash surface
   (`packages/core/src/permissions.mjs`). Owner bash rules come after them and the last match
   wins, so an owner rule can still narrow a verb. `read-only` is not a supported product mode:
