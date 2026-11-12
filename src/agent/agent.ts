@@ -190,7 +190,7 @@ export async function createOwnerOperatorSession(
         name: "owner-operator-privacy-guard",
         factory: createPrivacyToolGuardExtension({
           callerSessionId: opts.callerSessionId,
-          allowChildPrompt: surface === "chat" && opts.toolsAllow === undefined && !evalReadOnly && !baselinePrompt,
+          restrictedTools: opts.toolsAllow !== undefined || evalReadOnly || Boolean(baselinePrompt),
         }),
       },
       {

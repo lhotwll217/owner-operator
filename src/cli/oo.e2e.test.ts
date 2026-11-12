@@ -69,7 +69,7 @@ try {
   assert.equal(existsSync(join(ooHome, "daemon.json")), false, "OO_AGENT=1 never spawns a daemon");
   assert.equal(existsSync(join(ooHome, "daemon.log")), false, "OO_AGENT=1 never launches a daemon process");
   const agentRefusal = /^oo: agents reach Owner Operator through `oo <noun> <verb>`/;
-  for (const argv of [[], ["daemon"], ["-p", "hi"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
+  for (const argv of [[], ["daemon"], ["--continue"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
     const refused = spawnSync(ooBin, argv, { ...opts, env: { ...opts.env, OO_AGENT: "1" } });
     assert.equal(refused.status, 2, `OO_AGENT=1 refuses \`oo ${argv.join(" ")}\` (stderr: ${refused.stderr})`);
     assert.match(refused.stderr, agentRefusal);
@@ -112,30 +112,26 @@ try {
   assert.equal(setupRequired.stdout, "");
   markOnboarded(ooHome, { via: "e2e" });
 
-  const operatorParent = {
-    ...opts.env, OO_AGENT: "1", OO_CAN_PROMPT: "1", OO_CURRENT_SESSION_ID: "operator-parent",
-  };
-  const offlinePrompt = spawnSync(ooBin, ["-p", "hi"], { ...opts, env: operatorParent });
-  assert.equal(offlinePrompt.status, 1, `a nested prompt reports a connection failure (stderr: ${offlinePrompt.stderr})`);
-  assert.match(offlinePrompt.stderr, /daemon is not running; agents do not start it/);
-  assert.equal(existsSync(join(ooHome, "daemon.log")), false, "a nested prompt cannot spawn the daemon");
+  // Any agent caller may ask a fresh Operator, but only through the daemon already running.
+  const operatorParent = { ...opts.env, OO_AGENT: "1", OO_CURRENT_SESSION_ID: "operator-parent" };
+  const leasedCaller = { ...opts.env, OO_AGENT_RUN_LEASE_ID: "acp-lease" };
+  for (const env of [operatorParent, { ...opts.env, OO_AGENT: "1" }, leasedCaller]) {
+    const offlinePrompt = spawnSync(ooBin, ["-p", "hi"], { ...opts, env });
+    assert.equal(offlinePrompt.status, 1, `an agent prompt reports a connection failure (stderr: ${offlinePrompt.stderr})`);
+    assert.match(offlinePrompt.stderr, /daemon is not running; agents do not start it/);
+    assert.equal(existsSync(join(ooHome, "daemon.log")), false, "an agent prompt cannot spawn the daemon");
+    for (const argv of [[], ["daemon"], ["--continue"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
+      const refused = spawnSync(ooBin, argv, { ...opts, env });
+      assert.equal(refused.status, 2, refused.stderr);
+      assert.match(refused.stderr, agentRefusal);
+    }
+  }
   const mixedPrompt = spawnSync(ooBin, ["-i", "-p", "hi"], { ...opts, env: operatorParent });
   assert.equal(mixedPrompt.status, 2, mixedPrompt.stderr);
   assert.match(mixedPrompt.stderr, /^oo: -i\/--interactive is only valid by itself/);
-  for (const argv of [[], ["daemon"], ["--continue", "-p", "hi"], ["--session", "x", "-p", "hi"]]) {
-    const refused = spawnSync(ooBin, argv, { ...opts, env: operatorParent });
-    assert.equal(refused.status, 2, refused.stderr);
-    assert.match(refused.stderr, agentRefusal);
-  }
-  for (const env of [
-    { ...operatorParent, OO_CAN_PROMPT: "0" },
-    { ...operatorParent, OO_CURRENT_SESSION_ID: "" },
-    { ...operatorParent, OO_AGENT_RUN_LEASE_ID: "acp-lease" },
-  ]) {
-    const refused = spawnSync(ooBin, ["-p", "hi"], { ...opts, env });
-    assert.equal(refused.status, 2, refused.stderr);
-    assert.match(refused.stderr, agentRefusal);
-  }
+  const restrictedPrompt = spawnSync(ooBin, ["-p", "hi"], { ...opts, env: { ...operatorParent, OO_RESTRICTED_TOOLS: "1" } });
+  assert.equal(restrictedPrompt.status, 2, restrictedPrompt.stderr);
+  assert.match(restrictedPrompt.stderr, /tools are restricted, and `oo -p` would open a full-tool Operator/);
 
   const barePrompt = spawnSync(ooBin, ["what", "changed"], opts);
   assert.equal(barePrompt.status, 2, `bare prompt exits 2 (got ${barePrompt.status}; stderr: ${barePrompt.stderr})`);
@@ -192,8 +188,11 @@ try {
         index: 0, id: "ask_oo", type: "function", function: { name: "bash", arguments: JSON.stringify({ command }) },
       }] };
     } else {
-      const text = message.includes("agents reach Owner Operator") ? "nested prompt refused"
-        : message.includes("nested prompt refused") ? "parent received child reply" : "unexpected turn";
+      const text = role === "user" && message.includes("third-fixture") ? "grandchild reply"
+        : role === "user" && message.includes("leased-fixture") ? "leased caller reply"
+        : message.includes("agents reach Owner Operator") ? "nested prompt refused"
+        : message.includes("child received grandchild reply") ? "root received child reply"
+        : message.includes("grandchild reply") ? "child received grandchild reply" : "unexpected turn";
       delta = { role: "assistant", content: text };
     }
     const choice = { index: 0, delta, finish_reason: delta.tool_calls ? "tool_calls" : "stop" };
@@ -212,12 +211,23 @@ try {
     writeFileSync(join(piDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "local" }));
     const reply = await runOo(["-p", "start-fixture"]);
     assert.equal(reply.status, 0, reply.stderr);
-    assert.equal(reply.stdout.trim(), "parent received child reply");
-    const parentId = /\[oo\] session (\S+)/.exec(reply.stderr)?.[1];
-    assert.ok(parentId, reply.stderr);
-    const sessions = await (await import("../agent/agent")).listOoSessions();
-    assert.equal(sessions.length, 2, "only the root and its fresh child run");
-    assert.match(sessions.find((session) => session.id !== parentId)?.name ?? "", new RegExp(`chat ← ${parentId} @`));
+    assert.equal(reply.stdout.trim(), "root received child reply", "the grandchild's answer returns through the child to the root");
+    const rootId = /\[oo\] session (\S+)/.exec(reply.stderr)?.[1];
+    assert.ok(rootId, reply.stderr);
+    const { listOoSessions } = await import("../agent/agent");
+    const sessions = await listOoSessions();
+    assert.equal(sessions.length, 3, "the root, its child, and its grandchild run");
+    const childOf = (parentId: string) => sessions.filter((session) => session.name?.startsWith(`chat ← ${parentId} @`));
+    const [child] = childOf(rootId);
+    assert.ok(child, "the child records the root Operator as its parent");
+    assert.equal(childOf(child.id).length, 1, "the grandchild records the child Operator as its parent");
+
+    const leased = await runOo(["-p", "leased-fixture"], { env: { ...cliEnv, OO_AGENT_RUN_LEASE_ID: "acp-lease", CLAUDE_CODE_SESSION_ID: "claude-caller" } });
+    assert.equal(leased.status, 0, leased.stderr);
+    assert.equal(leased.stdout.trim(), "leased caller reply", "a daemon-run child can ask a fresh Operator");
+    const leasedId = /\[oo\] session (\S+)/.exec(leased.stderr)?.[1];
+    assert.match((await listOoSessions()).find((session) => session.id === leasedId)?.name ?? "", /^chat ← claude-caller @/,
+      "outside an Operator, the prompt records the detected caller as its parent");
     for (const env of [
       { ...cliEnv, OO_EVAL_READ_ONLY: "1" },
       { ...cliEnv, OO_EVAL_BASELINE_PROMPT: join(repoRoot, "src", "prompts", "owner-operator.md") },

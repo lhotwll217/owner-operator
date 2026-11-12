@@ -118,6 +118,17 @@ try {
     `command-ok|${join(process.cwd(), "oo")}|caller'id|current-session-two|${ooHome}|1`,
     "the same extension reads a changed current session ID live on every tool call",
   );
+  const restrictedMarker = (restrictedTools: boolean): string => {
+    const bash = event("bash", { command: "true" });
+    guardOwnerOperatorToolCall(bash, publicDir, { restrictedTools });
+    const command = (bash.input as { command: string }).command;
+    return execFileSync("/bin/sh", ["-c", `${command}; printf '%s' "\${OO_RESTRICTED_TOOLS-unset}"`], {
+      encoding: "utf8",
+      env: { ...process.env, OO_RESTRICTED_TOOLS: undefined },
+    });
+  };
+  assert.equal(restrictedMarker(true), "1", "a restricted-tool session marks its bash so `oo -p` refuses");
+  assert.equal(restrictedMarker(false), "unset", "a full-tool session leaves the marker absent");
 
   process.stdout.write("ok — privacy guard: supported tool_call preflight blocks every Pi file primitive\n");
 } finally {

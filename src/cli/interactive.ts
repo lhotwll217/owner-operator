@@ -109,7 +109,7 @@ const createRuntime: Parameters<typeof createAgentSessionRuntime>[0] = async ({ 
         { name: "owner-operator-tool-display", factory: ownerOperatorToolDisplayExtension },
         {
           name: "owner-operator-privacy-guard",
-          factory: createPrivacyToolGuardExtension({ callerSessionId: provenance.fromSession, allowChildPrompt: true }),
+          factory: createPrivacyToolGuardExtension({ callerSessionId: provenance.fromSession }),
         },
         { name: "owner-operator-permission-settings", factory: createPermissionSettingsExtension({ ooHome: paths.home }) },
         { name: "owner-operator-presentation", factory: ooPresentationExtension },

@@ -49,11 +49,15 @@ drill down from `oo --help`; `oo.e2e.test.ts` fails when a printed page and the 
 The Operator runs `oo` from bash. Agent calls connect to the existing daemon and report when it
 is missing, still starting, or unreachable. [ADR 0001](../adr/0001-agent-uses-its-own-cli.md)
 
-In a root Operator chat, `oo -p "<question>"` asks a fresh Operator session for one answer.
-The answer returns to the parent's bash on stdout. The child uses the same daemon and always
-records the calling Operator's session ID, even if the command supplies `--from-session`.
-This is one level of headless chat. Agent shells refuse
-interactive sessions, session resumes, and `oo daemon`.
+From any agent's bash, including an Operator that was itself prompted this way and a daemon-run
+child, `oo -p "<question>"` asks a fresh Operator session for one answer on stdout. It records
+the calling Operator's session ID as its parent, even if the command supplies `--from-session`;
+outside an Operator it records the caller the usual way (`--from-session`, then
+`CALLER_SESSION_ENV`). Agent shells refuse `oo daemon`,
+interactive sessions, and resumes (`--continue`, `--session`), because a resume could write into
+the caller's own thread mid-turn. An Operator running with restricted tools (`toolsAllow`, an eval
+arm) exports `OO_RESTRICTED_TOOLS=1`, and its `oo -p` is refused because the child would have the
+full tool set.
 
 | Noun | Covers |
 |---|---|
