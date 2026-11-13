@@ -9,6 +9,8 @@ import {
   parseWindowMs,
   resolveState,
   type AgentRun,
+  type HookFact,
+  type ThreadState,
   type AgentRunActivityUpdate,
   type AgentRunOutcome,
   type AgentRunStreamEvent,
@@ -68,15 +70,19 @@ export class State {
   recordObservation(row: ScanRow): void {
     if (isBlacklisted(this.blacklist(), { cwd: row.project, repo: row.repo })) return;
     const previous = this.db.resolutionRow(row.id);
-    const state = !row.working && previous?.lastMessageAt === row.lastMessageAt &&
-      previous.enrichedThroughMessageAt === row.lastMessageAt && !previous.enrichedWhileWorking && previous.state !== "working"
-      ? previous.state
-      : resolveState(
-      previous?.lastMessageAt
-        ? { state: previous.state, lastMessageAt: previous.lastMessageAt }
-        : undefined,
-      row,
-    );
+    const doneHolds = previous?.state === "done" && row.lastMessageAt <= (previous.lastMessageAt ?? "");
+    const hook = doneHolds ? null : this.db.hookLifecycle(row.id);
+    const state = hook
+      ? hook.state
+      : !row.working && previous?.lastMessageAt === row.lastMessageAt &&
+        previous.enrichedThroughMessageAt === row.lastMessageAt && !previous.enrichedWhileWorking && previous.state !== "working"
+        ? previous.state
+        : resolveState(
+          previous?.lastMessageAt
+            ? { state: previous.state, lastMessageAt: previous.lastMessageAt }
+            : undefined,
+          row,
+        );
     const changedMessage = row.lastMessageAt > (previous?.lastMessageAt ?? "");
     const result = this.db.recordScan({
       id: row.id,
@@ -110,6 +116,28 @@ export class State {
   recordPoll(rows: readonly ScanRow[]): void {
     this.db.purgeBlacklisted(this.blacklist());
     for (const row of rows) this.recordObservation(row);
+  }
+
+  /** Apply one normalized hook fact. A later transcript poll cannot replace this lifecycle. Owner Done still wins. */
+  recordHook(input: {
+    harness: string;
+    source: string;
+    app: string;
+    sessionId: string;
+    fact: HookFact;
+    cwd?: string;
+    prompt?: string;
+  }): { id: string; state: ThreadState } {
+    const result = this.db.recordHook(input);
+    const current = this.db.resolutionRow(input.sessionId);
+    this.publish({
+      kind: DomainEventKind.ThreadChanged,
+      threadId: input.sessionId,
+      state: result.state,
+      lastMessageAt: current?.lastMessageAt ?? null,
+      needsEnrichment: result.state !== "done",
+    });
+    return { id: input.sessionId, state: result.state };
   }
 
   listSessionState(options: { activeSince?: string } = {}): SessionStateRow[] {

@@ -36,6 +36,7 @@ import {
   type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { repoRoot } from "../shared/repo-root";
+import { installClaudeHooks } from "../hooks/install";
 import {
   buildSessionCatalogReview,
   reviewSessionCatalog,
@@ -263,6 +264,7 @@ export async function runOnboarding(
     }
 
     if (pendingOnboardingSteps(paths.home).length === 0) {
+      installClaudeHooks(paths.home);
       markOnboarded(paths.home, { via: options.force ? "command" : "first-run" });
       ctx.ui.notify("Owner Operator setup is complete.", "info");
       return true;

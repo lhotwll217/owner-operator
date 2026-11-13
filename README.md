@@ -5,7 +5,8 @@
 
 Owner Operator is an agent that helps you track and manage work across all your local coding
 agents. The harness operates a state machine that tracks ongoing agent sessions and their
-current status: working, waiting, or stale. It also generates summaries, so you can quickly see
+current status: working, waiting, or stale. Claude Code reports that lifecycle through
+hooks; other harnesses are still inferred from the transcript until their adapters land. It also generates summaries, so you can quickly see
 actionable details. Together these act as a high-signal ledger that lets the agent quickly
 understand how work has evolved through a session. All of this is viewable from a persistent
 widget that surfaces the list of ongoing sessions. The goal is to increase visibility while

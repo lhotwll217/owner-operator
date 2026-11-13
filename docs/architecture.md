@@ -127,6 +127,13 @@ one is pending and reports that with `statusSummaryPending`; a row with no statu
 title alone. A revision is written when the meaning changes and records the session position it
 was written from, so a reader can return to that point; a reassessment that lands on the same
 understanding advances the clock alone. Working sessions are reassessed about every four minutes.
+Claude Code can also report lifecycle over `POST /hooks/:harness`. The daemon reduces those
+payloads to harness-agnostic facts ([`hook-lifecycle.ts`](../packages/core/src/hook-lifecycle.ts))
+and that lifecycle wins over a later transcript poll. Jev still decides Need You for a session
+that has never reported a hook. Codex and OpenCode use the same route once their adapters
+register; the reducer does not name a harness. A delegated child's permission or question
+projects the parent as needs-you as well.
+
 The monitor never awaits the model in its scan hot path.
 Observed child transcripts and run statuses accompany the parent sample within a bounded context.
 Child message or run-status changes refresh the parent status summary and reject an in-flight older result.

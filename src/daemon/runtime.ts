@@ -25,6 +25,7 @@ import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/
 import { repoRoot } from "../shared/repo-root";
 import { WorktreeService } from "../worktrees/worktrees";
 import { runtimeFingerprint } from "./fingerprint";
+import { drainHookSpool, publishHookEndpoint } from "../hooks/install";
 
 export interface DaemonOptions {
   port?: number;
@@ -188,6 +189,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   mkdirSync(dirname(discoveryPath), { recursive: true });
   writeFileSync(discoveryPath, JSON.stringify(info, null, 2), { mode: 0o600 });
   chmodSync(discoveryPath, 0o600);
+  publishHookEndpoint(gateway.port, authToken);
+  drainHookSpool((hook) => state.recordHook({
+    harness: "claude", source: "claude", app: "Claude CLI", ...hook,
+  }));
 
   scheduler.start();
   agentRuns.start();

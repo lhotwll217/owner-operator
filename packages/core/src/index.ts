@@ -144,6 +144,8 @@ export type { SessionHostCandidate } from "./onboarding.mjs";
 
 // Thread status & the lo-fi state machine — model-free, polled, persisted. See status.ts.
 export * from "./status";
+export * from "./hook-lifecycle";
+export * from "./claude-hook";
 
 // Session-state data model: digest metadata + live status (+ cached model details), with the
 // display order all surfaces share. See session-state.ts.

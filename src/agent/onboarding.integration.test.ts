@@ -47,6 +47,15 @@ const candidates: SessionSourceCandidate[] = [{
   shape: false,
 }];
 let installCalls = 0;
+const claudeDir = join(root, "claude-config");
+const previousClaudeDir = process.env.CLAUDE_CONFIG_DIR;
+process.env.CLAUDE_CONFIG_DIR = claudeDir;
+mkdirSync(claudeDir, { recursive: true });
+writeFileSync(join(claudeDir, "settings.json"), `{
+  "theme": "dark",
+  "hooks": { "PreToolUse": [{ "hooks": [{ "type": "command", "command": "echo keep-me" }] }] }
+}
+`);
 
 try {
   const completed = await runOnboarding({ hasUI: true, ui } as any, {
@@ -98,6 +107,10 @@ try {
   assert.deepEqual(settings.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
   assert.equal(settings.alwaysOn, "declined");
   assert.equal(installCalls, 0, "declining always-on never invokes the installer");
+  const claudeSettings = readFileSync(join(claudeDir, "settings.json"), "utf8");
+  assert.match(claudeSettings, /echo keep-me/, "onboarding leaves the owner's Claude hook in place");
+  assert.match(claudeSettings, new RegExp(join(ooHome, "hooks", "claude-hook.sh").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(readFileSync(join(ooHome, "hooks", "claude-hook.sh"), "utf8").includes("endpoint.env"), true);
   assert.deepEqual(asked.slice(0, 5), [
     "Owner Operator",
     "Are there any coding projects or repositories you don’t want Owner Operator to interact with?",
@@ -240,5 +253,7 @@ try {
 
   process.stdout.write("ok — onboarding flow writes every consent through the core config API\n");
 } finally {
+  if (previousClaudeDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+  else process.env.CLAUDE_CONFIG_DIR = previousClaudeDir;
   rmSync(root, { recursive: true, force: true });
 }

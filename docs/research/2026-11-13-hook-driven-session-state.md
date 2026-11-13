@@ -178,9 +178,19 @@ not own the PTY. OSC titles are not available here.
 
 ## Design
 
+The hooked harnesses are Claude Code, Codex, and OpenCode. Each adapter follows Orca's own
+integration for that harness. Claude and Codex are settings/hooks.json commands. OpenCode is
+not: Orca installs a plugin that listens to the event stream (`permission.asked`,
+`question.asked`, `session.idle`, `session.status`) and posts the same normalized facts
+([`status-plugin-lifecycle-source.ts`](https://github.com/stablyai/orca/blob/57c9991c9821e68b4df1896d172b756c282012fb/src/main/opencode/status-hooks/plugin-source/status-plugin-lifecycle-source.ts),
+[`hook-service.ts`](https://github.com/stablyai/orca/blob/57c9991c9821e68b4df1896d172b756c282012fb/src/main/opencode/status-hooks/hook-service.ts)).
+The plugin also re-reads endpoint coordinates on every post
+([`status-plugin-post-source.ts`](https://github.com/stablyai/orca/blob/57c9991c9821e68b4df1896d172b756c282012fb/src/main/opencode/status-hooks/plugin-source/status-plugin-post-source.ts)).
+
 One harness-agnostic lifecycle, stored on the session, with a small adapter per harness.
-The adapter's only job is to turn a harness payload into a lifecycle fact. The core does
-not mention Claude or Codex.
+The adapter's only job is to turn a harness payload into a lifecycle fact. The reducer and
+`POST /hooks/:harness` do not mention Claude, Codex, or OpenCode. A new adapter is a
+function in the registry.
 
 Lifecycle facts:
 
@@ -279,23 +289,17 @@ Two separate holes, and hooks only cover the second if we also admit the session
 
 ### Fallback where there is no hook
 
-Owner Operator cannot scrape OSC titles. The fallback is the transcript `working` flag we
-already compute, with two deletions:
+Owner Operator cannot scrape OSC titles. Sessions with no hook lifecycle keep today's
+transcript `working` flag and the Jev Need You call. Jev is skipped only once a session has
+a hook fact. That is Claude after the first pull request, Codex after its adapter, and
+OpenCode after its adapter. Pi, Cursor, Antigravity, Grok Build, and PostHog Code stay on
+Jev. Cursor's hooks do not report the approval menu, so Cursor stays there until a
+permission event exists.
 
-- "user spoke last → working" is dropped. An interrupt marker and a Codex `turn_aborted`
-  reason of interrupted or error become `needs-you`. A bare user message with no terminal
-  signal stays `idle` until a hook or a real `working` flag says otherwise. That is the
-  conservative reading of #200 for harnesses without an Interrupt hook.
-- Jev no longer sets state. Unhooked harnesses do not get a model Need You. They show
-  working or idle, plus deterministic question tools when the transcript names one
-  (`AskUserQuestion`, the desktop next-step tool).
-
-Pi can post the same lifecycle facts from a small extension (`agent_start`, `tool_call`,
-`agent_end`, `ui_prompt_start` / `ui_prompt_end`), the way Orca already normalizes them.
-That is a later adapter, not a settings.json hook. OpenCode's plugin events are the same
-shape (`permission.asked`, `session.idle`). Cursor's hooks do not report the approval menu;
-Cursor stays on the transcript fallback until a permission event exists. Antigravity, Grok
-Build, and PostHog Code stay on the fallback.
+A finished delegated child of a working parent is owner-Done: the same explicit Done the
+owner applies, not a row left under Working and not a move to Idle. That is later than the
+Claude permission slice. A delegated child blocked on a permission is Need You on the child
+and on the parent.
 
 ### Install, uninstall, restart
 
@@ -321,89 +325,91 @@ does not go on the hook command line.
 
 ### What this deletes
 
-After Claude and Codex hooks are authoritative:
+Jev stays. It stops writing state only for a session that already has a hook lifecycle
+(Claude, then Codex, then OpenCode). Pi, Cursor, Antigravity, Grok Build, and PostHog Code
+keep `classifyStoppedSession`.
 
-- [`classifyStoppedSession`](../../src/agent/needs-you.ts) as a state writer, and the
-  `awaiting` score with it. `needs-you.behavior.ts` goes with that call.
-- `threads.awaiting_through_message_at` and `AWAITING_HOLDS_SQL`.
-- The branch in `recordObservation` that freezes an enriched needs-you/idle forever.
-- The branch in `appendModelDetailsIfFresh` that ignores attention while working. Hooks
-  write state on their own path; enrichment writes title and summary only.
-- `deriveState`'s "last role decides working vs idle" for any session that has a hook fact.
-  The `working` flag remains only as the unhooked fallback.
-- Jev as a way to notice harness-native sub-agents. `SubagentStart` / `SubagentStop` replace
-  that question.
+For a hooked session, drop:
 
-Kept: the scanner, enrichment titles and summaries, owner Done and snooze, the `agent_runs`
-ledger, `arrangeSessionState` (with the section rule changed), the widget as a pure client.
+- the Jev `awaiting` overlay (`threads.awaiting_through_message_at` is cleared when a hook
+  lands; unhooked sessions still use it),
+- the branch in `recordObservation` that freezes an enriched needs-you over a newer hook,
+- `deriveState` as the visible lifecycle. The transcript `working` flag remains the
+  fallback for sessions with no hook fact.
+
+Do not migrate rows already stuck in Need You. They stay until the owner marks Done.
+
+Kept: the scanner, enrichment titles and summaries, Jev for unhooked sessions, owner Done
+and snooze, the `agent_runs` ledger, and the widget as a pure client. A finished delegated
+child becomes owner-Done in a later pull request; this one does not change that arrangement.
 
 ## Bug map
 
 | Issue | Verdict |
 |---|---|
 | #195 | Fixed for Claude and Codex by `child-started` holding the parent `working` after the lead's Stop. Unhooked harnesses stay on the transcript `working` flag, which is the current bug. |
-| #197 | Fixed for hooked sessions: a later `turn-stopped`, `tool-finished`, or `session-ended` replaces needs-you, and a poll cannot put it back. Rows that already stuck, with no future hook, need a one-time decision (open question). |
+| #197 | Fixed for hooked sessions: a later fact replaces needs-you, and a poll cannot put it back. Rows already stuck stay until the owner marks Done. No migration. |
 | #198 | Fixed by `turn-started` inserting the row. The watcher stays for transcript content. |
-| #199 | Fixed by the section rule, independent of hooks. A hook-accurate child state is what makes the new section true. |
+| #199 | Fixed by marking the finished child owner-Done, so it leaves the list. Not by leaving it under Working. |
 | #200 | Partly. Codex `Interrupt` and `StopFailure` are hooks. Claude Esc does not run Stop; the transcript interrupt marker has to stay. A failed turn with no hook payload still depends on that marker. |
 | #193 | Fixed for Claude permission dialogs and `AskUserQuestion`, including mid-turn, because the hook sets needs-you while the transcript still says `tool_use`. Codex `PermissionRequest` is the same fix. Cursor's approval menu is not. |
 | #215 | Fixed by releasing Done only on an owner `turn-started`. |
 | #216 | Partly. Admitting the child and feeding `result_tail` into the parent sample removes the empty-children summary. The summary is still model text; a hook does not write it. The parent row's *state* becomes working or idle from the child's hooks without waiting for that sentence. |
 | #217 | Fixed by admitting delegated SDK sessions and creating the row on the child's `turn-started`, then the existing `parentThreadId` join. Hooks do not fix a child the scanner keeps dropping if we forget the admit rule. |
-| #156 | Fixed as a state bug by deleting the Jev state writer. Summary wording can still sound like an order until the prompt forbids that. The old `nextSteps` contract is already gone. |
+| #156 | Fixed for hooked sessions, because Jev no longer sets their state. Unhooked harnesses keep Jev, so the false-guidance path remains there until each has an adapter. OpenCode leaves that list when its adapter lands. |
 
 ## Pull requests
 
 Each one is verifiable with fixture HTTP posts and a temp `OO_HOME`. No live model call, no
 macOS UI.
 
-1. **Claude hooks feed Need You.** Managed install/uninstall, `POST /hooks/claude`,
-   `endpoint.env` re-source, spool drain. Facts: `turn-started`, `question-requested`,
-   `permission-requested`, `tool-started`, `tool-finished`, `turn-stopped`. Hook state wins
-   over a following poll. Tests: a settings file with a user `PreToolUse` command is
-   unchanged except for the one managed entry, and uninstall removes only that entry;
-   `PermissionRequest` then an unrelated `PreToolUse` stays needs-you; `AskUserQuestion`
-   then `PreToolUse` of `Read` becomes working; a poll that would have derived idle does
-   not overwrite a live permission; a script pointed at a dead port spools, and the next
-   daemon start applies it. This is [#193](https://github.com/lhotwll217/owner-operator/issues/193)
-   for Claude.
+1. **Claude hooks feed Need You.** This is the pull request that lands the shared core:
+   `POST /hooks/:harness`, the fact reducer, and `hook_events`. The only adapter is Claude.
+   Managed install/uninstall, onboarding, `endpoint.env` re-source, spool drain. A real
+   permission stays sticky; `AskUserQuestion` clears on the next unrelated tool. A poll
+   cannot replace a hook fact. A delegated child's permission is Need You on the child and
+   the parent. Jev still runs for sessions with no hook fact. This is
+   [#193](https://github.com/lhotwll217/owner-operator/issues/193) for Claude.
 
-2. **Children and interrupts.** `SubagentStart` / `SubagentStop` hold the parent working
-   (#195). Child section follows the child (#199), covered by `arrangeSessionState` tests
-   the widget already shares. Codex adapter with `Interrupt` (#200 for Codex). Claude
-   interrupt marker maps to needs-you even when the last role is user. Tests are fixture
-   sequences plus one scan fixture with `[Request interrupted`.
+2. **Codex adapter.** Orca's `hooks.json` events, including `Interrupt`, mapped onto the
+   same facts. No change to the reducer or the route. [#200](https://github.com/lhotwll217/owner-operator/issues/200)
+   for Codex Esc, and [#193](https://github.com/lhotwll217/owner-operator/issues/193) for
+   Codex `PermissionRequest`.
 
-3. **The row exists at prompt submit.** `turn-started` inserts a thread before any
-   transcript file, and a later scan attaches the path without changing state (#198).
-   Same for Codex. Test: post a session id with no file, `GET /session-state` returns it
-   as working.
+3. **OpenCode adapter.** Orca's plugin, not a settings.json hook. It posts
+   `permission.asked` / `question.asked` / `session.idle` as the same facts, and re-reads
+   the endpoint file on every event. OpenCode then leaves the Jev fallback.
+   [#16](https://github.com/lhotwll217/owner-operator/issues/16) is the transcript source,
+   which the catalog already admits; this pull request is the live half of that source.
+   The same plugin sets `OO_FROM_SESSION` from the shell tool's session id, which is
+   [#177](https://github.com/lhotwll217/owner-operator/issues/177): an OpenCode caller of
+   `oo runs delegate` gets a parent link without `--from-session`.
 
-4. **Done ignores non-owner messages** (#215). Tests: task-notification, heartbeat, assistant
-   message, and a delegated continuation leave Done; an owner `UserPromptSubmit` clears it.
+4. **Children, interrupts, and finished children.** `child-started` holds the parent
+   working (#195). A finished delegated child is marked owner-Done, so it leaves the list
+   (#199). Claude's interrupt marker and Codex `Interrupt` map to needs-you (#200).
 
-5. **Delegated children and the deletion.** Admit `child_session_id` transcripts despite
+5. **The row exists at prompt submit** (#198). `turn-started` inserts a thread before any
+   transcript file. A later scan attaches the path without changing hook state.
+
+6. **Done ignores non-owner messages** (#215). Task notifications, heartbeats, assistant
+   messages, and delegated continuations leave Done. An owner `turn-started` clears it.
+
+7. **Delegated children in the ledger.** Admit `child_session_id` transcripts despite
    `automatedTransport`. Parent enrichment reads the run row when the child thread has no
-   sample yet (#216, #217). Remove the Jev state writer, the awaiting column's effect, and
-   the freeze in `recordObservation` (#156, #197). Tests: an SDK-entrypoint fixture with a
-   matching `agent_runs` row appears under its parent; a completed child changes the
-   parent's enrichment inputs; a stopped session with no hook fact is idle, not needs-you.
+   sample yet (#216, #217). Jev remains for sessions that still have no hook.
 
-## Open questions
+## Decisions
 
-These change the product, so they are Luke's:
+Luke, 2026-11-13:
 
-- A finished child of a working parent: leave it indented under Working but marked idle, or
-  move it to Idle as this plan does?
-- For Pi, Cursor, OpenCode, Antigravity, Grok Build, and PostHog Code, is "no model Need
-  You" acceptable until each has an adapter? The alternative is keeping Jev as a fallback,
-  which keeps #156 and #197 for those harnesses.
-- Install hooks from onboarding, or only when the owner runs `oo hooks install`? The install
-  edits `~/.claude/settings.json` and Codex `hooks.json`.
-- The rows already stuck in Need You: leave them until the owner marks Done, or clear any
-  needs-you that has no unanswered permission or question the next time the daemon starts?
-- A delegated child blocked on a permission: needs-you on the child only, or also on the
-  parent so it sorts to the top while the parent is otherwise working?
+- A finished child of a working parent is owner-Done. It is not left under Working.
+- Hooks install during onboarding. `oo hooks status|install|uninstall` stays.
+- Unhooked harnesses keep Jev. Jev stops writing state only for hooked sessions. The hooked
+  set is Claude Code, Codex, and OpenCode. OpenCode leaves the Jev list when its adapter
+  lands.
+- Rows already stuck in Need You stay until the owner marks Done. No clearing migration.
+- A delegated child blocked on a permission is Need You on both the child and its parent.
 
 ## Not verified here
 
