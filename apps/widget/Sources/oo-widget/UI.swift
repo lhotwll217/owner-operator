@@ -9,10 +9,11 @@ import SwiftUI
 /// auto-sizes to this view, so toggling `expanded` resizes the HUD.
 struct WidgetRoot: View {
     @EnvironmentObject var client: DaemonClient
+    @EnvironmentObject var panelScreen: PanelScreen
     @State private var expanded = false
     @State private var collapsed: Set<SessionSection> = [.snoozed]
 
-    private var listMaxHeight: CGFloat { (NSScreen.main?.visibleFrame.height ?? 900) * 0.7 }
+    private static let cornerRadius: CGFloat = 16
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,17 +36,17 @@ struct WidgetRoot: View {
                                 }
                             }
                         }
-                        .padding(.horizontal, 6).padding(.bottom, 8)
+                        .padding(.horizontal, 6).padding(.bottom, 10)
                     }
-                    .frame(maxHeight: listMaxHeight)
+                    .frame(maxHeight: panelScreen.visibleHeight * 0.7)
                 }
-                Divider()
-                footer
             }
         }
         .frame(width: 440)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08)))
+        // The scrim keeps text legible when a bright wallpaper shows through the material.
+        .background(Color.black.opacity(0.32), in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous).strokeBorder(.white.opacity(0.08)))
         .contextMenu {
             Button(expanded ? "Collapse" : "Expand") { expanded.toggle() }
             Divider()
@@ -70,75 +71,73 @@ struct WidgetRoot: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
     }
-
-    private var footer: some View {
-        HStack {
-            Spacer()
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.borderless).font(.system(size: 11)).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .dragsPanel()
-    }
 }
 
-/// The always-visible small component: the yellow needs-you count, the green working count, and
-/// (collapsed) the ticker of rows that just came back to the owner. The chevron toggles the
+/// The one header, the same collapsed and expanded: the yellow needs-you count, the green working
+/// count, and the ticker of rows that just came back to the owner. The chevron toggles the
 /// expansion; the rest of the bar stays draggable so the panel can be repositioned.
 struct CompactBar: View {
     @EnvironmentObject var client: DaemonClient
     @Binding var expanded: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             if client.online && client.setupRequired {
-                Text("setup required").font(.system(size: 11)).foregroundStyle(.yellow)
+                Text("setup required").font(.system(size: 13, weight: .medium)).foregroundStyle(HeaderPalette.yellow)
                 Spacer(minLength: 6)
-            } else if client.online && !expanded {
-                // Expanded, the section headers carry these counts.
-                needsYouCount
-                if client.working > 0 {
-                    HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 6, height: 6)
-                        Text(verbatim: "\(client.working)")
-                    }
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green)
+            } else if client.online {
+                HStack(spacing: 14) {
+                    needsYouCount
+                    if client.working > 0 { workingCount }
                 }
                 if !fresh.isEmpty {
+                    Rectangle().fill(.white.opacity(0.16)).frame(width: 1, height: 18)
+                        .padding(.horizontal, 12)
                     FreshTicker(items: fresh)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Spacer(minLength: 6)
                 }
-            } else if client.online {
-                Spacer(minLength: 6)
             } else {
-                Text("daemon offline").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("daemon offline").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 Spacer(minLength: 6)
             }
             Button { expanded.toggle() } label: {
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                    .frame(width: 24, height: 18)
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .padding(.leading, 8)
             .help(expanded ? "Collapse the panel" : "Expand the panel")
         }
-        .padding(.horizontal, 10).padding(.top, 7).padding(.bottom, expanded ? 0 : 7)
+        .padding(.horizontal, 14)
+        .frame(height: 44)
         .contentShape(Rectangle())
         .dragsPanel()
     }
 
     private var needsYouCount: some View {
         let count = client.needsYou
-        return Text(verbatim: "\(count)")
-            .font(.system(size: 11, weight: .bold).monospacedDigit())
-            .foregroundStyle(count > 0 ? Color.black.opacity(0.85) : Color.secondary)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 18, minHeight: 18)
-            .background(Capsule().fill(count > 0 ? Color.yellow : Color.primary.opacity(0.12)))
+        return HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: count > 0 ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(count > 0 ? HeaderPalette.yellow : .white.opacity(0.38))
+            Text(verbatim: "\(count)")
+                .font(HeaderPalette.numeral)
+                .foregroundStyle(count > 0 ? HeaderPalette.yellow : .white.opacity(0.45))
+        }
+    }
+
+    private var workingCount: some View {
+        HStack(spacing: 5) {
+            ZStack {
+                Circle().fill(HeaderPalette.green.opacity(0.22)).frame(width: 14, height: 14)
+                Circle().fill(HeaderPalette.green).frame(width: 8, height: 8)
+            }
+            Text(verbatim: "\(client.working)").font(HeaderPalette.numeral).foregroundStyle(HeaderPalette.green)
+        }
     }
 
     /// Threads whose turn finished in the last 5 min — what the soft pulse cycles through.
@@ -160,23 +159,38 @@ private struct PanelDrag: ViewModifier {
                 .onChanged { _ in
                     guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
                     let mouse = NSEvent.mouseLocation
-                    let from = start ?? (panel.frame.origin, mouse)
+                    let from = start ?? (NSPoint(x: panel.frame.minX, y: panel.frame.maxY), mouse)
                     start = from
-                    panel.setFrameOrigin(NSPoint(x: from.panel.x + mouse.x - from.mouse.x, y: from.panel.y + mouse.y - from.mouse.y))
+                    // Track the top-left: the list height changes when the panel crosses to a screen of another size.
+                    panel.setFrameTopLeftPoint(NSPoint(x: from.panel.x + mouse.x - from.mouse.x, y: from.panel.y + mouse.y - from.mouse.y))
                 }
                 .onEnded { _ in start = nil }
         )
     }
 }
 
+private enum HeaderPalette {
+    static let yellow = Color(red: 1.0, green: 0.82, blue: 0.16)
+    static let green = Color(red: 0.36, green: 0.90, blue: 0.52)
+    static let tickerRepo = Color(red: 0.55, green: 0.82, blue: 1.0)
+    static let numeral = Font.system(size: 17, weight: .bold, design: .rounded).monospacedDigit()
+}
+
 private let projectBlue = Color(red: 0.40, green: 0.76, blue: 1.0)
 
+/// The project name: bold blue, so the owner can tell which project a row belongs to at a glance.
+private func repoAttributes(size: CGFloat, color: Color = projectBlue) -> AttributeContainer {
+    var a = AttributeContainer()
+    a.foregroundColor = color
+    a.font = .system(size: size, weight: .semibold)
+    return a
+}
+
 private func lineText(_ r: SessionStateRow) -> Text {
-    var proj = AttributeContainer(); proj.foregroundColor = projectBlue
-    var out = AttributedString(r.repo, attributes: proj)
-    var arrow = AttributeContainer(); arrow.foregroundColor = .secondary
+    var out = AttributedString(r.repo, attributes: repoAttributes(size: 13, color: HeaderPalette.tickerRepo))
+    var arrow = AttributeContainer(); arrow.foregroundColor = .white.opacity(0.55)
     out.append(AttributedString("  →  ", attributes: arrow))
-    var step = AttributeContainer(); step.foregroundColor = .primary
+    var step = AttributeContainer(); step.foregroundColor = .white.opacity(0.96)
     out.append(AttributedString(r.displayStatusSummary ?? r.title, attributes: step))
     guard let mark = AppBadge.textMark(for: r.app) else { return Text(out) }
     return mark + Text(" ") + Text(out)
@@ -187,7 +201,7 @@ private func tickerText(_ rows: [SessionStateRow]) -> Text {
     var out = Text(verbatim: "")
     for (i, r) in rows.enumerated() {
         if i > 0 {
-            var sep = AttributeContainer(); sep.foregroundColor = .secondary
+            var sep = AttributeContainer(); sep.foregroundColor = .white.opacity(0.38)
             out = out + Text(AttributedString("    ·    ", attributes: sep))
         }
         out = out + lineText(r)
@@ -215,19 +229,20 @@ struct FreshTicker: View {
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: gap) {
-                tickerText(items).font(.system(size: 11)).lineLimit(1).fixedSize()
+                tickerText(items).font(.system(size: 13, weight: .medium)).lineLimit(1).fixedSize()
                     .background(GeometryReader { g in
                         Color.clear.preference(key: TickerTextWidthKey.self, value: g.size.width)
                     })
-                tickerText(items).font(.system(size: 11)).lineLimit(1).fixedSize()
+                tickerText(items).font(.system(size: 13, weight: .medium)).lineLimit(1).fixedSize()
             }
             .offset(x: offset)
-            .frame(width: geo.size.width, height: 15, alignment: .leading)
+            .frame(width: geo.size.width, height: 18, alignment: .leading)
             .clipped()
             .onAppear { containerWidth = geo.size.width; restart() }
             .onChange(of: geo.size.width) { containerWidth = $0; restart() }
         }
-        .frame(height: 15)
+        .frame(height: 18)
+        .shadow(color: .black.opacity(0.45), radius: 1, y: 0.5)
         .onPreferenceChange(TickerTextWidthKey.self) { textWidth = $0; restart() }
         .onDisappear { timer?.invalidate(); timer = nil }
     }
@@ -424,8 +439,7 @@ struct RowView: View {
     }
 
     private var line2: some View {
-        var repo = AttributeContainer(); repo.foregroundColor = projectBlue
-        var out = AttributedString(row.repo, attributes: repo)
+        var out = AttributedString(row.repo, attributes: repoAttributes(size: 13))
         if let statusSummary = row.displayStatusSummary {
             var summary = AttributeContainer(); summary.foregroundColor = .secondary
             out.append(AttributedString("  \(statusSummary)", attributes: summary))
@@ -565,7 +579,7 @@ struct AppBadge: View {
     ]
     private static var cache: [String: (image: NSImage, template: Bool)] = [:]
 
-    /// The tool's mark, point-sized to ride beside 11pt text (the hi-res rep keeps it crisp
+    /// The tool's mark, point-sized to ride beside 11-13pt text (the hi-res rep keeps it crisp
     /// on retina). Shared by the badge and the inline `Text` uses (calm line, ticker).
     static func mark(for app: String) -> (image: NSImage, template: Bool)? {
         guard let hit = logos.first(where: { app.hasPrefix($0.prefix) }) else { return nil }
