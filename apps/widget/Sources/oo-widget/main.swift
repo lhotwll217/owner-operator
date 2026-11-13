@@ -36,10 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let client = DaemonClient.shared
         client.start()
 
-        let host = NSHostingController(rootView: WidgetRoot().environmentObject(client))
+        let panelScreen = PanelScreen()
+        let host = NSHostingController(rootView: WidgetRoot().environmentObject(client).environmentObject(panelScreen))
         host.sizingOptions = [.preferredContentSize] // SwiftUI size drives the panel size
 
-        let panel = FloatingPanel(contentViewController: host)
+        let panel = FloatingPanel(contentViewController: host, panelScreen: panelScreen)
         panel.showTopRight()
         self.panel = panel
     }
