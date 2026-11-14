@@ -4,7 +4,13 @@
 
 import type { HookFact } from "./hook-lifecycle";
 
-const IDLE_SESSION_SOURCES = new Set(["startup", "resume", "clear", "new"]);
+/** `SessionStart.source` is one of startup, resume, clear, compact or fork, per the Claude Code
+ * hooks reference (https://docs.claude.com/en/docs/claude-code/hooks). The first three mean the
+ * session has no prior turn. `compact` fires mid-session, and `fork` covers both a forked launch
+ * and a background copy that keeps working, so neither resets; a source this adapter has never
+ * seen is read the same way, because the next fact corrects an inherited state while a reset
+ * would wipe a live permission the owner still has to answer. */
+const RESET_SESSION_SOURCES = new Set(["startup", "resume", "clear"]);
 
 function field(body: Record<string, unknown>, key: string): string | null {
   const value = body[key];
@@ -29,9 +35,8 @@ export function claudeHookFact(body: Record<string, unknown>): HookFact | null {
     case "UserPromptSubmit":
       return { kind: "turn-started", ...fact };
     case "SessionStart": {
-      const source = field(body, "source");
-      if (source !== null && !IDLE_SESSION_SOURCES.has(source)) return null;
-      return { kind: "session-started", ...fact };
+      const reset = RESET_SESSION_SOURCES.has(field(body, "source") ?? "");
+      return { kind: reset ? "session-started" : "session-continued", ...fact };
     }
     case "SubagentStart":
       return fact.agentId ? { kind: "child-started", ...fact } : null;

@@ -66,11 +66,20 @@ const CHILD_HOOK_WAIT_SQL = `EXISTS (
     AND child.hook_wait IN ('permission', 'question')
 )`;
 
+/** Four signals can speak for one thread, and they are ranked by how much the owner loses when
+ * the arm above is wrong. Owner Done is the owner's own word, so nothing overrides it. Anything
+ * blocked on the owner comes next, because it is the only state that stalls until they act, and
+ * it reads the same whether the block is this session's own wait, a delegated child's, or a
+ * failed turn the hooks reported. A running delegated child is next, so a session that handed
+ * work out keeps showing Working whether or not it reports hooks itself; the alternative hides
+ * live work behind the lead's own idle turn. The hooked lifecycle speaks last, for this
+ * session's own turn, and the transcript poll only when no hook ever arrived. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
-  WHEN ${CHILD_HOOK_WAIT_SQL} OR t.hook_wait IN ('permission', 'question') THEN 'needs-you'
-  WHEN t.hook_state IN ('needs-you', 'working', 'idle') THEN t.hook_state
+  WHEN ${CHILD_HOOK_WAIT_SQL} OR t.hook_wait IN ('permission', 'question')
+    OR t.hook_state = 'needs-you' THEN 'needs-you'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  WHEN t.hook_state IN ('working', 'idle') THEN t.hook_state
   ELSE detail.state
 END`;
 
