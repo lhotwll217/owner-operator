@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AgentRunHarness,
   DomainEventKind,
   ScheduleKind,
   ScheduledPayloadKind,
@@ -267,6 +268,89 @@ try {
     ["Confirm the retention policy.", "Drafting the retention policy."],
     "a summary that returns takes its newest position and appears once",
   );
+
+  // A hook has observed no conversation message, so a row it creates must not claim one: a
+  // last_message_at ahead of the transcript makes the first scan look stale and drops its whole
+  // upsert, taking the project path, the repo and the deep link with it.
+  const hookedTranscript = join(dir, "hooked-first.jsonl");
+  state.recordHook({
+    harness: "claude",
+    source: "claude",
+    app: "Claude CLI",
+    sessionId: "hooked-first",
+    fact: { kind: "permission-requested", toolName: "Bash", toolUseId: "toolu_scan", agentId: null },
+    cwd: "/work/owner-operator",
+    prompt: "rename the export",
+  });
+  assert.equal(state.listCurrentSessionState().find((item) => item.id === "hooked-first")?.state, "needs-you");
+  assert.ok(!state.listEnrichmentCandidates().some((item) => item.id === "hooked-first"),
+    "a row with no transcript message yet is held out of enrichment, not asked to summarize nothing");
+  state.recordObservation({
+    ...row("2026-07-09T09:55:00.000Z"),
+    id: "hooked-first",
+    repo: "owner-operator",
+    project: "/Users/luke/Development/owner-operator",
+    transcriptPath: hookedTranscript,
+    link: "claude://hooked-first",
+    topic: "Rename the export",
+  });
+  const scanned = state.listCurrentSessionState().find((item) => item.id === "hooked-first");
+  assert.equal(scanned?.project, "/Users/luke/Development/owner-operator",
+    "the scanned session directory lands, instead of the hook's own cwd");
+  assert.equal(scanned?.repo, "owner-operator", "and the scanned repo, instead of that cwd's basename");
+  assert.equal(scanned?.link, "claude://hooked-first", "and the deep link, so the widget row opens the session");
+  assert.equal(scanned?.state, "needs-you", "while the hook lifecycle still decides the state");
+  assert.ok(state.visibleTranscriptPathsExcept(new Set()).includes(hookedTranscript),
+    "and the transcript path reaches the scanner");
+  assert.ok(state.listEnrichmentCandidates().some((item) => item.id === "hooked-first"),
+    "a scanned message makes the row eligible for its title and status summary");
+
+  const hookedCandidate = state.listEnrichmentCandidates().find((item) => item.id === "hooked-first");
+  assert.ok(hookedCandidate);
+  assert.equal(
+    state.appendEnrichment(
+      "hooked-first",
+      { topic: "Rename the export", statusSummary: "Waiting on a Bash permission." },
+      "2026-07-09T09:55:00.000Z",
+      hookedCandidate.children,
+      hookedCandidate.hookRevision,
+    ),
+    true,
+    "an enrichment with no attention answer is accepted for a hook-driven row",
+  );
+  const enrichedHook = state.listCurrentSessionState().find((item) => item.id === "hooked-first");
+  assert.equal(enrichedHook?.state, "needs-you", "and leaves the state at the hook's own answer");
+  assert.equal(enrichedHook?.statusSummary, "Waiting on a Bash permission.", "while the summary lands");
+  assert.equal(enrichedHook?.generatedTopic, "Rename the export", "and so does the title");
+  assert.ok(!state.listEnrichmentCandidates().some((item) => item.id === "hooked-first"),
+    "the watermark advanced, so the row is not a candidate again until something changes");
+
+  assert.equal(state.hookOwnsAttention("hooked-first"), true, "a live permission decides owner attention");
+  assert.equal(state.hookOwnsAttention("thread-flap"), false, "a scanned row uses classification");
+  state.recordObservation({ ...row("2026-07-09T09:56:00.000Z"), id: "scan-parent" });
+  state.createAgentRun({
+    harness: AgentRunHarness.ClaudeCode,
+    task: "rename the export",
+    cwd: "/work/owner-operator",
+    parentThreadId: "scan-parent",
+    childSessionId: "hooked-child",
+    depth: 1,
+    timeoutSeconds: 60,
+  });
+  state.recordHook({
+    harness: "claude",
+    source: "claude",
+    app: "Claude CLI",
+    sessionId: "hooked-child",
+    fact: { kind: "permission-requested", toolName: "Bash", toolUseId: "toolu_child", agentId: null },
+    cwd: "/work/owner-operator",
+    prompt: "rename the export",
+  });
+  assert.equal(state.listCurrentSessionState().find((item) => item.id === "scan-parent")?.state, "needs-you",
+    "a delegated child's permission already projects Need You onto an unhooked parent");
+  assert.equal(state.hookOwnsAttention("scan-parent"), true,
+    "the child's live permission decides its parent's attention too");
+
   state.close();
 
   writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: ["owner-operator", "issue-131"] }));

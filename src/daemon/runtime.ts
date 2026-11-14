@@ -25,6 +25,7 @@ import { daemonInfoPath, ownerOperatorHome, stateDatabasePath } from "../shared/
 import { repoRoot } from "../shared/repo-root";
 import { WorktreeService } from "../worktrees/worktrees";
 import { runtimeFingerprint } from "./fingerprint";
+import { drainHookSpool, publishHookEndpoint } from "../hooks/install";
 
 export interface DaemonOptions {
   port?: number;
@@ -76,11 +77,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
       : { enrich: options.monitor?.enrich ?? (async (candidate) => {
-          // Two calls with one job each. Need You decides the row's state and is only asked of
-          // a stopped session; the title and status summary may fail without holding it back.
-          const working = candidate.state === "working";
+          const decided = candidate.state === "working" || state.hookOwnsAttention(candidate.id);
           const [needsYou, account] = await Promise.allSettled([
-            working ? undefined : (async () => {
+            decided ? undefined : (async () => {
               const { classifyStoppedSession, SUMMARY_LIMIT } = await import("../agent/needs-you");
               const statusSummaries = state.recentStatusSummaries(candidate.id, SUMMARY_LIMIT);
               return classifyStoppedSession({ turns: await sampleTurns(candidate.id), statusSummaries });
@@ -97,7 +96,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
           ]);
           if (needsYou.status === "rejected") throw needsYou.reason;
           if (account.status === "rejected") {
-            if (working) throw account.reason;
+            if (decided) throw account.reason;
             monitorLogger({
               event: SessionMonitorLogEvent.EnrichmentFailed,
               error: `${candidate.id}: title and status summary: ${account.reason instanceof Error ? account.reason.message : String(account.reason)}`,
@@ -188,6 +187,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   mkdirSync(dirname(discoveryPath), { recursive: true });
   writeFileSync(discoveryPath, JSON.stringify(info, null, 2), { mode: 0o600 });
   chmodSync(discoveryPath, 0o600);
+  publishHookEndpoint(gateway.port, authToken);
+  drainHookSpool((hook) => state.recordHook({
+    harness: "claude", source: "claude", app: "Claude CLI", ...hook,
+  }));
 
   scheduler.start();
   agentRuns.start();

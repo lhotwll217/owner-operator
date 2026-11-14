@@ -33,9 +33,11 @@ import {
 } from "@owner-operator/core";
 import type { ParentAgentStateView } from "@owner-operator/core/agent-state";
 import type { State } from "../state/state";
+import { HOOK_ADAPTERS } from "../hooks/adapters";
 
 export interface GatewayMonitor {
   poll(): Promise<unknown>;
+  scheduleReconcile?(): void;
 }
 
 export interface GatewayScheduler {
@@ -163,6 +165,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       const route = `${request.method} ${url.pathname}`;
       const scheduleId = /^\/schedules\/([^/]+)/.exec(url.pathname)?.[1];
       const agentRunId = /^\/agent-runs\/([^/]+)/.exec(url.pathname)?.[1];
+      const hookHarness = /^\/hooks\/([a-z0-9-]+)$/.exec(url.pathname)?.[1];
 
       if (route === "GET /health") return respond(200, options.health());
       if (route === "GET /ready") {
@@ -170,6 +173,26 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(readiness.ready ? 200 : 503, readiness);
       }
       if (route === "GET /session-state") return respond(200, options.state.listCurrentSessionState());
+      if (request.method === "POST" && url.pathname === `/hooks/${hookHarness}`) {
+        const adapter = hookHarness ? HOOK_ADAPTERS[hookHarness] : undefined;
+        if (!adapter || !hookHarness) return respond(404, { error: "unknown hook harness" });
+        const body = await readBody(request);
+        if (!body || typeof body !== "object" || Array.isArray(body)) return respond(400, { error: "hook body must be an object" });
+        const payload = body as Record<string, unknown>;
+        const sessionId = typeof payload.session_id === "string" ? payload.session_id.trim() : "";
+        if (!sessionId || sessionId.length > 200 || /[\s/\\]/.test(sessionId)) {
+          return respond(400, { error: "session_id is required" });
+        }
+        const fact = adapter.adapt(payload);
+        if (!fact) return respond(204, { ignored: true });
+        const cwd = typeof payload.cwd === "string" ? payload.cwd : undefined;
+        const prompt = typeof payload.prompt === "string" ? payload.prompt : undefined;
+        const recorded = options.state.recordHook({
+          harness: hookHarness, source: adapter.source, app: adapter.app, sessionId, fact, cwd, prompt,
+        });
+        options.monitor.scheduleReconcile?.();
+        return respond(200, recorded);
+      }
       if (route === "POST /poll") {
         const body = await readBody(request) as { reconcile?: unknown } | null;
         if (body === null || typeof body !== "object" || Array.isArray(body)) return respond(400, { error: "poll body must be an object" });

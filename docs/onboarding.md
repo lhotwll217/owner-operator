@@ -15,7 +15,7 @@ surface. Setup also asks whether shell commands and changes should ask, run auto
 remain unavailable. Standalone Pi is optional; fresh installs use Owner Operator's built-in
 provider login and store credentials under `~/.owner-operator/pi`. Harnesses start included;
 mark any to ignore. It then configures macOS always-on services, the active window, and
-skills. The copy does not change standalone Pi.
+skills, and installs the Claude Code lifecycle hooks (`oo hooks` is the same install). The copy does not change standalone Pi.
 
 Until setup finishes, headless calls and transcript/model processing fail closed: the daemon
 does not scan or enrich transcripts, headless model calls return setup-required, and the

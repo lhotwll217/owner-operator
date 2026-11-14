@@ -9,7 +9,10 @@ import {
   ScheduleRunStatus,
   ScheduleRunTrigger,
   arrangeSessionState,
+  reduceHookFacts,
   formatRelative,
+  type HookFact,
+  type HookLifecycle,
   harnessIdentityObservation,
   isSessionBoilerplate,
   withoutRetiredAgentTools,
@@ -55,16 +58,35 @@ const HAS_ACTIVE_CHILD_SQL = `EXISTS (
     AND active_child.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')
 )`;
 
+/** A delegated child blocked on a permission or question. The parent shows Need You with it. */
+const CHILD_HOOK_WAIT_SQL = `EXISTS (
+  SELECT 1 FROM agent_runs child_run
+  JOIN threads child ON child.id = child_run.child_session_id
+  WHERE child_run.parent_thread_id = t.id
+    AND child.hook_wait IN ('permission', 'question')
+)`;
+
+/** Four signals can speak for one thread, so the arms rank them, highest first: owner Done,
+ * anything blocked on the owner, a running delegated child, this session's own hooked turn,
+ * the transcript poll. A running child outranks the hooked turn so that a session which handed
+ * work out still reads as Working rather than taking its own idle turn's word for it. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
+  WHEN ${CHILD_HOOK_WAIT_SQL} OR t.hook_wait IN ('permission', 'question')
+    OR t.hook_state = 'needs-you' THEN 'needs-you'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  WHEN t.hook_state = 'working' THEN 'working'
   ELSE detail.state
 END`;
 
 const AWAITING_HOLDS_SQL = `COALESCE(t.awaiting_through_message_at = t.last_message_at, 0)`;
 
 const OWNER_VISIBLE_THREAD_STATE_SQL = `CASE
-  WHEN detail.state != 'done' AND ${AWAITING_HOLDS_SQL} THEN 'working'
+  WHEN detail.state != 'done'
+    AND (t.hook_state IS NULL OR t.hook_state = 'idle')
+    AND t.hook_wait IS NULL
+    AND NOT (${CHILD_HOOK_WAIT_SQL})
+    AND ${AWAITING_HOLDS_SQL} THEN 'working'
   ELSE ${EFFECTIVE_THREAD_STATE_SQL}
 END`;
 
@@ -83,6 +105,11 @@ const CHILD_EVIDENCE_SQL = `(SELECT json_group_array(json_object(
   ORDER BY run.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}') DESC,
     run.created_at DESC, run.id
 ))`;
+
+const HOOK_REVISION_SQL = `(SELECT MAX(hook.id) FROM hook_events hook
+  WHERE hook.session_id = t.id OR hook.session_id IN (
+    SELECT run.child_session_id FROM agent_runs run WHERE run.parent_thread_id = t.id
+  ))`;
 
 export function defaultDbPath(): string {
   return stateDatabasePath();
@@ -115,6 +142,7 @@ export interface ThreadResolutionRow {
   enrichedChildren: string;
   enrichmentContract: number;
   childrenEvidence: string;
+  hookRevision: number | null;
 }
 
 export interface StatusSummaryRevision {
@@ -168,8 +196,23 @@ CREATE TABLE IF NOT EXISTS threads (
   enriched_through_message_at TEXT,
   enriched_while_working INTEGER NOT NULL DEFAULT 0,
   enrichment_contract INTEGER NOT NULL DEFAULT 0,
-  last_enriched_at TEXT
+  last_enriched_at TEXT,
+  hook_state TEXT,
+  hook_wait TEXT
 );
+
+CREATE TABLE IF NOT EXISTS hook_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  tool_name TEXT,
+  tool_use_id TEXT,
+  agent_id TEXT,
+  received_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hook_events_session ON hook_events(session_id, id);
 
 CREATE TABLE IF NOT EXISTS thread_details (
   thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
@@ -307,7 +350,7 @@ CREATE TABLE IF NOT EXISTS thread_worktrees (
 );
 `;
 
-const CURRENT_ENRICHMENT_CONTRACT = 2;
+const CURRENT_ENRICHMENT_CONTRACT = 3;
 
 const WORKTREE_COLUMNS = `
   id, repository, path, git_common_dir AS gitCommonDir,
@@ -416,6 +459,7 @@ export class ThreadDb {
     this.migrateOwnerSnooze();
     this.migrateThreadLink();
     this.migrateAwaitingWork();
+    this.migrateHookLifecycle();
     // Logs stored before the per-run counter existed continue from their highest stored record.
     this.db.exec(`INSERT OR IGNORE INTO agent_run_event_sequences (run_id, last_seq)
       SELECT run_id, MAX(seq) FROM agent_run_events GROUP BY run_id`);
@@ -475,6 +519,12 @@ export class ThreadDb {
     if (!threads.has("awaiting_through_message_at")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN awaiting_through_message_at TEXT");
     }
+  }
+
+  private migrateHookLifecycle(): void {
+    const threads = new Set(this.db.prepare("PRAGMA table_info(threads)").all().map((row) => (row as { name: string }).name));
+    if (!threads.has("hook_state")) this.db.exec("ALTER TABLE threads ADD COLUMN hook_state TEXT");
+    if (!threads.has("hook_wait")) this.db.exec("ALTER TABLE threads ADD COLUMN hook_wait TEXT");
   }
 
   private migrateThreadLink(): void {
@@ -742,6 +792,94 @@ export class ThreadDb {
     }
   }
 
+  /** Hook facts for one session, oldest first. Tool input is not stored. */
+  hookFacts(sessionId: string): HookFact[] {
+    return this.db.prepare(
+      `SELECT kind, tool_name AS toolName, tool_use_id AS toolUseId, agent_id AS agentId
+       FROM hook_events WHERE session_id = ? ORDER BY id`,
+    ).all(sessionId) as unknown as HookFact[];
+  }
+
+  /** The lifecycle hooks last reduced, or null when this session has none. */
+  hookLifecycle(threadId: string): HookLifecycle | null {
+    const row = this.db.prepare(
+      "SELECT hook_state AS state, hook_wait AS wait FROM threads WHERE id = ?",
+    ).get(threadId) as { state: string | null; wait: HookLifecycle["wait"] } | undefined;
+    if (row?.state !== "needs-you" && row?.state !== "working" && row?.state !== "idle") return null;
+    return { state: row.state, wait: row.wait === "permission" || row.wait === "question" ? row.wait : null };
+  }
+
+  /**
+   * Accept one normalized hook fact. The harness only labels the row and, for a new thread,
+   * the transcript source. Owner Done still wins over the lifecycle.
+   */
+  recordHook(input: {
+    harness: string;
+    source: string;
+    app: string;
+    sessionId: string;
+    fact: HookFact;
+    cwd?: string;
+    prompt?: string;
+  }): { state: ThreadState; created: boolean } {
+    const now = this.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previousLife = this.hookLifecycle(input.sessionId);
+      this.db.prepare(
+        `INSERT INTO hook_events (
+           session_id, harness, kind, tool_name, tool_use_id, agent_id, received_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        input.sessionId, input.harness, input.fact.kind, input.fact.toolName,
+        input.fact.toolUseId, input.fact.agentId, now,
+      );
+      const life = reduceHookFacts(this.hookFacts(input.sessionId));
+      const previous = this.resolutionRow(input.sessionId);
+      const changed = previousLife?.state !== life.state || previousLife?.wait !== life.wait ||
+        input.fact.kind === "turn-started" || input.fact.kind === "session-started";
+      const created = !previous;
+      if (created) {
+        const topic = input.prompt?.replace(/\s+/g, " ").trim().slice(0, 120) || `${input.app} session`;
+        const repo = input.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? "";
+        // No last_message_at: a hook reports a lifecycle event, never a conversation message, and
+        // `recordScan` reads that column as the watermark it must not move backwards. A value here
+        // would be ahead of every real message, so the first scan looks stale and its whole upsert
+        // is dropped, leaving the row without the session's path, repo, title or deep link.
+        this.db.prepare(
+          `INSERT INTO threads (
+             id, repo, project, app, source, created_at, first_seen_at, last_seen_at,
+             last_active_at, last_checked_at, raw_topic
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          input.sessionId, repo, input.cwd ?? null, input.app, input.source,
+          now, now, now, now, now, topic,
+        );
+        this.appendDetailsInTx(input.sessionId, { state: life.state }, "poll");
+      }
+      this.db.prepare(
+        `UPDATE threads SET hook_state = ?, hook_wait = ?,
+           last_seen_at = ?, last_active_at = ? WHERE id = ?`,
+      ).run(life.state, life.wait, now, now, input.sessionId);
+      if (changed) {
+        this.db.prepare(`UPDATE threads SET awaiting_through_message_at = NULL,
+          enriched_through_message_at = NULL WHERE id = ?`).run(input.sessionId);
+        this.db.prepare(`UPDATE threads SET enriched_through_message_at = NULL WHERE id IN (
+          SELECT parent_thread_id FROM agent_runs WHERE child_session_id = ?
+        )`).run(input.sessionId);
+      }
+      if (previous && previous.state !== "done" && (changed || life.state !== "idle")) {
+        this.appendDetailsInTx(input.sessionId, { state: life.state }, "poll");
+      }
+      const state = this.resolutionRow(input.sessionId)?.state ?? life.state;
+      this.db.exec("COMMIT");
+      return { state, created };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   appendModelDetails(threadId: string, details: ThreadDetails, throughMessageAt?: string): number | null {
     const now = this.now();
     this.db.exec("BEGIN IMMEDIATE");
@@ -764,25 +902,29 @@ export class ThreadDb {
     }
   }
 
+  hookOwnsAttention(threadId: string): boolean {
+    const life = this.hookLifecycle(threadId);
+    return (life !== null && life.state !== "idle") || this.childHasHookWait(threadId);
+  }
+
   appendModelDetailsIfFresh(
     threadId: string,
     details: ThreadEnrichment,
     throughMessageAt: string,
     children: EnrichmentCandidate["children"] = [],
+    hookRevision: EnrichmentCandidate["hookRevision"] = null,
   ): number | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
+      const hookOwnsAttention = this.hookOwnsAttention(threadId);
       const working = current?.state === "working" || this.hasActiveChild(threadId);
-      // Guards that reject an assessment: the owner closed the thread, a stopped session has no
-      // lifecycle answer, or it was made against evidence that has since moved. A repeat
-      // assessment of the same evidence is accepted — it advances the reassessment clock and
-      // writes a revision only if the meaning changed.
       if (
         !current || current.state === "done" ||
-        (!working && details.attention !== "idle" && details.attention !== "needs-you") ||
+        (!working && !hookOwnsAttention && details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
         JSON.stringify(children) !== current.childrenEvidence ||
+        hookRevision !== current.hookRevision ||
         (current.enrichedThroughMessageAt ?? "") > throughMessageAt
       ) {
         this.db.exec("COMMIT");
@@ -795,14 +937,14 @@ export class ThreadDb {
       const currentTitle = this.latestDetails(threadId)?.topic ?? null;
       const account = details.statusSummary !== undefined;
       const edge = this.appendDetailsInTx(threadId, {
-        ...(!working ? { state: details.attention } : {}),
+        ...(!working && !hookOwnsAttention ? { state: details.attention } : {}),
         ...(account ? {
           topic: details.topic || currentTitle,
           statusSummary: details.statusSummary,
           bookmark: details.bookmark ?? null,
         } : {}),
       }, "model");
-      if (!working) this.db.prepare("UPDATE threads SET awaiting_through_message_at = ? WHERE id = ?")
+      if (!working && !hookOwnsAttention) this.db.prepare("UPDATE threads SET awaiting_through_message_at = ? WHERE id = ?")
         .run(details.awaiting ? throughMessageAt : null, threadId);
       // Without a title and status summary the thread stays a candidate, so the account is
       // retried while the lifecycle answer it arrived with already shows.
@@ -886,7 +1028,8 @@ export class ThreadDb {
               t.enriched_while_working AS enrichedWhileWorking,
               t.enriched_children AS enrichedChildren,
               t.enrichment_contract AS enrichmentContract,
-              ${CHILD_EVIDENCE_SQL} AS childrenEvidence
+              ${CHILD_EVIDENCE_SQL} AS childrenEvidence,
+              ${HOOK_REVISION_SQL} AS hookRevision
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE t.id = ?`,
@@ -981,6 +1124,7 @@ export class ThreadDb {
         ...row,
         state,
         enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null,
+        hookRevision: resolution?.hookRevision ?? null,
         children: JSON.parse(resolution?.childrenEvidence ?? "[]") as EnrichmentCandidate["children"],
       }] : [];
     });
@@ -1583,6 +1727,12 @@ export class ThreadDb {
   private hasActiveChild(threadId: string): boolean {
     return Boolean(this.db.prepare(
       `SELECT 1 FROM threads t WHERE t.id = ? AND ${HAS_ACTIVE_CHILD_SQL}`,
+    ).get(threadId));
+  }
+
+  private childHasHookWait(threadId: string): boolean {
+    return Boolean(this.db.prepare(
+      `SELECT 1 FROM threads t WHERE t.id = ? AND ${CHILD_HOOK_WAIT_SQL}`,
     ).get(threadId));
   }
 

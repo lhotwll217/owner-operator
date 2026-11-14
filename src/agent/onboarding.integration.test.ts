@@ -47,6 +47,15 @@ const candidates: SessionSourceCandidate[] = [{
   shape: false,
 }];
 let installCalls = 0;
+const claudeDir = join(root, "claude-config");
+const previousClaudeDir = process.env.CLAUDE_CONFIG_DIR;
+process.env.CLAUDE_CONFIG_DIR = claudeDir;
+mkdirSync(claudeDir, { recursive: true });
+writeFileSync(join(claudeDir, "settings.json"), `{
+  "theme": "dark",
+  "hooks": { "PreToolUse": [{ "hooks": [{ "type": "command", "command": "echo keep-me" }] }] }
+}
+`);
 
 try {
   const completed = await runOnboarding({ hasUI: true, ui } as any, {
@@ -98,6 +107,10 @@ try {
   assert.deepEqual(settings.skillPolicy, { mode: "allowlist", allowlist: ["calendar", "mail"] });
   assert.equal(settings.alwaysOn, "declined");
   assert.equal(installCalls, 0, "declining always-on never invokes the installer");
+  const claudeSettings = readFileSync(join(claudeDir, "settings.json"), "utf8");
+  assert.match(claudeSettings, /echo keep-me/, "onboarding leaves the owner's Claude hook in place");
+  assert.match(claudeSettings, new RegExp(join(ooHome, "hooks", "claude-hook.sh").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(readFileSync(join(ooHome, "hooks", "claude-hook.sh"), "utf8").includes("endpoint.env"), true);
   assert.deepEqual(asked.slice(0, 5), [
     "Owner Operator",
     "Are there any coding projects or repositories you don’t want Owner Operator to interact with?",
@@ -149,6 +162,38 @@ try {
     if (priorPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = priorPiDir;
   }
+
+  // A settings.json the owner broke by hand must not take first-run setup down with it.
+  const brokenSettingsHome = join(root, "broken-settings-home");
+  const brokenClaudeDir = join(root, "claude-config-broken");
+  const brokenSettings = `"{\\"theme\\":\\"dark\\"}"\n`;
+  mkdirSync(brokenClaudeDir, { recursive: true });
+  writeFileSync(join(brokenClaudeDir, "settings.json"), brokenSettings);
+  for (const step of ["intro", "privacy", "auth", "permissions"] as const) markOnboardingStep(brokenSettingsHome, step);
+  const warnings: string[] = [];
+  process.env.CLAUDE_CONFIG_DIR = brokenClaudeDir;
+  assert.equal(await runOnboarding({
+    hasUI: true,
+    ui: {
+      async confirm(): Promise<boolean> { return false; },
+      async input(): Promise<string> { return ""; },
+      async select(title: string): Promise<string> {
+        return title === "How far back counts as active?" ? "1d" : "Owner Operator only (recommended)";
+      },
+      notify(message: string, level: string): void { if (level === "warning") warnings.push(message); },
+    },
+  } as any, {
+    ooHome: brokenSettingsHome,
+    platform: "linux",
+    detectHosts: () => [],
+    reviewCatalog: async () => ({ selectedFormats: [], defaultFormats: [], roots: [] }),
+  } as any), true, "a malformed Claude settings file does not stop onboarding completing");
+  assert.equal(isOnboarded(brokenSettingsHome), true);
+  assert.equal(readFileSync(join(brokenClaudeDir, "settings.json"), "utf8"), brokenSettings,
+    "onboarding leaves a settings file it cannot parse exactly as it found it");
+  assert.ok(warnings.some((message) => message.includes(join(brokenClaudeDir, "settings.json"))),
+    `the owner is told which file to fix, got ${JSON.stringify(warnings)}`);
+  process.env.CLAUDE_CONFIG_DIR = claudeDir;
 
   const cancelledHome = join(root, "cancelled-permissions-home");
   const cancelledPi = join(cancelledHome, "pi");
@@ -240,5 +285,7 @@ try {
 
   process.stdout.write("ok — onboarding flow writes every consent through the core config API\n");
 } finally {
+  if (previousClaudeDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+  else process.env.CLAUDE_CONFIG_DIR = previousClaudeDir;
   rmSync(root, { recursive: true, force: true });
 }

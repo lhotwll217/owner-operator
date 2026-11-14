@@ -36,6 +36,7 @@ import {
   type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { repoRoot } from "../shared/repo-root";
+import { installClaudeHooks } from "../hooks/install";
 import {
   buildSessionCatalogReview,
   reviewSessionCatalog,
@@ -263,6 +264,11 @@ export async function runOnboarding(
     }
 
     if (pendingOnboardingSteps(paths.home).length === 0) {
+      const hooks = installClaudeHooks(paths.home);
+      if (hooks.settings === "unparsable") {
+        ctx.ui.notify(`${hooks.settingsPath} is not valid JSON, so the Claude Code hooks that drive Need You`
+          + " were not installed. Fix the file, then run `oo hooks install`.", "warning");
+      }
       markOnboarded(paths.home, { via: options.force ? "command" : "first-run" });
       ctx.ui.notify("Owner Operator setup is complete.", "info");
       return true;

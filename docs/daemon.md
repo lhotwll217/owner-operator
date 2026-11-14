@@ -68,3 +68,9 @@ identity or credential changed. SSE subscriptions reread `daemon.json` before re
 
 The widget installer installs the daemon and widget LaunchAgents together; the widget itself
 is a pure Gateway client ([widget.md](widget.md)).
+
+On bind, the daemon publishes `$OO_HOME/hooks/endpoint.env` (loopback port and bearer, mode
+`0600`). The Claude hook script sources that file on every event, so a restart does not
+strand a session that is already running. If the daemon is down, the script spools the body
+under `$OO_HOME/hooks/spool/` and the next start applies it. The token is not placed on the
+hook command line.

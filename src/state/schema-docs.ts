@@ -17,7 +17,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "first_seen_at", description: "ISO first observation time." },
       { name: "last_seen_at", description: "ISO latest scan observation." },
       { name: "last_active_at", description: "ISO latest activity." },
-      { name: "last_message_at", description: "ISO latest conversation message; enrichment watermark source." },
+      { name: "last_message_at", description: "ISO latest conversation message; enrichment watermark source. NULL until a transcript scan observes one, which is how a hook-created row starts: a hook reports a lifecycle event, not a message. A scan carrying an older message than this one is rejected whole." },
       { name: "last_checked_at", description: "ISO latest monitor check." },
       { name: "diff_added", description: "Workspace lines added." },
       { name: "diff_deleted", description: "Workspace lines deleted." },
@@ -32,6 +32,8 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "enriched_while_working", description: "Whether enrichment landed during deterministic working status. A change in working status makes the same message eligible again." },
       { name: "enrichment_contract", description: "Version of the enrichment contract that last assessed this thread. Older versions remain eligible for one refresh." },
       { name: "enriched_children", description: "Observed child identities, message versions, and run statuses included in the summary. Child progress makes the parent eligible again." },
+      { name: "hook_state", description: "Lifecycle from harness hooks: needs-you, working, or idle. Live work and waits decide attention. Hook idle permits Jev to classify the stopped task. NULL means no hook has reported. A poll does not replace this fact. Owner Done still wins." },
+      { name: "hook_wait", description: "permission or question while hook_state is needs-you because the owner must answer. NULL otherwise. A delegated child's permission or question also projects the parent as needs-you." },
     ],
   },
   {
@@ -164,6 +166,20 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "git_common_dir", description: "Canonical Git common-directory identity used to validate live topology." },
       { name: "created_by_thread_id", description: "Root thread that created the worktree; deliberately not a foreign key." },
       { name: "created_at", description: "ISO time Owner Operator registered creation provenance." },
+    ],
+  },
+  {
+    name: "hook_events",
+    description: "Normalized harness lifecycle facts, oldest first. Adapters translate Claude, and later Codex and OpenCode, into the same kinds. Tool input is not stored.",
+    columns: [
+      { name: "id", description: "Monotonic insert order. Replay uses it." },
+      { name: "session_id", description: "Harness session id, the threads.id this fact belongs to." },
+      { name: "harness", description: "Which adapter accepted the event: claude today." },
+      { name: "kind", description: "Normalized fact: turn-started, tool-started, question-requested, permission-requested, tool-finished, batch-finished, turn-stopped, turn-failed, child-started, child-stopped, session-started." },
+      { name: "tool_name", description: "Tool name when the fact is about a tool; NULL otherwise." },
+      { name: "tool_use_id", description: "Harness tool-use id when the event carried one." },
+      { name: "agent_id", description: "Harness-native child id when the event is about that child." },
+      { name: "received_at", description: "ISO time the daemon accepted the fact." },
     ],
   },
   {

@@ -81,15 +81,16 @@ Enrichment makes two independent calls per thread, each reading through applicat
 scan/search modules. Every visible `needs-you`, `idle`, or `working` row is eligible, including
 parents with active delegated children.
 
-- **Need You** ([needs-you.ts](../src/agent/needs-you.ts)) is asked only of a stopped session: a
-  running turn or an active delegated child is already `working`, deterministically. It sends the
+- **Need You** ([needs-you.ts](../src/agent/needs-you.ts)) is asked of a stopped session whose
+  runtime facts do not already decide attention. A running turn or an active delegated child
+  is already `working`, and a live hook permission or question is already `needs-you`. It sends the
   owner's last two messages and the agent's last two, whole and without tool calls, with the
   thread's three latest distinct status summaries, to one Jev question: did the agent stop with
   the current task unfinished? The one tool call kept is the Claude desktop app's next-step box,
   whose recap and question the owner reads as the agent's. Work handed to the owner for review
   counts as unfinished; work the owner stopped does not. A score at or above the threshold is
   `needs-you`, otherwise `idle`. A scan alone sees a turn end, not whether the task is done, so
-  `needs-you` comes only from this call. The same call asks whether the agent stopped to wait for
+  unfinished-task attention comes from this call. The same call asks whether the agent stopped to wait for
   work it started that will report back, such as a harness-native sub-agent or a background
   command, which the scan cannot see. Above its threshold the row projects as `working`, over its
   stored `needs-you` or `idle`, until a newer message lands; there is no timer, so work that never
@@ -127,6 +128,17 @@ one is pending and reports that with `statusSummaryPending`; a row with no statu
 title alone. A revision is written when the meaning changes and records the session position it
 was written from, so a reader can return to that point; a reassessment that lands on the same
 understanding advances the clock alone. Working sessions are reassessed about every four minutes.
+Claude Code can also report lifecycle over `POST /hooks/:harness`. The daemon reduces those
+payloads to harness-agnostic facts ([`hook-lifecycle.ts`](../packages/core/src/hook-lifecycle.ts)).
+Live work, permission and question waits, and reported failures take precedence over transcript
+inference and classification. Hook Idle means the turn has stopped. Jev still judges whether
+the task is unfinished, including work waiting for the owner's review, or awaits background work.
+Unchanged polls and idle hook events preserve that assessment. Enrichment captures the hook
+revision along with the message and child evidence so newer activity rejects a stale assessment.
+Owner Done retains precedence. Codex and OpenCode use the same route once their adapters
+register; the reducer does not name a harness. A delegated child's permission or question
+projects the parent as needs-you as well.
+
 The monitor never awaits the model in its scan hot path.
 Observed child transcripts and run statuses accompany the parent sample within a bounded context.
 Child message or run-status changes refresh the parent status summary and reject an in-flight older result.
