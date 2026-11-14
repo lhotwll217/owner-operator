@@ -69,9 +69,13 @@ assert.deepEqual([...claudeHookEventsFor("2.0.56")], [
 ], "2.0.56 predates StopFailure (2.1.78) and PostToolBatch (2.1.118)");
 const conservative = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"];
 assert.deepEqual([...claudeHookEventsFor("1.0.64")], conservative);
-assert.deepEqual([...claudeHookEventsFor(null)], conservative,
-  "an unreadable version installs the core lifecycle rather than guessing forward");
-assert.deepEqual([...claudeHookEventsFor("not a version at all")], conservative);
+// A version the probe could not read carries no information, and the two events Need You reads
+// sit above 2.1.101, where an unknown event name stopped voiding the file. Gating on a guessed
+// old version would install a set that cannot drive the feature while reporting a clean install.
+assert.deepEqual([...claudeHookEventsFor(null)], [...CLAUDE_HOOK_EVENTS],
+  "an unreadable version installs every event instead of silently dropping PermissionRequest");
+assert.deepEqual([...claudeHookEventsFor("not a version at all")], [...CLAUDE_HOOK_EVENTS],
+  "a version string with no x.y.z in it is as unreadable as none");
 assert.deepEqual([...claudeHookEventsFor("2.1.9")], [...claudeHookEventsFor("2.0.56")],
   "2.1.9 is older than 2.1.78, not newer");
 for (const event of claudeHookEventsFor("2.1.280")) {

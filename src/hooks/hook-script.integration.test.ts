@@ -183,6 +183,12 @@ try {
   } finally {
     await quoted.close();
   }
+  // The spool writes through a temporary name and renames it in, so its own quoting has to survive
+  // the same home, and the rename has to find `mv` on a PATH that does not carry one.
+  const awkwardSpool = await runHook(hookScriptPath(awkwardHome), "awkward-spool");
+  assert.equal(awkwardSpool.status, 0, `spooling must survive a space in OO_HOME; stderr: ${awkwardSpool.stderr}`);
+  assert.deepEqual(spooled(awkwardHome).map((name) => /^\d+-\d+-\d*\.json$/.test(name)), [true],
+    "one complete event lands, with no temporary file left beside it");
 
   console.log("ok - the hook script posts over curl without node and survives a spaced OO_HOME");
 } finally {
