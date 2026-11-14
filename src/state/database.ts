@@ -75,7 +75,7 @@ const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN ${CHILD_HOOK_WAIT_SQL} OR t.hook_wait IN ('permission', 'question')
     OR t.hook_state = 'needs-you' THEN 'needs-you'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
-  WHEN t.hook_state IN ('working', 'idle') THEN t.hook_state
+  WHEN t.hook_state = 'working' THEN 'working'
   ELSE detail.state
 END`;
 
@@ -83,7 +83,7 @@ const AWAITING_HOLDS_SQL = `COALESCE(t.awaiting_through_message_at = t.last_mess
 
 const OWNER_VISIBLE_THREAD_STATE_SQL = `CASE
   WHEN detail.state != 'done'
-    AND t.hook_state IS NULL
+    AND (t.hook_state IS NULL OR t.hook_state = 'idle')
     AND t.hook_wait IS NULL
     AND NOT (${CHILD_HOOK_WAIT_SQL})
     AND ${AWAITING_HOLDS_SQL} THEN 'working'
@@ -105,6 +105,11 @@ const CHILD_EVIDENCE_SQL = `(SELECT json_group_array(json_object(
   ORDER BY run.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}') DESC,
     run.created_at DESC, run.id
 ))`;
+
+const HOOK_REVISION_SQL = `(SELECT MAX(hook.id) FROM hook_events hook
+  WHERE hook.session_id = t.id OR hook.session_id IN (
+    SELECT run.child_session_id FROM agent_runs run WHERE run.parent_thread_id = t.id
+  ))`;
 
 export function defaultDbPath(): string {
   return stateDatabasePath();
@@ -137,6 +142,7 @@ export interface ThreadResolutionRow {
   enrichedChildren: string;
   enrichmentContract: number;
   childrenEvidence: string;
+  hookRevision: number | null;
 }
 
 export interface StatusSummaryRevision {
@@ -344,7 +350,7 @@ CREATE TABLE IF NOT EXISTS thread_worktrees (
 );
 `;
 
-const CURRENT_ENRICHMENT_CONTRACT = 2;
+const CURRENT_ENRICHMENT_CONTRACT = 3;
 
 const WORKTREE_COLUMNS = `
   id, repository, path, git_common_dir AS gitCommonDir,
@@ -819,6 +825,7 @@ export class ThreadDb {
     const now = this.now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const previousLife = this.hookLifecycle(input.sessionId);
       this.db.prepare(
         `INSERT INTO hook_events (
            session_id, harness, kind, tool_name, tool_use_id, agent_id, received_at
@@ -829,6 +836,8 @@ export class ThreadDb {
       );
       const life = reduceHookFacts(this.hookFacts(input.sessionId));
       const previous = this.resolutionRow(input.sessionId);
+      const changed = previousLife?.state !== life.state || previousLife?.wait !== life.wait ||
+        input.fact.kind === "turn-started" || input.fact.kind === "session-started";
       const created = !previous;
       if (created) {
         const topic = input.prompt?.replace(/\s+/g, " ").trim().slice(0, 120) || `${input.app} session`;
@@ -849,12 +858,22 @@ export class ThreadDb {
         this.appendDetailsInTx(input.sessionId, { state: life.state }, "poll");
       }
       this.db.prepare(
-        `UPDATE threads SET hook_state = ?, hook_wait = ?, awaiting_through_message_at = NULL,
+        `UPDATE threads SET hook_state = ?, hook_wait = ?,
            last_seen_at = ?, last_active_at = ? WHERE id = ?`,
       ).run(life.state, life.wait, now, now, input.sessionId);
-      if (previous && previous.state !== "done") this.appendDetailsInTx(input.sessionId, { state: life.state }, "poll");
+      if (changed) {
+        this.db.prepare(`UPDATE threads SET awaiting_through_message_at = NULL,
+          enriched_through_message_at = NULL WHERE id = ?`).run(input.sessionId);
+        this.db.prepare(`UPDATE threads SET enriched_through_message_at = NULL WHERE id IN (
+          SELECT parent_thread_id FROM agent_runs WHERE child_session_id = ?
+        )`).run(input.sessionId);
+      }
+      if (previous && previous.state !== "done" && (changed || life.state !== "idle")) {
+        this.appendDetailsInTx(input.sessionId, { state: life.state }, "poll");
+      }
+      const state = this.resolutionRow(input.sessionId)?.state ?? life.state;
       this.db.exec("COMMIT");
-      return { state: previous?.state === "done" ? "done" : life.state, created };
+      return { state, created };
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -883,14 +902,9 @@ export class ThreadDb {
     }
   }
 
-  /**
-   * Whether hook facts, not the model, decide this row's lifecycle: its own hook lifecycle, or a
-   * delegated child holding a permission or question, which projects Need You onto this row. The
-   * one definition both the enrichment write and the daemon's ask gate read, so a row whose answer
-   * would be discarded is never asked for one.
-   */
-  hookDrivenLifecycle(threadId: string): boolean {
-    return this.hookLifecycle(threadId) !== null || this.childHasHookWait(threadId);
+  hookOwnsAttention(threadId: string): boolean {
+    const life = this.hookLifecycle(threadId);
+    return (life !== null && life.state !== "idle") || this.childHasHookWait(threadId);
   }
 
   appendModelDetailsIfFresh(
@@ -898,25 +912,19 @@ export class ThreadDb {
     details: ThreadEnrichment,
     throughMessageAt: string,
     children: EnrichmentCandidate["children"] = [],
+    hookRevision: EnrichmentCandidate["hookRevision"] = null,
   ): number | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      const hooked = this.hookDrivenLifecycle(threadId);
+      const hookOwnsAttention = this.hookOwnsAttention(threadId);
       const working = current?.state === "working" || this.hasActiveChild(threadId);
-      // Guards that reject an assessment: the owner closed the thread, a stopped session has no
-      // lifecycle answer, or it was made against evidence that has since moved. A repeat
-      // assessment of the same evidence is accepted — it advances the reassessment clock and
-      // writes a revision only if the meaning changed.
-      //
-      // A hook-driven row is the legitimate exception to the missing-answer guard: it is never
-      // asked the Need You question, so its result carries no attention by design, and rejecting
-      // it would cost the row its title and summary and re-queue it on every pass.
       if (
         !current || current.state === "done" ||
-        (!working && !hooked && details.attention !== "idle" && details.attention !== "needs-you") ||
+        (!working && !hookOwnsAttention && details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
         JSON.stringify(children) !== current.childrenEvidence ||
+        hookRevision !== current.hookRevision ||
         (current.enrichedThroughMessageAt ?? "") > throughMessageAt
       ) {
         this.db.exec("COMMIT");
@@ -929,14 +937,14 @@ export class ThreadDb {
       const currentTitle = this.latestDetails(threadId)?.topic ?? null;
       const account = details.statusSummary !== undefined;
       const edge = this.appendDetailsInTx(threadId, {
-        ...(!working && !hooked ? { state: details.attention } : {}),
+        ...(!working && !hookOwnsAttention ? { state: details.attention } : {}),
         ...(account ? {
           topic: details.topic || currentTitle,
           statusSummary: details.statusSummary,
           bookmark: details.bookmark ?? null,
         } : {}),
       }, "model");
-      if (!working && !hooked) this.db.prepare("UPDATE threads SET awaiting_through_message_at = ? WHERE id = ?")
+      if (!working && !hookOwnsAttention) this.db.prepare("UPDATE threads SET awaiting_through_message_at = ? WHERE id = ?")
         .run(details.awaiting ? throughMessageAt : null, threadId);
       // Without a title and status summary the thread stays a candidate, so the account is
       // retried while the lifecycle answer it arrived with already shows.
@@ -1020,7 +1028,8 @@ export class ThreadDb {
               t.enriched_while_working AS enrichedWhileWorking,
               t.enriched_children AS enrichedChildren,
               t.enrichment_contract AS enrichmentContract,
-              ${CHILD_EVIDENCE_SQL} AS childrenEvidence
+              ${CHILD_EVIDENCE_SQL} AS childrenEvidence,
+              ${HOOK_REVISION_SQL} AS hookRevision
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
        WHERE t.id = ?`,
@@ -1115,6 +1124,7 @@ export class ThreadDb {
         ...row,
         state,
         enrichedThroughMessageAt: resolution?.enrichedThroughMessageAt ?? null,
+        hookRevision: resolution?.hookRevision ?? null,
         children: JSON.parse(resolution?.childrenEvidence ?? "[]") as EnrichmentCandidate["children"],
       }] : [];
     });

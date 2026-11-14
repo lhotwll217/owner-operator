@@ -1,5 +1,9 @@
 # Hook-driven session state — design for review
 
+The original plan below to skip classification for every hooked session is superseded by the
+[current lifecycle and attention contract](../architecture.md#state-and-events). A stopped turn
+still needs an unfinished-task assessment.
+
 Investigation only. No implementation. Orca was read at
 [`57c9991c9821e68b4df1896d172b756c282012fb`](https://github.com/stablyai/orca/commit/57c9991c9821e68b4df1896d172b756c282012fb)
 (2026-11-13). Owner Operator citations are this checkout (`main` at the time of the branch).

@@ -72,11 +72,13 @@ export class State {
     const previous = this.db.resolutionRow(row.id);
     const doneHolds = previous?.state === "done" && row.lastMessageAt <= (previous.lastMessageAt ?? "");
     const hook = doneHolds ? null : this.db.hookLifecycle(row.id);
-    const state = hook
+    const state = hook && hook.state !== "idle"
       ? hook.state
-      : !row.working && previous?.lastMessageAt === row.lastMessageAt &&
-        previous.enrichedThroughMessageAt === row.lastMessageAt && !previous.enrichedWhileWorking && previous.state !== "working"
+      : (!row.working || hook?.state === "idle") && previous?.lastMessageAt === row.lastMessageAt &&
+        (hook?.state === "idle" || previous.enrichedThroughMessageAt === row.lastMessageAt && !previous.enrichedWhileWorking) &&
+        previous.state !== "working"
         ? previous.state
+        : hook?.state === "idle" ? "idle"
         : resolveState(
           previous?.lastMessageAt
             ? { state: previous.state, lastMessageAt: previous.lastMessageAt }
@@ -162,9 +164,8 @@ export class State {
     return this.db.listEnrichmentCandidates().filter((row) => visible.has(row.id));
   }
 
-  /** Whether hook facts decide this thread's lifecycle, so the model must not be asked about it. */
-  hookDrivenLifecycle(threadId: string): boolean {
-    return this.db.hookDrivenLifecycle(threadId);
+  hookOwnsAttention(threadId: string): boolean {
+    return this.db.hookOwnsAttention(threadId);
   }
 
   requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
@@ -201,8 +202,9 @@ export class State {
     details: ThreadEnrichment,
     throughMessageAt: string,
     children: EnrichmentCandidate["children"] = [],
+    hookRevision: EnrichmentCandidate["hookRevision"] = null,
   ): boolean {
-    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt, children) !== null;
+    const applied = this.db.appendModelDetailsIfFresh(threadId, details, throughMessageAt, children, hookRevision) !== null;
     if (!applied) return false;
     const current = this.db.resolutionRow(threadId);
     if (current) {

@@ -32,7 +32,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "enriched_while_working", description: "Whether enrichment landed during deterministic working status. A change in working status makes the same message eligible again." },
       { name: "enrichment_contract", description: "Version of the enrichment contract that last assessed this thread. Older versions remain eligible for one refresh." },
       { name: "enriched_children", description: "Observed child identities, message versions, and run statuses included in the summary. Child progress makes the parent eligible again." },
-      { name: "hook_state", description: "Lifecycle from harness hooks: needs-you, working, or idle. NULL means no hook has reported, and Jev still decides Need You. A poll does not replace it. Owner Done still wins." },
+      { name: "hook_state", description: "Lifecycle from harness hooks: needs-you, working, or idle. Live work and waits decide attention. Hook idle permits Jev to classify the stopped task. NULL means no hook has reported. A poll does not replace this fact. Owner Done still wins." },
       { name: "hook_wait", description: "permission or question while hook_state is needs-you because the owner must answer. NULL otherwise. A delegated child's permission or question also projects the parent as needs-you." },
     ],
   },

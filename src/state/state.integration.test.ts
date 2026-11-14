@@ -305,15 +305,15 @@ try {
   assert.ok(state.listEnrichmentCandidates().some((item) => item.id === "hooked-first"),
     "a scanned message makes the row eligible for its title and status summary");
 
-  // A hook-driven row's state comes from hook facts alone, so the model is never asked whether the
-  // owner is needed. Its answer therefore carries no attention, and that has to be accepted: a
-  // rejection would leave the row with no title and no summary and return it to the queue on every
-  // pass, paying for both model calls each time.
+  const hookedCandidate = state.listEnrichmentCandidates().find((item) => item.id === "hooked-first");
+  assert.ok(hookedCandidate);
   assert.equal(
     state.appendEnrichment(
       "hooked-first",
       { topic: "Rename the export", statusSummary: "Waiting on a Bash permission." },
       "2026-07-09T09:55:00.000Z",
+      hookedCandidate.children,
+      hookedCandidate.hookRevision,
     ),
     true,
     "an enrichment with no attention answer is accepted for a hook-driven row",
@@ -325,9 +325,8 @@ try {
   assert.ok(!state.listEnrichmentCandidates().some((item) => item.id === "hooked-first"),
     "the watermark advanced, so the row is not a candidate again until something changes");
 
-  // Which rows the ask skips. A row with no hook facts keeps the model's Need You answer.
-  assert.equal(state.hookDrivenLifecycle("hooked-first"), true, "a row with its own hook facts is hook-driven");
-  assert.equal(state.hookDrivenLifecycle("thread-flap"), false, "a scanned row is not");
+  assert.equal(state.hookOwnsAttention("hooked-first"), true, "a live permission decides owner attention");
+  assert.equal(state.hookOwnsAttention("thread-flap"), false, "a scanned row uses classification");
   state.recordObservation({ ...row("2026-07-09T09:56:00.000Z"), id: "scan-parent" });
   state.createAgentRun({
     harness: AgentRunHarness.ClaudeCode,
@@ -349,8 +348,8 @@ try {
   });
   assert.equal(state.listCurrentSessionState().find((item) => item.id === "scan-parent")?.state, "needs-you",
     "a delegated child's permission already projects Need You onto an unhooked parent");
-  assert.equal(state.hookDrivenLifecycle("scan-parent"), true,
-    "so that parent is hook-driven too, and asking the model would only produce an answer to discard");
+  assert.equal(state.hookOwnsAttention("scan-parent"), true,
+    "the child's live permission decides its parent's attention too");
 
   state.close();
 

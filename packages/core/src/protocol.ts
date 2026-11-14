@@ -81,6 +81,7 @@ export interface SessionStateRow {
 
 export interface EnrichmentCandidate extends SessionStateRow {
   enrichedThroughMessageAt: string | null;
+  hookRevision: number | null;
   children: Array<{ id: string; source: string; lastMessageAt: string | null; runId: string; status: AgentRun["status"] }>;
 }
 

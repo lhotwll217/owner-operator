@@ -77,12 +77,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     ...(options.enableEnrichment === false
       ? { enrich: undefined }
       : { enrich: options.monitor?.enrich ?? (async (candidate) => {
-          // Two calls with one job each. Need You decides the row's state, and is asked only when
-          // nothing else has already decided it: a turn in progress, or hook facts that own the
-          // lifecycle and outrank any model answer. Asking either anyway costs a call whose reading
-          // is discarded, and leaves a failed title and status summary with nothing to write, so
-          // that failure surfaces instead of returning a partial result.
-          const decided = candidate.state === "working" || state.hookDrivenLifecycle(candidate.id);
+          const decided = candidate.state === "working" || state.hookOwnsAttention(candidate.id);
           const [needsYou, account] = await Promise.allSettled([
             decided ? undefined : (async () => {
               const { classifyStoppedSession, SUMMARY_LIMIT } = await import("../agent/needs-you");

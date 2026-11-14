@@ -37,6 +37,7 @@ import { HOOK_ADAPTERS } from "../hooks/adapters";
 
 export interface GatewayMonitor {
   poll(): Promise<unknown>;
+  scheduleReconcile?(): void;
 }
 
 export interface GatewayScheduler {
@@ -186,9 +187,11 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         if (!fact) return respond(204, { ignored: true });
         const cwd = typeof payload.cwd === "string" ? payload.cwd : undefined;
         const prompt = typeof payload.prompt === "string" ? payload.prompt : undefined;
-        return respond(200, options.state.recordHook({
+        const recorded = options.state.recordHook({
           harness: hookHarness, source: adapter.source, app: adapter.app, sessionId, fact, cwd, prompt,
-        }));
+        });
+        options.monitor.scheduleReconcile?.();
+        return respond(200, recorded);
       }
       if (route === "POST /poll") {
         const body = await readBody(request) as { reconcile?: unknown } | null;
