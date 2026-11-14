@@ -50,8 +50,7 @@ try {
   assert.equal((await claude("perm-session", { hook_event_name: "Notification" })).status, 204);
 
   await claude("perm-session", { hook_event_name: "UserPromptSubmit", prompt: "rename the export" });
-  // PreToolUse precedes PermissionRequest for every tool call, and only it carries the id the
-  // ask is about: https://docs.claude.com/en/docs/claude-code/hooks
+  // Only this PreToolUse carries the id the ask that follows is about.
   await claude("perm-session", {
     hook_event_name: "PreToolUse",
     tool_name: "Bash",

@@ -4,12 +4,9 @@
 
 import type { HookFact } from "./hook-lifecycle";
 
-/** `SessionStart.source` is one of startup, resume, clear, compact or fork, per the Claude Code
- * hooks reference (https://docs.claude.com/en/docs/claude-code/hooks). The first three mean the
- * session has no prior turn. `compact` fires mid-session, and `fork` covers both a forked launch
- * and a background copy that keeps working, so neither resets; a source this adapter has never
- * seen is read the same way, because the next fact corrects an inherited state while a reset
- * would wipe a live permission the owner still has to answer. */
+/** The five `SessionStart.source` values are startup, resume, clear, compact and fork
+ * (https://code.claude.com/docs/en/hooks). A source outside this set continues the session,
+ * because a reset would wipe a live permission the owner still has to answer. */
 const RESET_SESSION_SOURCES = new Set(["startup", "resume", "clear"]);
 
 function field(body: Record<string, unknown>, key: string): string | null {

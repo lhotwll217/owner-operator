@@ -205,8 +205,7 @@ assert.deepEqual(
   "a sub-agent's tool events never erase the lead's failed turn",
 );
 
-// SessionStart.source is startup, resume, clear, compact or fork, per the Claude Code hooks
-// reference (https://docs.claude.com/en/docs/claude-code/hooks).
+// Source values per https://code.claude.com/docs/en/hooks
 for (const source of ["startup", "resume", "clear"]) {
   assert.equal(
     claudeHookFact({ hook_event_name: "SessionStart", source })?.kind,
