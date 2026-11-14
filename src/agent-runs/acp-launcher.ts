@@ -16,6 +16,7 @@ import {
   AgentRunHarness,
   AgentRunStatus,
   isAgentRunEffort,
+  ownerOperatorPaths,
   type AgentRunEffort,
   type AgentRunLaunchRequest,
   type AgentRunStreamEvent,
@@ -40,8 +41,26 @@ import {
  * persists only a smaller tail (RESULT_TAIL_BYTES, 32KB), so this bounds daemon memory against a
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
-/** Preserve the durable owner task verbatim while adding execution-only child policy. */
-export function delegatedChildTaskEnvelope(task: string, depth: number, childSessionId?: string): string {
+
+function readDelegatedChildInstructions(): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(ownerOperatorPaths(ownerOperatorHome()).delegatedChildInstructions, "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+  return text.trim() || undefined;
+}
+
+/** Preserve the durable owner task verbatim, then the owner's child instructions, then
+ * execution-only child policy. */
+export function delegatedChildTaskEnvelope(
+  task: string,
+  depth: number,
+  childSessionId?: string,
+  instructions?: string,
+): string {
   const boundary = depth < AGENT_RUN_MAX_DEPTH && childSessionId
     ? `You may delegate through Owner Operator up to depth ${AGENT_RUN_MAX_DEPTH}. `
       + `Use OO_AGENT=1 oo runs delegate --from-session ${childSessionId} so the child is linked to this conversation and returns a pending run id. `
@@ -51,7 +70,7 @@ export function delegatedChildTaskEnvelope(task: string, depth: number, childSes
       ? `This run is at delegation depth ${AGENT_RUN_MAX_DEPTH}, the maximum. `
         + "Complete the work directly; do not launch further agents."
       : "No child session identity was confirmed. Complete the work directly; do not launch further agents.";
-  return `${task}\n\n${boundary}`;
+  return `${task}\n\n${instructions ? `${instructions}\n\n` : ""}${boundary}`;
 }
 
 /** Where acpx persists its per-child session records. Relocated out of the system tmpdir
@@ -342,7 +361,7 @@ async function runAcpTurn(
   const turn = runtime.startTurn({
     handle,
     text: delegatedChildTaskEnvelope(request.run.task, request.run.depth,
-      handle.agentSessionId ?? handle.backendSessionId),
+      handle.agentSessionId ?? handle.backendSessionId, readDelegatedChildInstructions()),
     mode: "prompt",
     requestId: request.run.id,
     signal: request.signal,

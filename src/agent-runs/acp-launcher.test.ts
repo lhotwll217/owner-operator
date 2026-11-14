@@ -1,5 +1,7 @@
 import assert from "node:assert";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AcpRuntime } from "acpx/runtime";
 import {
   AgentRunHarness,
@@ -148,6 +150,11 @@ const run: AgentRun = {
   timeoutSeconds: 3_600,
 };
 
+const ooHome = mkdtempSync(join(tmpdir(), "oo-acp-launcher-"));
+process.env.OO_HOME = ooHome;
+process.on("exit", () => rmSync(ooHome, { recursive: true, force: true }));
+const instructionsPath = join(ooHome, "workspace", "delegated-child-instructions.md");
+
 const activity: AgentRunActivityUpdate[] = [];
 const result = await createAcpLauncher({ runtimeFactory: () => runtime })({
   run,
@@ -175,7 +182,12 @@ assert.deepEqual(
   ["ensure", "status", "set-effort", "status", "turn"],
   "the delegated task starts only after exact state is read back",
 );
-assert.match(turnTexts[0] ?? "", /^produce a report\n\n/);
+const depthOneBoundary = "You may delegate through Owner Operator up to depth 5. "
+  + "Use OO_AGENT=1 oo runs delegate --from-session child-session so the child is linked to this conversation and returns a pending run id. "
+  + "If the child is still running, report its id and remaining work. Owner Operator will continue this saved conversation automatically when its children finish. "
+  + "Do not launch untracked harness-native or background agents.";
+assert.equal(turnTexts[0], `produce a report\n\n${depthOneBoundary}`,
+  "with no instructions file the first message is the task and the delegation boundary");
 assert.match(turnTexts[0] ?? "", /may delegate through Owner Operator up to depth 5/i);
 assert.doesNotMatch(turnTexts[0] ?? "", /Do not launch nested or background agents/i);
 assert.match(turnTexts[0] ?? "", /--from-session child-session/);
@@ -183,6 +195,42 @@ assert.match(turnTexts[0] ?? "", /continue this saved conversation automatically
 assert.match(delegatedChildTaskEnvelope("finish", 5, "child-session"), /do not launch further agents/i);
 assert.doesNotMatch(delegatedChildTaskEnvelope("finish", 5, "child-session"), /may delegate/i);
 assert.match(delegatedChildTaskEnvelope("finish", 4), /No child session identity was confirmed/);
+
+{
+  mkdirSync(join(ooHome, "workspace"), { recursive: true });
+  const launchText = async (): Promise<string> => {
+    const before = turnTexts.length;
+    await createAcpLauncher({ runtimeFactory: () => runtime })({
+      run, turnIntent: { kind: "fresh" }, signal: new AbortController().signal, onActivity: () => {},
+    });
+    assert.equal(turnTexts.length, before + 1, "each launch sends one first message");
+    return turnTexts[before];
+  };
+
+  writeFileSync(instructionsPath, "Read the poteto-mode skill first.\n\nThen work.\n");
+  assert.equal(await launchText(), `produce a report\n\nRead the poteto-mode skill first.\n\nThen work.\n\n${depthOneBoundary}`,
+    "instructions appear between the task and the delegation boundary");
+
+  writeFileSync(instructionsPath, "Edited between runs.");
+  assert.match(await launchText(), /\n\nEdited between runs\.\n\n/, "an edit applies to the next launch");
+
+  writeFileSync(instructionsPath, " \n\t\n");
+  assert.equal(await launchText(), `produce a report\n\n${depthOneBoundary}`,
+    "a whitespace-only file adds no instructions section");
+
+  rmSync(instructionsPath);
+  mkdirSync(instructionsPath);
+  const turnsBeforeReadFailure = turnTexts.length;
+  await assert.rejects(launchText(), { code: "EISDIR" }, "an unreadable instructions file fails the launch");
+  assert.equal(turnTexts.length, turnsBeforeReadFailure, "an unreadable instructions file submits no turn");
+  rmSync(instructionsPath, { recursive: true });
+
+  assert.equal(
+    delegatedChildTaskEnvelope("finish", 5, "child-session", "Owner rule."),
+    "finish\n\nOwner rule.\n\nThis run is at delegation depth 5, the maximum. Complete the work directly; do not launch further agents.",
+    "instructions precede the boundary at max depth too",
+  );
+}
 
 // Every child event reaches the run's event log, in order, including thought and status.
 const streamed = [
@@ -367,6 +415,7 @@ const resumeRecord = {
   acpx: {},
 };
 let resumeEnsureInput: Record<string, unknown> | undefined;
+const resumeTurnTexts: string[] = [];
 const resumeRuntime = {
   ensureSession: async (input: Record<string, unknown>) => {
     resumeEnsureInput = input;
@@ -381,13 +430,17 @@ const resumeRuntime = {
     models: { currentModelId: resumeRun.model },
     details: { configOptions: [] },
   }),
-  startTurn: () => ({
-    promptStarted: Promise.resolve(),
-    events: (async function* () {})(),
-    result: Promise.resolve({ status: "completed" }),
-  }),
+  startTurn: ({ text }: { text: string }) => {
+    resumeTurnTexts.push(text);
+    return {
+      promptStarted: Promise.resolve(),
+      events: (async function* () {})(),
+      result: Promise.resolve({ status: "completed" }),
+    };
+  },
   close: async () => undefined,
 } as unknown as AcpRuntime;
+writeFileSync(instructionsPath, "Owner instructions before continuation.");
 await createAcpLauncher({
   leasedRuntimeFactory: () => ({
     runtime: resumeRuntime,
@@ -410,6 +463,9 @@ await createAcpLauncher({
 assert.equal(resumeEnsureInput?.sessionKey, "completed-acpx-record", "resume reuses the exact acpx record id");
 assert.equal(resumeEnsureInput?.resumeSessionId, "backend-child", "resume loads the record's exact ACP session id");
 assert.equal(resumeRecord.closed, true, "Resume accepts the ordinary record state persisted by acpx.close()");
+assert.ok(resumeTurnTexts[0]?.startsWith("answer a follow-up\n\nOwner instructions before continuation.\n\n"),
+  "a resumed task includes the current owner instructions");
+assert.equal(resumeRun.task, "answer a follow-up", "resume keeps the original task unchanged");
 
 const identityCases = [
   {
@@ -435,6 +491,8 @@ const identityCases = [
   },
 ] as const;
 for (const identityCase of identityCases) {
+  const instructions = `${identityCase.harness} owner instructions edited before resume.`;
+  writeFileSync(instructionsPath, instructions);
   const record = {
     ...resumeRecord,
     acpxRecordId: identityCase.recordId,
@@ -484,11 +542,17 @@ for (const identityCase of identityCases) {
     identityCase.acpSessionId,
     `${identityCase.harness} resumes through the record's ACP session identity`,
   );
+  assert.ok(resumeTurnTexts.at(-1)?.startsWith(`answer a follow-up\n\n${instructions}\n\n`),
+    `${identityCase.harness} resume receives instructions edited between turns`);
+  assert.equal(resumeRun.task, "answer a follow-up", "owner instructions do not mutate the resumed task");
 }
+rmSync(instructionsPath);
 
 // A handled failed turn reaches the same acpx.close() cleanup. Retry must load that normally closed
 // source record under its new run id without weakening either level of identity proof.
 for (const identityCase of identityCases) {
+  const instructions = `${identityCase.harness} owner instructions edited before retry.`;
+  writeFileSync(instructionsPath, instructions);
   const record = {
     ...resumeRecord,
     acpxRecordId: identityCase.recordId,
@@ -514,6 +578,7 @@ for (const identityCase of identityCases) {
   };
   let retryEnsureInput: Record<string, unknown> | undefined;
   let retryTurnCalls = 0;
+  let retryTurnText: string | undefined;
   const retryRuntime = {
     ...resumeRuntime,
     ensureSession: async (input: Record<string, unknown>) => {
@@ -525,8 +590,9 @@ for (const identityCase of identityCases) {
         ...(identityCase.agentSessionId ? { agentSessionId: identityCase.agentSessionId } : {}),
       };
     },
-    startTurn: () => {
+    startTurn: ({ text }: { text: string }) => {
       retryTurnCalls += 1;
+      retryTurnText = text;
       return {
         promptStarted: Promise.resolve(),
         events: (async function* () {})(),
@@ -561,6 +627,10 @@ for (const identityCase of identityCases) {
   );
   assert.equal(record.closed, true, `${identityCase.harness} fixture matches acpx.close() persistence`);
   assert.equal(retryTurnCalls, 1, `${identityCase.harness} Retry runs after an ordinarily closed failed turn`);
+  assert.ok(retryTurnText?.startsWith(`answer a follow-up\n\n${instructions}\n\n`),
+    `${identityCase.harness} retry receives instructions edited between turns`);
+  assert.equal(failedRun.task, "answer a follow-up", "retry keeps the failed run's original task unchanged");
+  assert.equal(retryRun.task, "answer a follow-up", "owner instructions do not mutate the retry task");
 
   const freshRetryRuntime = {
     ...retryRuntime,
@@ -604,6 +674,7 @@ for (const identityCase of identityCases) {
   );
   assert.equal(retryTurnCalls, 1, "a rejected Retry fallback never receives a turn");
 }
+rmSync(instructionsPath);
 
 let legacyRetryTurnCalls = 0;
 await createAcpLauncher({
