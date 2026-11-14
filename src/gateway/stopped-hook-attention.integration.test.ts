@@ -73,6 +73,12 @@ try {
   assert.equal(assess(candidate("complete"), finished), true);
   assert.equal((await row("complete"))?.state, "idle", "a completed hooked task stays Idle");
 
+  await stopped("attention-only");
+  assert.equal(assess(candidate("attention-only"), { attention: "needs-you" }), true);
+  state.recordObservation(fakeScanRow({ id: "attention-only", lastMessageAt: stamp }));
+  assert.equal((await row("attention-only"))?.state, "needs-you", "an unchanged scan preserves attention when title generation failed");
+  assert.ok(state.listEnrichmentCandidates().some((item) => item.id === "attention-only"), "the failed account remains eligible to retry");
+
   await stopped("race");
   const stale = candidate("race");
   await hook("race", "UserPromptSubmit", { prompt: "Continue the repair" });
@@ -118,6 +124,7 @@ try {
 
   await stopped("parent");
   const beforeChild = candidate("parent");
+  state.recordObservation(fakeScanRow({ id: "delegated", lastMessageAt: stamp }));
   state.createAgentRun({ harness: AgentRunHarness.ClaudeCode, task: "Check repair", cwd: dir,
     parentThreadId: "parent", childSessionId: "delegated", depth: 1, timeoutSeconds: 60 });
   assert.equal(assess(beforeChild, finished), false, "a new child invalidates a stopped assessment");
