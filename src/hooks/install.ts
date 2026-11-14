@@ -35,6 +35,15 @@ function shellQuote(value: string): string {
  * https://github.com/stablyai/orca/blob/dcd69a06f323ea73d788acc395ac4e9b0dbf9ecb/src/main/agent-hooks/installation/scripts/hook-post-command.ts#L67-L80
  * `-f` is ours, because a non-2xx reply has to reach `spool_payload`, and plain curl exits 0 on one.
  * `command -p curl` covers a host with no `/usr/bin/curl`, such as NixOS.
+ *
+ * A spooled payload carries the owner's prompt text, tool input and cwd, so `umask 077` sets the
+ * directory and the file to the owner alone with no window a `chmod` after the write would leave
+ * open. The payload lands under a temporary name and is renamed in, so a file in the spool is
+ * always complete and `drainHookSpool` may delete one it cannot parse. `mv` is the only external
+ * utility that rename needs, and the hook's PATH may not carry one, so `command -p` asks for the
+ * standard utilities first and the PATH copy covers a host whose standard path is bare, as NixOS's
+ * is. Measured: on a PATH holding only `cat`, `date` and `mkdir`, the first form moves the file and
+ * a bare `mv` exits 127.
  */
 export function claudeHookScript(endpointFile: string, spoolDir: string): string {
   const endpoint = shellQuote(endpointFile);
@@ -48,8 +57,12 @@ if [ -r ${endpoint} ]; then
   set +a
 fi
 spool_payload() {
+  umask 077
   mkdir -p ${spool}
-  printf '%s' "$payload" > ${spool}/$(date +%s)-$$-$RANDOM.json
+  part=${spool}/$$.part
+  spooled=${spool}/$(date +%s)-$$-$RANDOM.json
+  printf '%s' "$payload" > "$part" || return 0
+  command -p mv -f "$part" "$spooled" 2>/dev/null || mv -f "$part" "$spooled"
 }
 if [ -z "$OO_HOOK_PORT" ] || [ -z "$OO_HOOK_TOKEN" ]; then
   spool_payload
@@ -101,6 +114,10 @@ function writeScript(ooHome: string): string {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, claudeHookScript(hookEndpointPath(ooHome), hookSpoolDir(ooHome)), { mode: 0o700 });
   chmodSync(path, 0o700);
+  // The script's own umask covers a spool it creates. A directory an earlier install left readable
+  // keeps that mode through `mkdir -p`, so narrow it here instead of waiting for the owner to notice.
+  mkdirSync(hookSpoolDir(ooHome), { recursive: true, mode: 0o700 });
+  chmodSync(hookSpoolDir(ooHome), 0o700);
   return path;
 }
 
@@ -196,21 +213,36 @@ export function readSpooledHook(raw: string): SpooledClaudeHook | null {
   };
 }
 
-/** Apply spooled events in name order and delete each file that applied. */
+/**
+ * Apply spooled events in arrival order and delete every file read, applied or not.
+ *
+ * The reducer answers from the order the facts arrived in, so a replay that reorders them reports a
+ * state the session was never in. `sh` has no portable sub-second clock, and the filename's own
+ * `$$` is not an arrival order, so the name cannot carry it. The kernel's write time can, to the
+ * nanosecond, and the script renames each payload in whole, so mtime is when that event arrived.
+ *
+ * Applying twice is safe and losing one is not, so a file is deleted after it applies: a crash
+ * mid-drain repeats the last fact, and every fact kind folds to the same lifecycle when it repeats.
+ */
 export function drainHookSpool(
   apply: (hook: SpooledClaudeHook) => void,
   ooHome = ownerOperatorHome(),
 ): number {
   const dir = hookSpoolDir(ooHome);
   if (!existsSync(dir)) return 0;
+  const arrived = readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => ({ name, at: statSync(join(dir, name), { bigint: true }).mtimeNs }))
+    .sort((left, right) => (left.at === right.at ? left.name.localeCompare(right.name) : left.at < right.at ? -1 : 1));
   let applied = 0;
-  for (const name of readdirSync(dir).sort()) {
+  for (const { name } of arrived) {
     const path = join(dir, name);
     const hook = readSpooledHook(readFileSync(path, "utf8"));
-    if (!hook) continue;
-    apply(hook);
+    if (hook) {
+      apply(hook);
+      applied += 1;
+    }
     rmSync(path, { force: true });
-    applied += 1;
   }
   return applied;
 }

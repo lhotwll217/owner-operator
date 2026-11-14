@@ -34,10 +34,16 @@ const FIRST_VERSION: Record<ClaudeHookEvent, string> = {
   PostToolBatch: "2.1.118",
 };
 
-// The floor an unreadable version falls back to, Orca's measured choice. Every value from 1.0.62 to
-// 2.0.43 picks the same events here, so the exact number is not load-bearing:
-// https://github.com/stablyai/orca/blob/dcd69a06f323ea73d788acc395ac4e9b0dbf9ecb/src/main/claude/cli-capabilities/claude-hook-event-versions.ts#L26-L36
-const UNKNOWN_VERSION = "1.0.64";
+/**
+ * The release from which naming an unknown hook event stopped costing the file: Claude Code skips
+ * the entry it does not recognize and keeps the rest in effect.
+ * https://github.com/anthropics/claude-code/blob/1c0586016060731d89d65c2b0616ff45b6842e2e/CHANGELOG.md#L7767
+ * An unreadable version is assumed to be at least this, which is why it installs every event. The
+ * other way round costs the whole feature: `PermissionRequest` and `PostToolBatch` are the events
+ * Need You reads, both sit above this floor, and a probe that fails would install neither while
+ * `oo hooks status` still said the hooks were installed.
+ */
+export const EVENT_NAMES_SURVIVE_FROM = "2.1.101";
 
 const VERSION_ORDER = new Intl.Collator("en", { numeric: true });
 
@@ -46,7 +52,8 @@ const VERSION_ORDER = new Intl.Collator("en", { numeric: true });
  * `x.y.z` part counts, because numeric collation sorts a prerelease suffix above its own release.
  */
 export function claudeHookEventsFor(claudeVersion: string | null): readonly ClaudeHookEvent[] {
-  const version = /\d+\.\d+\.\d+/.exec(claudeVersion ?? "")?.[0] ?? UNKNOWN_VERSION;
+  const version = /\d+\.\d+\.\d+/.exec(claudeVersion ?? "")?.[0];
+  if (!version) return CLAUDE_HOOK_EVENTS;
   return CLAUDE_HOOK_EVENTS.filter((event) => VERSION_ORDER.compare(version, FIRST_VERSION[event]) >= 0);
 }
 

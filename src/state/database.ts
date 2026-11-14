@@ -833,14 +833,18 @@ export class ThreadDb {
       if (created) {
         const topic = input.prompt?.replace(/\s+/g, " ").trim().slice(0, 120) || `${input.app} session`;
         const repo = input.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? "";
+        // No last_message_at: a hook reports a lifecycle event, never a conversation message, and
+        // `recordScan` reads that column as the watermark it must not move backwards. A value here
+        // would be ahead of every real message, so the first scan looks stale and its whole upsert
+        // is dropped, leaving the row without the session's path, repo, title or deep link.
         this.db.prepare(
           `INSERT INTO threads (
              id, repo, project, app, source, created_at, first_seen_at, last_seen_at,
-             last_active_at, last_message_at, last_checked_at, raw_topic
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             last_active_at, last_checked_at, raw_topic
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           input.sessionId, repo, input.cwd ?? null, input.app, input.source,
-          now, now, now, now, now, now, topic,
+          now, now, now, now, now, topic,
         );
         this.appendDetailsInTx(input.sessionId, { state: life.state }, "poll");
       }
@@ -879,6 +883,16 @@ export class ThreadDb {
     }
   }
 
+  /**
+   * Whether hook facts, not the model, decide this row's lifecycle: its own hook lifecycle, or a
+   * delegated child holding a permission or question, which projects Need You onto this row. The
+   * one definition both the enrichment write and the daemon's ask gate read, so a row whose answer
+   * would be discarded is never asked for one.
+   */
+  hookDrivenLifecycle(threadId: string): boolean {
+    return this.hookLifecycle(threadId) !== null || this.childHasHookWait(threadId);
+  }
+
   appendModelDetailsIfFresh(
     threadId: string,
     details: ThreadEnrichment,
@@ -888,15 +902,19 @@ export class ThreadDb {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      const hooked = this.hookLifecycle(threadId) !== null || this.childHasHookWait(threadId);
+      const hooked = this.hookDrivenLifecycle(threadId);
       const working = current?.state === "working" || this.hasActiveChild(threadId);
       // Guards that reject an assessment: the owner closed the thread, a stopped session has no
       // lifecycle answer, or it was made against evidence that has since moved. A repeat
       // assessment of the same evidence is accepted — it advances the reassessment clock and
       // writes a revision only if the meaning changed.
+      //
+      // A hook-driven row is the legitimate exception to the missing-answer guard: it is never
+      // asked the Need You question, so its result carries no attention by design, and rejecting
+      // it would cost the row its title and summary and re-queue it on every pass.
       if (
         !current || current.state === "done" ||
-        (!working && details.attention !== "idle" && details.attention !== "needs-you") ||
+        (!working && !hooked && details.attention !== "idle" && details.attention !== "needs-you") ||
         current.lastMessageAt !== throughMessageAt ||
         JSON.stringify(children) !== current.childrenEvidence ||
         (current.enrichedThroughMessageAt ?? "") > throughMessageAt

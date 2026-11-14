@@ -17,7 +17,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "first_seen_at", description: "ISO first observation time." },
       { name: "last_seen_at", description: "ISO latest scan observation." },
       { name: "last_active_at", description: "ISO latest activity." },
-      { name: "last_message_at", description: "ISO latest conversation message; enrichment watermark source." },
+      { name: "last_message_at", description: "ISO latest conversation message; enrichment watermark source. NULL until a transcript scan observes one, which is how a hook-created row starts: a hook reports a lifecycle event, not a message. A scan carrying an older message than this one is rejected whole." },
       { name: "last_checked_at", description: "ISO latest monitor check." },
       { name: "diff_added", description: "Workspace lines added." },
       { name: "diff_deleted", description: "Workspace lines deleted." },

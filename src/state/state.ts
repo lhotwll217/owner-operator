@@ -162,6 +162,11 @@ export class State {
     return this.db.listEnrichmentCandidates().filter((row) => visible.has(row.id));
   }
 
+  /** Whether hook facts decide this thread's lifecycle, so the model must not be asked about it. */
+  hookDrivenLifecycle(threadId: string): boolean {
+    return this.db.hookDrivenLifecycle(threadId);
+  }
+
   requestEnrichment(requests: readonly { id: string; lastMessageAt: string }[]): string[] {
     const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
     const queuedIds = this.db.requestEnrichment(requests.filter((row) => visible.has(row.id)));
