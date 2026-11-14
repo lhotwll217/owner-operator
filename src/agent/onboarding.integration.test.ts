@@ -163,6 +163,38 @@ try {
     else process.env.PI_CODING_AGENT_DIR = priorPiDir;
   }
 
+  // A settings.json the owner broke by hand must not take first-run setup down with it.
+  const brokenSettingsHome = join(root, "broken-settings-home");
+  const brokenClaudeDir = join(root, "claude-config-broken");
+  const brokenSettings = `"{\\"theme\\":\\"dark\\"}"\n`;
+  mkdirSync(brokenClaudeDir, { recursive: true });
+  writeFileSync(join(brokenClaudeDir, "settings.json"), brokenSettings);
+  for (const step of ["intro", "privacy", "auth", "permissions"] as const) markOnboardingStep(brokenSettingsHome, step);
+  const warnings: string[] = [];
+  process.env.CLAUDE_CONFIG_DIR = brokenClaudeDir;
+  assert.equal(await runOnboarding({
+    hasUI: true,
+    ui: {
+      async confirm(): Promise<boolean> { return false; },
+      async input(): Promise<string> { return ""; },
+      async select(title: string): Promise<string> {
+        return title === "How far back counts as active?" ? "1d" : "Owner Operator only (recommended)";
+      },
+      notify(message: string, level: string): void { if (level === "warning") warnings.push(message); },
+    },
+  } as any, {
+    ooHome: brokenSettingsHome,
+    platform: "linux",
+    detectHosts: () => [],
+    reviewCatalog: async () => ({ selectedFormats: [], defaultFormats: [], roots: [] }),
+  } as any), true, "a malformed Claude settings file does not stop onboarding completing");
+  assert.equal(isOnboarded(brokenSettingsHome), true);
+  assert.equal(readFileSync(join(brokenClaudeDir, "settings.json"), "utf8"), brokenSettings,
+    "onboarding leaves a settings file it cannot parse exactly as it found it");
+  assert.ok(warnings.some((message) => message.includes(join(brokenClaudeDir, "settings.json"))),
+    `the owner is told which file to fix, got ${JSON.stringify(warnings)}`);
+  process.env.CLAUDE_CONFIG_DIR = claudeDir;
+
   const cancelledHome = join(root, "cancelled-permissions-home");
   const cancelledPi = join(cancelledHome, "pi");
   mkdirSync(cancelledPi, { recursive: true });
