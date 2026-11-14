@@ -192,6 +192,31 @@ try {
     "the parent's own permission outranks its running delegated child",
   );
 
+  await claude("compact-session", { hook_event_name: "UserPromptSubmit", prompt: "summarize the log" });
+  await claude("compact-session", {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_use_id: "toolu_tail",
+    tool_input: { command: "tail -n 100 app.log" },
+  });
+  await claude("compact-session", {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    tool_input: { command: "tail -n 100 app.log" },
+  });
+  assert.equal((await row("compact-session")).state, "needs-you");
+  await claude("compact-session", { hook_event_name: "SessionStart", source: "compact" });
+  assert.equal(
+    (await row("compact-session")).state,
+    "needs-you",
+    "a compaction keeps the permission the owner still has to answer",
+  );
+  await claude("compact-session", { hook_event_name: "SessionStart", source: "startup" });
+  assert.equal((await row("compact-session")).state, "idle", "a session start with no prior turn does reset it");
+
+  await claude("forked-session", { hook_event_name: "SessionStart", source: "fork" });
+  assert.equal((await row("forked-session")).state, "idle", "a forked session is on the list before it says anything");
+
   console.log("ok - claude hooks drive session state");
 } finally {
   await gateway.close();
