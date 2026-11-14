@@ -217,6 +217,11 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   rejects depth 6. The child prompt includes its confirmed session id when nesting is available.
   A depth-5 child, or a child without a confirmed session id, is told to work directly.
   Untracked harness-native and background agents remain outside the delegated-run ledger.
+- **Owner child instructions** come from `$OO_HOME/workspace/delegated-child-instructions.md`,
+  read for each task message, including retry and resume, so edits apply to the next turn.
+  Each message contains the task, then the file's text, then the delegation boundary above;
+  the stored task stays unchanged. A missing or whitespace-only file adds nothing; any other
+  read error fails the launch. Owner Operator neither seeds nor interprets it.
 - **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)

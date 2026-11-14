@@ -23,6 +23,7 @@ export function ownerOperatorPaths(ooHome = defaultHome()) {
     workspaceSkills: join(workspace, "skills"),
     workspaceArtifacts: join(workspace, "artifacts"),
     userHarnessPreferences: join(workspace, "user-harness-preferences.md"),
+    delegatedChildInstructions: join(workspace, "delegated-child-instructions.md"),
     delegatedBaselines: join(ooHome, "delegated-baselines"),
     piAgentDir,
     piAuth: join(piAgentDir, "auth.json"),
