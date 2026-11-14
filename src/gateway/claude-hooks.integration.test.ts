@@ -50,6 +50,14 @@ try {
   assert.equal((await claude("perm-session", { hook_event_name: "Notification" })).status, 204);
 
   await claude("perm-session", { hook_event_name: "UserPromptSubmit", prompt: "rename the export" });
+  // PreToolUse precedes PermissionRequest for every tool call, and only it carries the id the
+  // ask is about: https://docs.claude.com/en/docs/claude-code/hooks
+  await claude("perm-session", {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_use_id: "toolu_bash",
+    tool_input: { command: "ls" },
+  });
   await claude("perm-session", {
     hook_event_name: "PermissionRequest",
     tool_name: "Bash",
@@ -118,6 +126,71 @@ try {
   assert.equal((await row("delegated-child")).state, "needs-you");
   assert.equal((await row("parent-session")).state, "needs-you", "a delegated child's permission is Need You on the parent too");
   assert.equal((await row("delegated-child")).parentThreadId, "parent-session");
+
+  await claude("parallel-session", { hook_event_name: "UserPromptSubmit", prompt: "check both trees" });
+  await claude("parallel-session", {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_use_id: "toolu_ls",
+    tool_input: { command: "ls" },
+  });
+  await claude("parallel-session", {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_use_id: "toolu_pwd",
+    tool_input: { command: "pwd" },
+  });
+  await claude("parallel-session", {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    tool_input: { command: "pwd" },
+    permission_suggestions: [],
+  });
+  await claude("parallel-session", { hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "toolu_ls" });
+  assert.equal(
+    (await row("parallel-session")).state,
+    "needs-you",
+    "one of two parallel Bash calls finishing does not answer the permission",
+  );
+  await claude("parallel-session", {
+    hook_event_name: "PostToolBatch",
+    tool_calls: [{ tool_name: "Bash", tool_use_id: "toolu_pwd", tool_response: "denied" }],
+  });
+  assert.equal((await row("parallel-session")).state, "working", "the batch end resolves the asked call");
+
+  state.createAgentRun({
+    harness: AgentRunHarness.ClaudeCode,
+    task: "update the changelog",
+    cwd: "/work/owner-operator",
+    parentThreadId: "hooked-parent",
+    childSessionId: "quiet-child",
+    depth: 1,
+    timeoutSeconds: 60,
+  });
+  await claude("hooked-parent", { hook_event_name: "UserPromptSubmit", prompt: "update the changelog" });
+  await claude("hooked-parent", { hook_event_name: "Stop" });
+  assert.equal(
+    (await row("hooked-parent")).state,
+    "working",
+    "a hooked parent whose own turn stopped stays working while its delegated child runs",
+  );
+  await claude("hooked-parent", { hook_event_name: "UserPromptSubmit", prompt: "and the version" });
+  await claude("hooked-parent", {
+    hook_event_name: "PreToolUse",
+    tool_name: "Write",
+    tool_use_id: "toolu_version",
+    tool_input: { file_path: "package.json", content: "{}" },
+  });
+  await claude("hooked-parent", {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Write",
+    tool_input: { file_path: "package.json", content: "{}" },
+  });
+  assert.equal(
+    (await row("hooked-parent")).state,
+    "needs-you",
+    "the parent's own permission outranks its running delegated child",
+  );
 
   console.log("ok - claude hooks drive session state");
 } finally {
