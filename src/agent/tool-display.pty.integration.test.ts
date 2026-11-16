@@ -12,7 +12,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "@earendil-works/pi-ai";
+import { num, obj, str } from "@earendil-works/pi-schema";
 import { getCapabilities } from "@earendil-works/pi-tui";
 import { renderInRealPty } from "../../test/fixtures/real-pty";
 import { buildOoTheme, ooPresentationExtension } from "../shared/oo-presentation";
@@ -23,7 +23,7 @@ const fixtureTool = defineTool({
   name: "fixture_lookup",
   label: "Fixture lookup",
   description: "Tool display fixture.",
-  parameters: Type.Object({ action: Type.String(), limit: Type.Number() }),
+  parameters: obj({ action: str(), limit: num() }),
   async execute() {
     return { content: [{ type: "text" as const, text: "unused" }], details: {} };
   },
