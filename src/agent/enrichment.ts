@@ -1,5 +1,6 @@
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { Type, type Tool } from "@earendil-works/pi-ai";
+import type { Tool } from "@earendil-works/pi-ai";
+import { nullable, obj, str } from "@earendil-works/pi-schema";
 import type { StatusSummaryRevision } from "../state/database";
 import { ownerOperatorPiServices, type OwnerOperatorPiServices } from "./agent";
 
@@ -23,14 +24,12 @@ const STATUS_SUMMARY_EXAMPLES = [
   "Investigation established `workspace/artifacts/` as the artifact home. Widget discovery and rendering remain unverified.",
 ];
 
-const nullable = <T extends Parameters<typeof Type.Union>[0][number]>(schema: T) => Type.Union([schema, Type.Null()]);
-
 const RECORD_ASSESSMENT: Tool = {
   name: "record_assessment",
   description: "Record this session's title and status summary.",
-  parameters: Type.Object({
-    topic: nullable(Type.String({ minLength: 1, description: "New title, or null to keep the current title." })),
-    statusSummary: nullable(Type.String({
+  parameters: obj({
+    topic: nullable(str({ minLength: 1, description: "New title, or null to keep the current title." })),
+    statusSummary: nullable(str({
       minLength: 1,
       maxLength: STATUS_SUMMARY_SCHEMA_MAX_CHARS,
       description: `Status summary of at most ${STATUS_SUMMARY_MAX_CHARS} characters. Null keeps the recorded one when the prompt lists recorded status summaries.`,

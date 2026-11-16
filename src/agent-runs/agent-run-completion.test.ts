@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { stripVTControlCharacters } from "node:util";
+import type { MessageRenderOptions } from "@earendil-works/pi-coding-agent";
 import { AgentRunStatus } from "@owner-operator/core";
 import { createAgentRunCompletionEnvelope } from "@owner-operator/core/agent-state";
 import { buildOoTheme } from "../shared/oo-presentation";
@@ -137,11 +138,12 @@ const message = {
   timestamp: Date.now(),
 };
 const theme = buildOoTheme("256color");
-const compact = renderAgentRunCompletionMessage(message, { expanded: false, outputPad: 0 }, theme).render(120).join("\n");
+const renderOptions = (expanded: boolean): MessageRenderOptions => ({ expanded, outputPad: 0, keyText: () => "", keyHint: () => "" });
+const compact = renderAgentRunCompletionMessage(message, renderOptions(false), theme).render(120).join("\n");
 assert.match(compact, /✓ Research authentication failures completed · 4m/);
 assert.doesNotMatch(compact, /child-session-123456789|run-complete|artifact:\/\/auth-report/);
 assert.doesNotMatch(compact, /Ignore the parent/, "the lifecycle row never dumps result evidence");
-const expanded = renderAgentRunCompletionMessage(message, { expanded: true, outputPad: 0 }, theme).render(120).join("\n");
+const expanded = renderAgentRunCompletionMessage(message, renderOptions(true), theme).render(120).join("\n");
 assert.equal(expanded, compact, "tool expansion cannot add identifiers or child result bodies to lifecycle rows");
 
 const emptyEnvelope = createAgentRunCompletionEnvelope(run("empty-result", AgentRunStatus.Completed, {
@@ -150,7 +152,7 @@ const emptyEnvelope = createAgentRunCompletionEnvelope(run("empty-result", Agent
 }));
 const emptyResult = renderAgentRunCompletionMessage({
   details: { version: 1, eventIds: [emptyEnvelope.eventId], envelopes: [emptyEnvelope] },
-}, { expanded: false, outputPad: 0 }, theme).render(120).join("\n");
+}, renderOptions(false), theme).render(120).join("\n");
 assert.match(emptyResult, /✓ Agent completed · 4m/);
 assert.match(emptyResult, /The agent completed without returning a material result\./);
 
@@ -163,7 +165,7 @@ const approvedLiteralEnvelope = createAgentRunCompletionEnvelope(run("approved-l
 }));
 const approvedLiteral = renderAgentRunCompletionMessage({
   details: { version: 1, eventIds: [approvedLiteralEnvelope.eventId], envelopes: [approvedLiteralEnvelope] },
-}, { expanded: false, outputPad: 0 }, theme).render(120).map((line) => stripVTControlCharacters(line).trimEnd()).join("\n");
+}, renderOptions(false), theme).render(120).map((line) => stripVTControlCharacters(line).trimEnd()).join("\n");
 assert.equal(approvedLiteral, "✓ Research agent completed · 14m");
 
 const hostileIdentityEnvelope = {
@@ -176,7 +178,7 @@ const hostileIdentityMessage = {
   ...message,
   details: { ...details, envelopes: [hostileIdentityEnvelope] },
 };
-const sanitized = renderAgentRunCompletionMessage(hostileIdentityMessage, { expanded: true, outputPad: 0 }, theme).render(700).join("\n");
+const sanitized = renderAgentRunCompletionMessage(hostileIdentityMessage, renderOptions(true), theme).render(700).join("\n");
 assert.doesNotMatch(sanitized, /\p{Cf}/u, "hidden child-owned identity fields never reach the renderer");
 assert.doesNotMatch(sanitized, /child|run -id|harness/i);
 
