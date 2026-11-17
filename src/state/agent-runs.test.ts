@@ -163,6 +163,9 @@ assert.equal(
 );
 
 // --- projection join: a scanned child thread carries its parent --------------------------
+// run-1 already finished, which makes its child Done; a live round is what keeps a child in
+// the active projection, so the join is checked under one.
+db.createAgentRun(input("run-10", { childSessionId: "child-session-1" }));
 db.recordScan({
   id: "child-session-1",
   repo: "owner-operator",

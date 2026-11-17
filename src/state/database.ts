@@ -47,17 +47,38 @@ const AGENT_RUN_EFFORT_SQL = AGENT_RUN_EFFORTS.map((effort) => `'${effort}'`).jo
  * they are watching keeps up with it. */
 const WORKING_REASSESS_MS = 4 * 60 * 1_000;
 
+/** The statuses a run holds while its child is live. Every other status is terminal
+ * (`AGENT_RUN_TERMINAL_STATUSES`). One list keeps the active and finished predicates below from
+ * drifting apart. */
+const LIVE_AGENT_RUN_STATUS_SQL = `('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')`;
+
 /** One State-owned definition of an active delegated child. Every persisted owner-attention
  * projection embeds this predicate instead of growing a parallel run lifecycle. */
 const HAS_ACTIVE_CHILD_SQL = `EXISTS (
   SELECT 1 FROM agent_runs active_child
   WHERE active_child.parent_thread_id = t.id
-    AND active_child.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')
+    AND active_child.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 )`;
 
+/** This thread is a delegated child and every run that issued it has reached a terminal status.
+ * The run ledger is the only place that knows the child's work ended. A transcript scan sees a
+ * yielded turn, and the classifier that writes `thread_details` guessed `idle` or `needs-you`,
+ * which left the owner marking each finished child Done by hand. Nothing is written for this
+ * state. A retry or resume is a new run on the same `child_session_id`, so the row wakes on its
+ * own. */
+const CHILD_RUN_FINISHED_SQL = `(EXISTS (
+  SELECT 1 FROM agent_runs issuing_run WHERE issuing_run.child_session_id = t.id
+) AND NOT EXISTS (
+  SELECT 1 FROM agent_runs live_run
+  WHERE live_run.child_session_id = t.id AND live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
+))`;
+
+/** A live child subtree outranks the finished run that started this thread, so Done never hides
+ * delegated work still in flight beneath it. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  WHEN ${CHILD_RUN_FINISHED_SQL} THEN 'done'
   ELSE detail.state
 END`;
 
@@ -1591,8 +1612,8 @@ export class ThreadDb {
       `SELECT t.id AS threadId, t.last_message_at AS lastMessageAt
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
-       WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
+       WHERE ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you' AND t.last_message_at IS NOT NULL
+         AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
        ORDER BY t.last_message_at ASC`,
     ).all({ now: this.now() }) as Array<{ threadId: string; lastMessageAt: string }>;
   }
@@ -1609,8 +1630,8 @@ export class ThreadDb {
       const eligible = this.db.prepare(
         `SELECT 1 FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
           AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
-         WHERE t.id = ? AND t.last_message_at = ? AND detail.state = 'needs-you'
-           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
+         WHERE t.id = ? AND t.last_message_at = ? AND ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
+           AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
       );
       const now = this.now();
       const fresh = params.changes.filter((change) => {

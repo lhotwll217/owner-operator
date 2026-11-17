@@ -419,6 +419,15 @@ Summary enrichment continues during child work without changing the parent's wor
 Once all children are terminal, the transcript-derived root state applies again. The ledger record
 remains the canonical child provenance.
 
+The child side is symmetric. Once every run that issued a child session is terminal, State
+projects that child as `done`, so it leaves the active view and the needs-you schedule inputs
+instead of waiting for the owner to mark each finished child Done
+([#226](https://github.com/lhotwll217/owner-operator/issues/226)). The run ledger is the only
+place that knows the work ended; a transcript scan sees a yielded turn, and the enrichment
+classifier guessed `idle` or `needs-you`. A live child subtree outranks this rule, so Done never
+hides delegated work still in flight. Nothing is written to `thread_details`: a retry or resume is
+a new run on the same `child_session_id`, which brings the row back on its own.
+
 In the terminal, a delegation renders as the Operator's ordinary bash call, whose output is the
 pending run line (`oo runs delegate` without `--json`); the completion message persists the other
 inline lifecycle moment. Owner-directed inspection and lifecycle control remain available through

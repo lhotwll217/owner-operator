@@ -1,10 +1,10 @@
 // Integration: a delegated child whose run reached a terminal status is Done, so it leaves the
-// active view instead of sitting under its parent forever (issue #225).
+// active view instead of sitting under its parent forever (issue #226).
 //
-// The run ledger knows the child's work ended; the model classifier that writes `thread_details`
-// does not, and left six finished review children at `idle`. Done here is derived in the State
-// projection from `agent_runs.status`, never written into the details ledger, so a new round for
-// the same child session (retry or resume creates a new run) brings its row straight back.
+// The run ledger knows the child's work ended. The classifier that writes `thread_details` does
+// not, and left five finished review children at `idle` under one parent. Done here is derived
+// in the State projection from `agent_runs.status` and never written into the details ledger, so
+// a new round for the same child session brings its row straight back.
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -98,7 +98,11 @@ try {
     childSessionId: "codex-child",
     resumeOfRunId: run.id,
   });
-  assert.equal(visible(state, "codex-child")?.state, "idle", "a fresh round for the same child session brings its row back");
+  assert.equal(
+    visible(state, "codex-child")?.state,
+    "needs-you",
+    "a fresh round for the same child session brings its row back, with its own state again",
+  );
 
   process.stdout.write("ok — a finished delegated child is Done and a new round wakes it\n");
 } finally {
