@@ -98,8 +98,6 @@ export async function runSessionStateWidgetProof(options: {
       assert.ok(seed.appendEnrichment(id, { topic: "Stale review instruction", statusSummary: "Review and confirm the task", priority: 2, attention: "needs-you" as const }, at));
     }
     seed.markThreadsDone(["owner-done"]);
-    const run = seed.createAgentRun({ harness: AgentRunHarness.Codex, task: "Review the implementation", cwd: project, parentThreadId: "parent", childSessionId: "child", depth: 1, timeoutSeconds: 60 });
-    seed.finishAgentRun(run.id, { status: AgentRunStatus.Completed, resultTail: "Review complete. No findings.", error: null });
     console.log("BEFORE", JSON.stringify(seed.listCurrentSessionState().map((r) => ({ id: r.id, title: r.topic, state: r.state, statusSummary: r.statusSummary }))));
     const windowPreserved = !seed.listCurrentSessionState().some((r) => r.id === "outside-window");
     seed.close();
@@ -204,6 +202,9 @@ export async function runSessionStateWidgetProof(options: {
     daemon = await boot();
     await daemon.agentRuns.stop();
     const activeChild = daemon.state.createAgentRun({ harness: AgentRunHarness.Codex, task: "Implement export", cwd: project, parentThreadId: "parent", depth: 1, timeoutSeconds: 600 });
+    // The review child's own run, live for every stage below: a child leaves the widget when its
+    // run reaches a terminal status, so the delegated row only exists while the run does.
+    const childRun = daemon.state.createAgentRun({ harness: AgentRunHarness.Codex, task: "Review the implementation", cwd: project, parentThreadId: "parent", childSessionId: "child", depth: 1, timeoutSeconds: 60 });
     await api("/poll", {});
     await waitFor(() => daemon!.state.listCurrentSessionState().some((r) => r.id === "partial" && r.app === "Owner Operator"), 10_000, "startup scan observes real transcripts");
     const before: SessionStateRow[] = await api("/session-state");
@@ -244,7 +245,7 @@ export async function runSessionStateWidgetProof(options: {
     assert.equal(updated.find((r) => r.id === "first-message")?.topic, "Pinned invoice export");
     assert.notEqual(updated.find((r) => r.id === "first-message")?.statusSummary, after.find((r) => r.id === "first-message")?.statusSummary);
     await nativeProof("working-update", updated);
-    const childAt = new Date(Date.now() + 1_000).toISOString();
+    const childAt = new Date().toISOString();
     transcript("child", "Review CSV escaping in the export.", "CSV escaping verified for embedded commas, quotes, and newlines. All checks passed. No findings or owner decision.", childAt);
     await api("/poll", {});
     await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "child-only progress refreshes parent summary");
@@ -262,8 +263,22 @@ export async function runSessionStateWidgetProof(options: {
     const settled: SessionStateRow[] = await api("/session-state");
     assert.equal(settled.find((r) => r.id === "first-message")?.state, "idle");
     await nativeProof("direct-idle", settled);
+    daemon.state.finishAgentRun(childRun.id, { status: AgentRunStatus.Completed, resultTail: "Review complete. No findings.", error: null });
+    await api("/poll", {});
+    await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "the finished child's evidence settles the parent summary");
+    assert.ok(
+      !(await api("/session-state") as SessionStateRow[]).some((r) => r.id === "child"),
+      "a delegated child leaves the widget when its run reaches a terminal status, without an owner Done",
+    );
+    // New child evidence after the run ends is the owner continuing that session by hand, so the
+    // row comes back and its summary keeps up.
+    transcript("child", "Review CSV escaping in the export.", "I can also check the retention window.", new Date(Date.now() + 2_000).toISOString());
+    await api("/poll", {});
+    await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "the continued child reconciles again");
+    const continued: SessionStateRow[] = await api("/session-state");
+    assert.ok(continued.find((r) => r.id === "child")?.statusSummary, "a message after the run ends restores the child row with a current summary");
     await api("/done", { ids: ["child", "summarized"] });
-    assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "first-message", "parent", "partial"], "only explicit Done removes completed work");
+    assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "first-message", "parent", "partial"], "an ordinary completed session waits for explicit Done");
     assert.equal(after.find((r) => r.id === "decision")?.state, "needs-you");
     assert.ok(after.find((r) => r.id === "decision")?.statusSummary);
     assert.equal(after.find((r) => r.id === "partial")?.state, "idle");

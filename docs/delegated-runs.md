@@ -419,6 +419,26 @@ Summary enrichment continues during child work without changing the parent's wor
 Once all children are terminal, the transcript-derived root state applies again. The ledger record
 remains the canonical child provenance.
 
+The child side is symmetric. Once every run that issued a child session is terminal, State
+projects that child as `done`, so it leaves the active view and the needs-you schedule inputs
+instead of waiting for the owner to mark each finished child Done
+([#226](https://github.com/lhotwll217/owner-operator/issues/226)). The run ledger is the only
+place that knows the work ended; a transcript scan sees a yielded turn, and the enrichment
+classifier guessed `idle` or `needs-you`. Nothing is written to `thread_details`: a retry or
+resume is a new run on the same `child_session_id`, which holds the row open again.
+
+Two conditions bound that rule, both in
+[`CHILD_RUN_FINISHED_SQL`](../src/state/database.ts). A live run anywhere below the thread
+outranks it, found by walking each live run's lineage upward, so Done never hides delegated work
+still in flight at any depth. And it is released the way an owner Done mark is, by a message
+newer than the mark, so continuing a finished child by hand in its own harness brings the row
+back. The mark is the end of the child's last run: `finished_at` for a status the run reached
+through its own lifecycle, and the run's last recorded activity for `interrupted` and `lost`,
+whose `finished_at` is the clock of the sweep that noticed rather than evidence about the child.
+
+One level is not enough for the parent-side rule or the active window, which still read
+immediate children only ([#228](https://github.com/lhotwll217/owner-operator/issues/228)).
+
 In the terminal, a delegation renders as the Operator's ordinary bash call, whose output is the
 pending run line (`oo runs delegate` without `--json`); the completion message persists the other
 inline lifecycle moment. Owner-directed inspection and lifecycle control remain available through

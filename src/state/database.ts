@@ -47,17 +47,72 @@ const AGENT_RUN_EFFORT_SQL = AGENT_RUN_EFFORTS.map((effort) => `'${effort}'`).jo
  * they are watching keeps up with it. */
 const WORKING_REASSESS_MS = 4 * 60 * 1_000;
 
+/** The statuses a run holds while its child is live. Every other status is terminal
+ * (`AGENT_RUN_TERMINAL_STATUSES`). One list keeps the active and finished predicates below from
+ * drifting apart. */
+const LIVE_AGENT_RUN_STATUS_SQL = `('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')`;
+
 /** One State-owned definition of an active delegated child. Every persisted owner-attention
  * projection embeds this predicate instead of growing a parallel run lifecycle. */
 const HAS_ACTIVE_CHILD_SQL = `EXISTS (
   SELECT 1 FROM agent_runs active_child
   WHERE active_child.parent_thread_id = t.id
-    AND active_child.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')
+    AND active_child.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 )`;
 
+/** When one run's delegated work ended. `finished_at` is that moment for a status the run
+ * reached through its own lifecycle. For `interrupted` and `lost` it is instead the clock of the
+ * sweep that noticed, which runs whenever the next daemon starts and can land long after the
+ * child stopped, even after the owner has continued the session. The sweep's clock says nothing
+ * about the child, so those two statuses use the run's own last evidence of activity, the same
+ * watermark the lost sweep itself reads. */
+const AGENT_RUN_WORK_ENDED_SQL = `CASE
+  WHEN ended_run.status IN ('${AgentRunStatus.Interrupted}', '${AgentRunStatus.Lost}')
+    THEN COALESCE(ended_run.last_activity_at, ended_run.started_at, ended_run.created_at)
+  ELSE ended_run.finished_at
+END`;
+
+/** Every thread with a live run somewhere below it, found by walking each live run's lineage
+ * upward through the runs that issued its ancestors. Delegation nests to depth 5, so a check on
+ * immediate children alone would let a thread with live work two levels down go Done and take
+ * the live branch's last visible ancestor with it. `UNION` ends the walk even if the recorded
+ * lineage ever cycles. */
+const THREADS_ABOVE_LIVE_RUN_SQL = `(
+  WITH RECURSIVE ancestor(thread_id) AS (
+    SELECT live_run.parent_thread_id FROM agent_runs live_run
+     WHERE live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL} AND live_run.parent_thread_id IS NOT NULL
+    UNION
+    SELECT issuing_run.parent_thread_id FROM agent_runs issuing_run
+     JOIN ancestor ON issuing_run.child_session_id = ancestor.thread_id
+     WHERE issuing_run.parent_thread_id IS NOT NULL
+  )
+  SELECT thread_id FROM ancestor
+)`;
+
+/** This thread is a delegated child, every run that issued it has reached a terminal status, and
+ * no run below it is live. The run ledger is the only place that knows the child's work ended. A
+ * transcript scan sees a yielded turn, and the classifier that writes `thread_details` guessed
+ * `idle` or `needs-you`, which left the owner marking each finished child Done by hand.
+ *
+ * Nothing is written for this state, and it is released the way an owner Done mark is, by a
+ * message newer than the mark. The mark here is the end of the child's last run, so continuing
+ * that child by hand in its own harness wakes the row. A missing `last_message_at` compares as
+ * older, the convention the snooze hold already uses. */
+const CHILD_RUN_FINISHED_SQL = `(EXISTS (
+  SELECT 1 FROM agent_runs issuing_run WHERE issuing_run.child_session_id = t.id
+) AND NOT EXISTS (
+  SELECT 1 FROM agent_runs live_run
+  WHERE live_run.child_session_id = t.id AND live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
+) AND COALESCE(t.last_message_at, '') <= (
+  SELECT MAX(${AGENT_RUN_WORK_ENDED_SQL}) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
+) AND t.id NOT IN ${THREADS_ABOVE_LIVE_RUN_SQL})`;
+
+/** A live child outranks the finished run that issued this thread, so Done never hides delegated
+ * work still in flight. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  WHEN ${CHILD_RUN_FINISHED_SQL} THEN 'done'
   ELSE detail.state
 END`;
 
@@ -1591,8 +1646,8 @@ export class ThreadDb {
       `SELECT t.id AS threadId, t.last_message_at AS lastMessageAt
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
-       WHERE detail.state = 'needs-you' AND t.last_message_at IS NOT NULL
-         AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
+       WHERE ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you' AND t.last_message_at IS NOT NULL
+         AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}
        ORDER BY t.last_message_at ASC`,
     ).all({ now: this.now() }) as Array<{ threadId: string; lastMessageAt: string }>;
   }
@@ -1609,8 +1664,8 @@ export class ThreadDb {
       const eligible = this.db.prepare(
         `SELECT 1 FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
           AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
-         WHERE t.id = ? AND t.last_message_at = ? AND detail.state = 'needs-you'
-           AND NOT ${HAS_ACTIVE_CHILD_SQL} AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
+         WHERE t.id = ? AND t.last_message_at = ? AND ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
+           AND NOT ${AWAITING_HOLDS_SQL} AND NOT ${SNOOZE_HOLDS_SQL}`,
       );
       const now = this.now();
       const fresh = params.changes.filter((change) => {
