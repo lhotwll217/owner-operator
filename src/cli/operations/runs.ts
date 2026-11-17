@@ -131,7 +131,10 @@ export const runs: Noun = {
         + `At most ${AGENT_RUN_MAX_CONCURRENT} runs execute daemon-wide; later runs remain queued. `
         + `Delegation can nest to depth ${AGENT_RUN_MAX_DEPTH}. Children should pass their own saved\n`
         + "session id with --from-session so depth and parent lineage are recorded. An ACP child\n"
-        + "can report a pending run id; its conversation continues automatically after the children finish.",
+        + "can report a pending run id; its conversation continues automatically after the children finish.\n"
+        + "A caller outside this Mac (such as grok-bot) always passes --origin <name>; the run then shows\n"
+        + "as its own row with that caller's mark. Without --origin, a parent session that matches no\n"
+        + "session on this Mac is rejected.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
@@ -140,12 +143,13 @@ export const runs: Noun = {
         cwd: { type: "string", help: "child working directory (default: the parent session's selected worktree, else the current directory)" },
         timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },
         "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
-        origin: { type: "string", help: "outside caller that started the run, such as grok-bot; the run shows as its own row with that caller's mark" },
+        origin: { type: "string", help: "required for a caller outside this Mac, such as grok-bot: its name; the run shows as its own row with that caller's mark" },
         "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default for agent callers)" },
       },
       examples: [
         'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',
         'oo runs delegate --harness claude-code --effort high --cwd ../other-repo --no-wait --json "Review the open diff against the repo standards"',
+        'oo runs delegate --harness codex --origin grok-bot --no-wait "Triage the new issue and report back"',
       ],
       async run({ values, positionals: [task], json }) {
         const harness = values.harness;

@@ -460,6 +460,11 @@ export class State {
     return this.db.listAgentRuns(filter);
   }
 
+  /** The session is already known here: an indexed thread or a delegated run's child. */
+  knowsSession(id: string): boolean {
+    return this.db.resolutionRow(id) !== undefined || this.db.agentRunByChildSession(id) !== undefined;
+  }
+
   registerAndSelectWorktree(
     threadId: string,
     worktree: Pick<RegisteredWorktree, "repository" | "path" | "gitCommonDir">,

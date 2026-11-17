@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ScanActiveTranscriptsResult } from "./scan-active-transcripts.mjs";
-import { AgentRunStatus, type EnrichmentCandidate } from "@owner-operator/core";
+import { AgentRunStatus, isOnboarded, type EnrichmentCandidate } from "@owner-operator/core";
 import type { Turn } from "../agent/needs-you";
 
 const execFileAsync = promisify(execFile);
@@ -18,6 +18,15 @@ export async function runTranscriptScan(args: readonly string[], files: readonly
     { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   return JSON.parse(stdout) as ScanActiveTranscriptsResult;
+}
+
+/** An authorized transcript in the active window has exactly this session id. Unlike the monitor's
+ * scan this includes automated sessions, such as a scheduled Operator turn, which never become
+ * threads. */
+export async function transcriptExists(id: string): Promise<boolean> {
+  if (!isOnboarded()) return false;
+  const scan = await runTranscriptScan(["--thread", id, "--sample", "0"]);
+  return scan.threads.some((thread) => thread.id === id);
 }
 
 /** Bounded transcript context passed across the monitor → model-completion seam. */

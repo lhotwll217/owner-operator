@@ -56,7 +56,7 @@ export interface GatewayAgentRuns {
   list(parentThreadId?: string): AgentRun[];
   view(parentThreadId?: string): ParentAgentStateView;
   get(id: string): AgentRun | undefined;
-  launch(input: AgentRunCreateInput): AgentRun;
+  launch(input: AgentRunCreateInput): AgentRun | Promise<AgentRun>;
   cancel(id: string): Promise<AgentRun>;
   retry(id: string): AgentRun;
   resume(id: string, task: string): AgentRun;
@@ -252,7 +252,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(200, options.agentRuns.view(parent ?? undefined));
       }
       if (route === "POST /agent-runs") {
-        const run = options.agentRuns.launch(await readBody(request) as AgentRunCreateInput);
+        const run = await options.agentRuns.launch(await readBody(request) as AgentRunCreateInput);
         return respond(201, run);
       }
       if (agentRunId && request.method === "GET" && url.pathname === `/agent-runs/${agentRunId}`) {

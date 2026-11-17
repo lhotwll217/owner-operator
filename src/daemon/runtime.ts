@@ -10,7 +10,7 @@ import {
 } from "@owner-operator/core";
 import { startGateway, type GatewayHarness, type RunningGateway } from "../gateway/server";
 import { SessionMonitor, SessionMonitorLogEvent, type SessionMonitorOptions } from "../session-monitor/monitor";
-import { sampleEnrichment, sampleTurns } from "../session-monitor/scan";
+import { sampleEnrichment, sampleTurns, transcriptExists } from "../session-monitor/scan";
 import { Scheduler, type SchedulerOptions } from "../scheduler/scheduler";
 import { AgentRunExecutor, type AgentRunExecutorOptions } from "../agent-runs/executor";
 import { createAcpLauncher } from "../agent-runs/acp-launcher";
@@ -34,6 +34,8 @@ export interface DaemonOptions {
   agentRuns?: AgentRunExecutorOptions;
   /** Injectable for tests and evals; each omitted operation observes real harnesses in this process. */
   harness?: Partial<GatewayHarness>;
+  /** Injectable for tests; the default reads the owner's authorized transcript stores. */
+  transcriptExists?: (sessionId: string) => Promise<boolean>;
   watch?: boolean;
   fingerprintIntervalMs?: number;
   enableEnrichment?: boolean;
@@ -154,7 +156,17 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
         state.listAgentRuns(parentThreadId ? { parentThreadId } : {}),
       ),
       get: (id) => state.agentRunById(id),
-      launch: (input) => agentRuns.launch(input),
+      launch: async (input) => {
+        const parent = input.parentThreadId;
+        if (parent && input.origin == null && !state.knowsSession(parent)
+          && !await (options.transcriptExists ?? transcriptExists)(parent)) {
+          throw new Error(
+            `parent session ${parent} matches no session on this Mac. An outside caller (such as grok-bot) `
+            + "passes --origin <name>. A local agent passes --from-session <id> with its real session id.",
+          );
+        }
+        return agentRuns.launch(input);
+      },
       cancel: (id) => agentRuns.cancel(id),
       retry: (id) => agentRuns.retry(id),
       resume: (id, task) => agentRuns.resume(id, task),
