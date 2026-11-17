@@ -10,7 +10,7 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 OO_HOME="${OO_HOME:-$HOME/.owner-operator}"
 
-if git -C "$SRC" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ "$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" = "$SRC" ]; then
   COMMIT="$(git -C "$SRC" rev-parse --verify "${1:-HEAD}^{commit}")"
   RUNTIME="$OO_HOME/runtime/$COMMIT"
   if [ ! -d "$RUNTIME" ]; then
