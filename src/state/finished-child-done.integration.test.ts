@@ -35,11 +35,15 @@ const scanRow = (id: string): ScanRow => ({
 const visible = (state: State, id: string) =>
   state.listCurrentSessionState().find((row) => row.id === id);
 
+// Done is released by a message newer than the run's end, so the clock has to move for the
+// release rule to mean anything.
+let now = "2026-11-16T10:06:00.000Z";
+
 let closeState: (() => void) | undefined;
 try {
   const state = new State(join(dir, "state.db"), {
     bus: new InMemoryEventBus(),
-    now: () => "2026-11-16T10:06:00.000Z",
+    now: () => now,
     activeWindow: "1d",
   });
   closeState = () => state.close();
@@ -87,8 +91,20 @@ try {
   state.finishAgentRun(runningGrandchild.id, { status: AgentRunStatus.Completed, resultTail: "checked", error: null });
   assert.equal(visible(state, "codex-child"), undefined, "the child is Done again once its own subtree settles");
 
-  // Retry and resume create a new run against the same child session; that run reopens the row.
-  state.createAgentRun({
+  // The owner can pick a finished child up by hand in its own harness. A message newer than the
+  // run's end releases Done, the same release rule an owner Done mark gets.
+  now = "2026-11-16T10:10:00.000Z";
+  state.recordObservation({ ...scanRow("codex-child"), lastMessageAt: "2026-11-16T10:09:00.000Z", secondsSinceLastMessage: 60, lastRole: "user" });
+  assert.equal(
+    visible(state, "codex-child")?.state,
+    "working",
+    "a message newer than the finished run wakes the child again",
+  );
+
+  // A fresh round against the same child session is a new run. It holds the row open while it
+  // works, and its own end settles the row again, so the release rule is a comparison and not a
+  // one-way latch.
+  const resumed = state.createAgentRun({
     harness: AgentRunHarness.Codex,
     task: "answer the review follow-up",
     cwd: dir,
@@ -98,13 +114,44 @@ try {
     childSessionId: "codex-child",
     resumeOfRunId: run.id,
   });
-  assert.equal(
-    visible(state, "codex-child")?.state,
-    "needs-you",
-    "a fresh round for the same child session brings its row back, with its own state again",
-  );
+  assert.ok(visible(state, "codex-child"), "a live round keeps the woken child's row");
+  const runningResumed = state.claimNextPendingAgentRun(3)!;
+  assert.equal(runningResumed.id, resumed.id);
+  now = "2026-11-16T10:15:00.000Z";
+  state.finishAgentRun(runningResumed.id, { status: AgentRunStatus.Completed, resultTail: "answered", error: null });
+  assert.equal(visible(state, "codex-child"), undefined, "the child is Done again once the new round ends");
 
-  process.stdout.write("ok — a finished delegated child is Done and a new round wakes it\n");
+  // Delegation nests to depth 5, and only the deepest run is live here. A finished thread with
+  // live work anywhere below it keeps its own row, so the live branch never loses its anchor.
+  const deepChild = state.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "trace the deployment",
+    cwd: dir,
+    parentThreadId: "codex-child",
+    depth: 2,
+    timeoutSeconds: 3_600,
+  });
+  const runningDeepChild = state.claimNextPendingAgentRun(3)!;
+  state.recordAgentRunActivity(runningDeepChild.id, { childSessionId: "codex-grandchild" });
+  state.recordObservation(scanRow("codex-grandchild"));
+  state.finishAgentRun(runningDeepChild.id, { status: AgentRunStatus.Completed, resultTail: "traced", error: null });
+  state.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "read the Fly logs",
+    cwd: dir,
+    parentThreadId: "codex-grandchild",
+    depth: 3,
+    timeoutSeconds: 3_600,
+  });
+  assert.equal(
+    visible(state, "codex-grandchild")?.state,
+    "working",
+    "the finished thread with the live run directly below it is working",
+  );
+  assert.ok(visible(state, "codex-child"), "a finished thread keeps its row while a deeper descendant is live");
+  assert.equal(deepChild.depth, 2);
+
+  process.stdout.write("ok — a finished delegated child is Done, and a newer message, a new round, or live work below it wakes the row\n");
 } finally {
   closeState?.();
   if (previousOoHome === undefined) delete process.env.OO_HOME;

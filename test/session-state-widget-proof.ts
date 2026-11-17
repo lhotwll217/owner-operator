@@ -270,7 +270,14 @@ export async function runSessionStateWidgetProof(options: {
       !(await api("/session-state") as SessionStateRow[]).some((r) => r.id === "child"),
       "a delegated child leaves the widget when its run reaches a terminal status, without an owner Done",
     );
-    await api("/done", { ids: ["summarized"] });
+    // New child evidence after the run ends is the owner continuing that session by hand, so the
+    // row comes back and its summary keeps up.
+    transcript("child", "Review CSV escaping in the export.", "I can also check the retention window.", new Date(Date.now() + 2_000).toISOString());
+    await api("/poll", {});
+    await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "the continued child reconciles again");
+    const continued: SessionStateRow[] = await api("/session-state");
+    assert.ok(continued.find((r) => r.id === "child")?.statusSummary, "a message after the run ends restores the child row with a current summary");
+    await api("/done", { ids: ["child", "summarized"] });
     assert.deepEqual((await api("/session-state") as SessionStateRow[]).map((r) => r.id).sort(), ["decision", "first-message", "parent", "partial"], "an ordinary completed session waits for explicit Done");
     assert.equal(after.find((r) => r.id === "decision")?.state, "needs-you");
     assert.ok(after.find((r) => r.id === "decision")?.statusSummary);

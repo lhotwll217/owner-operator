@@ -19,8 +19,9 @@ export {
 
 /**
  * Lifecycle state of a thread: what's happening. Mirrors the bounded vocabulary agent-deck polls for.
- * `done` comes from an explicit Done action and holds until a newer message wakes
- * the thread (see resolve.mjs).
+ * `done` comes from an explicit Done action, or for a delegated child from the end of its runs,
+ * and holds until a newer message wakes the thread (see resolve.mjs for the owner mark and
+ * src/state/database.ts for the delegated child).
  */
 export type ThreadState = "needs-you" | "working" | "idle" | "done";
 

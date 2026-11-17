@@ -105,7 +105,9 @@ parents with active delegated children.
   revision continues that account. This call never sets state; when it fails, the Need You answer
   still lands and the row stays eligible until a title and status summary do.
 
-Completed work stays visible until an explicit Done action.
+Completed work stays visible until an explicit Done action. A delegated child is the one
+exception: State projects it `done` once its runs end, under the same release rule
+([delegated runs](delegated-runs.md)).
 Enrichment runs several threads at once, bounded by `enrichConcurrency` (default 10). A poll
 that lands while a pass is running gets its own pass afterwards, so a turn ending or a child
 starting is reassessed within one model call rather than at the next tick.

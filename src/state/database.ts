@@ -60,21 +60,43 @@ const HAS_ACTIVE_CHILD_SQL = `EXISTS (
     AND active_child.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 )`;
 
-/** This thread is a delegated child and every run that issued it has reached a terminal status.
- * The run ledger is the only place that knows the child's work ended. A transcript scan sees a
- * yielded turn, and the classifier that writes `thread_details` guessed `idle` or `needs-you`,
- * which left the owner marking each finished child Done by hand. Nothing is written for this
- * state. A retry or resume is a new run on the same `child_session_id`, so the row wakes on its
- * own. */
+/** Every thread with a live run somewhere below it, found by walking each live run's lineage
+ * upward through the runs that issued its ancestors. Delegation nests to depth 5, so a check on
+ * immediate children alone would let a thread with live work two levels down go Done and take
+ * the live branch's last visible ancestor with it. `UNION` ends the walk even if the recorded
+ * lineage ever cycles. */
+const THREADS_ABOVE_LIVE_RUN_SQL = `(
+  WITH RECURSIVE ancestor(thread_id) AS (
+    SELECT live_run.parent_thread_id FROM agent_runs live_run
+     WHERE live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL} AND live_run.parent_thread_id IS NOT NULL
+    UNION
+    SELECT issuing_run.parent_thread_id FROM agent_runs issuing_run
+     JOIN ancestor ON issuing_run.child_session_id = ancestor.thread_id
+     WHERE issuing_run.parent_thread_id IS NOT NULL
+  )
+  SELECT thread_id FROM ancestor
+)`;
+
+/** This thread is a delegated child, every run that issued it has reached a terminal status, and
+ * no run below it is live. The run ledger is the only place that knows the child's work ended. A
+ * transcript scan sees a yielded turn, and the classifier that writes `thread_details` guessed
+ * `idle` or `needs-you`, which left the owner marking each finished child Done by hand.
+ *
+ * Nothing is written for this state, and it is released the way an owner Done mark is, by a
+ * message newer than the mark. The mark here is the end of the child's last run, so continuing
+ * that child by hand in its own harness wakes the row. A missing `last_message_at` compares as
+ * older, the convention the snooze hold already uses. */
 const CHILD_RUN_FINISHED_SQL = `(EXISTS (
   SELECT 1 FROM agent_runs issuing_run WHERE issuing_run.child_session_id = t.id
 ) AND NOT EXISTS (
   SELECT 1 FROM agent_runs live_run
   WHERE live_run.child_session_id = t.id AND live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
-))`;
+) AND COALESCE(t.last_message_at, '') <= (
+  SELECT MAX(ended_run.finished_at) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
+) AND t.id NOT IN ${THREADS_ABOVE_LIVE_RUN_SQL})`;
 
-/** A live child subtree outranks the finished run that started this thread, so Done never hides
- * delegated work still in flight beneath it. */
+/** A live child outranks the finished run that issued this thread, so Done never hides delegated
+ * work still in flight. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
   WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
