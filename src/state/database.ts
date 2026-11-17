@@ -60,6 +60,18 @@ const HAS_ACTIVE_CHILD_SQL = `EXISTS (
     AND active_child.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 )`;
 
+/** When one run's delegated work ended. `finished_at` is that moment for a status the run
+ * reached through its own lifecycle. For `interrupted` and `lost` it is instead the clock of the
+ * sweep that noticed, which runs whenever the next daemon starts and can land long after the
+ * child stopped, even after the owner has continued the session. The sweep's clock says nothing
+ * about the child, so those two statuses use the run's own last evidence of activity, the same
+ * watermark the lost sweep itself reads. */
+const AGENT_RUN_WORK_ENDED_SQL = `CASE
+  WHEN ended_run.status IN ('${AgentRunStatus.Interrupted}', '${AgentRunStatus.Lost}')
+    THEN COALESCE(ended_run.last_activity_at, ended_run.started_at, ended_run.created_at)
+  ELSE ended_run.finished_at
+END`;
+
 /** Every thread with a live run somewhere below it, found by walking each live run's lineage
  * upward through the runs that issued its ancestors. Delegation nests to depth 5, so a check on
  * immediate children alone would let a thread with live work two levels down go Done and take
@@ -92,7 +104,7 @@ const CHILD_RUN_FINISHED_SQL = `(EXISTS (
   SELECT 1 FROM agent_runs live_run
   WHERE live_run.child_session_id = t.id AND live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 ) AND COALESCE(t.last_message_at, '') <= (
-  SELECT MAX(ended_run.finished_at) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
+  SELECT MAX(${AGENT_RUN_WORK_ENDED_SQL}) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
 ) AND t.id NOT IN ${THREADS_ABOVE_LIVE_RUN_SQL})`;
 
 /** A live child outranks the finished run that issued this thread, so Done never hides delegated
