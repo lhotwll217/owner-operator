@@ -79,8 +79,7 @@ function privacyEntries(raw: string): { paths: string[]; repos: string[] } {
 }
 
 const installAlwaysOn = async (ooHome: string): Promise<void> => {
-  await execFileAsync("make", ["install"], {
-    cwd: path.join(repoRoot, "apps", "widget"),
+  await execFileAsync(path.join(repoRoot, "scripts", "install-runtime.sh"), [], {
     env: { ...process.env, OO_HOME: ooHome },
   });
 };
@@ -226,7 +225,8 @@ export async function runOnboarding(
       if ((options.platform ?? process.platform) === "darwin") {
         const install = await ctx.ui.confirm(
           "Keep Owner Operator running?",
-          "Install the existing widget and daemon LaunchAgents for login and crash recovery?",
+          `Install this commit as a pinned runtime under ${path.join(paths.home, "runtime")}, ` +
+            "run the widget and daemon LaunchAgents from it for login and crash recovery, and link the global oo to it?",
         );
         if (install) {
           await (options.installAlwaysOn ?? installAlwaysOn)(paths.home);

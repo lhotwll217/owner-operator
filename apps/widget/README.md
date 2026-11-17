@@ -20,7 +20,7 @@ Needs the loopback daemon + a GUI session. SwiftPM — no Xcode project, no sign
 ```sh
 make run       # launch
 make once      # print the session state and exit — headless smoke test
-make install   # installs widget + daemon LaunchAgents; make uninstall removes both
+make install   # pins HEAD as the runtime and installs its widget + daemon LaunchAgents; make uninstall removes both
 swift test     # unit tests — sections, decode, owner writes, snooze presets, fresh-window
 ```
 

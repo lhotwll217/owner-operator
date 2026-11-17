@@ -9,8 +9,8 @@ run: ## launch the menu bar widget
 once: ## print the current session state and exit (smoke test)
 	swift run oo-widget --once
 
-install: ## install as a LaunchAgent — always there across logout/reboot
-	./dev/install.sh
+install: ## pin HEAD as the runtime and install its widget + daemon LaunchAgents
+	../../scripts/install-runtime.sh
 
 uninstall: ## remove the LaunchAgent and stop the widget
 	./dev/uninstall.sh
