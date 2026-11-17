@@ -14,7 +14,8 @@ model settings, then shows every supported harness and recognized app or CLI on 
 surface. Setup also asks whether shell commands and changes should ask, run automatically, or
 remain unavailable. Standalone Pi is optional; fresh installs use Owner Operator's built-in
 provider login and store credentials under `~/.owner-operator/pi`. Harnesses start included;
-mark any to ignore. It then configures macOS always-on services, the active window, and
+mark any to ignore. It then configures macOS always-on services, which run a
+[pinned runtime](daemon.md#pinned-runtime) of the current commit, the active window, and
 skills. The copy does not change standalone Pi.
 
 Until setup finishes, headless calls and transcript/model processing fail closed: the daemon

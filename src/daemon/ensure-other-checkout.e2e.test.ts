@@ -34,7 +34,7 @@ writeFileSync(join(bin, "launchctl"), `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 const args = process.argv.slice(2);
 appendFileSync(process.env.OO_TEST_LAUNCH_LOG, args.join(" ") + "\\n");
-if (args[0] === "print") process.stdout.write("\\tpid = " + process.env.OO_TEST_DAEMON_PID + "\\n");
+if (args[0] === "print") process.stdout.write(process.env.OO_TEST_LAUNCHD_IDLE ? "\\tstate = not running\\n" : "\\tpid = " + process.env.OO_TEST_DAEMON_PID + "\\n");
 `);
 chmodSync(join(bin, "launchctl"), 0o755);
 
@@ -97,7 +97,13 @@ try {
   await ensureDaemon();
   assert.equal(kickstarts(), 2, "a client from the daemon's own checkout still replaces a daemon on older code");
 
-  console.log("ok — only the daemon's own checkout replaces it");
+  writeFileSync(daemonRootFile, "/elsewhere/owner-operator");
+  process.env.OO_TEST_LAUNCHD_IDLE = "1";
+  await assert.rejects(ensureDaemon({ takeOver: true }), /did not become ready/);
+  assert.equal(isAlive(daemon.pid!), false, "takeover stops another checkout's daemon that a loaded, idle launchd job does not own");
+  assert.equal(kickstarts(), 3, "takeover then asks launchd to start this checkout's daemon");
+
+  console.log("ok — only the daemon's own checkout replaces it, unless it takes over");
 } finally {
   if (daemon.pid && isAlive(daemon.pid)) daemon.kill("SIGTERM");
   for (const [key, value] of Object.entries(oldEnv)) {

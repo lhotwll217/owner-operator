@@ -49,6 +49,15 @@ npm install            # once, from the repo root; needs Node 22+
 Setup walks privacy boundaries, credentials, the supported-harness review, permission mode,
 and macOS always-on services: [docs/onboarding.md](docs/onboarding.md).
 
+Always-on services run a pinned copy of one commit, not your checkout, so editing or switching
+branches never touches the live daemon. To install or upgrade, run from a checkout:
+
+```bash
+scripts/install-runtime.sh [<git-ref>]   # default HEAD, e.g. origin/main
+```
+
+How the pinned runtime works: [docs/daemon.md](docs/daemon.md#pinned-runtime).
+
 ### Optional: agentsview search backend
 
 `oo search` uses [agentsview](https://github.com/kenn-io/agentsview) for discovery queries when

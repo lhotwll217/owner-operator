@@ -34,6 +34,7 @@ it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 test/
   run.mjs                    root src tier runner
   eval-daemon.integration.test.ts
+  pinned-runtime.e2e.test.ts dev checkout edits never change or restart the installed daemon
   scan.integration.test.ts   real scan subprocess over session files + git
   sessions-grep.integration.test.ts
 

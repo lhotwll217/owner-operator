@@ -45,8 +45,10 @@ async function launchdPidOwnership(pid: number): Promise<LaunchdPidOwnership> {
       { encoding: "utf8" },
     );
     const reportedPid = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(stdout)?.[1];
-    if (!reportedPid) return LaunchdPidOwnership.Unknown;
-    return Number(reportedPid) === pid ? LaunchdPidOwnership.Owned : LaunchdPidOwnership.NotOwned;
+    if (reportedPid) return Number(reportedPid) === pid ? LaunchdPidOwnership.Owned : LaunchdPidOwnership.NotOwned;
+    // A loaded job that is not running, such as one that lost the port to a detached daemon, owns no PID.
+    const state = /^\s*state\s*=\s*(.+?)\s*$/m.exec(stdout)?.[1];
+    return state !== undefined && state !== "running" ? LaunchdPidOwnership.NotOwned : LaunchdPidOwnership.Unknown;
   } catch (error) {
     const code = (error as Error & { code?: string | number }).code;
     return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code)
@@ -85,8 +87,9 @@ async function startDaemonProcess(): Promise<void> {
   child.unref();
 }
 
-/** Ensure a ready daemon for terminal clients; the widget remains a pure client. */
-export async function ensureDaemon(): Promise<void> {
+/** Ensure a ready daemon for terminal clients; the widget remains a pure client. `takeOver` also
+ * replaces a ready daemon from another checkout and fails unless this checkout's daemon serves. */
+export async function ensureDaemon({ takeOver = false }: { takeOver?: boolean } = {}): Promise<void> {
   const expected = runtimeFingerprint();
   const existing = await probeGateway();
   const launchdOwnsDaemon = launchdCanManageCurrentHome() && existsSync(daemonLaunchAgentPath());
@@ -141,10 +144,12 @@ export async function ensureDaemon(): Promise<void> {
   } else if (existing) {
     // The daemon is shared, so a client from another checkout defers to a ready one instead of
     // interrupting its children; under launchd a replacement would restart the same checkout anyway.
+    // Only the runtime installer takes over, because it has just pointed launchd at itself.
     // A pre-repoRoot daemon omits the field and counts as another checkout; on its own checkout it
     // is already stale.
-    const otherCheckout = existing.health.repoRoot !== repoRoot;
-    if ((otherCheckout || existing.health.fingerprint === expected) && !existing.health.stale && existing.ready.ready) return;
+    const sameCheckout = existing.health.repoRoot === repoRoot;
+    const current = sameCheckout ? existing.health.fingerprint === expected : !takeOver;
+    if (current && !existing.health.stale && existing.ready.ready) return;
     const ownership = launchdOwnsDaemon
       ? await launchdPidOwnership(existing.health.pid)
       : LaunchdPidOwnership.NotOwned;
@@ -161,7 +166,8 @@ export async function ensureDaemon(): Promise<void> {
         const current = await probeGateway();
         if (
           current?.kind === "reachable" && current.health.pid !== existing.health.pid &&
-          current.health.fingerprint === expected && !current.health.stale && current.ready.ready
+          (!takeOver || current.health.repoRoot === repoRoot) && current.health.fingerprint === expected &&
+          !current.health.stale && current.ready.ready
         ) return;
         if (current?.kind !== "reachable" && await loopbackPortIsFree(existing.info.port)) {
           released = true;
@@ -179,11 +185,17 @@ export async function ensureDaemon(): Promise<void> {
 
   if (!startRequested) await startDaemonProcess();
 
-  let gateway;
+  let serving: string | undefined;
   for (let attempt = 0; attempt < 40; attempt++) {
-    gateway = await connectGateway();
-    if (gateway) { gateway.close(); return; }
+    const gateway = await connectGateway();
+    if (gateway) {
+      serving = takeOver ? (await gateway.health()).repoRoot : repoRoot;
+      gateway.close();
+      if (serving === repoRoot) return;
+    }
     await sleep(125);
   }
-  throw new Error(`Owner Operator daemon did not become ready; inspect ${daemonLogPath()}`);
+  throw new Error(serving
+    ? `Owner Operator daemon still serves ${serving}, not ${repoRoot}; inspect ${daemonLogPath()}`
+    : `Owner Operator daemon did not become ready; inspect ${daemonLogPath()}`);
 }
