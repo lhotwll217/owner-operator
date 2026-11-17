@@ -10,17 +10,19 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 OO_HOME="${OO_HOME:-$HOME/.owner-operator}"
 
-# One install at a time, so the services and the global oo always land on the same commit. The
-# kernel releases the lock if a run dies.
+# One install at a time per user, whatever OO_HOME, because every install rewrites the same
+# LaunchAgents and global oo. The kernel releases the lock if a run dies.
 if [ -z "${OO_RUNTIME_INSTALL_LOCKED:-}" ]; then
-  mkdir -p "$OO_HOME/runtime"
-  OO_RUNTIME_INSTALL_LOCKED=1 exec lockf -k "$OO_HOME/runtime/.install.lock" "$0" "$@"
+  LOCK="/tmp/owner-operator-install-$(id -u).lock"
+  if command -v lockf >/dev/null; then LOCKER=(lockf -k "$LOCK"); else LOCKER=(flock "$LOCK"); fi
+  OO_RUNTIME_INSTALL_LOCKED=1 exec "${LOCKER[@]}" "$0" "$@"
 fi
 
 if [ "$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" = "$SRC" ]; then
   COMMIT="$(git -C "$SRC" rev-parse --verify "${1:-HEAD}^{commit}")"
   RUNTIME="$OO_HOME/runtime/$COMMIT"
   if [ ! -d "$RUNTIME" ]; then
+    mkdir -p "$OO_HOME/runtime"
     STAGE="$OO_HOME/runtime/.partial-$COMMIT"
     rm -rf "$STAGE" && mkdir "$STAGE"
     git -C "$SRC" archive "$COMMIT" | tar -x -C "$STAGE"

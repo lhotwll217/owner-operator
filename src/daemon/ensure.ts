@@ -45,8 +45,10 @@ async function launchdPidOwnership(pid: number): Promise<LaunchdPidOwnership> {
       { encoding: "utf8" },
     );
     const reportedPid = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(stdout)?.[1];
-    if (!reportedPid) return LaunchdPidOwnership.Unknown;
-    return Number(reportedPid) === pid ? LaunchdPidOwnership.Owned : LaunchdPidOwnership.NotOwned;
+    if (reportedPid) return Number(reportedPid) === pid ? LaunchdPidOwnership.Owned : LaunchdPidOwnership.NotOwned;
+    // A loaded job that is not running, such as one that lost the port to a detached daemon, owns no PID.
+    const state = /^\s*state\s*=\s*(.+?)\s*$/m.exec(stdout)?.[1];
+    return state !== undefined && state !== "running" ? LaunchdPidOwnership.NotOwned : LaunchdPidOwnership.Unknown;
   } catch (error) {
     const code = (error as Error & { code?: string | number }).code;
     return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code)
@@ -164,7 +166,7 @@ export async function ensureDaemon({ takeOver = false }: { takeOver?: boolean } 
         const current = await probeGateway();
         if (
           current?.kind === "reachable" && current.health.pid !== existing.health.pid &&
-          current.health.repoRoot === repoRoot && current.health.fingerprint === expected &&
+          (!takeOver || current.health.repoRoot === repoRoot) && current.health.fingerprint === expected &&
           !current.health.stale && current.ready.ready
         ) return;
         if (current?.kind !== "reachable" && await loopbackPortIsFree(existing.info.port)) {

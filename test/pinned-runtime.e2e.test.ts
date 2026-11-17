@@ -34,14 +34,16 @@ const stub = (name: string, body: string): void => {
   writeFileSync(join(bin, name), body);
   chmodSync(join(bin, name), 0o755);
 };
-// launchd stand-in: it owns only the process it started; kickstart -k replaces that process with
-// whatever the installed plist names, and unload stops it.
+// launchd stand-in: it owns only the process it started, and a loaded job whose process exited prints
+// `state = not running` as launchctl does. kickstart -k replaces the process with whatever the
+// installed plist names; unload stops it.
 stub("launchctl", `#!/usr/bin/env node
 const { appendFileSync, closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
 const jobFile = process.env.OO_TEST_JOB_PID;
+const loadedFile = jobFile + ".loaded";
 appendFileSync(process.env.OO_TEST_LAUNCH_LOG, args.join(" ") + "\\n");
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const job = () => { const pid = existsSync(jobFile) ? Number(readFileSync(jobFile, "utf8")) : 0; return pid && alive(pid) ? pid : 0; };
@@ -52,9 +54,16 @@ const stop = () => {
   while (pid && alive(pid) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   rmSync(jobFile, { force: true });
 };
-if (args[0] === "print") { const pid = job(); if (pid) process.stdout.write("\\tpid = " + pid + "\\n"); process.exit(pid ? 0 : 113); }
-if (args[0] === "unload") stop();
+if (args[0] === "print") {
+  if (!existsSync(loadedFile)) process.exit(113);
+  const pid = job();
+  process.stdout.write(pid ? "\\tstate = running\\n\\tpid = " + pid + "\\n" : "\\tstate = not running\\n");
+  process.exit(0);
+}
+if (args[0] === "load" || args[0] === "bootstrap") writeFileSync(loadedFile, "");
+if (args[0] === "unload") { stop(); rmSync(loadedFile, { force: true }); }
 if (args[0] !== "kickstart") process.exit(0);
+if (!existsSync(loadedFile)) process.exit(113);
 stop();
 const plist = readFileSync(join(process.env.HOME, "Library/LaunchAgents/com.owner-operator.daemon.plist"), "utf8");
 const argv = [.../<key>ProgramArguments<\\/key>\\s*<array>([\\s\\S]*?)<\\/array>/.exec(plist)[1].matchAll(/<string>(.*?)<\\/string>/g)].map((m) => m[1]);
