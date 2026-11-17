@@ -245,7 +245,7 @@ export async function runSessionStateWidgetProof(options: {
     assert.equal(updated.find((r) => r.id === "first-message")?.topic, "Pinned invoice export");
     assert.notEqual(updated.find((r) => r.id === "first-message")?.statusSummary, after.find((r) => r.id === "first-message")?.statusSummary);
     await nativeProof("working-update", updated);
-    const childAt = new Date(Date.now() + 1_000).toISOString();
+    const childAt = new Date().toISOString();
     transcript("child", "Review CSV escaping in the export.", "CSV escaping verified for embedded commas, quotes, and newlines. All checks passed. No findings or owner decision.", childAt);
     await api("/poll", {});
     await waitFor(() => daemon!.state.listEnrichmentCandidates().length === 0, live ? 90_000 : 10_000, "child-only progress refreshes parent summary");
