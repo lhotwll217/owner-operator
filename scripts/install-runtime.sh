@@ -37,12 +37,16 @@ else
   exit 2
 fi
 
-# Link the global oo, then point the LaunchAgents at the runtime. If that fails, put the previous
-# global oo back so both stay on the previous install.
+# Link the global oo, then point the LaunchAgents at the runtime. The daemon LaunchAgent is the
+# commit point: launchd and every oo client start the daemon from it. If the helper fails before
+# writing it, put the previous global oo back; once it names this runtime, finish the switch.
 GLOBAL="$(npm root -g)/owner-operator"
-if [ -L "$GLOBAL" ]; then PREVIOUS="$(cd "$GLOBAL" && pwd -P)"; elif [ -e "$GLOBAL" ]; then PREVIOUS=unknown; else PREVIOUS=none; fi
+if [ -L "$GLOBAL" ]; then PREVIOUS="$(cd "$GLOBAL" 2>/dev/null && pwd -P || echo none)"
+elif [ -e "$GLOBAL" ]; then PREVIOUS=unknown; else PREVIOUS=none; fi
 npm install -g --ignore-scripts --no-audit --no-fund "$RUNTIME"
-if ! OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh"; then
+ACTIVATED=1
+OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh" || ACTIVATED=0
+if [ "$ACTIVATED" = 0 ] && ! grep -qF "<string>$RUNTIME/oo</string>" "$HOME/Library/LaunchAgents/com.owner-operator.daemon.plist" 2>/dev/null; then
   case "$PREVIOUS" in
     none) npm uninstall -g owner-operator ;;
     unknown) echo "install-runtime: global oo now points at $RUNTIME; rerun to finish" >&2 ;;
@@ -51,4 +55,5 @@ if ! OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh"; then
   exit 1
 fi
 OO_HOME="$OO_HOME" node --import "$RUNTIME/node_modules/tsx/dist/loader.mjs" "$RUNTIME/scripts/take-over-daemon.ts"
+[ "$ACTIVATED" = 1 ] || { echo "install-runtime: the LaunchAgents did not all load; the daemon runs from $RUNTIME, rerun to finish" >&2; exit 1; }
 echo "Owner Operator now runs from $RUNTIME"

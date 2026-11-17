@@ -60,6 +60,7 @@ if (args[0] === "print") {
   process.stdout.write(pid ? "\\tstate = running\\n\\tpid = " + pid + "\\n" : "\\tstate = not running\\n");
   process.exit(0);
 }
+if (args[0] === "load" && process.env.OO_TEST_DAEMON_LOAD_FAILS && args[1].includes("daemon")) process.exit(5);
 if (args[0] === "load" || args[0] === "bootstrap") writeFileSync(loadedFile, "");
 if (args[0] === "unload") { stop(); rmSync(loadedFile, { force: true }); }
 if (args[0] !== "kickstart") process.exit(0);
@@ -152,6 +153,8 @@ try {
   assert.notEqual(installer(broken).status, 0, "a checkout whose Git metadata is broken is never installed");
   assert.equal(existsSync(daemonPlist), false, "a broken checkout leaves the LaunchAgents unchanged");
 
+  mkdirSync(join(prefix, "lib", "node_modules"), { recursive: true });
+  symlinkSync(join(root, "deleted-checkout"), join(prefix, "lib", "node_modules", "owner-operator"));
   const install = installer(dev);
   assert.equal(install.status, 0, `install-runtime.sh failed:\n${install.stdout}\n${install.stderr}`);
   const plist = readFileSync(daemonPlist, "utf8");
@@ -189,6 +192,15 @@ try {
 
   appendFileSync(join(runtime, "src", "daemon", "ensure.ts"), "\n// edited in place\n");
   await waitFor(() => !alive(before.pid), 10_000, "an edit inside the runtime itself retires the daemon");
+
+
+  const upgrade = join(ooHome, "runtime", git("rev-parse", "HEAD"));
+  assert.notEqual(installer(dev, "OO_TEST_DAEMON_LOAD_FAILS").status, 0, "a failed LaunchAgent load fails the install");
+  assert.ok(readFileSync(daemonPlist, "utf8").includes(`<string>${upgrade}/oo</string>`), "the LaunchAgent names the upgrade");
+  assert.equal(globalRoot(), upgrade, "once the LaunchAgent names the upgrade, the global oo follows it");
+  const recovered = await health();
+  pids.push(recovered.pid);
+  assert.equal(recovered.repoRoot, upgrade, "once the LaunchAgent names the upgrade, its daemon serves");
 
   console.log("ok — dev checkout changes never change or restart the pinned daemon");
 } finally {

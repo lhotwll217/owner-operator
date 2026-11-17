@@ -70,8 +70,8 @@ identity or credential changed. SSE subscriptions reread `daemon.json` before re
 
 [`scripts/install-runtime.sh [<git-ref>]`](../scripts/install-runtime.sh) installs one commit
 (default `HEAD`; uncommitted changes are not included) into `$OO_HOME/runtime/<commit>` with
-`git archive` and `npm ci`. It then writes the daemon and widget LaunchAgents to run that copy,
-links the global `oo` to the copy with `npm install -g`, and takes over the daemon. Taking over
+`git archive` and `npm ci`. It then links the global `oo` to the copy with `npm install -g`,
+writes the daemon and widget LaunchAgents to run that copy, and takes over the daemon. Taking over
 replaces whichever daemon serves, including a detached one started from a checkout before
 installation, and the install fails unless `/health` then reports the copy as its `repoRoot`. Onboarding's always-on step and `make install` in `apps/widget` both run it.
 
@@ -82,7 +82,12 @@ login restarts the same copy. Only a deliberate rerun changes the live code.
 To upgrade, rerun the script with the new ref, for example `scripts/install-runtime.sh origin/main`
 after `git fetch`. Rerunning a commit that is already installed only rewrites the services. Older
 copies stay on disk until you delete them; delete one only when no LaunchAgent or global `oo`
-points at it. Installs run one at a time, and a crashed install's `.partial-<commit>` directory is
-replaced by the next install of that commit.
+points at it. Installs run one at a time, and the next install deletes a crashed install's `.partial-*`
+staging directory.
+
+The daemon LaunchAgent is the commit point, because launchd and every `oo` client start the
+daemon from it. If writing the LaunchAgents fails before the daemon LaunchAgent names the copy,
+the install puts the previous global `oo` back. Once it names the copy, the install still starts
+that copy's daemon and keeps the new global `oo`, then exits non-zero so you rerun it to finish.
 
 The widget itself is a pure Gateway client ([widget.md](widget.md)).
