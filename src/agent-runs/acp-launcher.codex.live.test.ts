@@ -43,6 +43,7 @@ if (process.env.OO_CODEX_ACP_LIVE_WORKER === "1") {
     resumeOfRunId: null,
     completionRunIds: [],
     timeoutSeconds: 180,
+    origin: null,
   };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(new Error("Codex live acceptance timed out")), 180_000);

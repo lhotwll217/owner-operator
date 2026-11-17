@@ -150,6 +150,8 @@ export interface AgentRunCreateInput {
   cwd: string;
   /** Owner Operator thread id of the delegating session, when known. */
   parentThreadId?: string | null;
+  /** Free-form name of the outside caller that started the run, such as `grok-bot`. */
+  origin?: string | null;
   /** Model the child should run, when the owner pins one; null lets the harness pick. */
   model?: string | null;
   /** Reasoning effort requested for the child; omission uses the baseline, explicit null clears it. */
@@ -222,6 +224,8 @@ export interface AgentRun {
   /** Terminal child run IDs carried by this follow-up; promptSubmitted confirms delivery. */
   completionRunIds: string[];
   timeoutSeconds: number;
+  /** Outside caller that started the run, normalized at launch; null for an ordinary delegation. */
+  origin: string | null;
 }
 
 /** Explicit runtime intent derived from the two semantic run relationships. A retry with no

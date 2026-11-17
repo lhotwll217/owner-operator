@@ -369,6 +369,7 @@ struct RowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     title
+                    if let origin = row.origin { OriginPill(origin: origin) }
                     statusSummaryDisclosure
                 }
                 if !isChild {
@@ -531,6 +532,27 @@ struct RowView: View {
     }
 }
 
+/// Who started a run from off this Mac: the caller's mark in a capsule, its name on hover. A
+/// caller with no bundled mark shows its name instead.
+struct OriginPill: View {
+    let origin: String
+
+    var body: some View {
+        Group {
+            if let mark = AppBadge.mark(forOrigin: origin) {
+                Image(nsImage: mark.image).renderingMode(mark.template ? .template : .original)
+            } else {
+                Text(origin).font(.system(size: 10.5))
+            }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(Capsule().fill(Color.primary.opacity(0.08)))
+        .fixedSize()
+        .help("Started by \(origin)")
+    }
+}
+
 /// A 24pt icon button, the mock's hover action.
 struct IconButton: View {
     let systemName: String
@@ -589,6 +611,12 @@ struct AppBadge: View {
         let m = (img, hit.template)
         cache[hit.resource] = m
         return m
+    }
+
+    /// A delegation origin is free-form (`grok-bot`), so it matches a mark by its resource name.
+    static func mark(forOrigin origin: String) -> (image: NSImage, template: Bool)? {
+        let name = origin.lowercased()
+        return logos.first(where: { name.hasPrefix($0.resource) }).flatMap { mark(for: $0.prefix) }
     }
 
     /// The mark as a `Text`-inline image, nudged down to sit optically centered on the line.

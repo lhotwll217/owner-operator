@@ -133,6 +133,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "resume_of_run_id", description: "Exact terminal run after which this row sends a required new task. Resume requires a reloadable saved child conversation and is mutually exclusive with retry_of_run_id." },
       { name: "completion_run_ids", description: "JSON array of terminal child run IDs carried by this follow-up. prompt_submitted confirms delivery; pending rows retain the scheduled evidence without acknowledging it." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
+      { name: "origin", description: "Free-form name of the outside caller that started the run, such as grok-bot; NULL for an ordinary delegation. A run with an origin shows as a top-level session-state row. Retry and resume copy it." },
     ],
   },
   {

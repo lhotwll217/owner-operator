@@ -94,6 +94,8 @@ struct SessionStateRow: Decodable, Identifiable {
     let diffAdded: Int?
     let diffDeleted: Int?
     let parentThreadId: String?
+    /// Outside caller that started this session's run, such as `grok-bot`.
+    let origin: String?
     let section: SessionSection
     let depth: Int
     let snooze: Snooze?
@@ -104,7 +106,7 @@ struct SessionStateRow: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, source, repo, project, app, topic, generatedTopic, ownerTitle, statusSummary
         case state, lastActive, lastActiveAt, createdAt, lastMessageAt, stateSince
-        case diffAdded, diffDeleted, parentThreadId, section, depth, snooze, link
+        case diffAdded, diffDeleted, parentThreadId, origin, section, depth, snooze, link
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +130,7 @@ struct SessionStateRow: Decodable, Identifiable {
         diffAdded = try? c.decode(Int.self, forKey: .diffAdded)
         diffDeleted = try? c.decode(Int.self, forKey: .diffDeleted)
         parentThreadId = try? c.decode(String.self, forKey: .parentThreadId)
+        origin = try? c.decode(String.self, forKey: .origin)
         section = SessionSection(rawValue: (try? c.decode(String.self, forKey: .section)) ?? "") ?? .idle
         depth = max(0, (try? c.decode(Int.self, forKey: .depth)) ?? 0)
         snooze = (try? c.decode(Snooze.Wire.self, forKey: .snooze)).flatMap(Snooze.init(wire:))

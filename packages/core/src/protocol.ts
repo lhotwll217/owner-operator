@@ -69,6 +69,9 @@ export interface SessionStateRow {
   diffDeleted: number | null;
   /** Set when this thread is a delegated run's child session: the delegating thread's id. */
   parentThreadId: string | null;
+  /** Outside caller that started this session's delegated run, such as `grok-bot`. A row with an
+   * origin is a root even when its run names a parent. */
+  origin: string | null;
   /** Display section. Rows arrive in display order; a child carries its parent's section. */
   section: SessionSection;
   /** Nesting under a visible delegated parent; 0 for a root. */

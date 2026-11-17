@@ -140,6 +140,7 @@ export const runs: Noun = {
         cwd: { type: "string", help: "child working directory (default: the parent session's selected worktree, else the current directory)" },
         timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },
         "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
+        origin: { type: "string", help: "outside caller that started the run, such as grok-bot; the run shows as its own row with that caller's mark" },
         "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default for agent callers)" },
       },
       examples: [
@@ -171,6 +172,7 @@ export const runs: Noun = {
           ...(typeof values.model === "string" ? { model: values.model } : {}),
           ...(effort !== undefined ? { effort } : {}),
           ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+          ...(typeof values.origin === "string" ? { origin: values.origin } : {}),
           onMissingBaseline: agentCaller() ? AgentRunMissingBaseline.Ask : AgentRunMissingBaseline.HarnessChoice,
         });
         if (values["no-wait"] || agentCaller()) {

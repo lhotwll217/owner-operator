@@ -155,6 +155,8 @@ export class AgentRunExecutor {
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > MAX_AGENT_RUN_TIMEOUT_SECONDS) {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
     }
+    const origin = input.origin == null ? null : typeof input.origin === "string" ? input.origin.trim() : "";
+    if (origin === "") throw new Error("delegation origin must be a non-empty string");
     const depth = this.depthFor(input.parentThreadId ?? null);
     if (depth > AGENT_RUN_MAX_DEPTH) {
       throw new Error(`delegation depth ${depth} exceeds the cap of ${AGENT_RUN_MAX_DEPTH}`);
@@ -173,6 +175,7 @@ export class AgentRunExecutor {
       effort: launch.effort,
       depth,
       timeoutSeconds,
+      origin,
     });
     this.pump();
     return run;
