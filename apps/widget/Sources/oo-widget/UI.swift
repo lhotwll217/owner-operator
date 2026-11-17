@@ -359,7 +359,8 @@ struct RowView: View {
     static let titleInset = SectionInset.text + badgeSize + badgeGap
 
     private var isChild: Bool { row.depth > 0 }
-    private var showActions: Bool { hovering && !isChild && !editing }
+    private var hasActions: Bool { !isChild && !row.awaitingTranscript }
+    private var showActions: Bool { hovering && hasActions && !editing }
 
     var body: some View {
         HStack(alignment: .top, spacing: Self.badgeGap) {
@@ -369,6 +370,7 @@ struct RowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     title
+                    if let origin = row.origin { OriginPill(origin: origin) }
                     statusSummaryDisclosure
                 }
                 if !isChild {
@@ -391,9 +393,11 @@ struct RowView: View {
         .onHover { hovering = $0 }
         .help(row.link == nil ? "" : "Open in \(row.app)")
         .contextMenu {
-            Button("Rename…") { startEditing() }
-            if row.isRenamed {
-                Button("Use AI title") { onRename("") }
+            if !row.awaitingTranscript {
+                Button("Rename…") { startEditing() }
+                if row.isRenamed {
+                    Button("Use AI title") { onRename("") }
+                }
             }
         }
     }
@@ -469,7 +473,7 @@ struct RowView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .opacity(showActions ? 0 : 1)
-            if !isChild {
+            if hasActions {
                 actions.opacity(showActions ? 1 : 0).allowsHitTesting(showActions)
             }
         }
@@ -531,6 +535,27 @@ struct RowView: View {
     }
 }
 
+/// Who started a run from off this Mac: the caller's mark in a capsule, its name on hover. A
+/// caller with no bundled mark gets a generic one, so the pill never shows text.
+struct OriginPill: View {
+    let origin: String
+
+    var body: some View {
+        Group {
+            if let mark = AppBadge.mark(forOrigin: origin) {
+                Image(nsImage: mark.image).renderingMode(mark.template ? .template : .original)
+            } else {
+                Image(systemName: "globe").font(.system(size: 10))
+            }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(Capsule().fill(Color.primary.opacity(0.08)))
+        .fixedSize()
+        .help("Started by \(origin)")
+    }
+}
+
 /// A 24pt icon button, the mock's hover action.
 struct IconButton: View {
     let systemName: String
@@ -589,6 +614,12 @@ struct AppBadge: View {
         let m = (img, hit.template)
         cache[hit.resource] = m
         return m
+    }
+
+    /// A delegation origin is free-form (`grok-bot`), so it matches a mark by its resource name.
+    static func mark(forOrigin origin: String) -> (image: NSImage, template: Bool)? {
+        let name = origin.lowercased()
+        return logos.first(where: { name.hasPrefix($0.resource) }).flatMap { mark(for: $0.prefix) }
     }
 
     /// The mark as a `Text`-inline image, nudged down to sit optically centered on the line.

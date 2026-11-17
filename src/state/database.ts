@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   AGENT_RUN_EFFORTS,
@@ -107,11 +107,19 @@ const CHILD_RUN_FINISHED_SQL = `(EXISTS (
   SELECT MAX(${AGENT_RUN_WORK_ENDED_SQL}) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
 ) AND t.id NOT IN ${THREADS_ABOVE_LIVE_RUN_SQL})`;
 
+/** The session is the child of a live run an outside caller started. The ledger, not the
+ * transcript, knows that run is still going. */
+const HAS_ACTIVE_ORIGIN_RUN_SQL = `EXISTS (
+  SELECT 1 FROM agent_runs origin_run
+  WHERE origin_run.child_session_id = t.id AND origin_run.origin IS NOT NULL
+    AND origin_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
+)`;
+
 /** A live child outranks the finished run that issued this thread, so Done never hides delegated
  * work still in flight. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
-  WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  WHEN ${HAS_ACTIVE_CHILD_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} THEN 'working'
   WHEN ${CHILD_RUN_FINISHED_SQL} THEN 'done'
   ELSE detail.state
 END`;
@@ -320,6 +328,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   resume_of_run_id TEXT REFERENCES agent_runs(id),
   completion_run_ids TEXT NOT NULL DEFAULT '[]',
   timeout_seconds INTEGER NOT NULL,
+  origin TEXT,
   CHECK (retry_of_run_id IS NULL OR resume_of_run_id IS NULL)
 );
 
@@ -382,7 +391,7 @@ const AGENT_RUN_COLUMNS = `
   acpx_record_id AS acpxRecordId, prompt_submitted AS promptSubmitted, result_tail AS resultTail, error,
   retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, completion_run_ids AS completionRunIds,
-  timeout_seconds AS timeoutSeconds`;
+  timeout_seconds AS timeoutSeconds, origin`;
 
 /** A sweep that failed part way; `committed` lists the runs it had already finalized. */
 export class PartialAgentRunSweepError extends Error {
@@ -413,7 +422,10 @@ export interface AgentRunInsert {
   completionRunIds?: readonly string[];
   childSessionId?: string | null;
   acpxRecordId?: string | null;
+  origin?: string | null;
 }
+
+type UnindexedOriginRun = Pick<AgentRun, "id" | "harness" | "task" | "cwd" | "createdAt" | "childSessionId"> & { origin: string };
 
 type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted" | "completionRunIds"> & {
   completionRunIds: string;
@@ -467,6 +479,7 @@ export class ThreadDb {
     this.migrateAgentRunEffort();
     this.migrateAgentRunPromptSubmission();
     this.migrateAgentRunCompletionReceipts();
+    this.migrateAgentRunOrigin();
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
     this.migrateThreadLink();
@@ -565,6 +578,13 @@ export class ThreadDb {
     const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
     if (!columns.some(({ name }) => name === "completion_run_ids")) {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN completion_run_ids TEXT NOT NULL DEFAULT '[]'");
+    }
+  }
+
+  private migrateAgentRunOrigin(): void {
+    const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "origin")) {
+      this.db.exec("ALTER TABLE agent_runs ADD COLUMN origin TEXT");
     }
   }
 
@@ -955,7 +975,7 @@ export class ThreadDb {
     const where = options.activeSince
       ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
            AND (t.last_active_at >= $since OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
-             OR ${HAS_ACTIVE_CHILD_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
+             OR ${HAS_ACTIVE_CHILD_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source,
@@ -978,6 +998,8 @@ export class ThreadDb {
               (SELECT run.parent_thread_id FROM agent_runs run
                 WHERE run.child_session_id = t.id AND run.parent_thread_id IS NOT NULL
                 ORDER BY run.created_at DESC LIMIT 1) AS parentThreadId,
+              (SELECT run.origin FROM agent_runs run WHERE run.child_session_id = t.id
+                ORDER BY run.created_at DESC LIMIT 1) AS origin,
               ${SNOOZE_HOLDS_SQL} AS snoozeHolds, t.snoozed_until AS snoozedUntil, t.link AS link
        FROM threads t JOIN thread_details detail ON detail.thread_id = t.id
         AND detail.version = (SELECT MAX(version) FROM thread_details WHERE thread_id = t.id)
@@ -994,18 +1016,60 @@ export class ThreadDb {
         snoozedUntil: string | null;
       }>;
     const nowMs = Date.parse(now);
-    return arrangeSessionState(rows
-      // Generated/owner titles are deliberate user-facing labels. Apply the legacy
-      // transport-noise classifier only to raw topics; its broad scan-time patterns must
-      // never hide a real title produced after inspecting the conversation.
-      .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
-      .map(({ snoozeHolds, snoozedUntil, ...row }) => ({
-        ...row,
-        statusSummaryPending: Boolean(row.statusSummaryPending),
-        lastActive: row.lastMessageAt ? formatRelative((nowMs - Date.parse(row.lastMessageAt)) / 1000) : "",
-        snooze: !snoozeHolds ? null
-          : snoozedUntil ? { kind: "until" as const, until: snoozedUntil } : { kind: "next-message" as const },
-      })));
+    const ago = (at: string): string => formatRelative((nowMs - Date.parse(at)) / 1000);
+    return arrangeSessionState([
+      ...rows
+        // Generated/owner titles are deliberate user-facing labels. Apply the legacy
+        // transport-noise classifier only to raw topics; its broad scan-time patterns must
+        // never hide a real title produced after inspecting the conversation.
+        .filter((row) => row.ownerTitle != null || row.generatedTopic.trim() || !isSessionBoilerplate(row.topic))
+        .map(({ snoozeHolds, snoozedUntil, ...row }) => ({
+          ...row,
+          parentThreadId: row.origin ? null : row.parentThreadId,
+          awaitingTranscript: false,
+          statusSummaryPending: Boolean(row.statusSummaryPending),
+          lastActive: row.lastMessageAt ? ago(row.lastMessageAt) : "",
+          snooze: !snoozeHolds ? null
+            : snoozedUntil ? { kind: "until" as const, until: snoozedUntil } : { kind: "next-message" as const },
+        })),
+      ...this.unindexedOriginRuns().map((run) => ({
+        id: run.childSessionId ?? run.id,
+        source: run.harness,
+        repo: basename(run.cwd),
+        project: run.cwd,
+        app: "Owner Operator",
+        topic: run.task,
+        generatedTopic: "",
+        ownerTitle: null,
+        statusSummary: null,
+        statusSummaryPending: false,
+        state: "working" as const,
+        stateSince: run.createdAt,
+        lastActive: ago(run.createdAt),
+        lastActiveAt: run.createdAt,
+        createdAt: run.createdAt,
+        lastMessageAt: null,
+        diffAdded: null,
+        diffDeleted: null,
+        parentThreadId: null,
+        origin: run.origin,
+        awaitingTranscript: true,
+        snooze: null,
+        link: null,
+      })),
+    ]);
+  }
+
+  /** Live runs started by an outside caller whose child session has no indexed thread yet. The
+   * owner sees who started them before the first transcript scan. */
+  private unindexedOriginRuns(): UnindexedOriginRun[] {
+    return this.db.prepare(
+      `SELECT id, harness, task, cwd, created_at AS createdAt, child_session_id AS childSessionId, origin
+       FROM agent_runs run
+       WHERE origin IS NOT NULL AND status IN ('pending', 'running')
+         AND (child_session_id IS NULL OR NOT EXISTS (SELECT 1 FROM threads WHERE id = run.child_session_id))
+       ORDER BY id`,
+    ).all() as unknown as UnindexedOriginRun[];
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
@@ -1274,14 +1338,15 @@ export class ThreadDb {
     this.db.prepare(
       `INSERT INTO agent_runs (
          id, harness, task, cwd, parent_thread_id, model, effort, depth, status, created_at,
-         child_session_id, acpx_record_id, retry_of_run_id, resume_of_run_id, completion_run_ids, timeout_seconds
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         child_session_id, acpx_record_id, retry_of_run_id, resume_of_run_id, completion_run_ids, timeout_seconds,
+         origin
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
       insert.model ?? null, insert.effort ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
       insert.childSessionId ?? null, insert.acpxRecordId ?? null,
       insert.retryOfRunId ?? null, insert.resumeOfRunId ?? null,
-      JSON.stringify(insert.completionRunIds ?? []), insert.timeoutSeconds,
+      JSON.stringify(insert.completionRunIds ?? []), insert.timeoutSeconds, insert.origin ?? null,
     );
     return this.agentRunById(insert.id)!;
   }

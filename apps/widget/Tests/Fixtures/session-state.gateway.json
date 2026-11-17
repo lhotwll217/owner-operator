@@ -19,6 +19,8 @@
     "diffAdded": null,
     "diffDeleted": null,
     "parentThreadId": null,
+    "origin": null,
+    "awaitingTranscript": false,
     "section": "needs-you",
     "depth": 0,
     "snooze": null,

@@ -70,6 +70,8 @@ try {
     monitor: { scan: async () => [], intervalMs: 60_000 },
     scheduler: { tickMs: 60_000 },
     agentRuns: { launcher, tickMs: 50 },
+    // The parent sessions this test names stand for local transcripts the daemon has not indexed.
+    transcriptExists: async (id) => ["parent-flag", "parent-codex", "operator-session", "acp-parent"].includes(id),
   });
   const state = daemon.state;
 

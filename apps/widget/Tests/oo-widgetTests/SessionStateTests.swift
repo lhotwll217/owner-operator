@@ -145,6 +145,20 @@ struct SessionStateTests {
         #expect(fallback.project == "/tasks/issue-132")
     }
 
+    @Test func originNamesTheCallerWithItsMark() throws {
+        var started = row(id: "remote", state: "working")
+        started["origin"] = "grok-bot"
+        started["awaitingTranscript"] = true
+        let decoded = try rows([started, row(id: "local", state: "working")])
+        #expect(decoded[0].origin == "grok-bot")
+        #expect(decoded[0].awaitingTranscript)
+        #expect(decoded[1].origin == nil)
+        #expect(!decoded[1].awaitingTranscript)
+        #expect(AppBadge.mark(forOrigin: "grok-bot") != nil)
+        #expect(AppBadge.mark(forOrigin: "grok-bot")?.image === AppBadge.mark(for: "Grok Build")?.image)
+        #expect(AppBadge.mark(forOrigin: "mystery-bot") == nil)
+    }
+
     @Test func newFieldsDecodeLeniently() throws {
         var unknown = row(id: "unknown", state: "working", section: "elsewhere", link: "not a url")
         unknown["depth"] = "deep"

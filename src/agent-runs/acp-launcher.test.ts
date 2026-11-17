@@ -148,6 +148,7 @@ const run: AgentRun = {
   resumeOfRunId: null,
   completionRunIds: [],
   timeoutSeconds: 3_600,
+  origin: null,
 };
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-acp-launcher-"));

@@ -16,7 +16,7 @@ import {
 } from "@owner-operator/core/agent-state";
 import { ownerOperatorHome } from "../shared/paths";
 
-type Inherited = Pick<AgentRun, "harness" | "cwd" | "parentThreadId" | "model" | "effort" | "depth" | "timeoutSeconds">;
+type Inherited = Pick<AgentRun, "harness" | "cwd" | "parentThreadId" | "model" | "effort" | "depth" | "timeoutSeconds" | "origin">;
 
 /** A Retry successor is fully determined by its predecessor: same task, same carried completions. */
 export type RetrySuccessor = Inherited & {
@@ -169,6 +169,7 @@ const inherited = (run: AgentRun): Inherited => ({
   effort: run.effort,
   depth: run.depth,
   timeoutSeconds: run.timeoutSeconds,
+  origin: run.origin,
 });
 
 const cannotLoad = (run: AgentRun): string => `harness ${run.harness} does not support loading an existing session`;
