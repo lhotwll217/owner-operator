@@ -16,26 +16,39 @@ OO_HOME="${OO_HOME:-$HOME/.owner-operator}"
 exec 9>"/tmp/owner-operator-install-$(id -u).lock"
 perl -MFcntl=:flock -e 'open(my $lock, ">&=9") or die "install-runtime: $!\n"; flock($lock, LOCK_EX) or die "install-runtime: $!\n"'
 
-if [ "$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" = "$SRC" ]; then
+if [ "$(dirname "$SRC")" = "$(cd "$OO_HOME/runtime" 2>/dev/null && pwd -P)" ]; then
+  [ "$#" -eq 0 ] || { echo "install-runtime: <git-ref> needs a Git checkout; $SRC is an installed runtime" >&2; exit 2; }
+  RUNTIME="$SRC"
+elif [ "$(git -C "$SRC" rev-parse --show-toplevel)" = "$SRC" ]; then
   COMMIT="$(git -C "$SRC" rev-parse --verify "${1:-HEAD}^{commit}")"
   RUNTIME="$OO_HOME/runtime/$COMMIT"
   if [ ! -d "$RUNTIME" ]; then
+    # A fresh staging folder per run: a killed run's npm children can outlive the lock and keep
+    # writing into theirs.
+    rm -rf "$OO_HOME/runtime"/.partial-* || true
     mkdir -p "$OO_HOME/runtime"
-    STAGE="$OO_HOME/runtime/.partial-$COMMIT"
-    rm -rf "$STAGE" && mkdir "$STAGE"
+    STAGE="$(mktemp -d "$OO_HOME/runtime/.partial-$COMMIT.XXXXXX")"
     git -C "$SRC" archive "$COMMIT" | tar -x -C "$STAGE"
     (cd "$STAGE" && npm ci --no-audit --no-fund)
     mv "$STAGE" "$RUNTIME"
   fi
 else
-  [ "$#" -eq 0 ] || { echo "install-runtime: <git-ref> needs a Git checkout; $SRC is an installed runtime" >&2; exit 2; }
-  RUNTIME="$SRC"
+  echo "install-runtime: $SRC is neither a Git checkout nor an installed runtime" >&2
+  exit 2
 fi
 
-# Build before switching anything, then link the global oo before the LaunchAgents, so a failed
-# build or link leaves the previous install in place.
-(cd "$RUNTIME/apps/widget" && swift build -c release >/dev/null)
+# Link the global oo, then point the LaunchAgents at the runtime. If that fails, put the previous
+# global oo back so both stay on the previous install.
+GLOBAL="$(npm root -g)/owner-operator"
+if [ -L "$GLOBAL" ]; then PREVIOUS="$(cd "$GLOBAL" && pwd -P)"; elif [ -e "$GLOBAL" ]; then PREVIOUS=unknown; else PREVIOUS=none; fi
 npm install -g --ignore-scripts --no-audit --no-fund "$RUNTIME"
-OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh"
+if ! OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh"; then
+  case "$PREVIOUS" in
+    none) npm uninstall -g owner-operator ;;
+    unknown) echo "install-runtime: global oo now points at $RUNTIME; rerun to finish" >&2 ;;
+    *) npm install -g --ignore-scripts --no-audit --no-fund "$PREVIOUS" ;;
+  esac
+  exit 1
+fi
 OO_HOME="$OO_HOME" node --import "$RUNTIME/node_modules/tsx/dist/loader.mjs" "$RUNTIME/scripts/take-over-daemon.ts"
 echo "Owner Operator now runs from $RUNTIME"

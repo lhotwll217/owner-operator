@@ -74,7 +74,7 @@ child.unref();
 closeSync(log);
 writeFileSync(jobFile, String(child.pid));
 `);
-stub("swift", `#!/bin/sh\nmkdir -p .build/release && touch .build/release/oo-widget\n`);
+stub("swift", `#!/bin/sh\n[ -z "$OO_TEST_WIDGET_BUILD_FAILS" ] || exit 1\nmkdir -p .build/release && touch .build/release/oo-widget\n`);
 stub("pkill", "#!/bin/sh\nexit 1\n");
 // npm stand-in: `ci` links the repo's installed dependencies and stamps the lockfile like postinstall;
 // the global link runs real npm against a temporary prefix, or fails when OO_TEST_GLOBAL_LINK_FAILS is set.
@@ -134,19 +134,33 @@ try {
   assert.equal((await health()).repoRoot, dev, "before installation a detached daemon serves the dev checkout");
 
   const daemonPlist = join(home, "Library", "LaunchAgents", "com.owner-operator.daemon.plist");
-  const failed = spawnSync(join(dev, "scripts", "install-runtime.sh"), [], {
-    cwd: dev, env: { ...env, OO_TEST_GLOBAL_LINK_FAILS: "1" }, encoding: "utf8",
+  const installer = (cwd: string, failure?: string) => spawnSync(join(cwd, "scripts", "install-runtime.sh"), [], {
+    cwd, env: failure ? { ...env, [failure]: "1" } : env, encoding: "utf8",
   });
-  assert.notEqual(failed.status, 0, "a failed global link fails the install");
-  assert.equal(existsSync(daemonPlist), false, "a failed global link leaves the LaunchAgents unchanged");
-  assert.equal((await health()).repoRoot, dev, "a failed global link leaves the checkout's daemon serving");
+  const globalOo = join(prefix, "bin", "oo");
+  for (const failure of ["OO_TEST_GLOBAL_LINK_FAILS", "OO_TEST_WIDGET_BUILD_FAILS"]) {
+    assert.notEqual(installer(dev, failure).status, 0, `${failure}: the install fails`);
+    assert.equal(existsSync(daemonPlist), false, `${failure}: the LaunchAgents are unchanged`);
+    assert.equal(existsSync(globalOo), false, `${failure}: the global oo is unchanged`);
+    assert.equal((await health()).repoRoot, dev, `${failure}: the checkout's daemon keeps serving`);
+  }
 
-  const install = spawnSync(join(dev, "scripts", "install-runtime.sh"), [], { cwd: dev, env, encoding: "utf8" });
+  const broken = join(root, "broken");
+  execFileSync("cp", ["-R", dev, broken]);
+  rmSync(join(broken, ".git"), { recursive: true });
+  writeFileSync(join(broken, ".git"), `gitdir: ${join(root, "missing")}\n`);
+  assert.notEqual(installer(broken).status, 0, "a checkout whose Git metadata is broken is never installed");
+  assert.equal(existsSync(daemonPlist), false, "a broken checkout leaves the LaunchAgents unchanged");
+
+  const install = installer(dev);
   assert.equal(install.status, 0, `install-runtime.sh failed:\n${install.stdout}\n${install.stderr}`);
   const plist = readFileSync(daemonPlist, "utf8");
   assert.ok(plist.includes(`<string>${runtime}/oo</string>`), "the daemon LaunchAgent runs the pinned runtime");
-  const doctor = spawnSync(join(prefix, "bin", "oo"), ["doctor"], { cwd: root, env, encoding: "utf8" });
-  assert.ok(doctor.stdout.includes(`Install root: ${runtime}\n`), `the global oo runs the pinned runtime:\n${doctor.stdout}${doctor.stderr}`);
+  const globalRoot = (): string => {
+    const doctor = spawnSync(globalOo, ["doctor"], { cwd: root, env, encoding: "utf8" });
+    return /^Install root: (.*)$/m.exec(doctor.stdout)?.[1] ?? `${doctor.stdout}${doctor.stderr}`;
+  };
+  assert.equal(globalRoot(), runtime, "the global oo runs the pinned runtime");
 
   const before = await health();
   pids.push(before.pid);
@@ -167,6 +181,11 @@ try {
   assert.equal(after.pid, before.pid, "the pinned daemon keeps running across dev edits and branch switches");
   assert.equal(after.fingerprint, before.fingerprint, "the pinned daemon's code is unchanged");
   assert.equal(after.stale, false, "dev edits do not mark the pinned daemon stale");
+
+  assert.notEqual(installer(dev, "OO_TEST_WIDGET_BUILD_FAILS").status, 0, "a failed upgrade fails the install");
+  assert.equal(globalRoot(), runtime, "a failed upgrade puts the previous global oo back");
+  assert.ok(readFileSync(daemonPlist, "utf8").includes(`<string>${runtime}/oo</string>`), "a failed upgrade keeps the LaunchAgent");
+  assert.equal((await health()).pid, before.pid, "a failed upgrade keeps the pinned daemon serving");
 
   appendFileSync(join(runtime, "src", "daemon", "ensure.ts"), "\n// edited in place\n");
   await waitFor(() => !alive(before.pid), 10_000, "an edit inside the runtime itself retires the daemon");
