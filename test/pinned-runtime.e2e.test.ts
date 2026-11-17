@@ -77,8 +77,9 @@ writeFileSync(jobFile, String(child.pid));
 stub("swift", `#!/bin/sh\nmkdir -p .build/release && touch .build/release/oo-widget\n`);
 stub("pkill", "#!/bin/sh\nexit 1\n");
 // npm stand-in: `ci` links the repo's installed dependencies and stamps the lockfile like postinstall;
-// the global link runs real npm against a temporary prefix.
+// the global link runs real npm against a temporary prefix, or fails when OO_TEST_GLOBAL_LINK_FAILS is set.
 stub("npm", `#!/bin/sh
+[ "$1" != install ] || [ -z "$OO_TEST_GLOBAL_LINK_FAILS" ] || exit 1
 [ "$1" = ci ] || exec "$OO_TEST_REAL_NPM" "$@" --offline
 mkdir node_modules
 for entry in "$OO_TEST_NODE_MODULES"/* "$OO_TEST_NODE_MODULES"/.bin; do ln -s "$entry" node_modules/; done
@@ -115,7 +116,8 @@ const runtime = join(ooHome, "runtime", pinned);
 
 const health = async (): Promise<DaemonHealth> => {
   const info = JSON.parse(readFileSync(join(ooHome, "daemon.json"), "utf8")) as DaemonInfo;
-  const response = await fetch(`http://127.0.0.1:${info.port}/health`, { headers: { authorization: `Bearer ${info.authToken}` } });
+  // Each probe may reach a different daemon on the same port, so never reuse a pooled connection.
+  const response = await fetch(`http://127.0.0.1:${info.port}/health`, { headers: { authorization: `Bearer ${info.authToken}`, connection: "close" } });
   return await response.json() as DaemonHealth;
 };
 const alive = (pid: number): boolean => {
@@ -131,9 +133,17 @@ try {
   await waitFor(() => existsSync(join(ooHome, "daemon.json")), 30_000, "a checkout client's detached daemon starts");
   assert.equal((await health()).repoRoot, dev, "before installation a detached daemon serves the dev checkout");
 
+  const daemonPlist = join(home, "Library", "LaunchAgents", "com.owner-operator.daemon.plist");
+  const failed = spawnSync(join(dev, "scripts", "install-runtime.sh"), [], {
+    cwd: dev, env: { ...env, OO_TEST_GLOBAL_LINK_FAILS: "1" }, encoding: "utf8",
+  });
+  assert.notEqual(failed.status, 0, "a failed global link fails the install");
+  assert.equal(existsSync(daemonPlist), false, "a failed global link leaves the LaunchAgents unchanged");
+  assert.equal((await health()).repoRoot, dev, "a failed global link leaves the checkout's daemon serving");
+
   const install = spawnSync(join(dev, "scripts", "install-runtime.sh"), [], { cwd: dev, env, encoding: "utf8" });
   assert.equal(install.status, 0, `install-runtime.sh failed:\n${install.stdout}\n${install.stderr}`);
-  const plist = readFileSync(join(home, "Library", "LaunchAgents", "com.owner-operator.daemon.plist"), "utf8");
+  const plist = readFileSync(daemonPlist, "utf8");
   assert.ok(plist.includes(`<string>${runtime}/oo</string>`), "the daemon LaunchAgent runs the pinned runtime");
   const doctor = spawnSync(join(prefix, "bin", "oo"), ["doctor"], { cwd: root, env, encoding: "utf8" });
   assert.ok(doctor.stdout.includes(`Install root: ${runtime}\n`), `the global oo runs the pinned runtime:\n${doctor.stdout}${doctor.stderr}`);

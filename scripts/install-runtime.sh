@@ -11,12 +11,10 @@ SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 OO_HOME="${OO_HOME:-$HOME/.owner-operator}"
 
 # One install at a time per user, whatever OO_HOME, because every install rewrites the same
-# LaunchAgents and global oo. The kernel releases the lock if a run dies.
-if [ -z "${OO_RUNTIME_INSTALL_LOCKED:-}" ]; then
-  LOCK="/tmp/owner-operator-install-$(id -u).lock"
-  if command -v lockf >/dev/null; then LOCKER=(lockf -k "$LOCK"); else LOCKER=(flock "$LOCK"); fi
-  OO_RUNTIME_INSTALL_LOCKED=1 exec "${LOCKER[@]}" "$0" "$@"
-fi
+# LaunchAgents and global oo. The lock lives on this shell's fd 9, which its commands inherit, so it
+# holds until this run and anything it started have exited, even if the run is killed.
+exec 9>"/tmp/owner-operator-install-$(id -u).lock"
+perl -MFcntl=:flock -e 'open(my $lock, ">&=9") or die "install-runtime: $!\n"; flock($lock, LOCK_EX) or die "install-runtime: $!\n"'
 
 if [ "$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" = "$SRC" ]; then
   COMMIT="$(git -C "$SRC" rev-parse --verify "${1:-HEAD}^{commit}")"
@@ -34,7 +32,10 @@ else
   RUNTIME="$SRC"
 fi
 
-OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh"
+# Build before switching anything, then link the global oo before the LaunchAgents, so a failed
+# build or link leaves the previous install in place.
+(cd "$RUNTIME/apps/widget" && swift build -c release >/dev/null)
 npm install -g --ignore-scripts --no-audit --no-fund "$RUNTIME"
+OO_HOME="$OO_HOME" "$RUNTIME/apps/widget/dev/install.sh"
 OO_HOME="$OO_HOME" node --import "$RUNTIME/node_modules/tsx/dist/loader.mjs" "$RUNTIME/scripts/take-over-daemon.ts"
 echo "Owner Operator now runs from $RUNTIME"
