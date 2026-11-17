@@ -71,8 +71,9 @@ identity or credential changed. SSE subscriptions reread `daemon.json` before re
 [`scripts/install-runtime.sh [<git-ref>]`](../scripts/install-runtime.sh) installs one commit
 (default `HEAD`; uncommitted changes are not included) into `$OO_HOME/runtime/<commit>` with
 `git archive` and `npm ci`. It then writes the daemon and widget LaunchAgents to run that copy,
-restarts the daemon through launchd, and links the global `oo` to the copy with
-`npm install -g`. Onboarding's always-on step and `make install` in `apps/widget` both run it.
+links the global `oo` to the copy with `npm install -g`, and takes over the daemon. Taking over
+replaces whichever daemon serves, including a detached one started from a checkout before
+installation, and the install fails unless `/health` then reports the copy as its `repoRoot`. Onboarding's always-on step and `make install` in `apps/widget` both run it.
 
 Nothing edits the copy, so its fingerprint never changes and it never goes stale on its own. A
 checkout's `./oo` is another checkout and connects to it instead of replacing it. A crash or
@@ -81,6 +82,7 @@ login restarts the same copy. Only a deliberate rerun changes the live code.
 To upgrade, rerun the script with the new ref, for example `scripts/install-runtime.sh origin/main`
 after `git fetch`. Rerunning a commit that is already installed only rewrites the services. Older
 copies stay on disk until you delete them; delete one only when no LaunchAgent or global `oo`
-points at it. A `.partial-*` directory under `runtime/` is a crashed install and safe to delete.
+points at it. Installs run one at a time, and a crashed install's `.partial-<commit>` directory is
+replaced by the next install of that commit.
 
 The widget itself is a pure Gateway client ([widget.md](widget.md)).
