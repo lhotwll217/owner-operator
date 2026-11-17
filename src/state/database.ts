@@ -107,11 +107,19 @@ const CHILD_RUN_FINISHED_SQL = `(EXISTS (
   SELECT MAX(${AGENT_RUN_WORK_ENDED_SQL}) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
 ) AND t.id NOT IN ${THREADS_ABOVE_LIVE_RUN_SQL})`;
 
+/** The session is the child of a live run an outside caller started. The ledger, not the
+ * transcript, knows that run is still going. */
+const HAS_ACTIVE_ORIGIN_RUN_SQL = `EXISTS (
+  SELECT 1 FROM agent_runs origin_run
+  WHERE origin_run.child_session_id = t.id AND origin_run.origin IS NOT NULL
+    AND origin_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
+)`;
+
 /** A live child outranks the finished run that issued this thread, so Done never hides delegated
  * work still in flight. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
-  WHEN ${HAS_ACTIVE_CHILD_SQL} THEN 'working'
+  WHEN ${HAS_ACTIVE_CHILD_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} THEN 'working'
   WHEN ${CHILD_RUN_FINISHED_SQL} THEN 'done'
   ELSE detail.state
 END`;
@@ -967,7 +975,7 @@ export class ThreadDb {
     const where = options.activeSince
       ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
            AND (t.last_active_at >= $since OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
-             OR ${HAS_ACTIVE_CHILD_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
+             OR ${HAS_ACTIVE_CHILD_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source,
@@ -1018,6 +1026,7 @@ export class ThreadDb {
         .map(({ snoozeHolds, snoozedUntil, ...row }) => ({
           ...row,
           parentThreadId: row.origin ? null : row.parentThreadId,
+          awaitingTranscript: false,
           statusSummaryPending: Boolean(row.statusSummaryPending),
           lastActive: row.lastMessageAt ? ago(row.lastMessageAt) : "",
           snooze: !snoozeHolds ? null
@@ -1044,6 +1053,7 @@ export class ThreadDb {
         diffDeleted: null,
         parentThreadId: null,
         origin: run.origin,
+        awaitingTranscript: true,
         snooze: null,
         link: null,
       })),

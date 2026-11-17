@@ -359,7 +359,8 @@ struct RowView: View {
     static let titleInset = SectionInset.text + badgeSize + badgeGap
 
     private var isChild: Bool { row.depth > 0 }
-    private var showActions: Bool { hovering && !isChild && !editing }
+    private var hasActions: Bool { !isChild && !row.awaitingTranscript }
+    private var showActions: Bool { hovering && hasActions && !editing }
 
     var body: some View {
         HStack(alignment: .top, spacing: Self.badgeGap) {
@@ -392,9 +393,11 @@ struct RowView: View {
         .onHover { hovering = $0 }
         .help(row.link == nil ? "" : "Open in \(row.app)")
         .contextMenu {
-            Button("Rename…") { startEditing() }
-            if row.isRenamed {
-                Button("Use AI title") { onRename("") }
+            if !row.awaitingTranscript {
+                Button("Rename…") { startEditing() }
+                if row.isRenamed {
+                    Button("Use AI title") { onRename("") }
+                }
             }
         }
     }
@@ -470,7 +473,7 @@ struct RowView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .opacity(showActions ? 0 : 1)
-            if !isChild {
+            if hasActions {
                 actions.opacity(showActions ? 1 : 0).allowsHitTesting(showActions)
             }
         }
@@ -533,7 +536,7 @@ struct RowView: View {
 }
 
 /// Who started a run from off this Mac: the caller's mark in a capsule, its name on hover. A
-/// caller with no bundled mark shows its name instead.
+/// caller with no bundled mark gets a generic one, so the pill never shows text.
 struct OriginPill: View {
     let origin: String
 
@@ -542,7 +545,7 @@ struct OriginPill: View {
             if let mark = AppBadge.mark(forOrigin: origin) {
                 Image(nsImage: mark.image).renderingMode(mark.template ? .template : .original)
             } else {
-                Text(origin).font(.system(size: 10.5))
+                Image(systemName: "globe").font(.system(size: 10))
             }
         }
         .foregroundStyle(.secondary)

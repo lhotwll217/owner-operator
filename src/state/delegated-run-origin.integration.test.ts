@@ -55,18 +55,23 @@ try {
   assert.equal(queued.section, "working");
   assert.equal(queued.depth, 0, "an origin run is a root even when its run names a visible parent");
   assert.equal(queued.parentThreadId, null);
+  assert.equal(queued.awaitingTranscript, true, "a ledger row has no thread to act on yet");
 
   state.claimNextPendingAgentRun(3);
   state.recordAgentRunActivity(remote.id, { childSessionId: "grok-child" });
   assert.equal(rowById(remote.id), undefined, "the ledger row moves to the child's session identity");
   assert.equal(rowById("grok-child")?.origin, "grok-bot", "a running origin run shows before its transcript is indexed");
 
-  state.recordObservation(scanRow("grok-child", "login bug"));
+  state.recordObservation(scanRow("grok-child", "login bug", false));
   const indexed = state.listCurrentSessionState().filter((row) => row.id === "grok-child");
   assert.equal(indexed.length, 1, "the indexed thread replaces the ledger row");
   assert.equal(indexed[0].origin, "grok-bot", "the indexed thread keeps its origin");
   assert.equal(indexed[0].depth, 0, "the indexed origin thread stays a root");
   assert.equal(indexed[0].topic, "login bug", "the indexed thread supplies the row's facts");
+  assert.equal(indexed[0].awaitingTranscript, false);
+  assert.equal(indexed[0].section, "working", "a running origin run stays working between transcript turns");
+  state.finishAgentRun(remote.id, { status: AgentRunStatus.Completed, resultTail: "fixed", error: null });
+  assert.notEqual(rowById("grok-child")?.section, "working", "a finished origin run takes its transcript state");
 
   const local = state.createAgentRun({
     harness: AgentRunHarness.Codex,
@@ -100,6 +105,26 @@ try {
   assert.equal(unparented?.parentThreadId, "no-such-session", "the run's parent link is still reported");
   assert.equal(unparented?.depth, 0, "a parent that matches no session leaves the child at the root");
   assert.equal(unparented?.section, "idle", "an unparented child takes its own section");
+
+  state.recordObservation({
+    ...scanRow("stale-origin-child", "old remote work", false),
+    lastMessageAt: "2026-07-01T10:00:00.000Z",
+    secondsSinceLastMessage: 1_382_400,
+    secondsSinceActivity: 1_382_400,
+  });
+  assert.equal(rowById("stale-origin-child"), undefined, "a quiet session outside the window is hidden");
+  state.createAgentRun({
+    harness: AgentRunHarness.Codex,
+    task: "resume the old remote work",
+    cwd: dir,
+    depth: 0,
+    timeoutSeconds: 3_600,
+    origin: "grok-bot",
+    childSessionId: "stale-origin-child",
+  });
+  const resumed = rowById("stale-origin-child");
+  assert.equal(resumed?.section, "working", "resuming an origin session outside the window shows it at once");
+  assert.equal(resumed?.awaitingTranscript, false, "the indexed thread backs the resumed row");
 
   const cancelled = state.createAgentRun({
     harness: AgentRunHarness.Codex,

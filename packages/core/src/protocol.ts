@@ -72,6 +72,9 @@ export interface SessionStateRow {
   /** Outside caller that started this session's delegated run, such as `grok-bot`. A row with an
    * origin is a root even when its run names a parent. */
   origin: string | null;
+  /** The row comes from an origin run's ledger entry because its transcript is not indexed yet.
+   * There is no thread to mark done, snooze, or rename until it is. */
+  awaitingTranscript: boolean;
   /** Display section. Rows arrive in display order; a child carries its parent's section. */
   section: SessionSection;
   /** Nesting under a visible delegated parent; 0 for a root. */

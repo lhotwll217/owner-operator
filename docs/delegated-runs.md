@@ -441,10 +441,12 @@ immediate children only ([#228](https://github.com/lhotwll217/owner-operator/iss
 
 A caller outside this Mac names itself with `oo runs delegate --origin <name>` (free-form, such as
 `grok-bot`), stored as `agent_runs.origin` and copied by retry and resume. A run with an origin is
-always a root row whose `origin` the widget shows as that caller's mark after the title. Until the
-monitor indexes its transcript, a pending or running origin run projects as its own working row
-built from the ledger, so the owner sees who started it at once. A child whose parent matches no
-visible session is also a root.
+always a root row whose `origin` the widget shows as that caller's mark after the title (a generic
+mark when none is bundled). While the run is pending or running its session projects as working
+and stays visible, even when its transcript is quiet or outside the active window. Until the
+monitor indexes the transcript, the run projects as its own working row built from the ledger, with
+`awaitingTranscript` set and no row actions, since there is no thread to mark done, snooze, or
+rename yet. A child whose parent matches no visible session is also a root.
 
 In the terminal, a delegation renders as the Operator's ordinary bash call, whose output is the
 pending run line (`oo runs delegate` without `--json`); the completion message persists the other
