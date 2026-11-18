@@ -608,18 +608,24 @@ struct AppBadge: View {
     /// on retina). Shared by the badge and the inline `Text` uses (calm line, ticker).
     static func mark(for app: String) -> (image: NSImage, template: Bool)? {
         guard let hit = logos.first(where: { app.hasPrefix($0.prefix) }) else { return nil }
-        if let m = cache[hit.resource] { return m }
-        guard let img = Bundle.module.image(forResource: hit.resource) else { return nil }
-        img.size = NSSize(width: 11, height: 11)
-        let m = (img, hit.template)
-        cache[hit.resource] = m
-        return m
+        return mark(resource: hit.resource, template: hit.template)
     }
 
-    /// A delegation origin is free-form (`grok-bot`), so it matches a mark by its resource name.
+    /// A delegation origin is free-form. An origin that is an app of its own (`grok-bot`) wears
+    /// that app's logo; any other matches a tool's mark by resource name.
     static func mark(forOrigin origin: String) -> (image: NSImage, template: Bool)? {
         let name = origin.lowercased()
+        if name == "grok-bot" { return mark(resource: "grok-bot", template: false) }
         return logos.first(where: { name.hasPrefix($0.resource) }).flatMap { mark(for: $0.prefix) }
+    }
+
+    private static func mark(resource: String, template: Bool) -> (image: NSImage, template: Bool)? {
+        if let m = cache[resource] { return m }
+        guard let img = Bundle.module.image(forResource: resource) else { return nil }
+        img.size = NSSize(width: 11, height: 11)
+        let m = (img, template)
+        cache[resource] = m
+        return m
     }
 
     /// The mark as a `Text`-inline image, nudged down to sit optically centered on the line.

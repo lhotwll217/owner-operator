@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AGENT_HARNESS_DESCRIPTORS,
   AGENT_RUN_EFFORTS,
   AgentRunStatus,
   RETIRED_AGENT_TOOL_IDS,
@@ -12,6 +13,7 @@ import {
   formatRelative,
   harnessIdentityObservation,
   isSessionBoilerplate,
+  sessionHostFor,
   withoutRetiredAgentTools,
   type AgentRun,
   type AgentRunActivityUpdate,
@@ -426,6 +428,13 @@ export interface AgentRunInsert {
 }
 
 type UnindexedOriginRun = Pick<AgentRun, "id" | "harness" | "task" | "cwd" | "createdAt" | "childSessionId"> & { origin: string };
+
+/** The app the scanner will name this run's transcript, so the row keeps its badge once indexed.
+ * A run harness is an agent harness id (`claude-code`) or, for Cursor, its transcript format. */
+function runApp(run: UnindexedOriginRun): string {
+  const harness = AGENT_HARNESS_DESCRIPTORS.find(({ id, transcriptFormat }) => run.harness === id || run.harness === transcriptFormat);
+  return (harness && sessionHostFor({ format: harness.transcriptFormat, cwd: run.cwd })?.label) ?? run.harness;
+}
 
 type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted" | "completionRunIds"> & {
   completionRunIds: string;
@@ -1037,7 +1046,7 @@ export class ThreadDb {
         source: run.harness,
         repo: basename(run.cwd),
         project: run.cwd,
-        app: "Owner Operator",
+        app: runApp(run),
         topic: run.task,
         generatedTopic: "",
         ownerTitle: null,
