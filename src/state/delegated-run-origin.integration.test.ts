@@ -3,7 +3,7 @@
 // its parent and a parent that matches no session leaves its child at the root.
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentRunHarness, AgentRunStatus, type ScanRow } from "@owner-operator/core";
 import { InMemoryEventBus } from "./event-bus";
@@ -140,6 +140,16 @@ try {
   state.claimNextPendingAgentRun(3);
   state.finishAgentRun(cancelled.id, { status: AgentRunStatus.Cancelled, resultTail: null, error: null });
   assert.equal(rowById(cancelled.id), undefined, "a finished origin run with no transcript leaves the view");
+
+  const hosted = state.createAgentRun({
+    harness: AgentRunHarness.OpenCode,
+    task: "work in a Conductor workspace",
+    cwd: join(homedir(), "conductor", "workspaces", "owner-operator", "lisbon"),
+    depth: 0,
+    timeoutSeconds: 3_600,
+    origin: "grok-bot",
+  });
+  assert.equal(rowById(hosted.id)?.app, "OpenCode", "a pending origin run shows its harness, not its workspace host");
 } finally {
   closeState?.();
   if (previousOoHome === undefined) delete process.env.OO_HOME;

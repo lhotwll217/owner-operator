@@ -159,6 +159,8 @@ struct SessionStateTests {
         #expect(grokBot.image !== grokHarness.image, "the started-by pill wears the Grok Bot app logo")
         #expect(!grokBot.template, "the Grok Bot logo keeps its own colors")
         #expect(grokHarness.template, "the Grok harness mark is unchanged")
+        #expect(AppBadge.mark(for: "OpenCode") != nil, "an OpenCode row wears its harness mark")
+        #expect(AppBadge.mark(for: "Pi") != nil, "a Pi row wears its harness mark")
         #expect(AppBadge.mark(forOrigin: "mystery-bot") == nil)
     }
 
