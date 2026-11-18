@@ -154,8 +154,11 @@ struct SessionStateTests {
         #expect(decoded[0].awaitingTranscript)
         #expect(decoded[1].origin == nil)
         #expect(!decoded[1].awaitingTranscript)
-        #expect(AppBadge.mark(forOrigin: "grok-bot") != nil)
-        #expect(AppBadge.mark(forOrigin: "grok-bot")?.image === AppBadge.mark(for: "Grok Build")?.image)
+        let grokBot = try #require(AppBadge.mark(forOrigin: "grok-bot"))
+        let grokHarness = try #require(AppBadge.mark(for: "Grok Build"))
+        #expect(grokBot.image !== grokHarness.image, "the started-by pill wears the Grok Bot app logo")
+        #expect(!grokBot.template, "the Grok Bot logo keeps its own colors")
+        #expect(grokHarness.template, "the Grok harness mark is unchanged")
         #expect(AppBadge.mark(forOrigin: "mystery-bot") == nil)
     }
 

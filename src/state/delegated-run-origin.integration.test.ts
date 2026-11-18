@@ -18,7 +18,7 @@ const scanRow = (id: string, topic: string, working = true): ScanRow => ({
   source: "claude",
   repo: "owner-operator",
   project: dir,
-  app: "Claude Code",
+  app: "Claude CLI",
   topic,
   lastRole: "assistant",
   createdAt: "2026-07-17T10:00:00.000Z",
@@ -56,6 +56,7 @@ try {
   assert.equal(queued.depth, 0, "an origin run is a root even when its run names a visible parent");
   assert.equal(queued.parentThreadId, null);
   assert.equal(queued.awaitingTranscript, true, "a ledger row has no thread to act on yet");
+  assert.equal(queued.app, "Claude CLI", "a ledger row shows its run harness, not its origin");
 
   state.claimNextPendingAgentRun(3);
   state.recordAgentRunActivity(remote.id, { childSessionId: "grok-child" });
@@ -68,6 +69,7 @@ try {
   assert.equal(indexed[0].origin, "grok-bot", "the indexed thread keeps its origin");
   assert.equal(indexed[0].depth, 0, "the indexed origin thread stays a root");
   assert.equal(indexed[0].topic, "login bug", "the indexed thread supplies the row's facts");
+  assert.equal(indexed[0].app, queued.app, "the indexed thread keeps the ledger row's harness badge");
   assert.equal(indexed[0].awaitingTranscript, false);
   assert.equal(indexed[0].section, "working", "a running origin run stays working between transcript turns");
   state.finishAgentRun(remote.id, { status: AgentRunStatus.Completed, resultTail: "fixed", error: null });
@@ -134,7 +136,7 @@ try {
     timeoutSeconds: 3_600,
     origin: "grok-bot",
   });
-  assert.ok(rowById(cancelled.id), "a pending origin run is visible");
+  assert.equal(rowById(cancelled.id)?.app, "Codex CLI", "a pending origin run is visible under its harness");
   state.claimNextPendingAgentRun(3);
   state.finishAgentRun(cancelled.id, { status: AgentRunStatus.Cancelled, resultTail: null, error: null });
   assert.equal(rowById(cancelled.id), undefined, "a finished origin run with no transcript leaves the view");
