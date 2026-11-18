@@ -109,7 +109,11 @@ export class State {
 
   recordPoll(rows: readonly ScanRow[]): void {
     this.db.purgeBlacklisted(this.blacklist());
-    for (const row of rows) this.recordObservation(row);
+    for (const row of rows) {
+      // A delegated run's child is a session the owner asked for, whatever transport it runs on.
+      if (row.automated && !this.db.agentRunByChildSession(row.id)) continue;
+      this.recordObservation(row);
+    }
   }
 
   listSessionState(options: { activeSince?: string } = {}): SessionStateRow[] {
