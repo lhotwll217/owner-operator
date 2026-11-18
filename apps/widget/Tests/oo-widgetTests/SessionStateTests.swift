@@ -3,6 +3,7 @@
 
 import Testing
 import AppKit
+import SwiftUI
 import Foundation
 @testable import oo_widget
 
@@ -157,8 +158,8 @@ struct SessionStateTests {
         #expect(!decoded[1].awaitingTranscript)
         let grokBot = try #require(AppBadge.mark(forOrigin: "grok-bot"))
         let grokHarness = try #require(AppBadge.mark(for: "Grok Build"))
-        #expect(grokBot.image !== grokHarness.image, "the started-by pill wears the Grok Bot mark")
-        #expect(grokBot.template, "the Grok Bot mark tints white on the dark pill, like its menu bar icon")
+        #expect(grokBot.image !== grokHarness.image, "the started-by badge wears the Grok Bot mark")
+        #expect(grokBot.template, "the Grok Bot mark tints white on the dark panel, like its menu bar icon")
         let oneX = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 11, pixelsHigh: 11, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: oneX)
         grokBot.image.draw(in: NSRect(x: 0, y: 0, width: 11, height: 11))
@@ -169,6 +170,34 @@ struct SessionStateTests {
         #expect(AppBadge.mark(for: "OpenCode") != nil, "an OpenCode row wears its harness mark")
         #expect(AppBadge.mark(for: "Pi") != nil, "a Pi row wears its harness mark")
         #expect(AppBadge.mark(forOrigin: "mystery-bot") == nil)
+    }
+
+    @MainActor @Test func originBadgesTheHarnessLogoCorner() throws {
+        func logo(_ app: String, origin: String?) -> NSBitmapImageRep {
+            let view = AppBadge(app: app, size: 16, origin: origin).padding(8)
+            let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
+            host.appearance = NSAppearance(named: .darkAqua)
+            host.frame = NSRect(x: 0, y: 0, width: 32, height: 32)
+            host.layoutSubtreeIfNeeded()
+            let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+            host.cacheDisplay(in: host.bounds, to: rep)
+            return rep
+        }
+        func pixel(_ rep: NSBitmapImageRep, _ x: CGFloat, _ y: CGFloat) -> NSColor {
+            let s = CGFloat(rep.pixelsWide) / 32
+            return rep.colorAt(x: Int(x * s), y: Int(y * s))!.usingColorSpace(.deviceRGB)!
+        }
+        for app in ["Claude Code", "Codex", "opencode", "pi", "Cursor", "Owner Operator"] {
+            let plain = logo(app, origin: nil), badged = logo(app, origin: "grok-bot")
+            #expect(pixel(plain, 24, 26).alphaComponent < 0.1, "\(app): nothing sits past the logo's corner without an origin")
+            let mark = pixel(badged, 24, 26)
+            #expect(mark.alphaComponent > 0.9 && mark.redComponent > 0.9, "\(app): the white Grok Bot mark catches the corner")
+            #expect(pixel(plain, 12, 12) == pixel(badged, 12, 12), "\(app): the logo away from its corner is untouched")
+            let ring = stride(from: 18.25, to: 24, by: 0.5).flatMap { x in stride(from: 18.25, to: 24, by: 0.5).map { CGPoint(x: x, y: $0) } }
+                .filter { (5.1...5.5).contains(hypot($0.x - 24, $0.y - 24)) }
+            #expect(ring.contains { pixel(plain, $0.x, $0.y).alphaComponent > 0.3 && pixel(badged, $0.x, $0.y).alphaComponent < pixel(plain, $0.x, $0.y).alphaComponent / 2 },
+                    "\(app): a ring of panel separates the mark from the logo")
+        }
     }
 
     @Test func newFieldsDecodeLeniently() throws {
