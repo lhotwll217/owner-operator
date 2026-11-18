@@ -612,10 +612,11 @@ struct AppBadge: View {
     }
 
     /// A delegation origin is free-form. An origin that is an app of its own (`grok-bot`) wears
-    /// that app's logo; any other matches a tool's mark by resource name.
+    /// that app's mark; any other matches a tool's mark by resource name. The Grok Bot mark ships
+    /// a hand-hinted 11px rep so its eye cutouts stay crisp on a non-Retina display.
     static func mark(forOrigin origin: String) -> (image: NSImage, template: Bool)? {
         let name = origin.lowercased()
-        if name == "grok-bot" { return mark(resource: "grok-bot", template: false) }
+        if name == "grok-bot" { return mark(resource: "grok-bot", template: true) }
         return logos.first(where: { name.hasPrefix($0.resource) }).flatMap { mark(for: $0.prefix) }
     }
 
