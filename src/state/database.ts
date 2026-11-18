@@ -13,7 +13,7 @@ import {
   formatRelative,
   harnessIdentityObservation,
   isSessionBoilerplate,
-  sessionHostFor,
+  SESSION_HOST_DESCRIPTORS,
   withoutRetiredAgentTools,
   type AgentRun,
   type AgentRunActivityUpdate,
@@ -429,11 +429,12 @@ export interface AgentRunInsert {
 
 type UnindexedOriginRun = Pick<AgentRun, "id" | "harness" | "task" | "cwd" | "createdAt" | "childSessionId"> & { origin: string };
 
-/** The app the scanner will name this run's transcript, so the row keeps its badge once indexed.
- * A run harness is an agent harness id (`claude-code`) or, for Cursor, its transcript format. */
+/** The run harness's own CLI app (`Claude CLI`), the name the scanner falls back to for its
+ * transcripts. A run harness is an agent harness id (`claude-code`) or, for Cursor, its
+ * transcript format. */
 function runApp(run: UnindexedOriginRun): string {
-  const harness = AGENT_HARNESS_DESCRIPTORS.find(({ id, transcriptFormat }) => run.harness === id || run.harness === transcriptFormat);
-  return (harness && sessionHostFor({ format: harness.transcriptFormat, cwd: run.cwd })?.label) ?? run.harness;
+  const format = AGENT_HARNESS_DESCRIPTORS.find(({ id, transcriptFormat }) => run.harness === id || run.harness === transcriptFormat)?.transcriptFormat;
+  return SESSION_HOST_DESCRIPTORS.find((host) => host.fallback && format && host.formats?.includes(format))?.label ?? run.harness;
 }
 
 type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted" | "completionRunIds"> & {

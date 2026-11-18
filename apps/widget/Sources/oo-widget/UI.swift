@@ -607,7 +607,7 @@ struct AppBadge: View {
     /// The tool's mark, point-sized to ride beside 11-13pt text (the hi-res rep keeps it crisp
     /// on retina). Shared by the badge and the inline `Text` uses (calm line, ticker).
     static func mark(for app: String) -> (image: NSImage, template: Bool)? {
-        guard let hit = logos.first(where: { app.hasPrefix($0.prefix) }) else { return nil }
+        guard let hit = logos.first(where: { app.lowercased().hasPrefix($0.prefix.lowercased()) }) else { return nil }
         return mark(resource: hit.resource, template: hit.template)
     }
 
