@@ -364,13 +364,12 @@ struct RowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Self.badgeGap) {
-            AppBadge(app: row.app, size: Self.badgeSize)
+            AppBadge(app: row.app, size: Self.badgeSize, origin: row.origin)
                 .frame(width: Self.badgeSize, height: Self.badgeSize, alignment: .leading)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     title
-                    if let origin = row.origin { OriginPill(origin: origin) }
                     statusSummaryDisclosure
                 }
                 if !isChild {
@@ -535,24 +534,49 @@ struct RowView: View {
     }
 }
 
-/// Who started a run from off this Mac: the caller's mark in a capsule, its name on hover. A
-/// caller with no bundled mark gets a generic one, so the pill never shows text.
-struct OriginPill: View {
-    let origin: String
+/// Who started a run from off this Mac: the caller's mark, at 60% of the harness logo, centered
+/// on the logo's lower-right corner. A thin ring knocks the logo out around it, so the panel shows
+/// between the two and both stay readable. A caller with no bundled mark gets a generic one. A
+/// logo with no origin is left untouched.
+struct OriginBadge: ViewModifier {
+    let origin: String?
+    let logoSize: CGFloat
+    static let scale: CGFloat = 0.6
+    static let ring: CGFloat = 1
 
-    var body: some View {
-        Group {
-            if let mark = AppBadge.mark(forOrigin: origin) {
-                Image(nsImage: mark.image).renderingMode(mark.template ? .template : .original)
-            } else {
-                Image(systemName: "globe").font(.system(size: 10))
-            }
+    @ViewBuilder func body(content: Content) -> some View {
+        if let origin {
+            let mark = logoSize * Self.scale, outer = mark + 2 * Self.ring
+            content
+                .mask { CornerCutout(diameter: outer).fill(style: FillStyle(eoFill: true)) }
+                .overlay(alignment: .bottomTrailing) {
+                    Group {
+                        if let m = AppBadge.mark(forOrigin: origin) {
+                            Image(nsImage: m.image).renderingMode(m.template ? .template : .original)
+                                .resizable().interpolation(.high)
+                        } else {
+                            Image(systemName: "globe").resizable()
+                        }
+                    }
+                    .scaledToFit().frame(width: mark, height: mark)
+                    .foregroundStyle(.white)
+                    .offset(x: mark / 2, y: mark / 2)
+                    .help("Started by \(origin)")
+                }
+        } else {
+            content
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(Capsule().fill(Color.primary.opacity(0.08)))
-        .fixedSize()
-        .help("Started by \(origin)")
+    }
+
+    /// The logo's frame minus a circle centered on its lower-right corner.
+    private struct CornerCutout: Shape {
+        let diameter: CGFloat
+
+        func path(in rect: CGRect) -> Path {
+            var path = Path(rect)
+            path.addEllipse(in: CGRect(x: rect.maxX - diameter / 2, y: rect.maxY - diameter / 2, width: diameter, height: diameter))
+            return path
+        }
     }
 }
 
@@ -587,6 +611,8 @@ struct IconButton: View {
 struct AppBadge: View {
     let app: String
     var size: CGFloat = 11
+    /// Who started the run, worn as a corner badge on the mark.
+    var origin: String? = nil
 
     /// resource name + whether it's a monochrome template mark (tinted) vs a full-color mark.
     private static let logos: [(prefix: String, resource: String, template: Bool)] = [
@@ -650,6 +676,7 @@ struct AppBadge: View {
                 .resizable().interpolation(.high).scaledToFit()
                 .frame(width: size, height: size)
                 .foregroundStyle(.secondary) // tints template marks; full-color marks ignore it
+                .modifier(OriginBadge(origin: origin, logoSize: size))
                 .onHover { hovering = $0 }
                 .overlay(alignment: .trailing) {
                     if hovering {
