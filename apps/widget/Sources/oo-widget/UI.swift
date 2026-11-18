@@ -548,7 +548,7 @@ struct OriginPill: View {
                 Image(systemName: "globe").font(.system(size: 10))
             }
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 6).padding(.vertical, 2)
         .background(Capsule().fill(Color.primary.opacity(0.08)))
         .fixedSize()
