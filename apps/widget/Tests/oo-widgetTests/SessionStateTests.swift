@@ -2,6 +2,7 @@
 // daemon's order, optimistic owner writes, snooze presets, and the 5-min fresh-completion rule.
 
 import Testing
+import AppKit
 import Foundation
 @testable import oo_widget
 
@@ -156,8 +157,14 @@ struct SessionStateTests {
         #expect(!decoded[1].awaitingTranscript)
         let grokBot = try #require(AppBadge.mark(forOrigin: "grok-bot"))
         let grokHarness = try #require(AppBadge.mark(for: "Grok Build"))
-        #expect(grokBot.image !== grokHarness.image, "the started-by pill wears the Grok Bot app logo")
-        #expect(!grokBot.template, "the Grok Bot logo keeps its own colors")
+        #expect(grokBot.image !== grokHarness.image, "the started-by pill wears the Grok Bot mark")
+        #expect(grokBot.template, "the Grok Bot mark tints white on the dark pill, like its menu bar icon")
+        let oneX = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 11, pixelsHigh: 11, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: oneX)
+        grokBot.image.draw(in: NSRect(x: 0, y: 0, width: 11, height: 11))
+        NSGraphicsContext.current = nil
+        #expect(oneX.colorAt(x: 5, y: 3)!.alphaComponent < 0.1, "the eye is a clean cutout on a non-Retina display")
+        #expect(oneX.colorAt(x: 5, y: 6)!.alphaComponent > 0.9, "the head is solid on a non-Retina display")
         #expect(grokHarness.template, "the Grok harness mark is unchanged")
         #expect(AppBadge.mark(for: "OpenCode") != nil, "an OpenCode row wears its harness mark")
         #expect(AppBadge.mark(for: "Pi") != nil, "a Pi row wears its harness mark")
