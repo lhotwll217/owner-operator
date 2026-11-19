@@ -10,6 +10,7 @@ import {
   ScheduleRunStatus,
   ScheduleRunTrigger,
   ScheduledPayloadKind,
+  isTerminalAgentRunStatus,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleExecutionResult,
@@ -53,9 +54,11 @@ export type SchedulerLogRecord =
     }
   | {
       event: SchedulerLogEvent.LoopFailed;
-      source: "tick" | "needs-you" | "manual";
+      source: LoopSource;
       error: string;
     };
+
+type LoopSource = "tick" | "needs-you" | "run-finished" | "manual";
 
 export interface SchedulerOptions {
   now?: () => number;
@@ -133,6 +136,8 @@ export class Scheduler {
   private unsubscribe: (() => void) | null = null;
   private eventFlush: NodeJS.Immediate | null = null;
   private readonly pendingNeedsYou = new Map<string, string>();
+  private runFinishedFlush: NodeJS.Immediate | null = null;
+  private flushingRunFinished = false;
   private readonly activeControllers = new Set<AbortController>();
   private executionQueue: Promise<void> = Promise.resolve();
   private stopping = false;
@@ -224,9 +229,9 @@ export class Scheduler {
         this.scheduleEventFlush();
         return;
       }
-      if (event.kind === DomainEventKind.AgentRunChanged && event.status !== AgentRunStatus.Running) {
-        this.reconcileNeedsYouInputs();
-      }
+      if (event.kind !== DomainEventKind.AgentRunChanged) return;
+      if (event.status !== AgentRunStatus.Running) this.reconcileNeedsYouInputs();
+      if (isTerminalAgentRunStatus(event.status)) this.scheduleRunFinishedFlush();
     });
     this.reconcileNeedsYouInputs();
     this.runInBackground("tick", () => this.tick());
@@ -242,9 +247,11 @@ export class Scheduler {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     if (this.eventFlush) clearImmediate(this.eventFlush);
+    if (this.runFinishedFlush) clearImmediate(this.runFinishedFlush);
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.eventFlush = null;
+    this.runFinishedFlush = null;
     this.timer = null;
     for (const controller of this.activeControllers) {
       controller.abort(new Error("scheduler stopped"));
@@ -257,6 +264,9 @@ export class Scheduler {
     // A timed snooze ends at read time with no event, so each tick re-offers needs-you rows;
     // the per-message watermark keeps a handled row from running twice.
     this.reconcileNeedsYouInputs();
+    // A run can finish with no event this process saw: before startup, or while the daemon was
+    // down. Durable claims make each tick's re-check safe.
+    this.scheduleRunFinishedFlush();
     const due = this.state.listDueSchedules(new Date(this.now()).toISOString());
     for (const schedule of due) {
       if (this.running.has(schedule.id)) continue;
@@ -447,7 +457,42 @@ export class Scheduler {
     }
   }
 
-  private runInBackground(source: "tick" | "needs-you" | "manual", work: () => Promise<void>): void {
+  private scheduleRunFinishedFlush(): void {
+    if (this.runFinishedFlush) return;
+    this.runFinishedFlush = setImmediate(() => {
+      this.runFinishedFlush = null;
+      this.runInBackground("run-finished", () => this.flushRunFinished());
+    });
+    this.runFinishedFlush.unref?.();
+  }
+
+  /** One flush at a time, claiming only after the previous execution ends: a crash mid-burst
+   * then leaves the burst's later runs unclaimed and still eligible, not claimed and interrupted. */
+  private async flushRunFinished(): Promise<void> {
+    if (this.stopping || this.flushingRunFinished) return;
+    this.flushingRunFinished = true;
+    try {
+      for (const schedule of this.state.listSchedules()) {
+        if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.RunFinished) continue;
+        const { origin } = schedule.trigger;
+        while (!this.stopping && !this.running.has(schedule.id)) {
+          const claimed = this.state.claimRunFinishedScheduleRun(schedule, origin);
+          if (!claimed) break;
+          await this.enqueue(() => this.execute(
+            schedule,
+            ScheduleRunTrigger.RunFinished,
+            null,
+            claimed.context,
+            claimed.run,
+          ));
+        }
+      }
+    } finally {
+      this.flushingRunFinished = false;
+    }
+  }
+
+  private runInBackground(source: LoopSource, work: () => Promise<void>): void {
     void work().catch((error) => {
       this.logger({
         event: SchedulerLogEvent.LoopFailed,

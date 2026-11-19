@@ -18,6 +18,7 @@ import {
   type ScheduleRunTrigger,
   type ScanRow,
   type EnrichmentCandidate,
+  type RunFinishedTriggerContext,
   type ScheduleTriggerContext,
   type ThreadEnrichment,
   type Blacklist,
@@ -353,6 +354,22 @@ export class State {
     changes: readonly { threadId: string; lastMessageAt: string }[],
   ): { run: ScheduleRun; threadIds: string[]; observedThrough: string } | null {
     const claimed = this.db.claimNeedsYouScheduleRun({ id: randomUUID(), schedule, changes });
+    if (claimed) {
+      this.publish({
+        kind: DomainEventKind.ScheduleRunChanged,
+        scheduleId: schedule.id,
+        runId: claimed.run.id,
+        status: claimed.run.status,
+      });
+    }
+    return claimed;
+  }
+
+  claimRunFinishedScheduleRun(
+    schedule: ScheduleDefinition,
+    origin: string,
+  ): { run: ScheduleRun; context: RunFinishedTriggerContext } | null {
+    const claimed = this.db.claimRunFinishedScheduleRun({ id: randomUUID(), schedule, origin });
     if (claimed) {
       this.publish({
         kind: DomainEventKind.ScheduleRunChanged,

@@ -56,7 +56,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "id", description: "Stable schedule id." },
       { name: "name", description: "Unique human-readable name." },
       { name: "enabled", description: "1 permits future triggers." },
-      { name: "trigger_kind", description: "at | every | cron | needs-you." },
+      { name: "trigger_kind", description: "at | every | cron | needs-you | run-finished." },
       { name: "trigger_json", description: "Typed trigger snapshot." },
       { name: "payload_kind", description: "prompt | command." },
       { name: "payload_json", description: "Typed prompt or argv payload; contains no job-specific environment values." },
@@ -75,8 +75,8 @@ export const SCHEMA_DOCS: TableDoc[] = [
     columns: [
       { name: "id", description: "Stable run id." },
       { name: "schedule_id", description: "References schedules.id; history survives soft deletion." },
-      { name: "trigger", description: "scheduled | manual | needs-you." },
-      { name: "trigger_context_json", description: "Missed-run timing or typed needs-you thread batch." },
+      { name: "trigger", description: "scheduled | manual | needs-you | run-finished." },
+      { name: "trigger_context_json", description: "Missed-run timing, typed needs-you thread batch, or the finished run (runId, status, origin, finishedAt). Command payloads receive it on stdin." },
       { name: "payload_snapshot_json", description: "Immutable payload actually executed." },
       { name: "cwd", description: "Immutable cwd actually used." },
       { name: "timeout_seconds", description: "Immutable timeout actually used." },
@@ -100,6 +100,15 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "schedule_id", description: "Event schedule id." },
       { name: "thread_id", description: "Monitored session thread id." },
       { name: "last_message_at", description: "Latest message claimed by this schedule." },
+    ],
+  },
+  {
+    name: "schedule_run_finished_claims",
+    description: "Internal durable dedupe for run-finished event jobs: one row per delegated run a schedule has fired for, written with its schedule_runs row. Not a delivery queue.",
+    columns: [
+      { name: "schedule_id", description: "Run-finished schedule id." },
+      { name: "agent_run_id", description: "agent_runs.id of the terminal origin run this schedule fired for." },
+      { name: "claimed_at", description: "ISO time the schedule run was created; equals its schedule_runs.created_at." },
     ],
   },
   {
