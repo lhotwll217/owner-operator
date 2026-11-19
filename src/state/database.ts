@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AGENT_HARNESS_DESCRIPTORS,
   AGENT_RUN_EFFORTS,
   AgentRunStatus,
   RETIRED_AGENT_TOOL_IDS,
@@ -12,6 +13,7 @@ import {
   formatRelative,
   harnessIdentityObservation,
   isSessionBoilerplate,
+  SESSION_HOST_DESCRIPTORS,
   withoutRetiredAgentTools,
   type AgentRun,
   type AgentRunActivityUpdate,
@@ -426,6 +428,14 @@ export interface AgentRunInsert {
 }
 
 type UnindexedOriginRun = Pick<AgentRun, "id" | "harness" | "task" | "cwd" | "createdAt" | "childSessionId"> & { origin: string };
+
+/** The run harness's own CLI app (`Claude CLI`), the name the scanner falls back to for its
+ * transcripts. A run harness is an agent harness id (`claude-code`) or, for Cursor, its
+ * transcript format. */
+function runApp(run: UnindexedOriginRun): string {
+  const format = AGENT_HARNESS_DESCRIPTORS.find(({ id, transcriptFormat }) => run.harness === id || run.harness === transcriptFormat)?.transcriptFormat;
+  return SESSION_HOST_DESCRIPTORS.find((host) => host.fallback && format && host.formats?.includes(format))?.label ?? run.harness;
+}
 
 type AgentRunDbRow = Omit<AgentRun, "effortApplied" | "harnessIdentity" | "promptSubmitted" | "completionRunIds"> & {
   completionRunIds: string;
@@ -1037,7 +1047,7 @@ export class ThreadDb {
         source: run.harness,
         repo: basename(run.cwd),
         project: run.cwd,
-        app: "Owner Operator",
+        app: runApp(run),
         topic: run.task,
         generatedTopic: "",
         ownerTitle: null,
