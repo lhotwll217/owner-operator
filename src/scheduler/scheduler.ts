@@ -177,6 +177,10 @@ export class Scheduler {
     if (input.trigger.kind === ScheduleKind.At && !Number.isFinite(Date.parse(input.trigger.at))) {
       throw new Error("invalid at schedule");
     }
+    if (input.trigger.kind === ScheduleKind.RunFinished
+      && (typeof input.trigger.origin !== "string" || !input.trigger.origin.trim())) {
+      throw new Error("run-finished schedule requires a non-empty origin");
+    }
     if (input.payload.kind === ScheduledPayloadKind.Command) {
       if (!input.payload.argv.length || input.payload.argv.some((part) => typeof part !== "string")) {
         throw new Error("command argv must contain string arguments and an executable");
