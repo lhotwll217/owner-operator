@@ -52,6 +52,8 @@ export interface ScanRow {
   /** Workspace line delta vs the repo's base branch (scan-gathered), when there is one. */
   diffAdded?: number;
   diffDeleted?: number;
+  /** No owner turn, or a non-interactive transport such as the Claude or Codex SDK. */
+  automated?: boolean;
 }
 
 /** One polled thread with continuity across polls — the unit session-state projections use. */

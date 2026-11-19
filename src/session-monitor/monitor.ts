@@ -44,7 +44,7 @@ const NO_CUTOFF = "1970-01-01";
 async function scanTranscripts(since: string, limit: number, files: readonly string[] = []): Promise<ScanRow[]> {
   if (!isOnboarded()) return [];
   const parsed = await runTranscriptScan([
-    "--since", since, "--limit", String(limit), "--sample", "0",
+    "--since", since, "--limit", String(limit), "--sample", "0", "--all",
   ], files);
   return parsed.threads.map((thread): ScanRow => ({
     id: String(thread.id),
@@ -63,6 +63,7 @@ async function scanTranscripts(since: string, limit: number, files: readonly str
     link: typeof thread.link === "string" ? thread.link : null,
     ...(typeof thread.diffAdded === "number" ? { diffAdded: thread.diffAdded } : {}),
     ...(typeof thread.diffDeleted === "number" ? { diffDeleted: thread.diffDeleted } : {}),
+    automated: Boolean(thread.automated),
   }));
 }
 
