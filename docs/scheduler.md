@@ -9,11 +9,12 @@ read_when:
 # Scheduler
 
 The daemon composes one scheduler. Schedule definitions, next-run timestamps,
-execution history, and needs-you watermarks persist through `State`; the
+execution history, needs-you watermarks, and run-finished claims persist through `State`; the
 scheduler owns calendar evaluation, wakeups, and execution. The typed vocabulary
 is:
 
-- Trigger: `at`, `every`, `cron` with an explicit IANA time zone, or `needs-you`.
+- Trigger: `at`, `every`, `cron` with an explicit IANA time zone, `needs-you`, or `run-finished`
+  with an `origin`.
 - Payload: `prompt` or direct `argv` command.
 - Prompt tools: concrete `AgentToolId[]`; presets are resolved upstream.
 - Run context: absolute `cwd`, timeout, immutable payload snapshot, and trigger context.
@@ -32,8 +33,33 @@ Prompt runs create a fresh Pi `SessionManager` and transcript under
 follows OpenClaw's isolated-job rule:
 [a new transcript/session id per run](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/docs/automation/cron-jobs.md#L203-L220).
 Commands execute exact `argv` without a shell unless a caller deliberately
-supplies `["/bin/sh", "-lc", command]`. Scheduled-run transcripts are searchable but excluded
+supplies `["/bin/sh", "-lc", command]`. A command run with a trigger context reads it as
+JSON on stdin, then EOF; a run without one (a manual trigger) gets an empty stdin. Context never
+goes in argv or the environment. Prompt runs get the same context appended to the prompt. Scheduled-run transcripts are searchable but excluded
 from coding-session monitoring, preventing automation loops.
+
+## Waking an outside caller
+
+A run started with `oo runs delegate --origin <name>` has no local parent to wake
+([delegated-runs.md](delegated-runs.md)). A `run-finished` schedule for that origin fires once for
+each of its runs that reaches a terminal status: `completed`, `failed`, `cancelled`,
+`interrupted`, or `lost`. The context is `{ "runId", "status", "origin", "finishedAt" }`; the
+command reads the rest with `oo runs show <runId>`. Create one with
+`oo schedules create --from <file>`:
+
+```json
+{
+  "name": "wake my-caller",
+  "enabled": true,
+  "trigger": { "kind": "run-finished", "origin": "my-caller" },
+  "payload": { "kind": "command", "argv": ["/bin/sh", "/absolute/path/to/your-wake-script.sh"] },
+  "cwd": "/absolute/path/to/a/working/directory",
+  "timeoutSeconds": 60
+}
+```
+
+The script owns delivery: what it calls and with which credentials. Have it read secrets from a
+file or keychain, never from argv, because `payload_json` is stored and queryable.
 
 ## Policy
 
@@ -54,6 +80,14 @@ from coding-session monitoring, preventing automation loops.
 - Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit
   atomically. Roots with pending or running delegated children are excluded, and an agent-run
   transition reconciles the inputs so the transcript-derived handoff returns after termination.
+- A run-finished claim commits the schedule run with a `schedule_run_finished_claims` row, one per
+  schedule and agent run, so events, ticks, and restarts fire each run once. A terminal agent-run
+  event starts a claim pass, and so does every tick, which catches runs that ended before startup,
+  during downtime, or in the lost sweep. Only runs whose `finished_at` is at or after the
+  schedule's last edit fire, so creating, editing, or re-enabling a schedule never replays history.
+- The claim commits before the command starts. A daemon crash mid-command leaves that schedule run
+  `interrupted` and the caller unwoken, with no retry. Retrying a failed delivery, such as an HTTP
+  error, is the command's job; a non-zero exit is recorded as `failed` and never rerun.
 
 Failures and output are inspectable through read-only `oo db query`
 over `schedules` and `schedule_runs`. The table intent and columns live once in
