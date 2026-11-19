@@ -128,7 +128,7 @@ export interface ScheduledTimeTriggerContext {
   missedOccurrences: number;
 }
 
-/** Thin on purpose: the woken caller reads the rest with `oo runs show <runId>`. */
+/** Thin on purpose: the woken caller reads the rest with `oo runs get <runId>`. */
 export interface RunFinishedTriggerContext {
   runId: string;
   status: Exclude<AgentRunStatus, AgentRunStatus.Pending | AgentRunStatus.Running>;

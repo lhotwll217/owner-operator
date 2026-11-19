@@ -44,7 +44,7 @@ A run started with `oo runs delegate --origin <name>` has no local parent to wak
 ([delegated-runs.md](delegated-runs.md)). A `run-finished` schedule for that origin fires once for
 each of its runs that reaches a terminal status: `completed`, `failed`, `cancelled`,
 `interrupted`, or `lost`. The context is `{ "runId", "status", "origin", "finishedAt" }`; the
-command reads the rest with `oo runs show <runId>`. Create one with
+command reads the rest with `oo runs get <runId>`. Create one with
 `oo schedules create --from <file>`:
 
 ```json
