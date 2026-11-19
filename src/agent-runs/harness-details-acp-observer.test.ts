@@ -288,14 +288,14 @@ try {
   }
 
   const registry = readAcpRegistryProvenance();
-  assert.equal(registry.acpxVersion, "0.21.0");
+  assert.equal(registry.acpxVersion, "0.22.0");
   assert.ok(registry.registeredAgentNames.includes("claude"));
   assert.ok(registry.registeredAgentNames.includes("codex"));
   assert.ok(registry.registeredAgentNames.includes("cursor"));
 
   const claude = await readAcpRuntimeProvenance(AgentRunHarness.ClaudeCode);
   assert.deepEqual(claude, {
-    acpxVersion: "0.21.0",
+    acpxVersion: "0.22.0",
     adapter: {
       packageName: "@agentclientprotocol/claude-agent-acp",
       packageVersion: "0.95.0",
@@ -308,7 +308,7 @@ try {
     },
   });
   const codex = await readAcpRuntimeProvenance(AgentRunHarness.Codex);
-  assert.equal(codex.backend.version, "0.160.1", "backend resolves relative to the adapter, not Promptfoo");
+  assert.equal(codex.backend.version, "0.166.0", "backend resolves relative to the adapter, not Promptfoo");
   const cursor = await readAcpRuntimeProvenance(AgentRunHarness.Cursor, {
     resolveCursorCommand: () => "/fixture/cursor-agent",
     readCommandVersion: async (command) => {

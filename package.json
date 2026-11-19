@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.95.0",
-    "@agentclientprotocol/codex-acp": "2.2.2",
+    "@agentclientprotocol/codex-acp": "2.7.0",
     "@agentclientprotocol/sdk": "1.9.0",
     "@earendil-works/pi-ai": "^1.5.2",
     "@earendil-works/pi-coding-agent": "1.5.2",
@@ -47,7 +47,7 @@
     "@napi-rs/keyring": "2.1.0",
     "@owner-operator/core": "*",
     "@typesafe-ai/sdk": "0.7.0",
-    "acpx": "0.21.0",
+    "acpx": "0.22.0",
     "croner": "10.0.1",
     "jsonc-parser": "3.3.1",
     "pi-tool-display": "0.5.0"

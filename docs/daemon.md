@@ -2,6 +2,7 @@
 title: "Daemon"
 summary: "Daemon lifecycle: loopback auth, health/readiness, staleness, LaunchAgents"
 read_when:
+  - Installing or upgrading the pinned runtime
   - Debugging daemon startup, replacement, or client connection failures
   - Changing daemon discovery, supervision, or fingerprinting
 ---
@@ -84,5 +85,10 @@ after `git fetch`. Rerunning a commit that is already installed only rewrites th
 copies stay on disk until you delete them; delete one only when no LaunchAgent or global `oo`
 points at it. Installs run one at a time, and a crashed install's `.partial-<commit>` directory is
 replaced by the next install of that commit.
+
+**Verify activation:** After installing a runtime, verify that the daemon is healthy and serves
+the intended runtime, and that the widget process is running. Confirm widget visibility through
+visual inspection or owner confirmation. Report activation complete only when all checks pass;
+otherwise name the unverified check.
 
 The widget itself is a pure Gateway client ([widget.md](widget.md)).
