@@ -29,6 +29,8 @@ export interface CommandExecutionRequest {
   argv: readonly [string, ...string[]];
   cwd: string;
   signal: AbortSignal;
+  /** Written to the command's stdin, then EOF. Absent leaves stdin ignored. */
+  stdin?: string;
 }
 
 export enum SchedulerLogEvent {
@@ -76,18 +78,23 @@ function initialNextRunAt(input: ScheduleCreateInput, nowMs: number): string | n
     : computeNextRunAt(input.trigger, nowMs);
 }
 
-async function runCommand({ argv, cwd, signal }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
+async function runCommand({ argv, cwd, signal, stdin }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
       detached: process.platform !== "win32",
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (stdin !== undefined) {
+      // A command that exits without reading stdin closes the pipe (EPIPE); its exit code decides.
+      child.stdin!.on("error", () => undefined);
+      child.stdin!.end(stdin);
+    }
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout = tail(stdout + String(chunk)); });
-    child.stderr.on("data", (chunk) => { stderr = tail(stderr + String(chunk)); });
+    child.stdout!.on("data", (chunk) => { stdout = tail(stdout + String(chunk)); });
+    child.stderr!.on("data", (chunk) => { stderr = tail(stderr + String(chunk)); });
     child.once("error", reject);
     let forceKill: NodeJS.Timeout | null = null;
     child.once("close", (code, killedBy) => {
@@ -334,7 +341,12 @@ export class Scheduler {
     try {
       if (!existsSync(schedule.cwd)) throw new Error(`schedule cwd no longer exists: ${schedule.cwd}`);
       const work = schedule.payload.kind === ScheduledPayloadKind.Command
-        ? this.commandRunner!({ argv: (schedule.payload as ScheduledCommandPayload).argv, cwd: schedule.cwd, signal: controller.signal })
+        ? this.commandRunner!({
+          argv: (schedule.payload as ScheduledCommandPayload).argv,
+          cwd: schedule.cwd,
+          signal: controller.signal,
+          stdin: triggerContext && JSON.stringify(triggerContext),
+        })
         : this.runPrompt(schedule.payload, schedule, run.id, controller.signal, triggerContext);
       const result = await work;
       if (timedOut) throw controller.signal.reason ?? new Error("schedule timed out");
