@@ -192,7 +192,7 @@ try {
     scheduler.createSchedule(wake("padded", " caller "));
     scheduler.start();
     const executor = new AgentRunExecutor(state, { launcher: async () => { throw new Error("never launched"); } });
-    const run = executor.launch({ harness: AgentRunHarness.Codex, task: "outside task", cwd: dir, origin: " caller " });
+    const run = executor.launch({ harness: AgentRunHarness.Codex, model: "controlled", task: "outside task", cwd: dir, origin: " caller " });
     await waitFor(() => calls.of("padded").length === 1, 2_000, "a padded origin matches the same padded value given to delegate");
     assert.equal(JSON.parse(calls.of("padded")[0]!).runId, run.id);
     await executor.stop();
