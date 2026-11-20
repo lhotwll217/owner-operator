@@ -147,7 +147,6 @@ try {
     });
     busy.scheduler.createSchedule(wake("a", "a-origin"));
     busy.scheduler.createSchedule(wake("z", "z-origin"));
-    await pause(5);
     finishRun(busy.state, "a-origin");
     finishRun(busy.state, "z-origin");
     busy.scheduler.start();
@@ -179,7 +178,6 @@ try {
     const { state, scheduler } = open(calls.runner);
     scheduler.createSchedule(wake("padded", " caller "));
     scheduler.start();
-    await pause(5);
     const executor = new AgentRunExecutor(state, { launcher: async () => { throw new Error("never launched"); } });
     const run = executor.launch({ harness: AgentRunHarness.Codex, task: "outside task", cwd: dir, origin: " caller " });
     await waitFor(() => calls.of("padded").length === 1, 2_000, "a padded origin matches the same padded value given to delegate");

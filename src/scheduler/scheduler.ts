@@ -150,27 +150,26 @@ export class Scheduler {
     this.logger = options.logger ?? (() => undefined);
   }
 
-  createSchedule(input: ScheduleCreateInput): ScheduleDefinition {
-    this.validateSchedule(input);
+  createSchedule(raw: ScheduleCreateInput): ScheduleDefinition {
+    const input = this.validateSchedule(raw);
     const nowMs = this.now();
     const now = new Date(nowMs).toISOString();
     const nextRunAt = initialNextRunAt(input, nowMs);
     const schedule: ScheduleDefinition = {
-      id: randomUUID(), ...input, name: input.name.trim(), revision: 1,
+      id: randomUUID(), ...input, revision: 1,
       createdAt: now, updatedAt: now, nextRunAt,
     };
     return this.state.saveSchedule(schedule);
   }
 
-  updateSchedule(id: string, input: ScheduleCreateInput): ScheduleDefinition {
-    this.validateSchedule(input);
+  updateSchedule(id: string, raw: ScheduleCreateInput): ScheduleDefinition {
+    const input = this.validateSchedule(raw);
     const existing = this.state.scheduleById(id);
     if (!existing) throw new Error(`no such schedule: ${id}`);
     const nowMs = this.now();
     const schedule: ScheduleDefinition = {
       id,
       ...input,
-      name: input.name.trim(),
       revision: existing.revision + 1,
       createdAt: existing.createdAt,
       updatedAt: new Date(nowMs).toISOString(),
@@ -179,7 +178,8 @@ export class Scheduler {
     return this.state.saveSchedule(schedule);
   }
 
-  private validateSchedule(input: ScheduleCreateInput): void {
+  /** Returns the input with `name` and a run-finished `origin` trimmed, as delegate trims its origin. */
+  private validateSchedule(input: ScheduleCreateInput): ScheduleCreateInput {
     if (!input.name.trim()) throw new Error("schedule name is required");
     if (!isAbsolute(input.cwd)) throw new Error("schedule cwd must be an absolute path");
     if (!Number.isSafeInteger(input.timeoutSeconds) || input.timeoutSeconds < 1) {
@@ -207,6 +207,10 @@ export class Scheduler {
       throw new Error("invalid scheduled payload kind");
     }
     computeNextRunAt(input.trigger, this.now());
+    const trigger = input.trigger.kind === ScheduleKind.RunFinished
+      ? { ...input.trigger, origin: input.trigger.origin.trim() }
+      : input.trigger;
+    return { ...input, name: input.name.trim(), trigger };
   }
 
   listSchedules(): ScheduleDefinition[] {
@@ -466,30 +470,35 @@ export class Scheduler {
     this.runFinishedFlush.unref?.();
   }
 
-  /** One flush at a time, claiming only after the previous execution ends: a crash mid-burst
-   * then leaves the burst's later runs unclaimed and still eligible, not claimed and interrupted. */
+  /** One flush at a time, one wake per schedule per pass, so one caller's backlog waits its turn
+   * behind every other caller's next wake. */
   private async flushRunFinished(): Promise<void> {
     if (this.stopping || this.flushingRunFinished) return;
     this.flushingRunFinished = true;
     try {
-      for (const schedule of this.state.listSchedules()) {
-        if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.RunFinished) continue;
-        const { origin } = schedule.trigger;
-        while (!this.stopping && !this.running.has(schedule.id)) {
-          const claimed = this.state.claimRunFinishedScheduleRun(schedule, origin);
-          if (!claimed) break;
-          await this.enqueue(() => this.execute(
-            schedule,
-            ScheduleRunTrigger.RunFinished,
-            null,
-            claimed.context,
-            claimed.run,
-          ));
+      let woke = true;
+      while (woke) {
+        woke = false;
+        for (const schedule of this.state.listSchedules()) {
+          if (this.stopping) return;
+          if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.RunFinished) continue;
+          const { origin } = schedule.trigger;
+          if (await this.enqueue(() => this.wakeOnce(schedule, origin))) woke = true;
         }
       }
     } finally {
       this.flushingRunFinished = false;
     }
+  }
+
+  /** Claims at the head of the execution queue with the schedule's slot free, so a claimed wake
+   * starts at once. Stopping or a manual run holding the slot leaves the run unclaimed for a later pass. */
+  private async wakeOnce(schedule: ScheduleDefinition, origin: string): Promise<boolean> {
+    if (this.stopping || this.running.has(schedule.id)) return false;
+    const claimed = this.state.claimRunFinishedScheduleRun(schedule, origin);
+    if (!claimed) return false;
+    await this.execute(schedule, ScheduleRunTrigger.RunFinished, null, claimed.context, claimed.run);
+    return true;
   }
 
   private runInBackground(source: LoopSource, work: () => Promise<void>): void {

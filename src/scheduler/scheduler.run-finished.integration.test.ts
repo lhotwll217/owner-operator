@@ -62,7 +62,6 @@ try {
   }
 
   finishRun(state, ORIGIN, AgentRunStatus.Completed);
-  await pause(5);
   const job = scheduler.createSchedule(wake("wake outside caller", ORIGIN, ["/bin/sh", "/absolute/wake.sh"]));
   assert.equal(job.nextRunAt, null, "an event trigger has no timer occurrence");
   scheduler.start();
@@ -124,7 +123,6 @@ try {
   const out = join(dir, "context.json");
   const reader = scheduler.createSchedule(wake("shell reads stdin", "shell-caller", ["/bin/sh", "-c", `cat > '${out}'`]));
   const ignorer = scheduler.createSchedule(wake("shell ignores stdin", "shell-caller", ["/bin/sh", "-c", "exit 0"]));
-  await pause(5);
   const spawned = finishRun(state, "shell-caller", AgentRunStatus.Completed);
   await waitFor(
     () => [reader, ignorer].every((schedule) => state.listScheduleRuns(schedule.id)[0]?.status === ScheduleRunStatus.Completed),

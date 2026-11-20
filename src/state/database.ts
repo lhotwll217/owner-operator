@@ -7,6 +7,7 @@ import {
   AgentRunStatus,
   RETIRED_AGENT_TOOL_IDS,
   ScheduledPayloadKind,
+  ScheduleKind,
   ScheduleRunStatus,
   ScheduleRunTrigger,
   arrangeSessionState,
@@ -1193,7 +1194,26 @@ export class ThreadDb {
     }
   }
 
+  /** Saving a run-finished schedule claims every run of its origin already terminal, in the same
+   * transaction, so creating, editing, or re-enabling it never replays history. */
   saveSchedule(schedule: ScheduleDefinition): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.upsertSchedule(schedule);
+      if (schedule.trigger.kind === ScheduleKind.RunFinished) {
+        this.db.prepare(
+          `INSERT OR IGNORE INTO schedule_run_finished_claims (schedule_id, agent_run_id, claimed_at)
+           SELECT ?, id, ? FROM agent_runs WHERE origin = ? AND status NOT IN ${LIVE_AGENT_RUN_STATUS_SQL}`,
+        ).run(schedule.id, schedule.updatedAt, schedule.trigger.origin);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private upsertSchedule(schedule: ScheduleDefinition): void {
     this.db.prepare(
       `INSERT INTO schedules (
          id, name, enabled, trigger_kind, trigger_json, payload_kind, payload_json,
@@ -1786,10 +1806,9 @@ export class ThreadDb {
     }
   }
 
-  /** The oldest unclaimed terminal run from `origin` that finished at or after the schedule's last
-   * edit, claimed together with its schedule run. The claim row makes a repeated flush, a re-sent
-   * event, or a restart a no-op; the edit cutoff keeps a new or re-enabled schedule off history.
-   * The revision check ends a flush that outlived an edit, disable, or delete. */
+  /** The oldest unclaimed terminal run from `origin`, claimed together with its schedule run. The
+   * claim row makes a repeated flush, a re-sent event, or a restart a no-op. The revision check ends
+   * a flush that outlived an edit, disable, or delete. */
   claimRunFinishedScheduleRun(params: {
     id: string; schedule: ScheduleDefinition; origin: string;
   }): { run: ScheduleRun; context: RunFinishedTriggerContext } | null {
@@ -1802,11 +1821,10 @@ export class ThreadDb {
         `SELECT run.id AS runId, run.status, run.origin, run.finished_at AS finishedAt
          FROM agent_runs run
          WHERE run.origin = ? AND run.status NOT IN ${LIVE_AGENT_RUN_STATUS_SQL}
-           AND run.finished_at >= ?
            AND NOT EXISTS (SELECT 1 FROM schedule_run_finished_claims claim
              WHERE claim.schedule_id = ? AND claim.agent_run_id = run.id)
          ORDER BY run.finished_at ASC, run.created_at ASC LIMIT 1`,
-      ).get(params.origin, params.schedule.updatedAt, params.schedule.id) as RunFinishedTriggerContext | undefined;
+      ).get(params.origin, params.schedule.id) as RunFinishedTriggerContext | undefined;
       if (!finished) { this.db.exec("COMMIT"); return null; }
       const context = { ...finished };
       const createdAt = this.now();
