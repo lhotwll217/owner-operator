@@ -137,9 +137,8 @@ export class Scheduler {
   private eventFlush: NodeJS.Immediate | null = null;
   private readonly pendingNeedsYou = new Map<string, string>();
   private runFinishedFlush: NodeJS.Immediate | null = null;
-  private flushingRunFinished = false;
   private readonly activeControllers = new Set<AbortController>();
-  private executionQueue: Promise<void> = Promise.resolve();
+  private readonly background = new Set<Promise<void>>();
   private stopping = false;
 
   constructor(private readonly state: State, options: SchedulerOptions = {}) {
@@ -245,7 +244,7 @@ export class Scheduler {
 
   async stop(): Promise<void> {
     if (this.stopping) {
-      await this.executionQueue;
+      await this.drain();
       return;
     }
     this.stopping = true;
@@ -260,7 +259,11 @@ export class Scheduler {
     for (const controller of this.activeControllers) {
       controller.abort(new Error("scheduler stopped"));
     }
-    await this.executionQueue;
+    await this.drain();
+  }
+
+  private async drain(): Promise<void> {
+    while (this.background.size) await Promise.all(this.background);
   }
 
   async tick(): Promise<void> {
@@ -286,7 +289,7 @@ export class Scheduler {
       const enabled = schedule.trigger.kind !== ScheduleKind.At && schedule.enabled;
       const run = this.state.claimScheduledRun(schedule, schedule.nextRunAt!, next, enabled, context);
       if (!run) continue;
-      await this.enqueue(() => this.execute(
+      this.runInBackground("tick", () => this.execute(
         schedule, ScheduleRunTrigger.Scheduled, schedule.nextRunAt, context, run,
       ));
     }
@@ -305,16 +308,14 @@ export class Scheduler {
       this.running.delete(id);
       throw error;
     }
-    this.runInBackground("manual", async () => {
-      await this.enqueue(() => this.execute(
-        schedule,
-        ScheduleRunTrigger.Manual,
-        null,
-        undefined,
-        run,
-        true,
-      ));
-    });
+    this.runInBackground("manual", () => this.execute(
+      schedule,
+      ScheduleRunTrigger.Manual,
+      null,
+      undefined,
+      run,
+      true,
+    ));
     return run;
   }
 
@@ -391,6 +392,8 @@ export class Scheduler {
       clearTimeout(timeout);
       this.activeControllers.delete(controller);
       this.running.delete(schedule.id);
+      // A wake skipped while this schedule ran, or the next in its backlog, fires now.
+      this.scheduleRunFinishedFlush();
     }
   }
 
@@ -413,13 +416,6 @@ export class Scheduler {
       status: run.status,
       error: run.error,
     });
-  }
-
-  private enqueue<T>(work: () => Promise<T>): Promise<T> {
-    if (this.stopping) return Promise.reject(new Error("scheduler has been stopped"));
-    const result = this.executionQueue.then(work, work);
-    this.executionQueue = result.then(() => undefined, () => undefined);
-    return result;
   }
 
   private scheduleEventFlush(): void {
@@ -447,11 +443,12 @@ export class Scheduler {
     this.pendingNeedsYou.clear();
     if (!changes.length) return;
     for (const schedule of this.state.listSchedules()) {
-      if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.NeedsYou) continue;
+      // A busy schedule's changes return with the next tick's reconciliation.
+      if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.NeedsYou || this.running.has(schedule.id)) continue;
       const claimed = this.state.claimNeedsYouScheduleRun(schedule, changes);
       if (!claimed) continue;
       const context = { threadIds: claimed.threadIds, observedThrough: claimed.observedThrough };
-      await this.enqueue(() => this.execute(
+      this.runInBackground("needs-you", () => this.execute(
         schedule,
         ScheduleRunTrigger.NeedsYou,
         null,
@@ -462,52 +459,37 @@ export class Scheduler {
   }
 
   private scheduleRunFinishedFlush(): void {
-    if (this.runFinishedFlush) return;
+    if (this.runFinishedFlush || this.stopping) return;
     this.runFinishedFlush = setImmediate(() => {
       this.runFinishedFlush = null;
-      this.runInBackground("run-finished", () => this.flushRunFinished());
+      this.runInBackground("run-finished", async () => this.flushRunFinished());
     });
     this.runFinishedFlush.unref?.();
   }
 
-  /** One flush at a time, one wake per schedule per pass, so one caller's backlog waits its turn
-   * behind every other caller's next wake. */
-  private async flushRunFinished(): Promise<void> {
-    if (this.stopping || this.flushingRunFinished) return;
-    this.flushingRunFinished = true;
-    try {
-      let woke = true;
-      while (woke) {
-        woke = false;
-        for (const schedule of this.state.listSchedules()) {
-          if (this.stopping) return;
-          if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.RunFinished) continue;
-          const { origin } = schedule.trigger;
-          if (await this.enqueue(() => this.wakeOnce(schedule, origin))) woke = true;
-        }
-      }
-    } finally {
-      this.flushingRunFinished = false;
+  /** Each idle schedule claims its oldest pending wake and starts it in the same step; a busy one
+   * is offered its next wake when its run ends. */
+  private flushRunFinished(): void {
+    for (const schedule of this.state.listSchedules()) {
+      if (this.stopping) return;
+      if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.RunFinished || this.running.has(schedule.id)) continue;
+      const claimed = this.state.claimRunFinishedScheduleRun(schedule, schedule.trigger.origin);
+      if (!claimed) continue;
+      this.runInBackground("run-finished", () => this.execute(
+        schedule, ScheduleRunTrigger.RunFinished, null, claimed.context, claimed.run,
+      ));
     }
   }
 
-  /** Claims at the head of the execution queue with the schedule's slot free, so a claimed wake
-   * starts at once. Stopping or a manual run holding the slot leaves the run unclaimed for a later pass. */
-  private async wakeOnce(schedule: ScheduleDefinition, origin: string): Promise<boolean> {
-    if (this.stopping || this.running.has(schedule.id)) return false;
-    const claimed = this.state.claimRunFinishedScheduleRun(schedule, origin);
-    if (!claimed) return false;
-    await this.execute(schedule, ScheduleRunTrigger.RunFinished, null, claimed.context, claimed.run);
-    return true;
-  }
-
-  private runInBackground(source: LoopSource, work: () => Promise<void>): void {
-    void work().catch((error) => {
+  /** Tracked so `stop()` waits for every loop and execution before State closes. */
+  private runInBackground(source: LoopSource, work: () => Promise<unknown>): void {
+    const task: Promise<void> = work().then(() => undefined, (error) => {
       this.logger({
         event: SchedulerLogEvent.LoopFailed,
         source,
         error: error instanceof Error ? error.message : String(error),
       });
-    });
+    }).finally(() => this.background.delete(task));
+    this.background.add(task);
   }
 }

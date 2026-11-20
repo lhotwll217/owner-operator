@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS schedule_event_watermarks (
 CREATE TABLE IF NOT EXISTS schedule_run_finished_claims (
   schedule_id TEXT NOT NULL REFERENCES schedules(id),
   agent_run_id TEXT NOT NULL,
+  schedule_run_id TEXT REFERENCES schedule_runs(id),
   claimed_at TEXT NOT NULL,
   PRIMARY KEY (schedule_id, agent_run_id)
 );
@@ -1806,9 +1807,11 @@ export class ThreadDb {
     }
   }
 
-  /** The oldest unclaimed terminal run from `origin`, claimed together with its schedule run. The
-   * claim row makes a repeated flush, a re-sent event, or a restart a no-op. The revision check ends
-   * a flush that outlived an edit, disable, or delete. */
+  /** The oldest unclaimed terminal run from `origin`, claimed together with its schedule run. A claim
+   * holds unless its schedule run ended `interrupted` (stopped or killed mid-wake); then the run is
+   * claimed again, so delivery is at least once. A claim with no schedule run is history from
+   * `saveSchedule` and always holds. The revision check ends a flush that outlived an edit, disable,
+   * or delete. */
   claimRunFinishedScheduleRun(params: {
     id: string; schedule: ScheduleDefinition; origin: string;
   }): { run: ScheduleRun; context: RunFinishedTriggerContext } | null {
@@ -1822,7 +1825,9 @@ export class ThreadDb {
          FROM agent_runs run
          WHERE run.origin = ? AND run.status NOT IN ${LIVE_AGENT_RUN_STATUS_SQL}
            AND NOT EXISTS (SELECT 1 FROM schedule_run_finished_claims claim
-             WHERE claim.schedule_id = ? AND claim.agent_run_id = run.id)
+             LEFT JOIN schedule_runs wake ON wake.id = claim.schedule_run_id
+             WHERE claim.schedule_id = ? AND claim.agent_run_id = run.id
+               AND (wake.status IS NULL OR wake.status != '${ScheduleRunStatus.Interrupted}'))
          ORDER BY run.finished_at ASC, run.created_at ASC LIMIT 1`,
       ).get(params.origin, params.schedule.id) as RunFinishedTriggerContext | undefined;
       if (!finished) { this.db.exec("COMMIT"); return null; }
@@ -1837,8 +1842,10 @@ export class ThreadDb {
         createdAt,
       });
       this.db.prepare(
-        "INSERT INTO schedule_run_finished_claims (schedule_id, agent_run_id, claimed_at) VALUES (?, ?, ?)",
-      ).run(params.schedule.id, context.runId, createdAt);
+        `INSERT INTO schedule_run_finished_claims (schedule_id, agent_run_id, schedule_run_id, claimed_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT (schedule_id, agent_run_id)
+         DO UPDATE SET schedule_run_id = excluded.schedule_run_id, claimed_at = excluded.claimed_at`,
+      ).run(params.schedule.id, context.runId, run.id, createdAt);
       this.db.exec("COMMIT");
       return { run, context };
     } catch (error) {

@@ -104,10 +104,11 @@ export const SCHEMA_DOCS: TableDoc[] = [
   },
   {
     name: "schedule_run_finished_claims",
-    description: "Internal durable dedupe for run-finished event jobs: one row per terminal origin run a schedule has fired for, written with its schedule_runs row, or that was already terminal when the schedule was saved. Not a delivery queue.",
+    description: "Internal durable dedupe for run-finished event jobs: one row per terminal origin run a schedule has fired for, written with its schedule_runs row, or that was already terminal when the schedule was saved. A row whose schedule run ended interrupted is claimed again. Not a delivery queue.",
     columns: [
       { name: "schedule_id", description: "Run-finished schedule id." },
       { name: "agent_run_id", description: "agent_runs.id of the terminal origin run this schedule fired for or skipped as history." },
+      { name: "schedule_run_id", description: "schedule_runs.id of the latest wake for this run; null for history skipped at save." },
       { name: "claimed_at", description: "ISO time the schedule run was created, equal to its schedule_runs.created_at; for history skipped at save, the schedule's updated_at." },
     ],
   },
