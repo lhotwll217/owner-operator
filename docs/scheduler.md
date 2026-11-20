@@ -42,9 +42,9 @@ from coding-session monitoring, preventing automation loops.
 
 A run started with `oo runs delegate --origin <name>` has no local parent to wake
 ([delegated-runs.md](delegated-runs.md)). Both sides trim the origin before matching. A
-`run-finished` schedule for that origin fires once for
+`run-finished` schedule for that origin fires at least once for
 each of its runs that reaches a terminal status: `completed`, `failed`, `cancelled`,
-`interrupted`, or `lost`. The context is `{ "runId", "status", "origin", "finishedAt" }`; the
+`interrupted`, or `lost`. The same `runId` can arrive twice, so dedupe by it. The context is `{ "runId", "status", "origin", "finishedAt" }`; the
 command reads the rest with `oo runs get <runId>`. Create one with
 `oo schedules create --from <file>`:
 
@@ -69,31 +69,33 @@ file or keychain, never from argv, because `payload_json` is stored and queryabl
   no human authority is present. `toolsAllow` independently narrows tool availability.
 - The scheduled task cwd activates repository `.pi` permission rules
   ([agent.md — Permissions](agent.md#permissions)).
-- Global concurrency starts at one; the same job never overlaps.
+- Schedules run concurrently, so a slow or hung command delays no other schedule. The same
+  schedule never overlaps itself; a trigger that comes due while it runs waits for it to end.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
 - Timer occurrences advance and create their running row in one transaction before external work starts.
 - Manual triggers return their durable `running` row immediately; clients inspect run completion through `schedule_runs`.
-- A daemon crash marks running rows `interrupted`; no automatic job retry occurs.
+- A daemon crash marks running rows `interrupted`. Only a run-finished wake is retried (below).
 - Commands and prompt runs have bounded timeouts and bounded stdout/stderr tails.
-- Shutdown aborts active runs, terminates command process groups, and drains the queue before State closes.
+- Shutdown aborts active runs, terminates command process groups, and waits for every run to
+  record its outcome before State closes.
 - Disabling/deleting prevents future triggers but does not cancel an active run.
 - A monotonic schedule revision prevents an active run from overwriting a concurrent edit.
 - Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit
   atomically. Roots with pending or running delegated children are excluded, and an agent-run
   transition reconciles the inputs so the transcript-derived handoff returns after termination.
 - A run-finished claim commits the schedule run with a `schedule_run_finished_claims` row, one per
-  schedule and agent run, so events, ticks, and restarts fire each run once. A terminal agent-run
-  event starts a claim pass, and so does every tick, which catches runs that ended before startup,
+  schedule and agent run, so events and ticks claim each run once. A terminal agent-run event
+  starts a claim pass, and so does every tick, which catches runs that ended before startup,
   during downtime, or in the lost sweep.
-- A wake is claimed only at the head of the execution queue while its schedule is idle, and its
-  command starts in the same step. A wake still waiting at shutdown, or behind a manual run of the
-  same schedule, stays unclaimed and fires on a later pass. Each pass claims at most one wake per
-  schedule, so one caller's backlog never holds back another caller's next wake.
+- An idle schedule claims its oldest pending wake and starts the command in the same step. A busy
+  schedule is offered its next wake when its current run ends, so each caller works through its
+  own backlog and never holds back another caller's wake.
+- Wakes are delivered at least once. A wake whose schedule run ends `interrupted`, because shutdown
+  aborted its command or the daemon died after the claim, is claimed again on the first pass after
+  restart, with the same context. A wake whose command exited, with any code, or timed out is
+  never re-sent; retrying a failed delivery, such as an HTTP error, is the command's job.
 - Saving a run-finished schedule claims every run of its origin that is already terminal, in the
   same transaction, so creating, editing, or re-enabling a schedule never replays history.
-- A daemon crash mid-command leaves that schedule run `interrupted` and the caller unwoken, with no
-  retry. Retrying a failed delivery, such as an HTTP error, is the command's job; a non-zero exit is
-  recorded as `failed` and never rerun.
 
 Failures and output are inspectable through read-only `oo db query`
 over `schedules` and `schedule_runs`. The table intent and columns live once in
