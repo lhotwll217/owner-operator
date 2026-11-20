@@ -7,6 +7,7 @@ import {
   AgentRunStatus,
   RETIRED_AGENT_TOOL_IDS,
   ScheduledPayloadKind,
+  ScheduleKind,
   ScheduleRunStatus,
   ScheduleRunTrigger,
   arrangeSessionState,
@@ -24,6 +25,7 @@ import {
   type AgentRunResultRecord,
   type AgentRunStreamEvent,
   type ScheduleDefinition,
+  type RunFinishedTriggerContext,
   type ScheduleRun,
   type ScheduleTriggerContext,
   type ScheduledPayload,
@@ -287,7 +289,8 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
   stderr_tail TEXT,
   error TEXT,
   transcript_id TEXT,
-  attempt_count INTEGER NOT NULL DEFAULT 1
+  attempt_count INTEGER NOT NULL DEFAULT 1,
+  command_pid INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_schedule_runs_job_created
@@ -298,6 +301,14 @@ CREATE TABLE IF NOT EXISTS schedule_event_watermarks (
   thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   last_message_at TEXT NOT NULL,
   PRIMARY KEY (schedule_id, thread_id)
+);
+
+CREATE TABLE IF NOT EXISTS schedule_run_finished_claims (
+  schedule_id TEXT NOT NULL REFERENCES schedules(id),
+  agent_run_id TEXT NOT NULL,
+  schedule_run_id TEXT REFERENCES schedule_runs(id),
+  claimed_at TEXT NOT NULL,
+  PRIMARY KEY (schedule_id, agent_run_id)
 );
 
 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -490,6 +501,7 @@ export class ThreadDb {
     this.migrateAgentRunPromptSubmission();
     this.migrateAgentRunCompletionReceipts();
     this.migrateAgentRunOrigin();
+    this.migrateScheduleRunCommandPid();
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
     this.migrateThreadLink();
@@ -595,6 +607,13 @@ export class ThreadDb {
     const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
     if (!columns.some(({ name }) => name === "origin")) {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN origin TEXT");
+    }
+  }
+
+  private migrateScheduleRunCommandPid(): void {
+    const columns = this.db.prepare("PRAGMA table_info(schedule_runs)").all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "command_pid")) {
+      this.db.exec("ALTER TABLE schedule_runs ADD COLUMN command_pid INTEGER");
     }
   }
 
@@ -1185,7 +1204,26 @@ export class ThreadDb {
     }
   }
 
+  /** Saving a run-finished schedule claims every run of its origin already terminal, in the same
+   * transaction, so creating, editing, or re-enabling it never replays history. */
   saveSchedule(schedule: ScheduleDefinition): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.upsertSchedule(schedule);
+      if (schedule.trigger.kind === ScheduleKind.RunFinished) {
+        this.db.prepare(
+          `INSERT OR IGNORE INTO schedule_run_finished_claims (schedule_id, agent_run_id, claimed_at)
+           SELECT ?, id, ? FROM agent_runs WHERE origin = ? AND status NOT IN ${LIVE_AGENT_RUN_STATUS_SQL}`,
+        ).run(schedule.id, schedule.updatedAt, schedule.trigger.origin);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private upsertSchedule(schedule: ScheduleDefinition): void {
     this.db.prepare(
       `INSERT INTO schedules (
          id, name, enabled, trigger_kind, trigger_json, payload_kind, payload_json,
@@ -1336,6 +1374,16 @@ export class ThreadDb {
       outcome.stderrTail, outcome.error, outcome.transcriptId, id,
     );
     return this.scheduleRunById(id)!;
+  }
+
+  recordScheduleRunCommandPid(id: string, pid: number): void {
+    this.db.prepare("UPDATE schedule_runs SET command_pid = ? WHERE id = ?").run(pid, id);
+  }
+
+  runningScheduleRunCommandPids(): number[] {
+    return (this.db.prepare(
+      "SELECT command_pid FROM schedule_runs WHERE status = ? AND command_pid IS NOT NULL",
+    ).all(ScheduleRunStatus.Running) as Array<{ command_pid: number }>).map((row) => row.command_pid);
   }
 
   markRunningScheduleRunsInterrupted(reason: string): number {
@@ -1772,6 +1820,53 @@ export class ThreadDb {
       for (const change of fresh) write.run(params.schedule.id, change.threadId, change.lastMessageAt);
       this.db.exec("COMMIT");
       return { run, threadIds, observedThrough };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** The oldest unclaimed terminal run from `origin`, claimed together with its schedule run. A claim
+   * holds unless its schedule run ended `interrupted` (stopped or killed mid-wake); then the run is
+   * claimed again, so delivery is at least once. A claim with no schedule run is history from
+   * `saveSchedule` and always holds. The revision check ends a flush that outlived an edit, disable,
+   * or delete. */
+  claimRunFinishedScheduleRun(params: {
+    id: string; schedule: ScheduleDefinition; origin: string;
+  }): { run: ScheduleRun; context: RunFinishedTriggerContext } | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.db.prepare(
+        "SELECT 1 FROM schedules WHERE id = ? AND deleted_at IS NULL AND enabled = 1 AND revision = ?",
+      ).get(params.schedule.id, params.schedule.revision);
+      const finished = current && this.db.prepare(
+        `SELECT run.id AS runId, run.status, run.origin, run.finished_at AS finishedAt
+         FROM agent_runs run
+         WHERE run.origin = ? AND run.status NOT IN ${LIVE_AGENT_RUN_STATUS_SQL}
+           AND NOT EXISTS (SELECT 1 FROM schedule_run_finished_claims claim
+             LEFT JOIN schedule_runs wake ON wake.id = claim.schedule_run_id
+             WHERE claim.schedule_id = ? AND claim.agent_run_id = run.id
+               AND (wake.status IS NULL OR wake.status != '${ScheduleRunStatus.Interrupted}'))
+         ORDER BY run.finished_at ASC, run.created_at ASC LIMIT 1`,
+      ).get(params.origin, params.schedule.id) as RunFinishedTriggerContext | undefined;
+      if (!finished) { this.db.exec("COMMIT"); return null; }
+      const context = { ...finished };
+      const createdAt = this.now();
+      const run = this.insertScheduleRun({
+        id: params.id,
+        schedule: params.schedule,
+        trigger: ScheduleRunTrigger.RunFinished,
+        scheduledFor: null,
+        triggerContext: context,
+        createdAt,
+      });
+      this.db.prepare(
+        `INSERT INTO schedule_run_finished_claims (schedule_id, agent_run_id, schedule_run_id, claimed_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT (schedule_id, agent_run_id)
+         DO UPDATE SET schedule_run_id = excluded.schedule_run_id, claimed_at = excluded.claimed_at`,
+      ).run(params.schedule.id, context.runId, run.id, createdAt);
+      this.db.exec("COMMIT");
+      return { run, context };
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;

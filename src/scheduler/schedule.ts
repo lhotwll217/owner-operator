@@ -3,7 +3,7 @@ import { ScheduleKind, type ScheduleTrigger } from "@owner-operator/core";
 
 /** Return the next timer occurrence strictly after `nowMs`; event triggers return null. */
 export function computeNextRunAt(trigger: ScheduleTrigger, nowMs: number): string | null {
-  if (trigger.kind === ScheduleKind.NeedsYou) return null;
+  if (trigger.kind === ScheduleKind.NeedsYou || trigger.kind === ScheduleKind.RunFinished) return null;
 
   if (trigger.kind === ScheduleKind.At) {
     const atMs = Date.parse(trigger.at);

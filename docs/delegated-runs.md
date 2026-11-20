@@ -451,6 +451,8 @@ and stays visible, even when its transcript is quiet or outside the active windo
 monitor indexes the transcript, the run projects as its own working row built from the ledger, with
 `awaitingTranscript` set and no row actions, since there is no thread to mark done, snooze, or
 rename yet. A child whose known parent is not a visible row is also a root.
+No nested follow-up wakes an outside caller, so it subscribes with a `run-finished` schedule for
+its origin ([scheduler.md](scheduler.md)).
 
 In the terminal, a delegation renders as the Operator's ordinary bash call, whose output is the
 pending run line (`oo runs delegate` without `--json`); the completion message persists the other

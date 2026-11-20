@@ -10,6 +10,7 @@ import {
   ScheduleRunStatus,
   ScheduleRunTrigger,
   ScheduledPayloadKind,
+  isTerminalAgentRunStatus,
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleExecutionResult,
@@ -29,6 +30,10 @@ export interface CommandExecutionRequest {
   argv: readonly [string, ...string[]];
   cwd: string;
   signal: AbortSignal;
+  /** Written to the command's stdin, then EOF. Absent leaves stdin ignored. */
+  stdin?: string;
+  /** Receives the spawned process id, which leads the command's process group off Windows. */
+  onSpawn?: (pid: number) => void;
 }
 
 export enum SchedulerLogEvent {
@@ -51,9 +56,11 @@ export type SchedulerLogRecord =
     }
   | {
       event: SchedulerLogEvent.LoopFailed;
-      source: "tick" | "needs-you" | "manual";
+      source: LoopSource;
       error: string;
     };
+
+type LoopSource = "tick" | "needs-you" | "run-finished" | "manual";
 
 export interface SchedulerOptions {
   now?: () => number;
@@ -76,18 +83,30 @@ function initialNextRunAt(input: ScheduleCreateInput, nowMs: number): string | n
     : computeNextRunAt(input.trigger, nowMs);
 }
 
-async function runCommand({ argv, cwd, signal }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
+function killOrphanedCommand(pid: number): void {
+  try {
+    process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+  } catch { /* already exited */ }
+}
+
+async function runCommand({ argv, cwd, signal, stdin, onSpawn }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
       detached: process.platform !== "win32",
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (child.pid) onSpawn?.(child.pid);
+    if (stdin !== undefined) {
+      // A command that exits without reading stdin closes the pipe (EPIPE); its exit code decides.
+      child.stdin!.on("error", () => undefined);
+      child.stdin!.end(stdin);
+    }
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout = tail(stdout + String(chunk)); });
-    child.stderr.on("data", (chunk) => { stderr = tail(stderr + String(chunk)); });
+    child.stdout!.on("data", (chunk) => { stdout = tail(stdout + String(chunk)); });
+    child.stderr!.on("data", (chunk) => { stderr = tail(stderr + String(chunk)); });
     child.once("error", reject);
     let forceKill: NodeJS.Timeout | null = null;
     child.once("close", (code, killedBy) => {
@@ -126,8 +145,9 @@ export class Scheduler {
   private unsubscribe: (() => void) | null = null;
   private eventFlush: NodeJS.Immediate | null = null;
   private readonly pendingNeedsYou = new Map<string, string>();
+  private runFinishedFlush: NodeJS.Immediate | null = null;
   private readonly activeControllers = new Set<AbortController>();
-  private executionQueue: Promise<void> = Promise.resolve();
+  private readonly background = new Set<Promise<void>>();
   private stopping = false;
 
   constructor(private readonly state: State, options: SchedulerOptions = {}) {
@@ -138,27 +158,26 @@ export class Scheduler {
     this.logger = options.logger ?? (() => undefined);
   }
 
-  createSchedule(input: ScheduleCreateInput): ScheduleDefinition {
-    this.validateSchedule(input);
+  createSchedule(raw: ScheduleCreateInput): ScheduleDefinition {
+    const input = this.validateSchedule(raw);
     const nowMs = this.now();
     const now = new Date(nowMs).toISOString();
     const nextRunAt = initialNextRunAt(input, nowMs);
     const schedule: ScheduleDefinition = {
-      id: randomUUID(), ...input, name: input.name.trim(), revision: 1,
+      id: randomUUID(), ...input, revision: 1,
       createdAt: now, updatedAt: now, nextRunAt,
     };
     return this.state.saveSchedule(schedule);
   }
 
-  updateSchedule(id: string, input: ScheduleCreateInput): ScheduleDefinition {
-    this.validateSchedule(input);
+  updateSchedule(id: string, raw: ScheduleCreateInput): ScheduleDefinition {
+    const input = this.validateSchedule(raw);
     const existing = this.state.scheduleById(id);
     if (!existing) throw new Error(`no such schedule: ${id}`);
     const nowMs = this.now();
     const schedule: ScheduleDefinition = {
       id,
       ...input,
-      name: input.name.trim(),
       revision: existing.revision + 1,
       createdAt: existing.createdAt,
       updatedAt: new Date(nowMs).toISOString(),
@@ -167,7 +186,8 @@ export class Scheduler {
     return this.state.saveSchedule(schedule);
   }
 
-  private validateSchedule(input: ScheduleCreateInput): void {
+  /** Returns the input with `name` and a run-finished `origin` trimmed, as delegate trims its origin. */
+  private validateSchedule(input: ScheduleCreateInput): ScheduleCreateInput {
     if (!input.name.trim()) throw new Error("schedule name is required");
     if (!isAbsolute(input.cwd)) throw new Error("schedule cwd must be an absolute path");
     if (!Number.isSafeInteger(input.timeoutSeconds) || input.timeoutSeconds < 1) {
@@ -176,6 +196,10 @@ export class Scheduler {
     if (!Object.values(ScheduleKind).includes(input.trigger.kind)) throw new Error("invalid schedule kind");
     if (input.trigger.kind === ScheduleKind.At && !Number.isFinite(Date.parse(input.trigger.at))) {
       throw new Error("invalid at schedule");
+    }
+    if (input.trigger.kind === ScheduleKind.RunFinished
+      && (typeof input.trigger.origin !== "string" || !input.trigger.origin.trim())) {
+      throw new Error("run-finished schedule requires a non-empty origin");
     }
     if (input.payload.kind === ScheduledPayloadKind.Command) {
       if (!input.payload.argv.length || input.payload.argv.some((part) => typeof part !== "string")) {
@@ -191,6 +215,10 @@ export class Scheduler {
       throw new Error("invalid scheduled payload kind");
     }
     computeNextRunAt(input.trigger, this.now());
+    const trigger = input.trigger.kind === ScheduleKind.RunFinished
+      ? { ...input.trigger, origin: input.trigger.origin.trim() }
+      : input.trigger;
+    return { ...input, name: input.name.trim(), trigger };
   }
 
   listSchedules(): ScheduleDefinition[] {
@@ -204,6 +232,8 @@ export class Scheduler {
   start(): void {
     if (this.timer) return;
     if (this.stopping) throw new Error("scheduler has been stopped");
+    // Commands run detached and outlive a killed daemon; stop them before their wakes retry.
+    for (const pid of this.state.runningScheduleRunCommandPids()) killOrphanedCommand(pid);
     const interrupted = this.state.markRunningScheduleRunsInterrupted("daemon restarted during execution");
     if (interrupted) this.logger({ event: SchedulerLogEvent.StartupInterrupted, count: interrupted });
     this.unsubscribe = this.state.bus.subscribe((event) => {
@@ -213,9 +243,9 @@ export class Scheduler {
         this.scheduleEventFlush();
         return;
       }
-      if (event.kind === DomainEventKind.AgentRunChanged && event.status !== AgentRunStatus.Running) {
-        this.reconcileNeedsYouInputs();
-      }
+      if (event.kind !== DomainEventKind.AgentRunChanged) return;
+      if (event.status !== AgentRunStatus.Running) this.reconcileNeedsYouInputs();
+      if (isTerminalAgentRunStatus(event.status)) this.scheduleRunFinishedFlush();
     });
     this.reconcileNeedsYouInputs();
     this.runInBackground("tick", () => this.tick());
@@ -225,20 +255,26 @@ export class Scheduler {
 
   async stop(): Promise<void> {
     if (this.stopping) {
-      await this.executionQueue;
+      await this.drain();
       return;
     }
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     if (this.eventFlush) clearImmediate(this.eventFlush);
+    if (this.runFinishedFlush) clearImmediate(this.runFinishedFlush);
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.eventFlush = null;
+    this.runFinishedFlush = null;
     this.timer = null;
     for (const controller of this.activeControllers) {
       controller.abort(new Error("scheduler stopped"));
     }
-    await this.executionQueue;
+    await this.drain();
+  }
+
+  private async drain(): Promise<void> {
+    while (this.background.size) await Promise.all(this.background);
   }
 
   async tick(): Promise<void> {
@@ -246,6 +282,9 @@ export class Scheduler {
     // A timed snooze ends at read time with no event, so each tick re-offers needs-you rows;
     // the per-message watermark keeps a handled row from running twice.
     this.reconcileNeedsYouInputs();
+    // A run can finish with no event this process saw: before startup, or while the daemon was
+    // down. Durable claims make each tick's re-check safe.
+    this.scheduleRunFinishedFlush();
     const due = this.state.listDueSchedules(new Date(this.now()).toISOString());
     for (const schedule of due) {
       if (this.running.has(schedule.id)) continue;
@@ -261,7 +300,7 @@ export class Scheduler {
       const enabled = schedule.trigger.kind !== ScheduleKind.At && schedule.enabled;
       const run = this.state.claimScheduledRun(schedule, schedule.nextRunAt!, next, enabled, context);
       if (!run) continue;
-      await this.enqueue(() => this.execute(
+      this.runInBackground("tick", () => this.execute(
         schedule, ScheduleRunTrigger.Scheduled, schedule.nextRunAt, context, run,
       ));
     }
@@ -280,16 +319,14 @@ export class Scheduler {
       this.running.delete(id);
       throw error;
     }
-    this.runInBackground("manual", async () => {
-      await this.enqueue(() => this.execute(
-        schedule,
-        ScheduleRunTrigger.Manual,
-        null,
-        undefined,
-        run,
-        true,
-      ));
-    });
+    this.runInBackground("manual", () => this.execute(
+      schedule,
+      ScheduleRunTrigger.Manual,
+      null,
+      undefined,
+      run,
+      true,
+    ));
     return run;
   }
 
@@ -330,7 +367,13 @@ export class Scheduler {
     try {
       if (!existsSync(schedule.cwd)) throw new Error(`schedule cwd no longer exists: ${schedule.cwd}`);
       const work = schedule.payload.kind === ScheduledPayloadKind.Command
-        ? this.commandRunner!({ argv: (schedule.payload as ScheduledCommandPayload).argv, cwd: schedule.cwd, signal: controller.signal })
+        ? this.commandRunner!({
+          argv: (schedule.payload as ScheduledCommandPayload).argv,
+          cwd: schedule.cwd,
+          signal: controller.signal,
+          stdin: triggerContext && JSON.stringify(triggerContext),
+          onSpawn: (pid) => this.state.recordScheduleRunCommandPid(run.id, pid),
+        })
         : this.runPrompt(schedule.payload, schedule, run.id, controller.signal, triggerContext);
       const result = await work;
       if (timedOut) throw controller.signal.reason ?? new Error("schedule timed out");
@@ -361,6 +404,8 @@ export class Scheduler {
       clearTimeout(timeout);
       this.activeControllers.delete(controller);
       this.running.delete(schedule.id);
+      // A wake skipped while this schedule ran, or the next in its backlog, fires now.
+      this.scheduleRunFinishedFlush();
     }
   }
 
@@ -383,13 +428,6 @@ export class Scheduler {
       status: run.status,
       error: run.error,
     });
-  }
-
-  private enqueue<T>(work: () => Promise<T>): Promise<T> {
-    if (this.stopping) return Promise.reject(new Error("scheduler has been stopped"));
-    const result = this.executionQueue.then(work, work);
-    this.executionQueue = result.then(() => undefined, () => undefined);
-    return result;
   }
 
   private scheduleEventFlush(): void {
@@ -417,11 +455,12 @@ export class Scheduler {
     this.pendingNeedsYou.clear();
     if (!changes.length) return;
     for (const schedule of this.state.listSchedules()) {
-      if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.NeedsYou) continue;
+      // A busy schedule's changes return with the next tick's reconciliation.
+      if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.NeedsYou || this.running.has(schedule.id)) continue;
       const claimed = this.state.claimNeedsYouScheduleRun(schedule, changes);
       if (!claimed) continue;
       const context = { threadIds: claimed.threadIds, observedThrough: claimed.observedThrough };
-      await this.enqueue(() => this.execute(
+      this.runInBackground("needs-you", () => this.execute(
         schedule,
         ScheduleRunTrigger.NeedsYou,
         null,
@@ -431,13 +470,38 @@ export class Scheduler {
     }
   }
 
-  private runInBackground(source: "tick" | "needs-you" | "manual", work: () => Promise<void>): void {
-    void work().catch((error) => {
+  private scheduleRunFinishedFlush(): void {
+    if (this.runFinishedFlush || this.stopping) return;
+    this.runFinishedFlush = setImmediate(() => {
+      this.runFinishedFlush = null;
+      this.runInBackground("run-finished", async () => this.flushRunFinished());
+    });
+    this.runFinishedFlush.unref?.();
+  }
+
+  /** Each idle schedule claims its oldest pending wake and starts it in the same step; a busy one
+   * is offered its next wake when its run ends. */
+  private flushRunFinished(): void {
+    for (const schedule of this.state.listSchedules()) {
+      if (this.stopping) return;
+      if (!schedule.enabled || schedule.trigger.kind !== ScheduleKind.RunFinished || this.running.has(schedule.id)) continue;
+      const claimed = this.state.claimRunFinishedScheduleRun(schedule, schedule.trigger.origin);
+      if (!claimed) continue;
+      this.runInBackground("run-finished", () => this.execute(
+        schedule, ScheduleRunTrigger.RunFinished, null, claimed.context, claimed.run,
+      ));
+    }
+  }
+
+  /** Tracked so `stop()` waits for every loop and execution before State closes. */
+  private runInBackground(source: LoopSource, work: () => Promise<unknown>): void {
+    const task: Promise<void> = work().then(() => undefined, (error) => {
       this.logger({
         event: SchedulerLogEvent.LoopFailed,
         source,
         error: error instanceof Error ? error.message : String(error),
       });
-    });
+    }).finally(() => this.background.delete(task));
+    this.background.add(task);
   }
 }

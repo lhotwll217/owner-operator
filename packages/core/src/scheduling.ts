@@ -1,9 +1,12 @@
+import type { AgentRunStatus } from "./agent-runs";
+
 /** Closed scheduler vocabulary shared by clients, state, and the daemon runtime. */
 export enum ScheduleKind {
   At = "at",
   Every = "every",
   Cron = "cron",
   NeedsYou = "needs-you",
+  RunFinished = "run-finished",
 }
 
 export enum ScheduledPayloadKind {
@@ -22,6 +25,7 @@ export enum ScheduleRunTrigger {
   Scheduled = "scheduled",
   Manual = "manual",
   NeedsYou = "needs-you",
+  RunFinished = "run-finished",
 }
 
 export enum AgentToolId {
@@ -58,7 +62,9 @@ export type ScheduleTrigger =
   | { kind: ScheduleKind.At; at: string }
   | { kind: ScheduleKind.Every; everyMs: number; anchorMs: number }
   | { kind: ScheduleKind.Cron; expression: string; timeZone: string }
-  | { kind: ScheduleKind.NeedsYou };
+  | { kind: ScheduleKind.NeedsYou }
+  /** Fires once per delegated run started with this `--origin` that reaches a terminal status. */
+  | { kind: ScheduleKind.RunFinished; origin: string };
 
 export interface ScheduledPromptPayload {
   kind: ScheduledPayloadKind.Prompt;
@@ -122,7 +128,18 @@ export interface ScheduledTimeTriggerContext {
   missedOccurrences: number;
 }
 
-export type ScheduleTriggerContext = NeedsYouTriggerContext | ScheduledTimeTriggerContext;
+/** Thin on purpose: the woken caller reads the rest with `oo runs get <runId>`. */
+export interface RunFinishedTriggerContext {
+  runId: string;
+  status: Exclude<AgentRunStatus, AgentRunStatus.Pending | AgentRunStatus.Running>;
+  origin: string;
+  finishedAt: string;
+}
+
+export type ScheduleTriggerContext =
+  | NeedsYouTriggerContext
+  | ScheduledTimeTriggerContext
+  | RunFinishedTriggerContext;
 
 export interface ScheduleRun {
   id: string;
