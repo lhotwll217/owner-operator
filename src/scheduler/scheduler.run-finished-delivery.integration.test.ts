@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -217,6 +217,38 @@ try {
       scheduler.start();
       await waitFor(() => delivered.length === 1, 2_000, "the killed wake is delivered after restart");
       assert.equal(delivered[0], contextOf(run));
+    } finally {
+      await scheduler.stop();
+      state.close();
+    }
+  });
+
+  await scenario("daemon SIGKILLed while the wake command keeps running", async () => {
+    const dbPath = join(dir, "orphan.db");
+    const log = join(dir, "orphan.log");
+    const setup = new State(dbPath);
+    new Scheduler(setup).createSchedule({ ...wake("target", "target-origin"), payload: {
+      kind: ScheduledPayloadKind.Command,
+      argv: ["/bin/sh", "-c", `echo "start $$" >> "$0"
+        if [ ! -e "$0.killed" ]; then : > "$0.killed"; kill -9 $PPID; fi
+        sleep 3; echo "end $$" >> "$0"`, log],
+    } });
+    finishRun(setup, "target-origin");
+    setup.close();
+    const daemon = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./test/wake-daemon.ts", import.meta.url)), dbPath], { stdio: "inherit" });
+    const [, signal] = await once(daemon, "exit");
+    assert.equal(signal, "SIGKILL", "the wake command killed its daemon");
+
+    const state = new State(dbPath);
+    const scheduler = new Scheduler(state, { tickMs: 60_000 });
+    const events = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+    try {
+      scheduler.start();
+      await waitFor(() => events().length >= 2, 2_000, "the wake is retried after restart");
+      await pause(3_500);
+      const [first, second] = events().filter((line) => line.startsWith("start")).map((line) => line.split(" ")[1]);
+      assert.deepStrictEqual(events(), [`start ${first}`, `start ${second}`, `end ${second}`],
+        "the orphaned command is stopped before its wake is retried, so the schedule never overlaps itself");
     } finally {
       await scheduler.stop();
       state.close();
