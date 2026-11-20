@@ -71,6 +71,8 @@ file or keychain, never from argv, because `payload_json` is stored and queryabl
   ([agent.md — Permissions](agent.md#permissions)).
 - Schedules run concurrently, so a slow or hung command delays no other schedule. The same
   schedule never overlaps itself; a trigger that comes due while it runs waits for it to end.
+  Commands run detached and survive a daemon crash, so startup SIGKILLs the process group recorded
+  on each `running` row before marking it `interrupted`.
 - Overdue one-shots run once. Recurring jobs skip backlog and record timing/missed counts in run context.
 - Timer occurrences advance and create their running row in one transaction before external work starts.
 - Manual triggers return their durable `running` row immediately; clients inspect run completion through `schedule_runs`.
@@ -90,10 +92,12 @@ file or keychain, never from argv, because `payload_json` is stored and queryabl
 - An idle schedule claims its oldest pending wake and starts the command in the same step. A busy
   schedule is offered its next wake when its current run ends, so each caller works through its
   own backlog and never holds back another caller's wake.
-- Wakes are delivered at least once. A wake whose schedule run ends `interrupted`, because shutdown
-  aborted its command or the daemon died after the claim, is claimed again on the first pass after
-  restart, with the same context. A wake whose command exited, with any code, or timed out is
-  never re-sent; retrying a failed delivery, such as an HTTP error, is the command's job.
+- Wakes are delivered at least once, so the same wake can repeat and callers dedupe by `runId`. A
+  wake whose schedule run ends `interrupted`, because shutdown aborted its command or the daemon
+  died before recording its outcome, is claimed again on the first pass after restart, with the
+  same context. That includes a crash after the command exited but before its outcome was saved.
+  A wake whose recorded outcome is `completed` or `failed`, including a timeout, is not retried;
+  retrying a failed delivery, such as an HTTP error, is the command's job.
 - Saving a run-finished schedule claims every run of its origin that is already terminal, in the
   same transaction, so creating, editing, or re-enabling a schedule never replays history.
 
