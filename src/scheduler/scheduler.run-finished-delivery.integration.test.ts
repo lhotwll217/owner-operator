@@ -229,20 +229,18 @@ try {
     const setup = new State(dbPath);
     new Scheduler(setup).createSchedule({ ...wake("target", "target-origin"), payload: {
       kind: ScheduledPayloadKind.Command,
-      argv: ["/bin/sh", "-c", `echo "start $$" >> "$0"
-        if [ ! -e "$0.killed" ]; then : > "$0.killed"; kill -9 $PPID; fi
-        sleep 3; echo "end $$" >> "$0"`, log],
+      argv: ["/bin/sh", "-c", `echo "start $$" >> "$0"; sleep 3; echo "end $$" >> "$0"`, log],
     } });
     finishRun(setup, "target-origin");
     setup.close();
     const daemon = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./test/wake-daemon.ts", import.meta.url)), dbPath], { stdio: "inherit" });
-    const [, signal] = await once(daemon, "exit");
-    assert.equal(signal, "SIGKILL", "the wake command killed its daemon");
-
+    const events = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
     const state = new State(dbPath);
     const scheduler = new Scheduler(state, { tickMs: 60_000 });
-    const events = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
     try {
+      await waitFor(() => events().length === 1 && state.runningScheduleRunCommandPids().length === 1, 5_000, "the daemon's wake command is running");
+      daemon.kill("SIGKILL");
+      await once(daemon, "exit");
       scheduler.start();
       await waitFor(() => events().length >= 2, 2_000, "the wake is retried after restart");
       await pause(3_500);
@@ -250,6 +248,7 @@ try {
       assert.deepStrictEqual(events(), [`start ${first}`, `start ${second}`, `end ${second}`],
         "the orphaned command is stopped before its wake is retried, so the schedule never overlaps itself");
     } finally {
+      daemon.kill("SIGKILL");
       await scheduler.stop();
       state.close();
     }
