@@ -289,7 +289,8 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
   stderr_tail TEXT,
   error TEXT,
   transcript_id TEXT,
-  attempt_count INTEGER NOT NULL DEFAULT 1
+  attempt_count INTEGER NOT NULL DEFAULT 1,
+  command_pid INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_schedule_runs_job_created
@@ -500,6 +501,7 @@ export class ThreadDb {
     this.migrateAgentRunPromptSubmission();
     this.migrateAgentRunCompletionReceipts();
     this.migrateAgentRunOrigin();
+    this.migrateScheduleRunCommandPid();
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
     this.migrateThreadLink();
@@ -605,6 +607,13 @@ export class ThreadDb {
     const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
     if (!columns.some(({ name }) => name === "origin")) {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN origin TEXT");
+    }
+  }
+
+  private migrateScheduleRunCommandPid(): void {
+    const columns = this.db.prepare("PRAGMA table_info(schedule_runs)").all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "command_pid")) {
+      this.db.exec("ALTER TABLE schedule_runs ADD COLUMN command_pid INTEGER");
     }
   }
 
@@ -1365,6 +1374,16 @@ export class ThreadDb {
       outcome.stderrTail, outcome.error, outcome.transcriptId, id,
     );
     return this.scheduleRunById(id)!;
+  }
+
+  recordScheduleRunCommandPid(id: string, pid: number): void {
+    this.db.prepare("UPDATE schedule_runs SET command_pid = ? WHERE id = ?").run(pid, id);
+  }
+
+  runningScheduleRunCommandPids(): number[] {
+    return (this.db.prepare(
+      "SELECT command_pid FROM schedule_runs WHERE status = ? AND command_pid IS NOT NULL",
+    ).all(ScheduleRunStatus.Running) as Array<{ command_pid: number }>).map((row) => row.command_pid);
   }
 
   markRunningScheduleRunsInterrupted(reason: string): number {

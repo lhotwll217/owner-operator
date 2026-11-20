@@ -91,6 +91,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "error", description: "Terminal failure/interruption explanation." },
       { name: "transcript_id", description: "Fresh Owner Operator transcript id for a prompt run." },
       { name: "attempt_count", description: "Always 1 in V0; scheduler has no retry loop." },
+      { name: "command_pid", description: "Process (group) id of a running command, so startup can kill a command a crashed daemon left behind." },
     ],
   },
   {

@@ -337,6 +337,14 @@ export class State {
     return run;
   }
 
+  recordScheduleRunCommandPid(id: string, pid: number): void {
+    this.db.recordScheduleRunCommandPid(id, pid);
+  }
+
+  runningScheduleRunCommandPids(): number[] {
+    return this.db.runningScheduleRunCommandPids();
+  }
+
   markRunningScheduleRunsInterrupted(reason: string): number {
     return this.db.markRunningScheduleRunsInterrupted(reason);
   }

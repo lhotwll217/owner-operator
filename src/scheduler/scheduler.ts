@@ -32,6 +32,8 @@ export interface CommandExecutionRequest {
   signal: AbortSignal;
   /** Written to the command's stdin, then EOF. Absent leaves stdin ignored. */
   stdin?: string;
+  /** Receives the spawned process id, which leads the command's process group off Windows. */
+  onSpawn?: (pid: number) => void;
 }
 
 export enum SchedulerLogEvent {
@@ -81,7 +83,13 @@ function initialNextRunAt(input: ScheduleCreateInput, nowMs: number): string | n
     : computeNextRunAt(input.trigger, nowMs);
 }
 
-async function runCommand({ argv, cwd, signal, stdin }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
+function killOrphanedCommand(pid: number): void {
+  try {
+    process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+  } catch { /* already exited */ }
+}
+
+async function runCommand({ argv, cwd, signal, stdin, onSpawn }: CommandExecutionRequest): Promise<ScheduleExecutionResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
@@ -89,6 +97,7 @@ async function runCommand({ argv, cwd, signal, stdin }: CommandExecutionRequest)
       env: process.env,
       stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (child.pid) onSpawn?.(child.pid);
     if (stdin !== undefined) {
       // A command that exits without reading stdin closes the pipe (EPIPE); its exit code decides.
       child.stdin!.on("error", () => undefined);
@@ -223,6 +232,8 @@ export class Scheduler {
   start(): void {
     if (this.timer) return;
     if (this.stopping) throw new Error("scheduler has been stopped");
+    // Commands run detached and outlive a killed daemon; stop them before their wakes retry.
+    for (const pid of this.state.runningScheduleRunCommandPids()) killOrphanedCommand(pid);
     const interrupted = this.state.markRunningScheduleRunsInterrupted("daemon restarted during execution");
     if (interrupted) this.logger({ event: SchedulerLogEvent.StartupInterrupted, count: interrupted });
     this.unsubscribe = this.state.bus.subscribe((event) => {
@@ -361,6 +372,7 @@ export class Scheduler {
           cwd: schedule.cwd,
           signal: controller.signal,
           stdin: triggerContext && JSON.stringify(triggerContext),
+          onSpawn: (pid) => this.state.recordScheduleRunCommandPid(run.id, pid),
         })
         : this.runPrompt(schedule.payload, schedule, run.id, controller.signal, triggerContext);
       const result = await work;
