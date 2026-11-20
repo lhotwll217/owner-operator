@@ -41,7 +41,8 @@ from coding-session monitoring, preventing automation loops.
 ## Waking an outside caller
 
 A run started with `oo runs delegate --origin <name>` has no local parent to wake
-([delegated-runs.md](delegated-runs.md)). A `run-finished` schedule for that origin fires once for
+([delegated-runs.md](delegated-runs.md)). Both sides trim the origin before matching. A
+`run-finished` schedule for that origin fires once for
 each of its runs that reaches a terminal status: `completed`, `failed`, `cancelled`,
 `interrupted`, or `lost`. The context is `{ "runId", "status", "origin", "finishedAt" }`; the
 command reads the rest with `oo runs get <runId>`. Create one with
@@ -83,11 +84,16 @@ file or keychain, never from argv, because `payload_json` is stored and queryabl
 - A run-finished claim commits the schedule run with a `schedule_run_finished_claims` row, one per
   schedule and agent run, so events, ticks, and restarts fire each run once. A terminal agent-run
   event starts a claim pass, and so does every tick, which catches runs that ended before startup,
-  during downtime, or in the lost sweep. Only runs whose `finished_at` is at or after the
-  schedule's last edit fire, so creating, editing, or re-enabling a schedule never replays history.
-- The claim commits before the command starts. A daemon crash mid-command leaves that schedule run
-  `interrupted` and the caller unwoken, with no retry. Retrying a failed delivery, such as an HTTP
-  error, is the command's job; a non-zero exit is recorded as `failed` and never rerun.
+  during downtime, or in the lost sweep.
+- A wake is claimed only at the head of the execution queue while its schedule is idle, and its
+  command starts in the same step. A wake still waiting at shutdown, or behind a manual run of the
+  same schedule, stays unclaimed and fires on a later pass. Each pass claims at most one wake per
+  schedule, so one caller's backlog never holds back another caller's next wake.
+- Saving a run-finished schedule claims every run of its origin that is already terminal, in the
+  same transaction, so creating, editing, or re-enabling a schedule never replays history.
+- A daemon crash mid-command leaves that schedule run `interrupted` and the caller unwoken, with no
+  retry. Retrying a failed delivery, such as an HTTP error, is the command's job; a non-zero exit is
+  recorded as `failed` and never rerun.
 
 Failures and output are inspectable through read-only `oo db query`
 over `schedules` and `schedule_runs`. The table intent and columns live once in
