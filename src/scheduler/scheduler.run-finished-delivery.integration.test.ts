@@ -1,7 +1,10 @@
 import assert from "node:assert";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AgentRunHarness,
   AgentRunStatus,
@@ -89,48 +92,59 @@ async function scenario(
 }
 
 try {
-  await scenario("shutdown before the command starts", async (open) => {
+  await scenario("a hung command delays no other schedule", async (open) => {
+    const calls = recorder();
+    const { state, scheduler } = open(calls.runner);
+    const past = (ms: number) => ({ kind: ScheduleKind.At, at: new Date(Date.now() - ms).toISOString() }) as const;
+    scheduler.createSchedule({ ...wake("a hung", "unused"), trigger: past(2_000) });
+    scheduler.createSchedule({ ...wake("b timer", "unused"), trigger: past(1_000) });
+    scheduler.createSchedule(wake("c target", "target-origin"));
+    calls.blocked.set("a hung", () => undefined);
+    scheduler.start();
+    await waitFor(() => calls.of("a hung").length === 1, 1_000, "the hung command is running");
+    const run = finishRun(state, "target-origin");
+    await waitFor(() => calls.of("b timer").length === 1, 1_000, "a due timer runs beside the hung command");
+    await waitFor(() => calls.of("c target").length === 1, 1_000, "a wake fires beside the hung command");
+    assert.equal(calls.of("c target")[0], contextOf(run));
+  });
+
+  await scenario("a wake waits for its schedule's own run", async (open) => {
+    const calls = recorder();
+    const { state, scheduler } = open(calls.runner);
+    const target = scheduler.createSchedule(wake("target", "target-origin"));
+    scheduler.start();
+    calls.blocked.set("target", () => undefined);
+    await scheduler.runNow(target.id);
+    await waitFor(() => calls.of("target").length === 1, 1_000, "manual run is running");
+    const release = calls.blocked.get("target")!;
+    calls.blocked.delete("target");
+    const run = finishRun(state, "target-origin");
+    await scheduler.tick();
+    await pause();
+    assert.deepStrictEqual(calls.of("target"), [undefined], "the schedule never overlaps itself");
+    release();
+    await waitFor(() => calls.of("target").length === 2, 1_000, "the wake fires once the manual run ends");
+    assert.equal(calls.of("target")[1], contextOf(run));
+  });
+
+  await scenario("clean stop mid-command", async (open) => {
     const first = recorder();
     const { state, scheduler } = open(first.runner);
-    const blocker = scheduler.createSchedule(wake("a blocker", "blocker-origin"));
-    scheduler.createSchedule(wake("b target", "target-origin"));
+    scheduler.createSchedule(wake("target", "target-origin"));
     scheduler.start();
-    first.blocked.set("a blocker", () => undefined);
-    await scheduler.runNow(blocker.id);
-    await waitFor(() => first.of("a blocker").length === 1, 1_000, "blocker holds the execution queue");
+    finishRun(state, "target-origin");
+    await waitFor(() => first.of("target").length === 1, 1_000, "the first wake completes");
+    first.blocked.set("target", () => undefined);
     const run = finishRun(state, "target-origin");
-    await pause();
+    await waitFor(() => first.of("target").length === 2, 1_000, "the second wake's command is running");
     await scheduler.stop();
     state.close();
 
     const second = recorder();
     open(second.runner).scheduler.start();
-    await waitFor(() => second.of("b target").length === 1, 2_000, "a wake queued at shutdown is delivered after restart");
-    assert.equal(second.of("b target")[0], contextOf(run));
-  });
-
-  await scenario("runNow overtakes a queued wake", async (open) => {
-    const calls = recorder();
-    const { state, scheduler } = open(calls.runner);
-    const blocker = scheduler.createSchedule(wake("a blocker", "blocker-origin"));
-    const target = scheduler.createSchedule(wake("b target", "target-origin"));
-    scheduler.start();
-    calls.blocked.set("a blocker", () => undefined);
-    await scheduler.runNow(blocker.id);
-    await waitFor(() => calls.of("a blocker").length === 1, 1_000, "blocker holds the execution queue");
-    const run = finishRun(state, "target-origin");
+    await waitFor(() => second.of("target").length === 1, 2_000, "a wake stopped mid-command is retried after restart");
     await pause();
-    await scheduler.runNow(target.id);
-    calls.blocked.get("a blocker")!();
-    await waitFor(() => calls.of("b target").length >= 1, 1_000, "manual run of the target executes");
-    await scheduler.tick();
-    await waitFor(() => calls.of("b target").includes(contextOf(run)), 2_000, "a wake overtaken by runNow is still delivered");
-    await pause();
-    assert.deepStrictEqual(calls.of("b target"), [undefined, contextOf(run)], "one manual run, then exactly one wake");
-    assert.ok(
-      state.listScheduleRuns(target.id).every((row) => row.status === ScheduleRunStatus.Completed),
-      "no schedule run is stranded",
-    );
+    assert.deepStrictEqual(second.of("target"), [contextOf(run)], "only the interrupted wake repeats, never the completed one");
   });
 
   await scenario("busy caller does not starve another", async (open) => {
@@ -185,8 +199,33 @@ try {
     await executor.stop();
   });
 
+  await scenario("daemon SIGKILLed as the wake command starts", async () => {
+    const dbPath = join(dir, "crash.db");
+    const setup = new State(dbPath);
+    new Scheduler(setup).createSchedule({ ...wake("target", "target-origin"), payload: {
+      kind: ScheduledPayloadKind.Command, argv: ["/bin/sh", "-c", "kill -9 $PPID"],
+    } });
+    const run = finishRun(setup, "target-origin");
+    setup.close();
+    const daemon = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./test/wake-daemon.ts", import.meta.url)), dbPath], { stdio: "inherit" });
+    const [, signal] = await once(daemon, "exit");
+    assert.equal(signal, "SIGKILL", "the wake command killed its daemon");
+
+    const delivered: Array<string | undefined> = [];
+    const state = new State(dbPath);
+    const scheduler = new Scheduler(state, { tickMs: 60_000, commandRunner: async ({ stdin }) => { delivered.push(stdin); return ok; } });
+    try {
+      scheduler.start();
+      await waitFor(() => delivered.length === 1, 2_000, "the killed wake is delivered after restart");
+      assert.equal(delivered[0], contextOf(run));
+    } finally {
+      await scheduler.stop();
+      state.close();
+    }
+  });
+
   assert.deepStrictEqual(failures, [], "every scenario passes");
-  process.stdout.write("ok — run-finished wakes survive shutdown and runNow, round-robin across callers, skip same-ms history, and match origins as delegate does\n");
+  process.stdout.write("ok — run-finished wakes survive stop and SIGKILL, never wait on other schedules, round-robin across callers, skip same-ms history, and match origins as delegate does\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
