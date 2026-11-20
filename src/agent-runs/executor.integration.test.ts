@@ -161,10 +161,12 @@ try {
   );
   assert.throws(() => executor.launch({ harness: AgentRunHarness.Codex, task: "x", cwd: dir, origin: "  " }), /origin/);
   assert.throws(() => executor.launch({ harness: AgentRunHarness.Codex, task: "x", cwd: dir, origin: 7 as never }), /origin/);
+  assert.throws(() => executor.launch({ harness: AgentRunHarness.Codex, task: "x", cwd: dir, role: "builder" as never }), /role/);
 
   // --- stop: active runs are interrupted, not lost -----------------------------------------
-  const sixth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "sixth", cwd: dir, origin: " grok-bot " });
+  const sixth = executor.launch({ harness: AgentRunHarness.ClaudeCode, task: "sixth", cwd: dir, origin: " grok-bot ", role: "worker" });
   assert.equal(sixth.origin, "grok-bot", "launch records the caller's origin");
+  assert.equal(sixth.role, "worker", "launch records the caller's role");
   await waitFor(() => launches.length === 6, "sixth run to start");
   await executor.stop();
   assert.equal(state.agentRunById(sixth.id)?.status, AgentRunStatus.Interrupted, "stop interrupts active runs");
@@ -185,6 +187,7 @@ try {
   const retriedRun = restarted.retry(sixth.id);
   assert.equal(retriedRun.retryOfRunId, sixth.id);
   assert.equal(retriedRun.origin, "grok-bot", "retry keeps the caller's origin");
+  assert.equal(retriedRun.role, "worker", "retry keeps the role fixed at launch");
   assert.equal(retriedRun.childSessionId, retryable.childSessionId, "retry reuses the child session identity");
   await waitFor(() => launches.length === 7, "retried run to start");
   assert.equal(

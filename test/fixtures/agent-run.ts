@@ -39,6 +39,7 @@ export function agentRunFixture(
     completionRunIds: [],
     timeoutSeconds: 3_600,
     origin: null,
+    role: null,
     ...overrides,
   };
 }

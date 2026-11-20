@@ -145,6 +145,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "completion_run_ids", description: "JSON array of terminal child run IDs carried by this follow-up. prompt_submitted confirms delivery; pending rows retain the scheduled evidence without acknowledging it." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
       { name: "origin", description: "Free-form name of the outside caller that started the run, such as grok-bot; NULL for an ordinary delegation. A run with an origin shows as a top-level session-state row. Retry and resume copy it." },
+      { name: "role", description: "Role the caller fixed at launch: orchestrator | worker. NULL is a plain run whose prompt is the task alone. Values are defined by AgentRunRole in packages/core/src/agent-runs.ts. Retry and resume copy it." },
     ],
   },
   {

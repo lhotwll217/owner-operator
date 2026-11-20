@@ -18,6 +18,7 @@ import {
   isAgentRunEffort,
   ownerOperatorPaths,
   type AgentRunEffort,
+  type AgentRunRole,
   type AgentRunLaunchRequest,
   type AgentRunStreamEvent,
   type AgentRunLaunchResult,
@@ -42,10 +43,10 @@ import {
  * verbose child while still covering everything that gets persisted. */
 const MAX_BUFFERED_RESULT_BYTES = 64 * 1024;
 
-function readDelegatedChildInstructions(): string | undefined {
+function readOwnerInstructions(path: string): string | undefined {
   let text: string;
   try {
-    text = readFileSync(ownerOperatorPaths(ownerOperatorHome()).delegatedChildInstructions, "utf8");
+    text = readFileSync(path, "utf8");
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined;
     throw error;
@@ -53,23 +54,33 @@ function readDelegatedChildInstructions(): string | undefined {
   return text.trim() || undefined;
 }
 
-/** Preserve the durable owner task verbatim, then the owner's child instructions, then
- * execution-only child policy. */
+const ROLE_INSTRUCTIONS = {
+  orchestrator: "delegatedChildInstructions",
+  worker: "delegatedWorkerInstructions",
+} as const satisfies Record<AgentRunRole, keyof ReturnType<typeof ownerOperatorPaths>>;
+
+const WORK_DIRECTLY = "Complete the work directly; do not launch further agents.";
+
+/** A plain run's message is the owner task verbatim. A role adds the owner's instructions file for
+ * that role, then execution-only child policy. */
 export function delegatedChildTaskEnvelope(
   task: string,
+  role: AgentRunRole | null,
   depth: number,
   childSessionId?: string,
   instructions?: string,
 ): string {
-  const boundary = depth < AGENT_RUN_MAX_DEPTH && childSessionId
-    ? `You may delegate through Owner Operator up to depth ${AGENT_RUN_MAX_DEPTH}. `
-      + `Use OO_AGENT=1 oo runs delegate --from-session ${childSessionId} so the child is linked to this conversation and returns a pending run id. `
-      + "If the child is still running, report its id and remaining work. Owner Operator will continue this saved conversation automatically when its children finish. "
-      + "Do not launch untracked harness-native or background agents."
-    : depth >= AGENT_RUN_MAX_DEPTH
-      ? `This run is at delegation depth ${AGENT_RUN_MAX_DEPTH}, the maximum. `
-        + "Complete the work directly; do not launch further agents."
-      : "No child session identity was confirmed. Complete the work directly; do not launch further agents.";
+  if (role === null) return task;
+  const boundary = role === "worker"
+    ? WORK_DIRECTLY
+    : depth < AGENT_RUN_MAX_DEPTH && childSessionId
+      ? `You may delegate through Owner Operator up to depth ${AGENT_RUN_MAX_DEPTH}. `
+        + `Use OO_AGENT=1 oo runs delegate --from-session ${childSessionId} so the child is linked to this conversation and returns a pending run id. `
+        + "If the child is still running, report its id and remaining work. Owner Operator will continue this saved conversation automatically when its children finish. "
+        + "Do not launch untracked harness-native or background agents."
+      : depth >= AGENT_RUN_MAX_DEPTH
+        ? `This run is at delegation depth ${AGENT_RUN_MAX_DEPTH}, the maximum. ${WORK_DIRECTLY}`
+        : `No child session identity was confirmed. ${WORK_DIRECTLY}`;
   return `${task}\n\n${instructions ? `${instructions}\n\n` : ""}${boundary}`;
 }
 
@@ -360,8 +371,9 @@ async function runAcpTurn(
   // timeout-after-partial-output as a completed turn, so we pass no launcher-side timeout.
   const turn = runtime.startTurn({
     handle,
-    text: delegatedChildTaskEnvelope(request.run.task, request.run.depth,
-      handle.agentSessionId ?? handle.backendSessionId, readDelegatedChildInstructions()),
+    text: delegatedChildTaskEnvelope(request.run.task, request.run.role, request.run.depth,
+      handle.agentSessionId ?? handle.backendSessionId,
+      request.run.role ? readOwnerInstructions(ownerOperatorPaths(ownerOperatorHome())[ROLE_INSTRUCTIONS[request.run.role]]) : undefined),
     mode: "prompt",
     requestId: request.run.id,
     signal: request.signal,

@@ -3,11 +3,13 @@ import {
   AGENT_RUN_EFFORTS,
   AGENT_RUN_MAX_CONCURRENT,
   AGENT_RUN_MAX_DEPTH,
+  AGENT_RUN_ROLES,
   AgentRunHarness,
   AgentRunMissingBaseline,
   AgentRunStatus,
   DEFAULT_AGENT_RUN_TIMEOUT_SECONDS,
   isAgentRunEffort,
+  isAgentRunRole,
   isAgentRunResultRecord,
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
   type AgentRun,
@@ -134,7 +136,10 @@ export const runs: Noun = {
         + "can report a pending run id; its conversation continues automatically after the children finish.\n"
         + "A caller outside this Mac (such as grok-bot) always passes --origin <name>; the run then shows\n"
         + "as its own row with that caller's mark. Without --origin, a parent session that matches no\n"
-        + "session on this Mac is rejected.",
+        + "session on this Mac is rejected.\n"
+        + "Without --role the child receives the task alone. --role orchestrator adds the owner's child\n"
+        + "instructions and lets it delegate; --role worker adds the owner's worker instructions and tells\n"
+        + "it to work directly.",
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
@@ -144,11 +149,13 @@ export const runs: Noun = {
         timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },
         "from-session": { type: "string", help: "the run's parent session (default: the Operator session running this bash, else the calling session)" },
         origin: { type: "string", help: "required for a caller outside this Mac, such as grok-bot: its name; the run shows as its own row with that caller's mark" },
+        role: { type: "string", help: `${AGENT_RUN_ROLES.join(" or ")}; omitted: a plain run whose prompt is the task alone` },
         "no-wait": { type: "boolean", help: "print the pending row and return; attach later with `logs --follow` (default for agent callers)" },
       },
       examples: [
         'oo runs delegate --harness codex "Fix the failing lint in src/cli and report what changed"',
         'oo runs delegate --harness claude-code --effort high --cwd ../other-repo --no-wait --json "Review the open diff against the repo standards"',
+        'oo runs delegate --harness claude-code --role worker --no-wait "Add a test for the parser edge case and report the diff"',
         'oo runs delegate --harness codex --origin grok-bot --no-wait "Triage the new issue and report back"',
       ],
       async run({ values, positionals: [task], json }) {
@@ -159,6 +166,9 @@ export const runs: Noun = {
         const effort = values.effort === "none" ? null : values.effort;
         if (effort !== undefined && effort !== null && !isAgentRunEffort(effort)) {
           throw new UsageError(`--effort must be one of ${AGENT_RUN_EFFORTS.join(", ")}, or none`);
+        }
+        if (values.role !== undefined && !isAgentRunRole(values.role)) {
+          throw new UsageError(`--role must be one of ${AGENT_RUN_ROLES.join(", ")}`);
         }
         const timeoutSeconds = secondsFlag("timeout", values.timeout, MAX_AGENT_RUN_TIMEOUT_SECONDS);
         const parentThreadId = parentSessionId(typeof values["from-session"] === "string" ? values["from-session"] : undefined) ?? null;
@@ -177,6 +187,7 @@ export const runs: Noun = {
           ...(effort !== undefined ? { effort } : {}),
           ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
           ...(typeof values.origin === "string" ? { origin: values.origin } : {}),
+          ...(values.role !== undefined ? { role: values.role } : {}),
           onMissingBaseline: agentCaller() ? AgentRunMissingBaseline.Ask : AgentRunMissingBaseline.HarnessChoice,
         });
         if (values["no-wait"] || agentCaller()) {

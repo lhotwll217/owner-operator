@@ -21,7 +21,10 @@ The agent can also delegate work to the [supported coding harnesses](docs/delega
 through the ACP protocol. This lets
 the Owner Operator agent oversee a large piece of work while preserving the overall goal and
 adhering to the standards set by you. This approach is best coupled with an opinionated
-workflow via skills — I use Matt Pocock's skills, for example. An agent off this Mac can
+workflow via skills — I use Matt Pocock's skills, for example. A delegated run is plain by
+default: the child receives only its task. `--role orchestrator` lets it fan out under your
+orchestrator instructions, and `--role worker` gives it your worker instructions and tells it to
+work directly ([delegated-runs.md](docs/delegated-runs.md#execution)). An agent off this Mac can
 delegate too (`oo runs delegate --origin <name>`) and be woken by a command you configure
 when each run ends ([scheduler.md](docs/scheduler.md#waking-an-outside-caller)).
 

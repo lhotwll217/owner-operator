@@ -8,6 +8,7 @@ import {
   MAX_AGENT_RUN_TIMEOUT_SECONDS,
   agentRunTurnIntent,
   isAgentRunEffort,
+  isAgentRunRole,
   isTerminalAgentRunStatus,
   validateAgentRunResumeTask,
   type AgentRun,
@@ -151,6 +152,9 @@ export class AgentRunExecutor {
     if (input.effort != null && !isAgentRunEffort(input.effort)) {
       throw new Error(`unknown delegation effort: ${String(input.effort)}`);
     }
+    if (input.role != null && !isAgentRunRole(input.role)) {
+      throw new Error(`unknown delegation role: ${String(input.role)}`);
+    }
     const timeoutSeconds = input.timeoutSeconds ?? DEFAULT_AGENT_RUN_TIMEOUT_SECONDS;
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > MAX_AGENT_RUN_TIMEOUT_SECONDS) {
       throw new Error(`delegation timeoutSeconds must be 1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}`);
@@ -176,6 +180,7 @@ export class AgentRunExecutor {
       depth,
       timeoutSeconds,
       origin,
+      role: input.role ?? null,
     });
     this.pump();
     return run;

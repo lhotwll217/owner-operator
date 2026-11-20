@@ -20,6 +20,7 @@ export interface OwnerOperatorPaths {
   workspaceArtifacts: string;
   userHarnessPreferences: string;
   delegatedChildInstructions: string;
+  delegatedWorkerInstructions: string;
   delegatedBaselines: string;
   piAgentDir: string;
   piAuth: string;

@@ -31,6 +31,15 @@ export function isAgentRunEffort(value: unknown): value is AgentRunEffort {
   return typeof value === "string" && AGENT_RUN_EFFORTS.includes(value as AgentRunEffort);
 }
 
+/** Opt-in role a caller fixes at launch. An orchestrator may fan out and a worker may not; a run
+ * with no role is a plain run whose prompt is the task alone. */
+export const AGENT_RUN_ROLES = ["orchestrator", "worker"] as const;
+export type AgentRunRole = (typeof AGENT_RUN_ROLES)[number];
+
+export function isAgentRunRole(value: unknown): value is AgentRunRole {
+  return typeof value === "string" && AGENT_RUN_ROLES.includes(value as AgentRunRole);
+}
+
 /** Live harness identity evidence. An observed value always contains at least one supported fact;
  * this makes an empty or wholly unsupported status impossible to report as observed. */
 export type HarnessIdentityObservation =
@@ -152,6 +161,8 @@ export interface AgentRunCreateInput {
   parentThreadId?: string | null;
   /** Free-form name of the outside caller that started the run, such as `grok-bot`. */
   origin?: string | null;
+  /** Role fixed at launch; omitted or null starts a plain run. */
+  role?: AgentRunRole | null;
   /** Model the child should run, when the owner pins one; null lets the harness pick. */
   model?: string | null;
   /** Reasoning effort requested for the child; omission uses the baseline, explicit null clears it. */
@@ -226,6 +237,8 @@ export interface AgentRun {
   timeoutSeconds: number;
   /** Outside caller that started the run, normalized at launch; null for an ordinary delegation. */
   origin: string | null;
+  /** Role fixed at launch; null for a plain run. */
+  role: AgentRunRole | null;
 }
 
 /** Explicit runtime intent derived from the two semantic run relationships. A retry with no

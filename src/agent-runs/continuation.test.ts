@@ -50,6 +50,7 @@ try {
     childSessionId: "native-child",
     acpxRecordId: "acpx-record",
     origin: "grok-bot",
+    role: "worker",
   });
   const cancelled = { ...completed, id: "cancelled", status: AgentRunStatus.Cancelled, promptSubmitted: true };
   assert.deepEqual(resume(cancelled), {
@@ -63,6 +64,7 @@ try {
       depth: 1,
       timeoutSeconds: 3_600,
       origin: "grok-bot",
+      role: "worker",
       resumeOfRunId: "cancelled",
       childSessionId: "native-child",
       acpxRecordId: "acpx-record",
@@ -104,6 +106,7 @@ try {
     depth: 1,
     timeoutSeconds: 3_600,
     origin: null,
+    role: null,
     task: "task failed-for-retry",
     retryOfRunId: "failed-for-retry",
     completionRunIds: [],

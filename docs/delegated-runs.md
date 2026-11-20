@@ -214,14 +214,26 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   launcher-side timeout after partial output can never read as success.
 - **Depth is capped at 5.** An Operator launch is depth 1. A child may delegate through
   `OO_AGENT=1 oo runs delegate --from-session <its child session id>` at the next depth; the executor
-  rejects depth 6. The child prompt includes its confirmed session id when nesting is available.
-  A depth-5 child, or a child without a confirmed session id, is told to work directly.
-  Untracked harness-native and background agents remain outside the delegated-run ledger.
-- **Owner child instructions** come from `$OO_HOME/workspace/delegated-child-instructions.md`,
-  read for each task message, including retry and resume, so edits apply to the next turn.
-  Each message contains the task, then the file's text, then the delegation boundary above;
-  the stored task stays unchanged. A missing or whitespace-only file adds nothing; any other
-  read error fails the launch. Owner Operator neither seeds nor interprets it.
+  rejects depth 6, whatever the run's role. Untracked harness-native and background agents remain
+  outside the delegated-run ledger.
+- **Role is opt-in and fixed at launch** (`oo runs delegate --role orchestrator|worker`, stored as
+  `role` and copied by retry and resume; values in [`AgentRunRole`](../packages/core/src/agent-runs.ts)).
+  It decides only the child's task message:
+
+  | Role | Task message |
+  |---|---|
+  | none (plain run) | the task, verbatim, and nothing else |
+  | `worker` | the task, then the worker instructions file, then "Complete the work directly; do not launch further agents." |
+  | `orchestrator` | the task, then the child instructions file, then the delegation boundary: with a confirmed session id below depth 5, the `--from-session` command to delegate with; at depth 5 or without a confirmed id, an order to work directly |
+
+  A role adds no other constraint: the executor neither refuses a worker's delegation nor limits
+  its tools.
+- **Owner instructions files** are `$OO_HOME/workspace/delegated-child-instructions.md` for an
+  orchestrator and `$OO_HOME/workspace/delegated-worker-instructions.md` for a worker. Each is read
+  for each task message, including retry and resume, so edits apply to the next turn; the stored
+  task stays unchanged. A missing or whitespace-only file adds nothing; any other read error fails
+  the launch. Owner Operator neither seeds nor interprets them, so a worker file can be a symlink
+  to an agent definition the owner already maintains, such as pstack's `agents/poteto-agent.md`.
 - **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
