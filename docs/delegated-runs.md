@@ -233,8 +233,18 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   orchestrator and `$OO_HOME/workspace/delegated-worker-instructions.md` for a worker. Each is read
   for each task message, including retry and resume, so edits apply to the next turn; the stored
   task stays unchanged. A missing or whitespace-only file adds nothing; any other read error fails
-  the launch. Owner Operator neither seeds nor interprets them, so a worker file can be a symlink
-  to an agent definition the owner already maintains, such as pstack's `agents/poteto-agent.md`.
+  the launch. Owner Operator neither seeds nor interprets them. Every harness receives the same
+  text, so a file names each prompt or skill the child must read by absolute path. A symlink to
+  pstack's `agents/poteto-agent.md` is not enough: with no path from its parent, that prompt
+  searches only `~/.cursor/plugins` for poteto-mode. Name the skill's real path, not a
+  `workspace/skills` symlink to it: a harness that resolves `..` without following the link loses
+  the skill's relative links to its siblings and docs. A worker file that works on every harness:
+
+  ```md
+  Before any other work, read pstack's worker prompt at <pstack checkout>/agents/poteto-agent.md
+  and follow it. The poteto-mode SKILL.md path it asks for is
+  <pstack checkout>/skills/poteto-mode/SKILL.md.
+  ```
 - **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
