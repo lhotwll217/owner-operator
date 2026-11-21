@@ -188,6 +188,7 @@ function defaultAgentCommand(acpAgent: string): string {
   if (acpAgent === "codex") return codexAcpAgentCommand();
   if (acpAgent === "cursor") return cursorAcpAgentCommand();
   if (acpAgent === "opencode") return openCodeAcpAgentCommand();
+  if (acpAgent === "antigravity") return antigravityAcpAgentCommand();
   const command = createAgentRegistry().resolve(acpAgent);
   return Array.isArray(command) ? command.map((part) => JSON.stringify(part)).join(" ") : command;
 }
@@ -582,15 +583,15 @@ export function openCodeBinaryPath(): string {
   throw new Error("opencode v1 CLI not found on PATH, ~/.opencode/bin or ~/.local/bin; install opencode-ai@1 with native ACP support");
 }
 
-/** Resolve the locally installed `cursor-agent` launcher to an absolute path: the daemon's PATH
- * need not include the CLI installer's target directory (`~/.local/bin`). */
-export function cursorAgentBinaryPath(): string {
+/** Resolve a locally installed CLI launcher to an absolute path: the daemon's PATH need not
+ * include the CLI installer's target directory (`~/.local/bin`). */
+function localCliPath(name: string, harnessLabel: string): string {
   // resolve(), not join(): a relative PATH entry must not yield a relative command that a later
   // spawn could re-resolve against a different working directory.
   const candidates = [
     ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
     join(homedir(), ".local", "bin"),
-  ].map((dir) => resolve(dir, "cursor-agent"));
+  ].map((dir) => resolve(dir, name));
   for (const candidate of candidates) {
     try {
       accessSync(candidate, constants.X_OK);
@@ -599,7 +600,21 @@ export function cursorAgentBinaryPath(): string {
       // Not present or not executable in this directory; keep looking.
     }
   }
-  throw new Error("cursor-agent CLI not found on PATH or in ~/.local/bin; install it to delegate to Cursor");
+  throw new Error(`${name} CLI not found on PATH or in ~/.local/bin; install it to delegate to ${harnessLabel}`);
+}
+
+export function cursorAgentBinaryPath(): string {
+  return localCliPath("cursor-agent", "Cursor");
+}
+
+/** ACPX's `antigravity` registry entry names `agy_acp_server.par`, which the macOS CLI does not
+ * install; the installed `agy` serves ACP through its `acp` subcommand. */
+export function antigravityBinaryPath(): string {
+  return localCliPath("agy", "Antigravity");
+}
+
+export function antigravityAcpAgentCommand(): string {
+  return `${JSON.stringify(antigravityBinaryPath())} acp`;
 }
 
 function leasedAgentCommand(params: {

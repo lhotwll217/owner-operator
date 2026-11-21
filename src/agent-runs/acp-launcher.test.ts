@@ -83,6 +83,24 @@ try {
   }
 }
 
+{
+  const { mkdtempSync, realpathSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { antigravityAcpAgentCommand } = await import("./acp-launcher");
+  const pathRoot = realpathSync(mkdtempSync(join(tmpdir(), "oo-agy-path-")));
+  writeFileSync(join(pathRoot, "agy"), "#!/bin/sh\n", { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  try {
+    process.env.PATH = pathRoot;
+    assert.equal(antigravityAcpAgentCommand(), `${JSON.stringify(join(pathRoot, "agy"))} acp`,
+      "Antigravity runs the installed agy CLI's acp subcommand, not ACPX's agy_acp_server.par");
+  } finally {
+    process.env.PATH = previousPath;
+    rmSync(pathRoot, { recursive: true, force: true });
+  }
+}
+
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };
 const appliedOptions: Array<{ key: string; value: string }> = [];

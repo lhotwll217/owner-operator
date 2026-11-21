@@ -20,6 +20,7 @@ import {
 } from "./acp-session-selection";
 import {
   agentRunStateDir,
+  antigravityBinaryPath,
   createLeasedAcpRuntime,
   cursorAgentBinaryPath,
   openCodeAcpAgentCommand,
@@ -121,13 +122,15 @@ export async function readAcpRuntimeProvenance(
       },
     };
   }
-  if (harness === AgentRunHarness.Cursor) {
-    const command = (deps.resolveCursorCommand ?? cursorAgentBinaryPath)();
+  if (harness === AgentRunHarness.Cursor || harness === AgentRunHarness.Antigravity) {
+    const [name, command] = harness === AgentRunHarness.Cursor
+      ? ["cursor-agent", (deps.resolveCursorCommand ?? cursorAgentBinaryPath)()]
+      : ["agy", antigravityBinaryPath()];
     return {
       acpxVersion,
       adapter: { packageName: null, packageVersion: null, resolution: "path" },
       backend: {
-        name: "cursor-agent",
+        name,
         version: await (deps.readCommandVersion ?? readCommandVersion)(command),
         source: "path-command",
       },

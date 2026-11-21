@@ -110,6 +110,7 @@ new task to a replacement conversation.
 | Codex | Live recall with `gpt-6-astra`, high effort | The pinned adapter [interrupts the session's active turn](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L3376-L3385) and [restores the session](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L791-L834). |
 | Cursor | Protocol docs only; live recall blocked by authentication | Its native [ACP interface](https://prod.cursor.com/docs/cli/acp) supports `session/cancel` and `session/load`. Authentication must remain available. |
 | OpenCode | Source plus fixture; live recall blocked by subscription access | The v1 service [aborts the active turn](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L351-L354) and [loads saved messages](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L211-L236). OO also requires the saved session's continuation capabilities, as described [below](#opencode). |
+| Antigravity | Live `initialize` only; continuation unproven | `agy acp` (CLI 1.5.13) advertises `loadSession` and `sessionCapabilities.resume`. |
 
 The opt-in [live cancellation test](../src/agent-runs/resume-cancelled.live.test.ts) drives
 `oo runs delegate`, `cancel`, and `resume` through a separate daemon and temporary `OO_HOME`.
@@ -379,6 +380,14 @@ there is no second capability store or ledger migration. The synchronous environ
 eligibility and row creation together. At execution ACPX checks the current backend again, and OO
 rejects a changed child identity. A capability change since the retained observation can still
 fail the new attempt; the roster's boolean is only a harness-family allowance.
+
+### Antigravity
+
+ACPX's `antigravity` registry entry runs `agy_acp_server.par`, which the macOS CLI does not
+install. OO resolves the installed `agy` from PATH followed by `~/.local/bin` and runs its `acp`
+subcommand. Provenance records `agy --version`. The CLI is signed into whatever Google account is
+active on the machine; a delegated run bills that account and sends the task's code to it.
+Provider accounts and allowance stay unknown.
 
 ### Manual baseline-consent proof
 

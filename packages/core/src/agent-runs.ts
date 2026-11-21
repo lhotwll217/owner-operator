@@ -11,6 +11,7 @@ export enum AgentRunHarness {
   Codex = "codex",
   Cursor = "cursor",
   OpenCode = "opencode",
+  Antigravity = "antigravity",
 }
 
 export enum AgentRunStatus {
@@ -138,6 +139,16 @@ export const AGENT_RUN_CAPABILITIES: Readonly<Record<AgentRunHarness, AgentRunCa
   [AgentRunHarness.OpenCode]: {
     harness: AgentRunHarness.OpenCode,
     acpAgent: "opencode",
+    activitySource: "acp-events",
+    steerMidRun: false,
+    asksToParent: false,
+    loadSession: true,
+  },
+  // Pinned from a live `agy acp` initialize response (CLI 1.5.13): the server advertises
+  // loadSession; it advertises no steer or parent-ask surface.
+  [AgentRunHarness.Antigravity]: {
+    harness: AgentRunHarness.Antigravity,
+    acpAgent: "antigravity",
     activitySource: "acp-events",
     steerMidRun: false,
     asksToParent: false,
