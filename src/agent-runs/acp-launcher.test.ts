@@ -276,13 +276,13 @@ const cursorStatus = async () => ({
     options: [{ value: cursorModel, name: "grok-4.6" }],
   }] },
 });
-const cursorRuntimeEmitting = (text: string) => ({
+const cursorRuntimeEmitting = (...texts: string[]) => ({
   ensureSession: async () => handle,
   getStatus: cursorStatus,
   startTurn: () => ({
     promptStarted: Promise.resolve(),
     events: (async function* () {
-      yield { type: "text_delta", stream: "output", text };
+      for (const text of texts) yield { type: "text_delta", stream: "output", text };
     })(),
     result: Promise.resolve({ status: "completed" }),
   }),
@@ -305,6 +305,20 @@ for (const terminalError of [
     "the exact harness failure text remains available as bounded result evidence");
 }
 const cursorErrorRuntime = cursorRuntimeEmitting(`\n\n${cursorTerminalError}`);
+// Chunks a live Grok turn streamed when asked to echo an error line: a completed answer.
+const echoedError = await createAcpLauncher({
+  runtimeFactory: () => cursorRuntimeEmitting("Error", ":", " Ret", "ri", "able", "Error", ":", " example"),
+})({
+  run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
+  turnIntent: { kind: "fresh" },
+  signal: new AbortController().signal,
+  onActivity: () => undefined,
+});
+assert.deepEqual(
+  { status: echoedError.status, resultText: echoedError.resultText, error: echoedError.error },
+  { status: AgentRunStatus.Completed, resultText: "Error: RetriableError: example", error: null },
+  "a Cursor answer that quotes error text is not a harness failure",
+);
 
 // Owner ruling 2026-11-21: a Cursor run uses only Grok, whatever the Cursor account's default.
 {
