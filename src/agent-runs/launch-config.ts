@@ -56,7 +56,9 @@ export function resolveAgentRunLaunch(
       "candidate with `oo harness propose` and have the owner approve it with `oo harness approve`",
     );
   }
-  const effort = Object.hasOwn(pins, "effort") ? pins.effort ?? null : baseline?.effort ?? null;
+  // Cursor's Grok ids carry their own reasoning effort and its session advertises no effort
+  // selector, so an inherited effort could only fail the launch.
+  const effort = Object.hasOwn(pins, "effort") ? pins.effort ?? null : cursor ? null : baseline?.effort ?? null;
   return { model, effort };
 }
 

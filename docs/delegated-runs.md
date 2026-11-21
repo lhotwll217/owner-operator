@@ -238,7 +238,8 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   [ACP launcher](../src/agent-runs/acp-launcher.ts) chooses from the Grok ids the session
   advertises. An unpinned run takes the first one, not the Cursor account's default. An omitted
   `--model` never refuses, even under `OO_AGENT=1`, and ignores an approved non-Grok baseline; an
-  approved Grok baseline still applies. A pin is an
+  approved Grok baseline's model still applies, but not its effort: Cursor's Grok ids carry their
+  own reasoning effort and its session advertises no effort selector. A pin is an
   exact advertised id or its bracket-free name: `--model grok-4.7` selects
   `grok-4.7[context=256k,reasoning_effort=high,fast=true]`. Any other model fails the run before
   the task is sent. The names `cursor-agent --list-models` prints, such as `grok-4.7-medium`, are
