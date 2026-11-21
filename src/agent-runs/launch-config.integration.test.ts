@@ -35,6 +35,11 @@ try {
   approveDelegatedBaseline(AgentRunHarness.Cursor, { model: "grok-4.6", effort: null }, ooHome);
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, {}, ooHome), { model: "grok-4.6", effort: null },
     "an approved Grok baseline still applies");
+  approveDelegatedBaseline(AgentRunHarness.Cursor, { model: "grok-4.7", effort: "high" }, ooHome);
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, {}, ooHome), { model: "grok-4.7", effort: null },
+    "an approved Cursor effort is not inherited, because Cursor's Grok session has no effort selector to apply it");
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, { effort: "low" }, ooHome), { model: "grok-4.7", effort: "low" },
+    "an explicit Cursor effort still reaches the launcher");
   approveDelegatedBaseline(AgentRunHarness.Codex, { model: "approved-model", effort: "high" }, ooHome);
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), { model: "approved-model", effort: "high" });
   assert.deepEqual(
