@@ -113,6 +113,7 @@ new task to a replacement conversation.
 | Codex | Live recall with `gpt-6-astra`, high effort | The pinned adapter [interrupts the session's active turn](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L3376-L3385) and [restores the session](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L791-L834). |
 | Cursor | Protocol docs only; live recall blocked by authentication | Its native [ACP interface](https://prod.cursor.com/docs/cli/acp) supports `session/cancel` and `session/load`. Authentication must remain available. |
 | OpenCode | Source plus fixture; live recall blocked by subscription access | The v1 service [aborts the active turn](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L351-L354) and [loads saved messages](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L211-L236). OO also requires the saved session's continuation capabilities, as described [below](#opencode). |
+| Antigravity | Live `initialize` only; continuation unproven | `agy acp` (CLI 1.5.13) advertises `loadSession` and `sessionCapabilities.resume`. |
 
 The opt-in [live cancellation test](../src/agent-runs/resume-cancelled.live.test.ts) drives
 `oo runs delegate`, `cancel`, and `resume` through a separate daemon and temporary `OO_HOME`.
@@ -217,14 +218,36 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   launcher-side timeout after partial output can never read as success.
 - **Depth is capped at 5.** An Operator launch is depth 1. A child may delegate through
   `OO_AGENT=1 oo runs delegate --from-session <its child session id>` at the next depth; the executor
-  rejects depth 6. The child prompt includes its confirmed session id when nesting is available.
-  A depth-5 child, or a child without a confirmed session id, is told to work directly.
-  Untracked harness-native and background agents remain outside the delegated-run ledger.
-- **Owner child instructions** come from `$OO_HOME/workspace/delegated-child-instructions.md`,
-  read for each task message, including retry and resume, so edits apply to the next turn.
-  Each message contains the task, then the file's text, then the delegation boundary above;
-  the stored task stays unchanged. A missing or whitespace-only file adds nothing; any other
-  read error fails the launch. Owner Operator neither seeds nor interprets it.
+  rejects depth 6, whatever the run's role. Untracked harness-native and background agents remain
+  outside the delegated-run ledger.
+- **Role is opt-in and fixed at launch** (`oo runs delegate --role orchestrator|worker`, stored as
+  `role` and copied by retry and resume; values in [`AgentRunRole`](../packages/core/src/agent-runs.ts)).
+  It decides only the child's task message:
+
+  | Role | Task message |
+  |---|---|
+  | none (plain run) | the task, verbatim, and nothing else |
+  | `worker` | the task, then the worker instructions file, then "Complete the work directly; do not launch further agents." |
+  | `orchestrator` | the task, then the child instructions file, then the delegation boundary: with a confirmed session id below depth 5, the `--from-session` command to delegate with; at depth 5 or without a confirmed id, an order to work directly |
+
+  A role adds no other constraint: the executor neither refuses a worker's delegation nor limits
+  its tools.
+- **Owner instructions files** are `$OO_HOME/workspace/delegated-child-instructions.md` for an
+  orchestrator and `$OO_HOME/workspace/delegated-worker-instructions.md` for a worker. Each is read
+  for each task message, including retry and resume, so edits apply to the next turn; the stored
+  task stays unchanged. A missing or whitespace-only file adds nothing; any other read error fails
+  the launch. Owner Operator neither seeds nor interprets them. Every harness receives the same
+  text, so a file names each prompt or skill the child must read by absolute path. A symlink to
+  pstack's `agents/poteto-agent.md` is not enough: with no path from its parent, that prompt
+  searches only `~/.cursor/plugins` for poteto-mode. Name the skill's real path, not a
+  `workspace/skills` symlink to it: a harness that resolves `..` without following the link loses
+  the skill's relative links to its siblings and docs. A worker file that works on every harness:
+
+  ```md
+  Before any other work, read pstack's worker prompt at <pstack checkout>/agents/poteto-agent.md
+  and follow it. The poteto-mode SKILL.md path it asks for is
+  <pstack checkout>/skills/poteto-mode/SKILL.md.
+  ```
 - **Model** is pinnable per run (`oo runs delegate --model`), threaded to the child through ACP
   session options, and a caller pin always wins. When omitted, the launch resolves the
   owner-approved per-harness baseline from [launch configuration](../src/agent-runs/launch-config.ts)
@@ -380,6 +403,14 @@ there is no second capability store or ledger migration. The synchronous environ
 eligibility and row creation together. At execution ACPX checks the current backend again, and OO
 rejects a changed child identity. A capability change since the retained observation can still
 fail the new attempt; the roster's boolean is only a harness-family allowance.
+
+### Antigravity
+
+ACPX's `antigravity` registry entry runs `agy_acp_server.par`, which the macOS CLI does not
+install. OO resolves the installed `agy` from PATH followed by `~/.local/bin` and runs its `acp`
+subcommand. Provenance records `agy --version`. The CLI is signed into whatever Google account is
+active on the machine; a delegated run bills that account and sends the task's code to it.
+Provider accounts and allowance stay unknown.
 
 ### Manual baseline-consent proof
 

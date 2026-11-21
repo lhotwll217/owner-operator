@@ -118,7 +118,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
     description: "Durable delegated-run ledger. One row per child agent run launched through Owner Operator. For a run's outcome, filter status and inspect result_tail, error, and activity.",
     columns: [
       { name: "id", description: "Stable run id." },
-      { name: "harness", description: "Child harness: claude-code | codex | cursor | opencode." },
+      { name: "harness", description: "Child harness: claude-code | codex | cursor | opencode | antigravity." },
       { name: "task", description: "Prompt handed to the child agent." },
       { name: "cwd", description: "Absolute working directory the child ran in." },
       { name: "parent_thread_id", description: "Delegating session's thread id; NULL if unattributed. Children nest under this." },
@@ -145,6 +145,7 @@ export const SCHEMA_DOCS: TableDoc[] = [
       { name: "completion_run_ids", description: "JSON array of terminal child run IDs carried by this follow-up. prompt_submitted confirms delivery; pending rows retain the scheduled evidence without acknowledging it." },
       { name: "timeout_seconds", description: "Per-run timeout the executor enforced." },
       { name: "origin", description: "Free-form name of the outside caller that started the run, such as grok-bot; NULL for an ordinary delegation. A run with an origin shows as a top-level session-state row. Retry and resume copy it." },
+      { name: "role", description: "Role the caller fixed at launch: orchestrator | worker. NULL is a plain run whose prompt is the task alone. Values are defined by AgentRunRole in packages/core/src/agent-runs.ts. Retry and resume copy it." },
     ],
   },
   {

@@ -83,6 +83,24 @@ try {
   }
 }
 
+{
+  const { mkdtempSync, realpathSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { antigravityAcpAgentCommand } = await import("./acp-launcher");
+  const pathRoot = realpathSync(mkdtempSync(join(tmpdir(), "oo-agy-path-")));
+  writeFileSync(join(pathRoot, "agy"), "#!/bin/sh\n", { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  try {
+    process.env.PATH = pathRoot;
+    assert.equal(antigravityAcpAgentCommand(), `${JSON.stringify(join(pathRoot, "agy"))} acp`,
+      "Antigravity runs the installed agy CLI's acp subcommand, not ACPX's agy_acp_server.par");
+  } finally {
+    process.env.PATH = previousPath;
+    rmSync(pathRoot, { recursive: true, force: true });
+  }
+}
+
 const oversized = `${"x".repeat(70 * 1024)}newest-tail`;
 const handle = { agentSessionId: "child-session", acpxRecordId: "acpx-record" };
 const appliedOptions: Array<{ key: string; value: string }> = [];
@@ -149,6 +167,7 @@ const run: AgentRun = {
   completionRunIds: [],
   timeoutSeconds: 3_600,
   origin: null,
+  role: "orchestrator",
 };
 
 const ooHome = mkdtempSync(join(tmpdir(), "oo-acp-launcher-"));
@@ -193,16 +212,16 @@ assert.match(turnTexts[0] ?? "", /may delegate through Owner Operator up to dept
 assert.doesNotMatch(turnTexts[0] ?? "", /Do not launch nested or background agents/i);
 assert.match(turnTexts[0] ?? "", /--from-session child-session/);
 assert.match(turnTexts[0] ?? "", /continue this saved conversation automatically/i);
-assert.match(delegatedChildTaskEnvelope("finish", 5, "child-session"), /do not launch further agents/i);
-assert.doesNotMatch(delegatedChildTaskEnvelope("finish", 5, "child-session"), /may delegate/i);
-assert.match(delegatedChildTaskEnvelope("finish", 4), /No child session identity was confirmed/);
+assert.match(delegatedChildTaskEnvelope("finish", "orchestrator", 5, "child-session"), /do not launch further agents/i);
+assert.doesNotMatch(delegatedChildTaskEnvelope("finish", "orchestrator", 5, "child-session"), /may delegate/i);
+assert.match(delegatedChildTaskEnvelope("finish", "orchestrator", 4), /No child session identity was confirmed/);
 
 {
   mkdirSync(join(ooHome, "workspace"), { recursive: true });
-  const launchText = async (): Promise<string> => {
+  const launchText = async (role: AgentRun["role"] = "orchestrator"): Promise<string> => {
     const before = turnTexts.length;
     await createAcpLauncher({ runtimeFactory: () => runtime })({
-      run, turnIntent: { kind: "fresh" }, signal: new AbortController().signal, onActivity: () => {},
+      run: { ...run, role }, turnIntent: { kind: "fresh" }, signal: new AbortController().signal, onActivity: () => {},
     });
     assert.equal(turnTexts.length, before + 1, "each launch sends one first message");
     return turnTexts[before];
@@ -227,10 +246,25 @@ assert.match(delegatedChildTaskEnvelope("finish", 4), /No child session identity
   rmSync(instructionsPath, { recursive: true });
 
   assert.equal(
-    delegatedChildTaskEnvelope("finish", 5, "child-session", "Owner rule."),
+    delegatedChildTaskEnvelope("finish", "orchestrator", 5, "child-session", "Owner rule."),
     "finish\n\nOwner rule.\n\nThis run is at delegation depth 5, the maximum. Complete the work directly; do not launch further agents.",
     "instructions precede the boundary at max depth too",
   );
+
+  const workerPath = join(ooHome, "workspace", "delegated-worker-instructions.md");
+  writeFileSync(instructionsPath, "Orchestrator rule.");
+  writeFileSync(workerPath, "Worker rule.\n");
+  assert.equal(await launchText(null), "produce a report", "a plain run's message is the task alone");
+  assert.equal(await launchText("worker"),
+    "produce a report\n\nWorker rule.\n\nComplete the work directly; do not launch further agents.",
+    "a worker gets the worker instructions and is told to work directly");
+  assert.equal(await launchText("orchestrator"), `produce a report\n\nOrchestrator rule.\n\n${depthOneBoundary}`,
+    "an orchestrator gets the child instructions and may delegate");
+  rmSync(workerPath);
+  assert.equal(await launchText("worker"),
+    "produce a report\n\nComplete the work directly; do not launch further agents.",
+    "a missing worker file adds nothing");
+  rmSync(instructionsPath);
 }
 
 // Every child event reaches the run's event log, in order, including thought and status.

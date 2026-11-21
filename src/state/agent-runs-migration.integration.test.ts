@@ -149,6 +149,7 @@ try {
     .map(({ name }) => name);
   assert.ok(columns.includes("retry_of_run_id"));
   assert.ok(columns.includes("resume_of_run_id"));
+  assert.ok(columns.includes("role"), "an existing database gains the role column");
   assert.deepEqual(inspect.prepare("PRAGMA foreign_key_check(agent_runs)").all(), []);
   const indexNames = (inspect.prepare(
     "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_agent_runs_%' ORDER BY name",

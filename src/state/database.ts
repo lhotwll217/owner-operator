@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   AGENT_HARNESS_DESCRIPTORS,
   AGENT_RUN_EFFORTS,
+  AGENT_RUN_ROLES,
   AgentRunStatus,
   RETIRED_AGENT_TOOL_IDS,
   ScheduledPayloadKind,
@@ -20,6 +21,7 @@ import {
   type AgentRunActivityUpdate,
   type AgentRunHarness,
   type AgentRunEffort,
+  type AgentRunRole,
   type AgentRunOutcome,
   type AgentRunLogRecord,
   type AgentRunResultRecord,
@@ -45,6 +47,7 @@ import { stateDatabasePath } from "../shared/paths";
 export { type SessionStateRow } from "@owner-operator/core";
 
 const AGENT_RUN_EFFORT_SQL = AGENT_RUN_EFFORTS.map((effort) => `'${effort}'`).join(", ");
+const AGENT_RUN_ROLE_SQL = AGENT_RUN_ROLES.map((role) => `'${role}'`).join(", ");
 
 /** How long a working session's assessment stands before it is made again. The owner asked for
  * roughly four minutes: long enough not to re-read a turn constantly, short enough that a row
@@ -342,6 +345,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   completion_run_ids TEXT NOT NULL DEFAULT '[]',
   timeout_seconds INTEGER NOT NULL,
   origin TEXT,
+  role TEXT CHECK (role IS NULL OR role IN (${AGENT_RUN_ROLE_SQL})),
   CHECK (retry_of_run_id IS NULL OR resume_of_run_id IS NULL)
 );
 
@@ -404,7 +408,7 @@ const AGENT_RUN_COLUMNS = `
   acpx_record_id AS acpxRecordId, prompt_submitted AS promptSubmitted, result_tail AS resultTail, error,
   retry_of_run_id AS retryOfRunId,
   resume_of_run_id AS resumeOfRunId, completion_run_ids AS completionRunIds,
-  timeout_seconds AS timeoutSeconds, origin`;
+  timeout_seconds AS timeoutSeconds, origin, role`;
 
 /** A sweep that failed part way; `committed` lists the runs it had already finalized. */
 export class PartialAgentRunSweepError extends Error {
@@ -436,6 +440,7 @@ export interface AgentRunInsert {
   childSessionId?: string | null;
   acpxRecordId?: string | null;
   origin?: string | null;
+  role?: AgentRunRole | null;
 }
 
 type UnindexedOriginRun = Pick<AgentRun, "id" | "harness" | "task" | "cwd" | "createdAt" | "childSessionId"> & { origin: string };
@@ -501,6 +506,7 @@ export class ThreadDb {
     this.migrateAgentRunPromptSubmission();
     this.migrateAgentRunCompletionReceipts();
     this.migrateAgentRunOrigin();
+    this.migrateAgentRunRole();
     this.migrateScheduleRunCommandPid();
     this.migrateRetiredScheduleTools();
     this.migrateOwnerSnooze();
@@ -607,6 +613,13 @@ export class ThreadDb {
     const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
     if (!columns.some(({ name }) => name === "origin")) {
       this.db.exec("ALTER TABLE agent_runs ADD COLUMN origin TEXT");
+    }
+  }
+
+  private migrateAgentRunRole(): void {
+    const columns = this.db.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === "role")) {
+      this.db.exec(`ALTER TABLE agent_runs ADD COLUMN role TEXT CHECK (role IS NULL OR role IN (${AGENT_RUN_ROLE_SQL}))`);
     }
   }
 
@@ -1397,14 +1410,15 @@ export class ThreadDb {
       `INSERT INTO agent_runs (
          id, harness, task, cwd, parent_thread_id, model, effort, depth, status, created_at,
          child_session_id, acpx_record_id, retry_of_run_id, resume_of_run_id, completion_run_ids, timeout_seconds,
-         origin
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         origin, role
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       insert.id, insert.harness, insert.task, insert.cwd, insert.parentThreadId ?? null,
       insert.model ?? null, insert.effort ?? null, insert.depth, AgentRunStatus.Pending, this.now(),
       insert.childSessionId ?? null, insert.acpxRecordId ?? null,
       insert.retryOfRunId ?? null, insert.resumeOfRunId ?? null,
       JSON.stringify(insert.completionRunIds ?? []), insert.timeoutSeconds, insert.origin ?? null,
+      insert.role ?? null,
     );
     return this.agentRunById(insert.id)!;
   }
