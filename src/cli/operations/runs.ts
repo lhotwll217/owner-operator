@@ -138,7 +138,7 @@ export const runs: Noun = {
       minPositionals: 1,
       options: {
         harness: { type: "string", help: `child harness (required): ${HARNESSES.join(", ")}` },
-        model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice (the Operator's bash refuses instead, so the owner is asked)" },
+        model: { type: "string", help: "exact model id; omitted: the approved delegated baseline, else the harness's own choice (the Operator's bash refuses instead, so the owner is asked). Cursor runs only Grok: an advertised id or its name, such as grok-4.7" },
         effort: { type: "string", help: `reasoning effort (${AGENT_RUN_EFFORTS.join(", ")}), or none to override the approved one; omitted: resolved like --model` },
         cwd: { type: "string", help: "child working directory (default: the parent session's selected worktree, else the current directory)" },
         timeout: { type: "string", help: `seconds before the run is stopped (1..${MAX_AGENT_RUN_TIMEOUT_SECONDS}; default ${DEFAULT_AGENT_RUN_TIMEOUT_SECONDS})` },

@@ -89,6 +89,8 @@ owns transcript identity and discovery.
   starting fresh. Resume never substitutes a fresh conversation.
 - **The protocol turn result finalizes a run**, never process exit alone. A completed ACP turn
   is `completed`; a cancelled turn is `cancelled`; a turn error or child death is `failed`.
+  Cursor completes the protocol turn even when a step fails, so a Cursor turn whose output ends
+  in an `Error: <Kind>Error: …` line is `failed` with that line as its error.
 - **`interrupted`** is retryable: a graceful daemon shutdown mid-run, or a restart reconciling a
   row left `running` by a crash, lands here. The child identity is preserved for retry.
 - **`lost`** is assigned only by the reconciliation sweep: a `running` row with no live
@@ -231,6 +233,13 @@ resource retains the run projection. Pi completion delivery uses the shared comp
   baseline, then the harness's own choice: a missing baseline launches unpinned, and the launcher
   records the model and thought level the harness confirms in `harnessIdentity`. The CLI never
   prints, accepts, or changes the baseline.
+- **Cursor runs only Grok** (owner ruling 2026-11-21). The
+  [ACP launcher](../src/agent-runs/acp-launcher.ts) chooses from the Grok ids the session
+  advertises. An unpinned run takes the first one, not the Cursor account's default. A pin is an
+  exact advertised id or its bracket-free name: `--model grok-4.7` selects
+  `grok-4.7[context=256k,reasoning_effort=high,fast=true]`. Any other model fails the run before
+  the task is sent. The names `cursor-agent --list-models` prints, such as `grok-4.7-medium`, are
+  not ACP ids.
 - **Reasoning effort** is pinnable per run (`--effort`), including explicit `null`
   (`--effort none`). Its canonical vocabulary lives in [`AgentRunEffort`](../packages/core/src/agent-runs.ts);
   resolution follows the same caller pin then approved-baseline order as model and lands in the

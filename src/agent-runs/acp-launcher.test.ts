@@ -348,7 +348,7 @@ const cursorErrorRuntime = cursorRuntimeEmitting(`\n\n${cursorTerminalError}`);
   ] as const) {
     const { launched, turns, identities } = await launchCursor(requested);
     assert.equal((await launched).status, AgentRunStatus.Completed);
-    assert.equal(identities[0]?.harnessIdentity?.model, expected,
+    assert.deepEqual(identities[0]?.harnessIdentity, { observed: true, model: expected },
       `Cursor --model ${requested ?? "(none)"} runs and records ${expected}`);
     assert.equal(turns.length, 1);
   }
