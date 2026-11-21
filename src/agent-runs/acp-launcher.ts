@@ -341,7 +341,9 @@ async function runAcpTurn(
   const handle = existingHandle ?? await ensureAcpSession(runtime, request);
   request.onActivity(identityOf(handle));
   // An unpinned run (the harness's own choice) confirms the model the session reports now.
-  const model = request.run.model ?? await harnessSelectedModel(runtime, handle, request);
+  const model = request.run.harness === AgentRunHarness.Cursor
+    ? await selectCursorGrokModel(runtime, handle, request.run.model)
+    : request.run.model ?? await harnessSelectedModel(runtime, handle, request);
   const confirmed = await applyAndConfirmAcpSelection(runtime, handle, {
     model,
     effort: request.run.effort,
@@ -403,7 +405,7 @@ async function runAcpTurn(
   const resultText = chunks.join("");
   const identity = identityOf(handle);
   if (result.status === "completed") {
-    const terminalError = COMPLETED_TURN_ERRORS[request.run.harness]?.(resultText) ?? null;
+    const terminalError = COMPLETED_TURN_ERRORS[request.run.harness]?.(chunks.at(-1) ?? "") ?? null;
     if (terminalError) {
       return { status: AgentRunStatus.Failed, resultText, error: terminalError, ...identity };
     }
@@ -430,6 +432,34 @@ async function harnessSelectedModel(
   return model;
 }
 
+export function isCursorGrokModel(model: string): boolean {
+  return model.startsWith("grok-");
+}
+
+/** Owner ruling 2026-11-21: Cursor runs only Grok, never the account's default model. An unpinned
+ * run takes the first advertised Grok id (Cursor lists newest first). A short name such as
+ * `grok-4.7` selects the advertised id it prefixes, `grok-4.7[context=256k,...]`. acpx matches that
+ * alias only for a `cursor-agent` command, which the lease wrapper hides, so the match lives here. */
+async function selectCursorGrokModel(
+  runtime: AcpRuntime,
+  handle: Awaited<ReturnType<AcpRuntime["ensureSession"]>>,
+  requested: string | null,
+): Promise<string> {
+  const models = runtime.getStatus ? (await runtime.getStatus({ handle })).models : undefined;
+  const grok = (models?.availableModelIds ?? []).filter(isCursorGrokModel);
+  const model = requested === null
+    ? grok[0]
+    : grok.find((id) => id === requested || id.startsWith(`${requested}[`));
+  if (!model) {
+    throw new Error(
+      `Cursor runs only Grok models; ${requested === null ? "the session advertised none" : `${JSON.stringify(requested)} matches none`}. `
+      + `Advertised Grok models: ${grok.join(", ") || "none"}`,
+    );
+  }
+  if (model !== models?.currentModelId) await runtime.setModel?.({ handle, model });
+  return model;
+}
+
 /** The thought level the harness chose for itself, when it advertises one in the effort vocabulary. */
 function harnessSelectedEffort(options: SessionConfigOption[]): AgentRunEffort | undefined {
   const resolution = resolveThoughtLevelSelector(options);
@@ -437,13 +467,14 @@ function harnessSelectedEffort(options: SessionConfigOption[]): AgentRunEffort |
   return isAgentRunEffort(value) ? value : undefined;
 }
 
-/** Harness-owned interpretations of a "completed" turn's result text. The generic runner only
- * consults this table; each entry belongs to the harness whose adapter misreports the failure.
- * Cursor's adapter completes the turn normally after retry exhaustion, leaving the error only as
- * the trailing line of the result text. */
-const COMPLETED_TURN_ERRORS: Partial<Record<AgentRunHarness, (resultText: string) => string | null>> = {
-  [AgentRunHarness.Cursor]: (resultText) => {
-    const match = /(?:^|\r?\n)(Error: RetriableError: [^\r\n]*exceeded max retries)\s*$/.exec(resultText);
+/** Harness-owned interpretations of a "completed" turn's final output chunk. The generic runner
+ * only consults this table; each entry belongs to the harness whose adapter misreports the failure.
+ * Cursor's adapter completes the turn normally after a failed step and sends the error as one
+ * final chunk, `\n\nError: ${String(error)}`. Model text streams in token chunks, so an answer
+ * that quotes the same line never arrives as that single chunk. */
+const COMPLETED_TURN_ERRORS: Partial<Record<AgentRunHarness, (finalChunk: string) => string | null>> = {
+  [AgentRunHarness.Cursor]: (finalChunk) => {
+    const match = /^\n\n(Error: \w*Error: [^\r\n]*)\s*$/.exec(finalChunk);
     return match?.[1] ?? null;
   },
 };
@@ -472,7 +503,10 @@ function ensureAcpSession(
     mode: "persistent",
     cwd: request.run.cwd,
     ...(resumeSessionId !== undefined ? { resumeSessionId } : {}),
-    ...(request.run.model ? { sessionOptions: { model: request.run.model } } : {}),
+    // Cursor's model is chosen after the session advertises its ids (selectCursorGrokModel).
+    ...(request.run.model && request.run.harness !== AgentRunHarness.Cursor
+      ? { sessionOptions: { model: request.run.model } }
+      : {}),
   });
 }
 

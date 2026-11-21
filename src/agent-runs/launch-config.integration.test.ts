@@ -21,6 +21,25 @@ try {
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.OpenCode, harnessChoice, ooHome), {
     model: "provider/model/stable", effort: "high",
   }, "an approved baseline still wins over the harness's choice");
+  // Owner ruling 2026-11-21: an omitted Cursor model always reaches Grok. Null lets the launcher
+  // pick the newest advertised Grok id; an explicit non-Grok pin is refused there.
+  for (const onMissingBaseline of [AgentRunMissingBaseline.Ask, AgentRunMissingBaseline.HarnessChoice]) {
+    assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, { onMissingBaseline }, ooHome),
+      { model: null, effort: null }, `an unapproved Cursor launch (${onMissingBaseline}) runs Grok instead of refusing`);
+  }
+  approveDelegatedBaseline(AgentRunHarness.Cursor, { model: "claude-fable-5", effort: "high" }, ooHome);
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, {}, ooHome), { model: null, effort: null },
+    "a non-Grok Cursor baseline is never pinned");
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, { model: "claude-fable-5" }, ooHome),
+    { model: "claude-fable-5", effort: null }, "an explicit pin reaches the launcher, which refuses it");
+  approveDelegatedBaseline(AgentRunHarness.Cursor, { model: "grok-4.6", effort: null }, ooHome);
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, {}, ooHome), { model: "grok-4.6", effort: null },
+    "an approved Grok baseline still applies");
+  approveDelegatedBaseline(AgentRunHarness.Cursor, { model: "grok-4.7", effort: "high" }, ooHome);
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, {}, ooHome), { model: "grok-4.7", effort: null },
+    "an approved Cursor effort is not inherited, because Cursor's Grok session has no effort selector to apply it");
+  assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Cursor, { effort: "low" }, ooHome), { model: "grok-4.7", effort: "low" },
+    "an explicit Cursor effort still reaches the launcher");
   approveDelegatedBaseline(AgentRunHarness.Codex, { model: "approved-model", effort: "high" }, ooHome);
   assert.deepEqual(resolveAgentRunLaunch(AgentRunHarness.Codex, {}, ooHome), { model: "approved-model", effort: "high" });
   assert.deepEqual(

@@ -267,37 +267,112 @@ assert.deepEqual(unpinnedActivity[1], {
   harnessIdentity: { observed: true, model: "harness-resolved-model", effort: "ultra" },
 }, "the harness-confirmed model and thought level are recorded");
 
-const cursorModel = "composer-2.5[fast=true]";
+const cursorModel = "grok-4.6[effort=high,fast=true]";
 const cursorTerminalError = "Error: RetriableError: [internal] Failed to run step, exceeded max retries";
 const cursorStatus = async () => ({
   models: { currentModelId: cursorModel, availableModelIds: [cursorModel] },
   details: { configOptions: [{
     id: "model", name: "Model", category: "model", type: "select", currentValue: cursorModel,
-    options: [{ value: cursorModel, name: "composer-2.5" }],
+    options: [{ value: cursorModel, name: "grok-4.6" }],
   }] },
 });
-const cursorErrorRuntime = {
+const cursorRuntimeEmitting = (...texts: string[]) => ({
   ensureSession: async () => handle,
   getStatus: cursorStatus,
   startTurn: () => ({
     promptStarted: Promise.resolve(),
     events: (async function* () {
-      yield { type: "text_delta", stream: "output", text: `\n\n${cursorTerminalError}` };
+      for (const text of texts) yield { type: "text_delta", stream: "output", text };
     })(),
     result: Promise.resolve({ status: "completed" }),
   }),
-} as unknown as AcpRuntime;
-const cursorErrorResult = await createAcpLauncher({ runtimeFactory: () => cursorErrorRuntime })({
+}) as unknown as AcpRuntime;
+for (const terminalError of [
+  cursorTerminalError,
+  "Error: RetriableError: WritableIterable is closed",
+  "Error: NonRetriableError: Provider Error Too many MCP tools are enabled for this model. Please disable some MCP servers and try again.",
+]) {
+  const cursorErrorResult = await createAcpLauncher({ runtimeFactory: () => cursorRuntimeEmitting(`\n\n${terminalError}`) })({
+    run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
+    turnIntent: { kind: "fresh" },
+    signal: new AbortController().signal,
+    onActivity: () => undefined,
+  });
+  assert.equal(cursorErrorResult.status, AgentRunStatus.Failed,
+    `Cursor output ending in a harness error is not a completed task: ${terminalError}`);
+  assert.equal(cursorErrorResult.error, terminalError);
+  assert.equal(cursorErrorResult.resultText, `\n\n${terminalError}`,
+    "the exact harness failure text remains available as bounded result evidence");
+}
+const cursorErrorRuntime = cursorRuntimeEmitting(`\n\n${cursorTerminalError}`);
+// Chunks a live Grok turn streamed when asked to echo an error line: a completed answer.
+const echoedError = await createAcpLauncher({
+  runtimeFactory: () => cursorRuntimeEmitting("Error", ":", " Ret", "ri", "able", "Error", ":", " example"),
+})({
   run: { ...run, harness: AgentRunHarness.Cursor, model: cursorModel, effort: null },
   turnIntent: { kind: "fresh" },
   signal: new AbortController().signal,
   onActivity: () => undefined,
 });
-assert.equal(cursorErrorResult.status, AgentRunStatus.Failed,
-  "Cursor retry exhaustion cannot be reported as a successful completed task");
-assert.equal(cursorErrorResult.error, cursorTerminalError);
-assert.equal(cursorErrorResult.resultText, `\n\n${cursorTerminalError}`,
-  "the exact harness failure text remains available as bounded result evidence");
+assert.deepEqual(
+  { status: echoedError.status, resultText: echoedError.resultText, error: echoedError.error },
+  { status: AgentRunStatus.Completed, resultText: "Error: RetriableError: example", error: null },
+  "a Cursor answer that quotes error text is not a harness failure",
+);
+
+// Owner ruling 2026-11-21: a Cursor run uses only Grok, whatever the Cursor account's default.
+{
+  const accountDefault = "claude-fable-5[thinking=true,context=300k,effort=high]";
+  const grok47 = "grok-4.7[context=256k,reasoning_effort=high,fast=true]";
+  const advertised = ["default[]", grok47, cursorModel, "composer-2.5[fast=true]", accountDefault];
+  const launchCursor = async (model: string | null) => {
+    let current = accountDefault;
+    const turns: string[] = [];
+    const identities: AgentRunActivityUpdate[] = [];
+    const grokRuntime = {
+      ensureSession: async () => handle,
+      getStatus: async () => ({
+        models: { currentModelId: current, availableModelIds: advertised },
+        details: { configOptions: [] },
+      }),
+      setModel: async ({ model: selected }: { model: string }) => { current = selected; },
+      startTurn: ({ text }: { text: string }) => {
+        turns.push(text);
+        return {
+          promptStarted: Promise.resolve(),
+          events: (async function* () {})(),
+          result: Promise.resolve({ status: "completed" }),
+        };
+      },
+    } as unknown as AcpRuntime;
+    const launched = createAcpLauncher({ runtimeFactory: () => grokRuntime })({
+      run: { ...run, harness: AgentRunHarness.Cursor, model, effort: null },
+      turnIntent: { kind: "fresh" },
+      signal: new AbortController().signal,
+      onActivity: (update) => { if (update.harnessIdentity) identities.push(update); },
+    });
+    return { launched, turns, identities };
+  };
+
+  for (const [requested, expected] of [
+    [null, grok47],
+    ["grok-4.7", grok47],
+    ["grok-4.6", cursorModel],
+    [cursorModel, cursorModel],
+  ] as const) {
+    const { launched, turns, identities } = await launchCursor(requested);
+    assert.equal((await launched).status, AgentRunStatus.Completed);
+    assert.deepEqual(identities[0]?.harnessIdentity, { observed: true, model: expected },
+      `Cursor --model ${requested ?? "(none)"} runs and records ${expected}`);
+    assert.equal(turns.length, 1);
+  }
+
+  for (const requested of [accountDefault, "claude-fable-5", "composer-2.5[fast=true]", "grok-4"]) {
+    const { launched, turns } = await launchCursor(requested);
+    await assert.rejects(launched, /Cursor runs only Grok/, `Cursor refuses --model ${requested}`);
+    assert.equal(turns.length, 0, "a refused Cursor model never starts the task");
+  }
+}
 
 const cursorRecoveredRuntime = {
   ...cursorErrorRuntime,
@@ -401,6 +476,8 @@ const resumeRun = {
   id: "resumed-run",
   harness: AgentRunHarness.Codex,
   task: "answer a follow-up",
+  // A Grok id lets the Cursor identity cases below share this run.
+  model: cursorModel,
   effort: null,
   childSessionId: "resumed-child",
   acpxRecordId: "completed-acpx-record",
@@ -428,7 +505,7 @@ const resumeRuntime = {
     };
   },
   getStatus: async () => ({
-    models: { currentModelId: resumeRun.model },
+    models: { currentModelId: resumeRun.model, availableModelIds: [resumeRun.model] },
     details: { configOptions: [] },
   }),
   startTurn: ({ text }: { text: string }) => {

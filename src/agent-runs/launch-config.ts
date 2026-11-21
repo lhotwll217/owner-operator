@@ -7,13 +7,14 @@
  * once the harness confirms it. */
 
 import {
+  AgentRunHarness,
   AgentRunMissingBaseline,
   isAgentRunEffort,
   loadDelegatedBaseline,
   type AgentRunEffort,
-  type AgentRunHarness,
   type DelegatedBaseline,
 } from "@owner-operator/core";
+import { isCursorGrokModel } from "./acp-launcher";
 import { discoverAcpBaselineCandidate, type HarnessBaselineCandidate } from "./harness-details";
 
 export interface AgentRunLaunchPins {
@@ -40,9 +41,13 @@ export function resolveAgentRunLaunch(
   if (pins.model === null) {
     throw new Error(`delegated run for ${harness} requires a model; explicit null does not use the approved baseline`);
   }
-  const baseline = loadDelegatedBaseline(harness, ooHome);
+  const approved = loadDelegatedBaseline(harness, ooHome);
+  // Owner ruling 2026-11-21: Cursor runs only Grok. A non-Grok approval is ignored, and with no
+  // model the launcher picks the newest Grok the session advertises instead of asking.
+  const cursor = harness === AgentRunHarness.Cursor;
+  const baseline = cursor && approved && !isCursorGrokModel(approved.model) ? null : approved;
   const model = pins.model === undefined ? baseline?.model ?? null : pins.model;
-  if (!model && pins.onMissingBaseline === AgentRunMissingBaseline.HarnessChoice) {
+  if (!model && (cursor || pins.onMissingBaseline === AgentRunMissingBaseline.HarnessChoice)) {
     return { model: null, effort: Object.hasOwn(pins, "effort") ? pins.effort ?? null : null };
   }
   if (!model) {
@@ -51,7 +56,9 @@ export function resolveAgentRunLaunch(
       "candidate with `oo harness propose` and have the owner approve it with `oo harness approve`",
     );
   }
-  const effort = Object.hasOwn(pins, "effort") ? pins.effort ?? null : baseline?.effort ?? null;
+  // Cursor's Grok ids carry their own reasoning effort and its session advertises no effort
+  // selector, so an inherited effort could only fail the launch.
+  const effort = Object.hasOwn(pins, "effort") ? pins.effort ?? null : cursor ? null : baseline?.effort ?? null;
   return { model, effort };
 }
 
