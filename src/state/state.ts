@@ -134,6 +134,10 @@ export class State {
     return this.db.transcriptPaths(this.listCurrentSessionState().map((row) => row.id)).filter((path) => !scanned.has(path));
   }
 
+  workingTranscriptPaths(): string[] {
+    return this.db.transcriptPaths(this.listCurrentSessionState().filter((row) => row.state === "working").map((row) => row.id));
+  }
+
   listEnrichmentCandidates(): EnrichmentCandidate[] {
     const visible = new Set(this.listCurrentSessionState().map((row) => row.id));
     return this.db.listEnrichmentCandidates().filter((row) => visible.has(row.id));

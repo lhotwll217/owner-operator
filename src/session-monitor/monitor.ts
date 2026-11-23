@@ -120,14 +120,17 @@ export class SessionMonitor {
     }
   }
 
-  /** A full scan now, then a tick that either rescans everything (no watcher armed) or only
-   * reassesses working sessions on their cadence (the watcher already delivers every change). */
+  /** A full scan now, then a tick that rescans everything when no watcher is armed. With one,
+   * the tick rereads only the Working sessions: FSEvents can drop events and libuv discards
+   * the dropped-event notice, and a turn that went quiet only reads idle once it is reread. */
   start(): void {
     if (this.timer) return;
     this.pollInBackground();
     this.timer = setInterval(() => {
-      if (this.watchers.length) this.scheduleEnrichment();
-      else this.pollInBackground();
+      if (!this.watchers.length) return this.pollInBackground();
+      const working = this.state.workingTranscriptPaths();
+      if (working.length) this.pollInBackground(working);
+      else this.scheduleEnrichment();
     }, this.options.intervalMs ?? 15_000);
     this.timer.unref?.();
   }
