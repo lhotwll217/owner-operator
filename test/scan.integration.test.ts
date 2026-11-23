@@ -276,8 +276,9 @@ ocDb.exec(`
   CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL);
   CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
   CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE session_part (message_id TEXT NOT NULL, session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (message_id, ordinal));
 `);
-const ocV2 = "ses_dbv2", ocV1 = "ses_dbv1", ocMigrated = "ses_dbmigrated", ocFailed = "ses_dbfailed", ocNoRoute = "ses_dbnoroute", ocInterrupted = "ses_dbinterrupted";
+const ocV2 = "ses_dbv2", ocV1 = "ses_dbv1", ocMigrated = "ses_dbmigrated", ocFailed = "ses_dbfailed", ocNoRoute = "ses_dbnoroute", ocInterrupted = "ses_dbinterrupted", ocParts = "ses_dbparts";
 const ocSession = (table: string, id: string, created: number, updated: number) =>
   ocDb.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?)`).run(id, ocCwd, id, ocMs(created), ocMs(updated));
 const ocV2Message = (sessionId: string, seq: number, type: string, data: object) =>
@@ -309,6 +310,15 @@ ocSession("session_v2", ocInterrupted, 10, 10);
 ocV2Message(ocInterrupted, 1, "user", { time: { created: ocMs(10) }, text: "long task" });
 ocV2Message(ocInterrupted, 2, "assistant", { time: { created: ocMs(10) }, content: [{ type: "text", text: "Starting." }] });
 ocV2Message(ocInterrupted, 3, "idle", { time: { created: ocMs(10) }, outcome: "interrupted" });
+// OpenCode 2.4 writes each assistant part as a session_part row and leaves `content` empty.
+ocSession("session_v2", ocParts, 12, 11);
+ocV2Message(ocParts, 1, "user", { time: { created: ocMs(12) }, text: "count to three" });
+ocV2Message(ocParts, 2, "assistant", { time: { created: ocMs(11), completed: ocMs(11) }, content: [] });
+ocV2Message(ocParts, 3, "idle", { time: { created: ocMs(11) }, outcome: "succeeded" });
+const ocPart = (ordinal: number, type: string, text: string) =>
+  ocDb.prepare("INSERT INTO session_part VALUES (?, ?, ?, ?, ?)").run(`${ocParts}-2`, ocParts, ordinal, type, JSON.stringify({ type, text }));
+ocPart(1, "text", "1 2 3 DONE");
+ocPart(0, "reasoning", "hidden");
 ocDb.close();
 
 // Antigravity brain transcript: one step per line. USER_EXPLICIT USER_INPUT = the owner,
@@ -353,7 +363,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 18, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode (files + database), Antigravity, and Grok Build sessions");
+  assert.equal(fresh.count, 19, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode (files + database), Antigravity, and Grok Build sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "idle", "assistant yielded → quiet, not an owner obligation");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -450,6 +460,9 @@ try {
   assert.equal(ocNoRouteThread.state, "idle", "a turn that failed before any assistant message is answered, not pending");
   assert.equal(ocNoRouteThread.firstMessages[1]?.text, "Error: Model unavailable: opencode/big-pickle", "the idle row's failure is the agent's answer");
   assert.equal(byId(fresh, ocInterrupted)!.working, false, "an idle row closes the interrupted assistant message");
+  const ocPartsThread = byId(fresh, ocParts)!;
+  assert.equal(ocPartsThread.state, "idle", "a completed turn whose text is in session_part rows is answered");
+  assert.equal(ocPartsThread.firstMessages[1]?.text, "1 2 3 DONE", "assistant text from session_part text rows");
   const ocDrill = run("--thread", ocV2, "--file", join(dirname(ocStorage), "opencode.db"));
   assert.equal(byId(ocDrill, ocV2)?.working, true, "a changed database re-reads its sessions");
 
