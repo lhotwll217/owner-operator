@@ -55,7 +55,7 @@ process/model runtime and that application code never loads from development-ski
 SQLite (`~/.owner-operator/state.db`) is the only durable truth. `State` is its only production
 writer. The active `/session-state` response is a projection over `threads`, the latest dense
 `thread_details` version, and active delegated-child relationships; there is no stored snapshot or
-embedded client store. A root with a pending or running child projects as `working` without
+embedded client store. A thread with a pending or running run anywhere below it projects as `working` without
 rewriting its transcript-derived state. An owner snooze is the same kind of read-time overlay: two
 `threads` columns evaluated against the injected clock, never cleared at expiry. While it holds,
 the row projects in the snoozed section with its state unchanged; done outranks it, and it

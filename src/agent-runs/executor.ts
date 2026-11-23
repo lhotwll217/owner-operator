@@ -332,12 +332,10 @@ export class AgentRunExecutor {
         run,
         turnIntent,
         signal: controller.signal,
-        onActivity: (update) => {
-          this.state.recordAgentRunActivity(run.id, update);
-        },
-        onEvent: (event) => {
-          this.state.appendAgentRunEvent(run.id, event);
-        },
+        // The child's work outranks the ledger's record of it: a failed write here (a full disk)
+        // is logged and dropped, never thrown into the launcher, where it would end a live turn.
+        onActivity: (update) => this.recordDuringTurn(run.id, () => this.state.recordAgentRunActivity(run.id, update)),
+        onEvent: (event) => this.recordDuringTurn(run.id, () => this.state.appendAgentRunEvent(run.id, event)),
       });
       // An abort intent always wins over the launcher's own outcome — status AND reason. Launchers
       // differ on how they report an abort (the acpx bridge resolves with `cancelled`, a throwing
@@ -363,6 +361,15 @@ export class AgentRunExecutor {
       this.active.delete(run.id);
       if (!this.stopping) this.continueOwedParents();
       this.pump();
+    }
+  }
+
+  private recordDuringTurn(runId: string, write: () => unknown): void {
+    try {
+      write();
+    } catch (error) {
+      this.logger({ event: AgentRunExecutorLogEvent.LoopFailed,
+        error: `recording activity of ${runId}: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 

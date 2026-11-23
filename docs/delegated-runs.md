@@ -97,7 +97,9 @@ owns transcript identity and discovery.
 - **`lost`** is assigned only by the reconciliation sweep: a `running` row with no live
   in-process turn and no activity inside the grace window. Liveness is the executor's active-turn
   set plus durable rows — persisted metadata alone never keeps a run alive, and a live turn is
-  never reclaimed.
+  never reclaimed. A failed ledger write during a turn (such as a full disk) is logged and dropped,
+  never thrown into the launcher, so bookkeeping cannot end the child's work. A turn that ends
+  while its final row cannot be written still stays `running` until the sweep finds it.
 
 ### Harness continuation
 
@@ -168,7 +170,7 @@ Client behavior follows the same invalidation/refetch contract:
   opening one Gateway subscription, then lists again after attachment to close the snapshot gap.
   Initial and replacement SSE connections invalidate the fleet. `ParentRunSession` coalesces
   invalidations with an in-flight/dirty refetch rule and delivers terminal completions into the
-  parent conversation. State projects the parent as working while a delegated child is pending or running.
+  parent conversation. State projects the parent as working while a delegated run below it is pending or running.
 - **Headless chat:** opening or resuming a parent thread starts the same `ParentRunSession` and Pi
   completion adapter. Initial completion delivery is unbatched and
   awaited before the explicit prompt, and shutdown drains current delivery before closing the
@@ -457,10 +459,14 @@ A run row carries `parent_thread_id`. When the monitor observes the child's tran
 its ordinary scan path, the observed thread joins to its `agent_runs` row by identity
 (`child_session_id`), so the session-state projection exposes `parentThreadId`. This is an
 identity join, never inference from transcript-file growth. When the monitored OO parent is also
-visible, the widget nests the child beneath that exact root. While any child is pending or running,
-State projects the root as `working` and excludes it from needs-you schedule inputs.
+visible, the widget nests the child beneath that exact root. While a run anywhere below a thread
+is pending or running, State projects that thread as `working`, keeps it inside the active window,
+and excludes it from needs-you schedule inputs. One predicate in
+[`database.ts`](../src/state/database.ts), `HAS_LIVE_WORK_BELOW_SQL`, walks each live run's lineage
+upward, so every ancestor of live work at any depth gets the same answer
+([#228](https://github.com/lhotwll217/owner-operator/issues/228)).
 Summary enrichment continues during child work without changing the parent's working status.
-Once all children are terminal, the transcript-derived root state applies again. The ledger record
+Once every run below it is terminal, the transcript-derived root state applies again. The ledger record
 remains the canonical child provenance.
 
 The child side is symmetric. Once every run that issued a child session is terminal, State
@@ -472,16 +478,12 @@ classifier guessed `idle` or `needs-you`. Nothing is written to `thread_details`
 resume is a new run on the same `child_session_id`, which holds the row open again.
 
 Two conditions bound that rule, both in
-[`CHILD_RUN_FINISHED_SQL`](../src/state/database.ts). A live run anywhere below the thread
-outranks it, found by walking each live run's lineage upward, so Done never hides delegated work
-still in flight at any depth. And it is released the way an owner Done mark is, by a message
+[`CHILD_RUN_FINISHED_SQL`](../src/state/database.ts). Live work below the thread outranks it,
+through the same predicate, so Done never hides delegated work still in flight at any depth. And it is released the way an owner Done mark is, by a message
 newer than the mark, so continuing a finished child by hand in its own harness brings the row
 back. The mark is the end of the child's last run: `finished_at` for a status the run reached
 through its own lifecycle, and the run's last recorded activity for `interrupted` and `lost`,
 whose `finished_at` is the clock of the sweep that noticed rather than evidence about the child.
-
-One level is not enough for the parent-side rule or the active window, which still read
-immediate children only ([#228](https://github.com/lhotwll217/owner-operator/issues/228)).
 
 A caller outside this Mac always names itself with `oo runs delegate --origin <name>` (free-form,
 such as `grok-bot`), stored as `agent_runs.origin` and copied by retry and resume. Without

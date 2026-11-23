@@ -83,7 +83,7 @@ file or keychain, never from argv, because `payload_json` is stored and queryabl
 - Disabling/deleting prevents future triggers but does not cancel an active run.
 - A monotonic schedule revision prevents an active run from overwriting a concurrent edit.
 - Needs-you changes batch once per reconciliation; run creation and per-thread watermarks commit
-  atomically. Roots with pending or running delegated children are excluded, and an agent-run
+  atomically. Roots with a pending or running delegated run at any depth below them are excluded, and an agent-run
   transition reconciles the inputs so the transcript-derived handoff returns after termination.
 - A run-finished claim commits the schedule run with a `schedule_run_finished_claims` row, one per
   schedule and agent run, so events and ticks claim each run once. A terminal agent-run event
