@@ -190,9 +190,14 @@ export class SessionMonitor {
           if (event === "rename") this.unwatchTranscript(path, watcher);
           this.scheduleReconcile(path);
         });
-        watcher.on("error", () => this.unwatchTranscript(path, watcher));
+        watcher.on("error", () => {
+          this.unwatchTranscript(path, watcher);
+          this.scheduleReconcile(path);
+        });
         watcher.unref?.();
         this.transcriptWatchers.set(path, watcher);
+        // A write between this poll's read and the watch going live was reported to no one.
+        this.pendingFiles.add(path);
       } catch {
         // Not a file on disk (an OpenCode `<db>#<id>` session, or one already removed).
       }
