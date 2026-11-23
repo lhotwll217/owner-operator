@@ -209,9 +209,11 @@ export class SessionMonitor {
     if (this.transcriptWatchers.get(path) === watcher) this.transcriptWatchers.delete(path);
   }
 
+  /** The first change starts the flush and later ones join it, so a transcript written more often
+   * than the debounce cannot hold back every other session's change. */
   scheduleReconcile(file?: string): void {
     if (file) this.pendingFiles.add(file);
-    if (this.debounce) clearTimeout(this.debounce);
+    if (this.debounce) return;
     this.debounce = setTimeout(() => {
       this.debounce = null;
       const files = [...this.pendingFiles];

@@ -53,9 +53,13 @@ fi
 
 # The daemon holds a descriptor per watched transcript, and launchd starts agents with a soft limit
 # of 256. setrlimit(2) gives the ceiling to raise it to: min(OPEN_MAX, hard limit), OPEN_MAX = 10240.
+# Only the soft limit moves, and only upward, so the daemon's children keep the inherited hard limit.
 if [ "${1:-}" = "daemon" ]; then
+  WANT=10240
   HARD="$(ulimit -Hn)"
-  if [ "$HARD" = "unlimited" ] || [ "$HARD" -gt 10240 ]; then ulimit -n 10240; else ulimit -n "$HARD"; fi
+  if [ "$HARD" != "unlimited" ] && [ "$HARD" -lt "$WANT" ]; then WANT="$HARD"; fi
+  SOFT="$(ulimit -Sn)"
+  if [ "$SOFT" != "unlimited" ] && [ "$SOFT" -lt "$WANT" ]; then ulimit -Sn "$WANT"; fi
 fi
 
 # Prefer the checkout's tsx loader (workspace-hoisted to repo root) through Node's --import, not

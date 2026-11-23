@@ -23,10 +23,10 @@ function heldTranscript(name: string): { path: string; fd: number } {
   return { path, fd };
 }
 
-function watchedMonitor(id: string, path: string, duringScan?: (call: number) => void) {
+function watchedMonitor(id: string, path: string, duringScan?: (call: number) => void, debounceMs = 10) {
   const scans: string[][] = [];
   const monitor = new SessionMonitor(state, {
-    debounceMs: 10,
+    debounceMs,
     scan: async (_since, _limit, files = []) => {
       scans.push([...files]);
       duringScan?.(scans.length);
@@ -57,6 +57,20 @@ try {
   await racing.monitor.poll();
   await waitFor(() => racing.scans.slice(1).some((files) => files.includes(ended.path)), 2_000,
     "a write made before the watch was armed to be reread once it is");
+
+  const quiet = heldTranscript("quiet.jsonl");
+  const streaming = heldTranscript("streaming.jsonl");
+  const burst = watchedMonitor("quiet", quiet.path, undefined, 100);
+  burst.monitor.scheduleReconcile(quiet.path);
+  let streamed = 0;
+  const stream = setInterval(() => { streamed += 1; burst.monitor.scheduleReconcile(streaming.path); }, 20);
+  try {
+    await waitFor(() => burst.scans.some((files) => files.includes(quiet.path)), 1_000,
+      "a queued transcript to be scanned while another transcript streams writes");
+    assert.ok(streamed < 50, "the scan came while the stream was still writing");
+  } finally {
+    clearInterval(stream);
+  }
   process.stdout.write("ok — writes to held-open transcripts reach the monitor\n");
 } finally {
   for (const monitor of monitors) monitor.stop();
