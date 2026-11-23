@@ -50,13 +50,13 @@ Scope and output:
 Backends: a discovery query (--query without --session) runs on agentsview when its daemon is
 running, otherwise on session-grep. The header names the backend and, after a fallback, its
 backend_note. --any, --case-sensitive, --include-skill-bodies, --sort oldest|file, --target-root,
---owner-operator, --target-type opencode, --skim, and --session always run on session-grep, and so does
-any other discovery query without --semantic or --hybrid while an OpenCode database is in scope
-(agentsview has not indexed every OpenCode session). agentsview reports lower
+--owner-operator, --skim, and --session always run on session-grep. agentsview reports lower
 bounds instead of totals (message_matches_at_least or candidate_sessions_at_least, plus
 more_available) and counts the hits it cannot point at or that session-grep would hide
 (tool_hits_dropped, skill_body_hits_dropped, outside_sources_dropped, unmapped_dropped). Every hit's id and idx open with
---session ID --at IDX on either backend; use --backend session-grep for exact totals.
+--session ID --at IDX on either backend; use --backend session-grep for exact totals. OpenCode
+sessions live in a database session-grep cannot read, so only agentsview searches them, and an
+OpenCode hit opens with agentsview session messages opencode:ID --around IDX.
 
 Choose the lightest mode:
   Known session          use its stable id directly: a scoped query for one fact, --skim for a

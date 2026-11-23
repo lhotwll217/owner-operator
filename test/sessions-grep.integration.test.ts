@@ -5,8 +5,7 @@
 // Needs ripgrep, like the skill — skips cleanly if absent.
 import assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,31 +134,6 @@ try {
       JSON.stringify({ type: "response_item", timestamp: "2026-07-10T08:30:02.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `Codex UUID route works with ${CALLER_CHAIN_NEEDLE}` }] } }) + "\n",
   );
 
-  // OpenCode keeps sessions in opencode.db (no storage/ tree): a v2 session in a normal repo and
-  // a v1 session inside the blacklisted tree, which must never reach the search mirror.
-  const openCodeId = "ses_searchvisible";
-  const privateOpenCodeId = "ses_searchprivate";
-  const openCodeData = join(home, ".local", "share", "opencode");
-  mkdirSync(openCodeData, { recursive: true });
-  const openCodeDb = new DatabaseSync(join(openCodeData, "opencode.db"));
-  openCodeDb.exec(`
-    CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
-    CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
-    CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL);
-    CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
-    CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
-  `);
-  const openCodeAt = Date.parse("2026-06-30T10:00:00.000Z");
-  openCodeDb.prepare("INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?)").run(openCodeId, okCwd, "visible", openCodeAt, openCodeAt + 2_000);
-  openCodeDb.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run("m1", openCodeId, "user", 1,
-    JSON.stringify({ time: { created: openCodeAt }, text: "where is the needle" }));
-  openCodeDb.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run("m2", openCodeId, "assistant", 2,
-    JSON.stringify({ time: { created: openCodeAt + 1_000, completed: openCodeAt + 2_000 }, content: [{ type: "text", text: `OpenCode found ${NEEDLE}` }] }));
-  openCodeDb.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?)").run(privateOpenCodeId, join(privateRoot, "OpenCode"), "private", openCodeAt, openCodeAt);
-  openCodeDb.prepare("INSERT INTO message VALUES (?, ?, ?, ?)").run("p1", privateOpenCodeId, openCodeAt, JSON.stringify({ role: "user", time: { created: openCodeAt } }));
-  openCodeDb.prepare("INSERT INTO part VALUES (?, ?, ?, ?)").run("p1-text", "p1", privateOpenCodeId, JSON.stringify({ type: "text", text: `private ${NEEDLE}` }));
-  openCodeDb.close();
-
   const run = (...extra: string[]): { id: string; source?: string; namespace?: string; app?: string }[] => {
     const out = execFileSync(process.execPath, [GREP, "--query", NEEDLE, "--json", ...extra], {
       env: { ...process.env, HOME: home, OO_HOME: ooHome },
@@ -210,60 +184,7 @@ try {
   );
   assert.ok(ownerOperatorMatches.every((m) => m.namespace === "owner-operator"), "--owner-operator narrows to the OO namespace");
   assert.ok(ownerOperatorMatches.every((m) => m.source === "pi"), "Owner Operator sessions are just pi-format sessions to the primitive");
-  const defaultOpenCodeMatch = defaultMatches.find((match) => match.id === openCodeId);
-  assert.equal(defaultOpenCodeMatch?.source, "opencode", "OpenCode results name their harness, not the mirror's Pi format");
-  assert.equal(defaultOpenCodeMatch?.namespace, "coding", "OpenCode results retain their coding namespace");
-  assert.deepEqual(idsOf(run("--target-type", "opencode")), [openCodeId], "an explicit OpenCode target searches only OpenCode");
-  assert.ok(!idsOf(defaultMatches).includes(privateOpenCodeId), "a blacklisted OpenCode session is never returned");
-  assert.ok(!existsSync(join(ooHome, "search")), "no OpenCode mirror persists under OO_HOME");
-  assert.match(execFileSync(process.execPath, [GREP, "--skim", openCodeId], { env: { ...process.env, HOME: home, OO_HOME: ooHome }, encoding: "utf8" }),
-    new RegExp(`skim id=${openCodeId} messages=2`), "an OpenCode session id opens its mirrored transcript");
-
-  // The OpenCode mirror lives for one search: each search reads the database afresh, and no copy
-  // outlives it to escape a later blacklist or an unavailable database.
-  const ocHome = mkdtempSync(join(tmpdir(), "oo-grep-oc-home-"));
-  const ocOoHome = mkdtempSync(join(tmpdir(), "oo-grep-oc-oohome-"));
-  const ocTmp = mkdtempSync(join(tmpdir(), "oo-grep-oc-tmp-"));
-  try {
-    const ocCwd = join(ocHome, "dev", "app");
-    const ocData = join(ocHome, ".local", "share", "opencode");
-    mkdirSync(ocData, { recursive: true });
-    // An empty Owner Operator store keeps a search valid once the database is gone.
-    mkdirSync(join(ocOoHome, "sessions"));
-    const ocDb = new DatabaseSync(join(ocData, "opencode.db"));
-    ocDb.exec(`
-      CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
-      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
-    `);
-    const ocId = "ses_lifecycle";
-    const ocAt = Date.parse("2026-11-20T10:00:00.000Z");
-    ocDb.prepare("INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?)").run(ocId, ocCwd, "lifecycle", ocAt, ocAt);
-    const answer = (text: string) => JSON.stringify({ time: { created: ocAt }, content: [{ type: "text", text }] });
-    ocDb.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run("a1", ocId, "assistant", 1, answer("streaming ZZOCFIRSTZZ"));
-    const ocEnv = { ...process.env, HOME: ocHome, OO_HOME: ocOoHome, TMPDIR: ocTmp };
-    const ocSearch = (needle: string, ...extra: string[]) => JSON.parse(execFileSync(process.execPath,
-      [GREP, "--query", needle, "--json", ...extra], { env: ocEnv, encoding: "utf8" })).matches as { id: string }[];
-    const filesUnder = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
-      .flatMap((entry) => entry.isDirectory() ? filesUnder(join(dir, entry.name)) : [join(dir, entry.name)]);
-    const copies = () => [...filesUnder(ocOoHome), ...filesUnder(ocTmp)]
-      .filter((file) => /ZZOC(FIRST|SECOND)ZZ/.test(readFileSync(file, "utf8")));
-
-    assert.deepEqual(idsOf(ocSearch("ZZOCFIRSTZZ", "--target-type", "opencode")), [ocId]);
-    assert.deepEqual(filesUnder(ocTmp), [], "the search's temporary files are removed when it ends");
-    // OpenCode 2.4.0 rewrites a streaming message without advancing session_v2.time_updated.
-    ocDb.prepare("UPDATE session_message SET data = ? WHERE id = 'a1'").run(answer("finished ZZOCSECONDZZ"));
-    assert.deepEqual(idsOf(ocSearch("ZZOCSECONDZZ")), [ocId], "a message change without a session timestamp change is searchable");
-    ocDb.close();
-
-    writeFileSync(join(ocOoHome, "blacklist.json"), JSON.stringify({ paths: [ocCwd], repos: [] }));
-    renameSync(join(ocData, "opencode.db"), join(ocHome, "opencode.db.away"));
-    assert.deepEqual(idsOf(ocSearch("ZZOCSECONDZZ")), [], "a session blacklisted after a search is not found");
-    assert.deepEqual(copies(), [], "no copy of a blacklisted OpenCode transcript remains readable");
-  } finally {
-    for (const dir of [ocHome, ocOoHome, ocTmp]) rmSync(dir, { recursive: true, force: true });
-  }
   const codingPiMatches = run("--target-type", "pi");
-  assert.ok(!idsOf(codingPiMatches).includes(openCodeId), "an explicit Pi target excludes the OpenCode mirror");
   assert.ok(idsOf(codingPiMatches).includes(externalPiId), "an explicit Pi target searches standalone Pi coding history");
   assert.ok(!idsOf(codingPiMatches).includes(ownerOperatorId), "an explicit Pi target remains coding-only");
   assert.match(skim("--target-type", "codex"), new RegExp(`skim id=${codexId}`), "DB canonical Codex UUID resolves its rollout file");

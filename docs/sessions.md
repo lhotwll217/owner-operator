@@ -68,13 +68,10 @@ session's v2 rows win over its v1 copy. Each database session is one scan candid
 transcript path is `<db>#<session id>`. The monitor watches the database and its WAL, not the
 `-shm` index that reads also change.
 
-The search primitive reads JSONL only, so each search writes a Pi-format mirror of every
-non-blacklisted OpenCode session into a private temporary directory, reports its results as
-`source=opencode`, and removes the mirror when it ends: no copy outlives a search, so a later
-blacklist entry or an in-place message rewrite (which OpenCode makes without advancing the
-session's `time_updated`) applies to the next search. agentsview has not indexed every OpenCode
-session, so with a database in scope discovery runs on session-grep unless it needs agentsview
-(`oo search --help`, section Backends).
+`oo search` leaves OpenCode to agentsview, which indexes `opencode.db` itself: a hit keeps
+agentsview's message ordinal and context, the session's agentsview `cwd` decides the blacklist,
+and the hit opens with `agentsview session messages opencode:<id> --around <idx>`. Without a
+running agentsview, OpenCode sessions are not searched (`oo search --help`, section Backends).
 
 ## Onboarding review
 

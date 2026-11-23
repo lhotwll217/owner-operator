@@ -7,7 +7,6 @@ import assert from "node:assert";
 import { execFile, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
-import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -100,6 +99,27 @@ const hits = [
   { session_id: "codex:eeee1111-2222-3333-4444-555555555555", agent: "codex", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-05T10:00:00Z", snippet: NEEDLE },
 ];
 
+// OpenCode keeps sessions in SQLite, not a transcript file, so agentsview's own session and
+// message records are the only source for its hits.
+const openCodeSessions: Record<string, { cwd: string; messages: { ordinal: number; role: string; timestamp: string; content: string }[] }> = {
+  "opencode:ses_visible": {
+    cwd: okCwd,
+    messages: [
+      { ordinal: 0, role: "user", timestamp: "2026-10-07T10:00:00Z", content: "what did OpenCode find?" },
+      { ordinal: 1, role: "assistant", timestamp: "2026-10-07T10:00:01Z", content: `OpenCode found ${NEEDLE}` },
+      { ordinal: 2, role: "user", timestamp: "2026-10-07T10:00:02Z", content: "thanks" },
+    ],
+  },
+  "opencode:ses_private": {
+    cwd: join(privateRoot, "opencode"),
+    messages: [{ ordinal: 0, role: "user", timestamp: "2026-10-07T11:00:00Z", content: `private ${NEEDLE}` }],
+  },
+};
+const openCodeHits = [
+  { session_id: "opencode:ses_visible", agent: "opencode", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-07T10:00:01Z", snippet: `found ${NEEDLE}` },
+  { session_id: "opencode:ses_private", agent: "opencode", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-07T11:00:00Z", snippet: `private ${NEEDLE}` },
+];
+
 const requests: URL[] = [];
 const intents: (string | undefined)[] = [];
 let failSemantic = false;
@@ -111,6 +131,17 @@ const server = createServer((req: IncomingMessage, res) => {
   requests.push(url);
   intents.push(req.headers["x-agentsview-search-intent"] as string | undefined);
   res.setHeader("content-type", "application/json");
+  const sessionRoute = /^\/api\/v1\/sessions\/([^/]+)(\/messages)?$/.exec(url.pathname);
+  if (sessionRoute) {
+    const session = openCodeSessions[decodeURIComponent(sessionRoute[1])];
+    const around = Number(url.searchParams.get("around"));
+    const from = around - Number(url.searchParams.get("before"));
+    const to = around + Number(url.searchParams.get("after"));
+    res.end(JSON.stringify(sessionRoute[2]
+      ? { messages: session.messages.filter(({ ordinal }) => ordinal >= from && ordinal <= to) }
+      : { id: sessionRoute[1], cwd: session.cwd }));
+    return;
+  }
   if (failSemantic && url.searchParams.get("mode") === "semantic") {
     res.statusCode = 400;
     res.end(JSON.stringify({ error: "semantic search is not enabled" }));
@@ -140,14 +171,14 @@ await new Promise<void>((resolve) => closed.close(() => resolve()));
 writeFileSync(join(refusedBin, "agentsview"), `#!/bin/sh\necho "agentsview running at ${closedUrl}"\n`);
 for (const dir of [fakeBin, stoppedBin, refusedBin]) chmodSync(join(dir, "agentsview"), 0o755);
 
-const run = (bin: string, args: string[], homeDir = home) => new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+const run = (bin: string, args: string[]) => new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
   execFile(process.execPath, [WRAPPER, ...args], {
-    env: { ...process.env, HOME: homeDir, OO_HOME: ooHome, PATH: `${bin}:/usr/bin:/bin` },
+    env: { ...process.env, HOME: home, OO_HOME: ooHome, PATH: `${bin}:/usr/bin:/bin` },
     encoding: "utf8",
   }, (error, stdout, stderr) => resolve({ code: error ? Number((error as { code?: number }).code ?? 1) : 0, stdout, stderr }));
 });
-const json = async (bin: string, args: string[], homeDir = home) => {
-  const result = await run(bin, [...args, "--json"], homeDir);
+const json = async (bin: string, args: string[]) => {
+  const result = await run(bin, [...args, "--json"]);
   assert.equal(result.code, 0, result.stderr);
   return JSON.parse(result.stdout);
 };
@@ -158,7 +189,7 @@ try {
   const request = requests.at(-1)!;
   assert.equal(request.pathname, "/api/v1/search/content");
   assert.equal(request.searchParams.get("in"), "messages,thinking", "tool content stays out unless --include-tools");
-  assert.equal(request.searchParams.get("agent"), "claude,codex,pi", "only formats session-grep can open");
+  assert.equal(request.searchParams.get("agent"), "claude,codex,pi,opencode", "the configured formats, OpenCode included");
   assert.equal(request.searchParams.get("include_children"), "true", "subagent transcripts are searched, as session-grep does");
 
   const byId = new Map(found.matches.map((match: { id: string }) => [match.id, match]));
@@ -270,6 +301,40 @@ try {
   assert.equal(blank.unmappedDropped, 1, "it is dropped and counted");
   respond = null;
 
+  // OpenCode hits keep agentsview's numbering and context, and its cwd decides the blacklist.
+  respond = () => ({ matches: openCodeHits, next_cursor: 0 });
+  const openCode = await json(fakeBin, ["--query", NEEDLE, "--target-type", "opencode"]);
+  const lastSearch = () => requests.filter((url) => url.pathname === "/api/v1/search/content").at(-1)!;
+  assert.equal(lastSearch().searchParams.get("agent"), "opencode");
+  assert.deepEqual(openCode.matches.map(({ source, id, index, namespace, path, before, after }: Record<string, unknown>) =>
+    ({ source, id, index, namespace, path, before, after })), [{
+    source: "opencode",
+    id: "ses_visible",
+    index: 1,
+    namespace: "coding",
+    path: undefined,
+    before: [{ role: "user", text: "what did OpenCode find?", timestamp: "2026-10-07T10:00:00Z" }],
+    after: [{ role: "user", text: "thanks", timestamp: "2026-10-07T10:00:02Z" }],
+  }], "an OpenCode hit is located through agentsview alone");
+  assert.equal(openCode.blacklistedDropped, 1, "an OpenCode session in a blacklisted cwd is dropped");
+  const openCodeCandidates = await json(fakeBin, ["--query", NEEDLE, "--candidates"]);
+  assert.deepEqual(openCodeCandidates.candidates.map(({ id, repo }: { id: string; repo: string }) => [id, repo]), [["ses_visible", "repo"]]);
+  assert.match((await run(fakeBin, ["--query", NEEDLE])).stdout,
+    /open an OpenCode hit with `agentsview session messages opencode:ID --around IDX`/, "the text names the drill-in for OpenCode hits");
+  respond = null;
+  const openCodeDown = await run(stoppedBin, ["--query", NEEDLE, "--target-type", "opencode"]);
+  assert.notEqual(openCodeDown.code, 0, "OpenCode has no session-grep fallback");
+  assert.match(openCodeDown.stderr, /--target-type opencode: agentsview not running/);
+  assert.match((await run(fakeBin, ["--query", NEEDLE, "--target-type", "opencode", "--any"])).stderr,
+    /--target-type opencode needs agentsview, which does not support --any/);
+  assert.match((await run(fakeBin, ["--skim", "ses_visible", "--target-type", "opencode"])).stderr,
+    /supports discovery only; open a hit with `agentsview session messages/);
+  writeFileSync(join(ooHome, "session_sources.json"), JSON.stringify({ disable: ["opencode"] }));
+  await json(fakeBin, ["--query", NEEDLE]);
+  assert.equal(lastSearch().searchParams.get("agent"), "claude,codex,pi", "a disabled OpenCode source is not searched");
+  assert.match((await run(fakeBin, ["--query", NEEDLE, "--target-type", "opencode"])).stderr, /OpenCode session source is disabled/);
+  rmSync(join(ooHome, "session_sources.json"));
+
   const refused = await json(refusedBin, ["--query", NEEDLE]);
   assert.equal(refused.backend.name, "session-grep", "a reported daemon that refuses connections falls back");
   assert.match(refused.backend.note, /^agentsview search failed: /);
@@ -301,37 +366,6 @@ try {
   assert.deepEqual(any.backend, { name: "session-grep", note: "agentsview does not support --any" });
   const pinned = await json(fakeBin, ["--query", NEEDLE, "--backend", "session-grep"]);
   assert.deepEqual(pinned.backend, { name: "session-grep" }, "--backend session-grep skips detection");
-
-  // agentsview indexes few OpenCode sessions, so when an OpenCode store is in scope a lexical
-  // discovery query runs on session-grep, which reads opencode.db; the stub's hits omit it.
-  const openCodeHome = mkdtempSync(join(tmpdir(), "oo-av-opencode-home-"));
-  try {
-    const openCodeData = join(openCodeHome, ".local", "share", "opencode");
-    mkdirSync(openCodeData, { recursive: true });
-    const db = new DatabaseSync(join(openCodeData, "opencode.db"));
-    db.exec(`
-      CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
-      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
-    `);
-    const at = Date.parse("2026-11-20T10:00:00.000Z");
-    db.prepare("INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?)").run("ses_unindexed", join(openCodeHome, "dev"), "t", at, at);
-    db.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run("m1", "ses_unindexed", "user", 1,
-      JSON.stringify({ time: { created: at }, text: `OpenCode said ${NEEDLE}` }));
-    db.close();
-    const before = requests.length;
-    const openCode = await json(fakeBin, ["--query", NEEDLE], openCodeHome);
-    assert.deepEqual(openCode.backend, { name: "session-grep", note: "agentsview has not indexed every OpenCode session" });
-    assert.equal(requests.length, before, "the daemon is not queried");
-    assert.equal(openCode.matches.find((match: { id: string }) => match.id === "ses_unindexed")?.source, "opencode",
-      "default discovery finds an OpenCode session agentsview omits");
-    assert.match((await run(fakeBin, ["--query", NEEDLE], openCodeHome)).stdout,
-      /backend=session-grep backend_note="agentsview has not indexed every OpenCode session"/);
-    const semanticOpenCode = await json(fakeBin, ["--query", NEEDLE, "--semantic"], openCodeHome);
-    assert.equal(semanticOpenCode.backend.name, "agentsview", "--semantic runs only on agentsview, so it stays there");
-    assert.equal(requests.at(-1)!.searchParams.get("agent"), "claude,codex,pi,opencode");
-  } finally {
-    rmSync(openCodeHome, { recursive: true, force: true });
-  }
 
   const forced = await run(stoppedBin, ["--query", NEEDLE, "--backend", "agentsview"]);
   assert.notEqual(forced.code, 0, "--backend agentsview fails rather than silently falling back");
