@@ -28,6 +28,11 @@ Tier = filename suffix, colocated with the code it covers. Cross-cutting tests l
 your real sessions — each default tier points `HOME`/`OO_HOME` at a fresh `mkdtemp` and tears
 it down. `live` is opt-in (auto-skips without auth); `smoke` is run by hand.
 
+**Whole-product live check.** The tiers above cannot see a harness change its storage. The
+[`verify-owner-operator`](../.claude/skills/verify-owner-operator/SKILL.md) skill drives real
+turns on every installed harness through the installed daemon or an isolated checkout daemon, and
+reports per feature with evidence.
+
 ## Layout
 
 ```
