@@ -115,9 +115,10 @@ starting is reassessed within one model call rather than at the next tick.
 The monitor scans every store once at start. From then on the transcript watcher names the file
 that changed and the scan parses only that transcript and the files sharing its session id. The
 watcher is not complete: FSEvents can drop events and libuv skips the notice of the loss. So the
-interval tick also rereads the transcripts of the Working sessions, which lets a turn that ended
-unseen, or went quiet past the idle threshold, leave Working. Without an armed watcher the
-interval falls back to a full scan.
+interval tick also rereads the transcripts of the Working sessions. A turn that ended unseen then
+leaves Working, and so does a session whose last message is the owner's once it passes the idle
+threshold. A transcript that still shows a turn in progress stays Working however old it is.
+Without an armed watcher the interval falls back to a full scan.
 
 The message watermark, sampled child evidence, enrichment-contract version, and whether
 enrichment landed during working status determine freshness.

@@ -130,7 +130,7 @@ export class SessionMonitor {
       if (!this.watchers.length) return this.pollInBackground();
       const working = this.state.workingTranscriptPaths();
       if (working.length) this.pollInBackground(working);
-      else this.scheduleEnrichment();
+      this.scheduleEnrichment();
     }, this.options.intervalMs ?? 15_000);
     this.timer.unref?.();
   }

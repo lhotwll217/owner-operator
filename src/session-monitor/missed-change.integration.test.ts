@@ -40,6 +40,26 @@ try {
     "a turn that ended without a file event to leave Working");
   assert.ok(scannedFiles.slice(1).some((files) => files.includes(transcriptPath)),
     "the tick rereads the Working session's transcript, not every store");
+  monitor.stop();
+
+  let scans = 0;
+  let enrichments = 0;
+  const failing = new SessionMonitor(state, {
+    intervalMs: 20,
+    scan: async () => {
+      scans += 1;
+      if (scans > 1) throw new Error("scan failed");
+      return [fakeScanRow({ id: "stuck-session", source: "codex", transcriptPath, lastMessageAt: new Date().toISOString(), lastRole: "user", working: true })];
+    },
+    enrich: async (candidate) => {
+      if (candidate.id === "stuck-session") enrichments += 1;
+      throw new Error("enrichment retried");
+    },
+  });
+  failing.watch();
+  failing.start();
+  await waitFor(() => scans > 2 && enrichments > 1, 1_000, "enrichment retries while the Working reread fails");
+  failing.stop();
   process.stdout.write("ok — a missed transcript change still settles\n");
 } finally {
   monitor.stop();
