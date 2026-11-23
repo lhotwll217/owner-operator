@@ -28,4 +28,4 @@ Preconditions:
 
 - Model and effort resolve from the approved delegated baseline (`~/.owner-operator/delegated-baselines/`), else the harness's own choice. Under `OO_AGENT=1` a missing baseline refuses the launch, which is why the script unsets it.
 - Cursor runs only Grok models.
-- The installed runtime pins one commit. A harness upgrade can break it while a newer checkout works. On 2026-11-23 `oo harness details` on main rejected OpenCode 2.4.0 with "expected opencode v1". Run both targets before calling a failure a regression.
+- The installed runtime pins one commit. A harness upgrade can break it while a newer checkout works. Run both targets before calling a failure a regression.

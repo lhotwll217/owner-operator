@@ -1,6 +1,6 @@
 # Session tracking
 
-Owner Operator observes the child's transcript as a session thread, sees the turn finish, reads the reply, and writes a status summary. This is what broke silently for OpenCode 2.4 while every test passed.
+Owner Operator observes the child's transcript as a session thread, sees the turn finish, reads the reply, and writes a status summary.
 
 ## Sub-features
 

@@ -29,7 +29,6 @@ Preconditions:
 ## Gotchas
 
 - Claude Code refuses a foreground `sleep` and backgrounds it, then ends the turn without the nonce. That is why the widget turn waits in Python.
-- The child's transcript can settle a poll before its run turns terminal, so a running child may show Idle once. The check needs Working at least once, and title matching uses the title at render time, because enrichment retitles rows.
+- The child's transcript can settle a poll before its run turns terminal, so a running child may show Idle once. The check needs Working at least once, and the render may carry any title the row had while running, because enrichment retitles rows.
 - A reply-only turn usually finishes before a scan admits its child. That is why only the `widget` turn has to be seen while running.
 - The 30-minute stale threshold is the verifier's own choice, not a product rule. A genuinely long silent turn trips it. Open the transcript to confirm before filing.
-- On 2026-11-23 the installed daemon showed Codex sessions in Working whose transcripts ended in `task_complete` hours earlier. That is the same symptom class as the OpenCode break.

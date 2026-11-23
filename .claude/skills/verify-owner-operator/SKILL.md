@@ -56,7 +56,7 @@ Proof standards:
 - Every turn goes through `oo runs delegate`, the owner's path. Headless native CLIs are not used: `claude -p` is an automated transport and never becomes a session row (`session-hosts.mjs`).
 - Tracking is read from the state database (`oo db query`) and the transcript reader (`oo search --session`), never from the run's own result alone.
 - Widget proof is `/session-state` plus the real widget binary's render. The binary renders the same payload the panel does.
-- Report a fail exactly as observed. Weakening a check so it passes hides the next OpenCode-style break.
+- Report a fail exactly as observed. Weakening a check so it passes hides the next break that only shows up live.
 
 ## Cleanup
 
