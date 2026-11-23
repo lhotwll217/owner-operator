@@ -49,11 +49,6 @@ export async function searchAgentsview(url, { query, mode, limit, agent, include
   return { matches: body.matches ?? [], nextCursor: body.next_cursor ?? 0 };
 }
 
-/** agentsview's record of one session, including the `cwd` it ran in. */
-export function agentsviewSession(url, sessionId) {
-  return getJson(url, `/api/v1/sessions/${encodeURIComponent(sessionId)}`);
-}
-
 /** The messages agentsview numbers from `around - before` to `around + after`, oldest first, each
  * with its `ordinal`, `role`, `timestamp`, and `content`. */
 export async function agentsviewMessages(url, sessionId, { around, before, after }) {

@@ -69,8 +69,9 @@ transcript path is `<db>#<session id>`. The monitor watches the database and its
 `-shm` index that reads also change.
 
 `oo search` leaves OpenCode to agentsview, which indexes `opencode.db` itself: a hit keeps
-agentsview's message ordinal and context, the session's agentsview `cwd` decides the blacklist,
-and the hit opens with `agentsview session messages opencode:<id> --around <idx>`. Without a
+agentsview's message ordinal and context. agentsview indexes every OpenCode database it finds, so a
+hit counts only when a configured store's `opencode.db` holds the session, whose `directory` decides
+the blacklist. A hit whose message text lacks the match, such as a tool hit, is dropped. A hit opens with `agentsview session messages opencode:<id> --around <idx>`. Without a
 running agentsview, OpenCode sessions are not searched (`oo search --help`, section Backends).
 
 ## Onboarding review

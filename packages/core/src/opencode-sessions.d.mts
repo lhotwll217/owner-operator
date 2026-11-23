@@ -26,4 +26,5 @@ export interface OpenCodeMessage {
 export declare function openCodeDatabasePath(storeRoot: string): string;
 export declare function openOpenCodeDatabase(path: string): OpenCodeDatabase | null;
 export declare function listOpenCodeSessions(handle: OpenCodeDatabase, since?: number): OpenCodeSession[];
+export declare function openCodeSessionDirectory(handle: OpenCodeDatabase, sessionId: string): string | null;
 export declare function readOpenCodeMessages(handle: OpenCodeDatabase, sessionId: string): OpenCodeMessage[];

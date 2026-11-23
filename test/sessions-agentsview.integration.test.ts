@@ -7,6 +7,7 @@ import assert from "node:assert";
 import { execFile, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -99,9 +100,10 @@ const hits = [
   { session_id: "codex:eeee1111-2222-3333-4444-555555555555", agent: "codex", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-05T10:00:00Z", snippet: NEEDLE },
 ];
 
-// OpenCode keeps sessions in SQLite, not a transcript file, so agentsview's own session and
-// message records are the only source for its hits.
-const openCodeSessions: Record<string, { cwd: string; messages: { ordinal: number; role: string; timestamp: string; content: string }[] }> = {
+// OpenCode keeps sessions in SQLite, not a transcript file. The configured store's opencode.db
+// says which sessions are in scope and where each ran; agentsview's records give the messages.
+// ses_elsewhere is indexed by agentsview but held by no configured store.
+const openCodeSessions: Record<string, { cwd?: string; messages: { ordinal: number; role: string; timestamp: string; content: string }[] }> = {
   "opencode:ses_visible": {
     cwd: okCwd,
     messages: [
@@ -114,10 +116,23 @@ const openCodeSessions: Record<string, { cwd: string; messages: { ordinal: numbe
     cwd: join(privateRoot, "opencode"),
     messages: [{ ordinal: 0, role: "user", timestamp: "2026-10-07T11:00:00Z", content: `private ${NEEDLE}` }],
   },
+  "opencode:ses_elsewhere": {
+    messages: [{ ordinal: 0, role: "user", timestamp: "2026-10-07T12:00:00Z", content: `elsewhere ${NEEDLE}` }],
+  },
 };
+const openCodeDb = join(home, ".local", "share", "opencode", "opencode.db");
+mkdirSync(dirname(openCodeDb), { recursive: true });
+const ocDb = new DatabaseSync(openCodeDb);
+ocDb.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL); CREATE TABLE session_message (id TEXT PRIMARY KEY)");
+for (const [id, { cwd }] of Object.entries(openCodeSessions)) {
+  if (cwd) ocDb.prepare("INSERT INTO session_v2 VALUES (?, ?)").run(id.replace(/^opencode:/, ""), cwd);
+}
+ocDb.close();
 const openCodeHits = [
   { session_id: "opencode:ses_visible", agent: "opencode", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-07T10:00:01Z", snippet: `found ${NEEDLE}` },
   { session_id: "opencode:ses_private", agent: "opencode", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-07T11:00:00Z", snippet: `private ${NEEDLE}` },
+  { session_id: "opencode:ses_elsewhere", agent: "opencode", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-07T12:00:00Z", snippet: `elsewhere ${NEEDLE}` },
+  { session_id: "opencode:ses_visible", agent: "opencode", location: "tool_result", role: "user", ordinal: 0, timestamp: "2026-10-07T10:00:00Z", snippet: `${NEEDLE} in a tool result` },
 ];
 
 const requests: URL[] = [];
@@ -131,15 +146,13 @@ const server = createServer((req: IncomingMessage, res) => {
   requests.push(url);
   intents.push(req.headers["x-agentsview-search-intent"] as string | undefined);
   res.setHeader("content-type", "application/json");
-  const sessionRoute = /^\/api\/v1\/sessions\/([^/]+)(\/messages)?$/.exec(url.pathname);
-  if (sessionRoute) {
-    const session = openCodeSessions[decodeURIComponent(sessionRoute[1])];
+  const messagesRoute = /^\/api\/v1\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
+  if (messagesRoute) {
+    const session = openCodeSessions[decodeURIComponent(messagesRoute[1])];
     const around = Number(url.searchParams.get("around"));
     const from = around - Number(url.searchParams.get("before"));
     const to = around + Number(url.searchParams.get("after"));
-    res.end(JSON.stringify(sessionRoute[2]
-      ? { messages: session.messages.filter(({ ordinal }) => ordinal >= from && ordinal <= to) }
-      : { id: sessionRoute[1], cwd: session.cwd }));
+    res.end(JSON.stringify({ messages: session.messages.filter(({ ordinal }) => ordinal >= from && ordinal <= to) }));
     return;
   }
   if (failSemantic && url.searchParams.get("mode") === "semantic") {
@@ -315,8 +328,10 @@ try {
     path: undefined,
     before: [{ role: "user", text: "what did OpenCode find?", timestamp: "2026-10-07T10:00:00Z" }],
     after: [{ role: "user", text: "thanks", timestamp: "2026-10-07T10:00:02Z" }],
-  }], "an OpenCode hit is located through agentsview alone");
+  }], "an OpenCode hit is scoped by its configured store and read through agentsview");
   assert.equal(openCode.blacklistedDropped, 1, "an OpenCode session in a blacklisted cwd is dropped");
+  assert.equal(openCode.outsideSourcesDropped, 1, "an OpenCode session no configured store holds is dropped");
+  assert.equal(openCode.unmappedDropped, 1, "a tool hit whose message content lacks it is dropped, not shown with unrelated text");
   const openCodeCandidates = await json(fakeBin, ["--query", NEEDLE, "--candidates"]);
   assert.deepEqual(openCodeCandidates.candidates.map(({ id, repo }: { id: string; repo: string }) => [id, repo]), [["ses_visible", "repo"]]);
   assert.match((await run(fakeBin, ["--query", NEEDLE])).stdout,

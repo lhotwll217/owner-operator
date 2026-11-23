@@ -8,7 +8,6 @@ import { SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS } from "./flags.mjs";
 import { SEARCH_HELP } from "./help.mjs";
 import {
   agentsviewMessages,
-  agentsviewSession,
   detectAgentsview,
   hitMatcher,
   messageForHit,
@@ -26,6 +25,11 @@ import {
   latestOwnerOperatorProvenance,
   resolveRepo,
 } from "../../packages/core/src/session-cwd.mjs";
+import {
+  openCodeDatabasePath,
+  openCodeSessionDirectory,
+  openOpenCodeDatabase,
+} from "../../packages/core/src/opencode-sessions.mjs";
 
 // session-grep.mjs CONTEXT_PREVIEW_CHARS: the preview length of a hit's neighboring messages.
 const CONTEXT_PREVIEW_CHARS = 180;
@@ -360,6 +364,7 @@ async function agentsviewOutput(url) {
   const matcherFor = hitMatcher({ mode, query });
   const transcripts = transcriptIndex();
   const parsed = new Map();
+  let openCodeStores;
   const openCodeTranscripts = new Map();
   const seen = new Set();
   const located = [];
@@ -380,18 +385,26 @@ async function agentsviewOutput(url) {
     await locate(page.matches);
   } while (cursor && pages < 4 && wanted() < limit);
 
-  async function openCodeTranscript(sessionId) {
-    if (!openCodeTranscripts.has(sessionId)) {
-      const { cwd } = await agentsviewSession(url, sessionId);
-      let repo = null;
-      let blocked = true;
-      try {
-        repo = cwd ? resolveRepo(cwd) : null;
-        blocked = !cwd || isBlacklisted(blacklist, { cwd, repo });
-      } catch { /* fail closed, as fileBlacklisted does */ }
-      openCodeTranscripts.set(sessionId, { type: "opencode", identity: { namespace: "coding" }, repo, blocked });
+  // agentsview indexes every OpenCode database it finds, so a hit counts only when a configured
+  // store's database holds the session, and that row's directory decides the blacklist.
+  function openCodeTranscript(id) {
+    openCodeStores ??= configuredSources.filter((source) => source.source === "opencode")
+      .map((source) => openOpenCodeDatabase(openCodeDatabasePath(source.root))).filter(Boolean);
+    if (!openCodeTranscripts.has(id)) {
+      const cwd = openCodeStores.map((store) => openCodeSessionDirectory(store, id)).find((directory) => directory != null);
+      let transcript = null;
+      if (cwd != null) {
+        let repo = null;
+        let blocked = true;
+        try {
+          repo = cwd ? resolveRepo(cwd) : null;
+          blocked = !cwd || isBlacklisted(blacklist, { cwd, repo });
+        } catch { /* fail closed, as fileBlacklisted does */ }
+        transcript = { type: "opencode", identity: { namespace: "coding" }, repo, blocked };
+      }
+      openCodeTranscripts.set(id, transcript);
     }
-    return openCodeTranscripts.get(sessionId);
+    return openCodeTranscripts.get(id);
   }
 
   async function locate(hits) {
@@ -402,14 +415,20 @@ async function agentsviewOutput(url) {
     let messages;
     let found;
     if (hit.agent === "opencode") {
-      transcript = await openCodeTranscript(hit.session_id);
+      transcript = openCodeTranscript(id);
+      if (!transcript) {
+        outsideSourcesDropped += 1;
+        continue;
+      }
       if (transcript.blocked) {
         blacklistedDropped += 1;
         continue;
       }
       messages = (await agentsviewMessages(url, hit.session_id, { around: hit.ordinal, before, after }))
         .map(({ ordinal, role, timestamp, content }) => ({ index: ordinal, role, timestamp, time: Date.parse(timestamp), text: content?.trim() ? content : null }));
-      const message = messages.find((candidate) => candidate.index === hit.ordinal && candidate.text);
+      // agentsview's message content holds no tool output, so a tool hit finds no message here.
+      const contains = matcherFor(hit);
+      const message = messages.find((candidate) => candidate.index === hit.ordinal && candidate.text && contains(candidate.text));
       found = message ? { message } : null;
     } else {
       transcript = transcripts.get(id);
