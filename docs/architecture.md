@@ -117,6 +117,13 @@ that changed and the scan parses only that transcript and the files sharing its 
 interval tick only reassesses working sessions on their cadence. Without an armed watcher the
 interval falls back to a full scan.
 
+Two watches feed it. A watch on each store finds new transcripts. A watch on each visible
+session's own transcript carries that session's writes, because Codex App, the Claude desktop app,
+and Antigravity hold transcripts open, and on macOS a store watch (FSEvents) reports a write
+through a held-open file only when it closes. A transcript is reread once its watch is live, so a
+write made before then is not lost. Each transcript watch holds a descriptor, so `oo daemon`
+raises its open-file limit to min(OPEN_MAX, hard limit), as setrlimit(2) directs.
+
 The message watermark, sampled child evidence, enrichment-contract version, and whether
 enrichment landed during working status determine freshness.
 A newer message or a change in working status queues another assessment. Failed calls leave

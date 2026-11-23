@@ -73,6 +73,7 @@ export class SessionMonitor {
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
   private watchers: FSWatcher[] = [];
+  private transcriptWatchers = new Map<string, FSWatcher>();
   private watching = false;
   private watchRoots: readonly string[] | undefined;
   private polling = false;
@@ -112,6 +113,7 @@ export class SessionMonitor {
         return link ? { ...row, link } : row;
       }) : rows);
       this.current = this.state.listCurrentSessionState();
+      this.watchTranscripts();
       this.scheduleEnrichment();
       return this.current;
     } finally {
@@ -171,9 +173,47 @@ export class SessionMonitor {
     }
   }
 
+  /** The store watch (FSEvents on macOS) reports a write through a held-open descriptor only when
+   * the file closes, and Codex App holds each rollout open for the life of the app session. A watch
+   * on the file itself (kqueue) reports every write, so each visible session's transcript gets one. */
+  private watchTranscripts(): void {
+    if (!this.watching) return;
+    const paths = new Set(this.state.visibleTranscriptPaths());
+    for (const [path, watcher] of this.transcriptWatchers) {
+      if (!paths.has(path)) this.unwatchTranscript(path, watcher);
+    }
+    for (const path of paths) {
+      if (this.transcriptWatchers.has(path)) continue;
+      try {
+        const watcher = fsWatch(path, (event) => {
+          // A replaced or removed file keeps no watch; the poll this schedules re-arms a live one.
+          if (event === "rename") this.unwatchTranscript(path, watcher);
+          this.scheduleReconcile(path);
+        });
+        watcher.on("error", () => {
+          this.unwatchTranscript(path, watcher);
+          this.scheduleReconcile(path);
+        });
+        watcher.unref?.();
+        this.transcriptWatchers.set(path, watcher);
+        // A write between this poll's read and the watch going live was reported to no one.
+        this.pendingFiles.add(path);
+      } catch {
+        // Not a file on disk (an OpenCode `<db>#<id>` session, or one already removed).
+      }
+    }
+  }
+
+  private unwatchTranscript(path: string, watcher: FSWatcher): void {
+    watcher.close();
+    if (this.transcriptWatchers.get(path) === watcher) this.transcriptWatchers.delete(path);
+  }
+
+  /** The first change starts the flush and later ones join it, so a transcript written more often
+   * than the debounce cannot hold back every other session's change. */
   scheduleReconcile(file?: string): void {
     if (file) this.pendingFiles.add(file);
-    if (this.debounce) clearTimeout(this.debounce);
+    if (this.debounce) return;
     this.debounce = setTimeout(() => {
       this.debounce = null;
       const files = [...this.pendingFiles];
@@ -197,6 +237,8 @@ export class SessionMonitor {
     this.watchRoots = undefined;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
+    for (const watcher of this.transcriptWatchers.values()) watcher.close();
+    this.transcriptWatchers.clear();
   }
 
   private scheduleEnrichment(): void {
