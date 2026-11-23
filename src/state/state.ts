@@ -130,8 +130,12 @@ export class State {
     });
   }
 
+  visibleTranscriptPaths(): string[] {
+    return this.db.transcriptPaths(this.listCurrentSessionState().map((row) => row.id));
+  }
+
   visibleTranscriptPathsExcept(scanned: ReadonlySet<string>): string[] {
-    return this.db.transcriptPaths(this.listCurrentSessionState().map((row) => row.id)).filter((path) => !scanned.has(path));
+    return this.visibleTranscriptPaths().filter((path) => !scanned.has(path));
   }
 
   listEnrichmentCandidates(): EnrichmentCandidate[] {
