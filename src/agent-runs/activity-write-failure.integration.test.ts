@@ -40,12 +40,16 @@ try {
   const reachedMidTurn = new Promise<void>((resolve) => { midTurn = resolve; });
   let resumeTurn!: () => void;
   const turnResumes = new Promise<void>((resolve) => { resumeTurn = resolve; });
+  let freeDisk!: () => void;
+  const diskFreed = new Promise<void>((resolve) => { freeDisk = resolve; });
   const launcher = async (request: AgentRunLaunchRequest): Promise<AgentRunLaunchResult> => {
     request.onActivity({ activity: "running sleep 10", childSessionId: "orchestrator-child" });
     midTurn();
     await turnResumes;
+    request.onActivity({ promptSubmitted: true });
     request.onEvent?.({ type: "tool_call", title: "sleep 10", text: "sleep 10" });
     request.onActivity({ activity: "sleep 10 returned" });
+    await diskFreed;
     return { status: AgentRunStatus.Completed, resultText: "PROBE_DONE", error: null };
   };
   const logged: unknown[] = [];
@@ -58,10 +62,12 @@ try {
   resumeTurn();
   await new Promise((resolve) => setTimeout(resolve, 20));
   diskFull = false;
+  freeDisk();
 
   const finished = await executor.wait(run.id, 5_000);
   assert.equal(finished.status, AgentRunStatus.Completed, `a failed activity write does not end the turn: ${finished.error}`);
   assert.equal(finished.resultTail, "PROBE_DONE", "the turn's result is recorded once the ledger can write again");
+  assert.equal(finished.promptSubmitted, true, "a prompt receipt written while the disk was full still lands");
   assert.ok(
     logged.some((record) => JSON.stringify(record).includes("database or disk is full")),
     "the dropped activity write is logged",
