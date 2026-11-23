@@ -4,6 +4,7 @@
 export interface OpenCodeDatabase {
   readonly v1: boolean;
   readonly v2: boolean;
+  readonly parts: boolean;
   close(): void;
 }
 

@@ -5,7 +5,10 @@
 // ([database path](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/packages/cli/src/database-path.ts#L4-L13)).
 // The database holds two generations: v1 sessions in `session` with `message` + `part` rows, and
 // v2 sessions in `session_v2` with `session_message` rows. A session migrated to v2 keeps a copy
-// of its history in the v1 tables, so the v2 row is authoritative for any id it holds.
+// of its history in the v1 tables, so the v2 row is authoritative for any id it holds. From 2.4
+// OpenCode writes each assistant part as its own `session_part` row and leaves the message's
+// `content` empty; its reader puts the part rows, in ordinal order, before any inline content
+// ([withParts](https://github.com/anomalyco/opencode/blob/16ba7065443b3a54574d5fb9f64f4e47371b8fd1/packages/core/src/session/history.ts#L91-L122)).
 // Plain ESM so the zero-install scan and the search wrapper run it directly. Opens read-only.
 
 import { existsSync } from "node:fs";
@@ -29,7 +32,7 @@ export function openOpenCodeDatabase(path) {
     const v1 = ["session", "message", "part"].every((name) => tables.has(name));
     const v2 = ["session_v2", "session_message"].every((name) => tables.has(name));
     if (!v1 && !v2) { db.close(); return null; }
-    return { db, v1, v2, close: () => db.close() };
+    return { db, v1, v2, parts: v2 && tables.has("session_part"), close: () => db.close() };
   } catch {
     try { db?.close(); } catch { /* already closed */ }
     return null;
@@ -54,8 +57,11 @@ export function readOpenCodeMessages(handle, sessionId) {
   const inV2 = handle.v2 && handle.db.prepare("SELECT 1 FROM session_v2 WHERE id = ?").get(sessionId);
   const out = [];
   if (inV2) {
+    const parts = handle.parts
+      ? handle.db.prepare("SELECT type, data FROM session_part WHERE message_id = ? ORDER BY ordinal")
+      : null;
     for (const row of handle.db.prepare(
-      "SELECT type, data FROM session_message WHERE session_id = ? AND type IN ('user', 'assistant', 'idle') ORDER BY seq",
+      "SELECT id, type, data FROM session_message WHERE session_id = ? AND type IN ('user', 'assistant', 'idle') ORDER BY seq",
     ).all(sessionId)) {
       const data = parse(row.data);
       if (!data) continue;
@@ -72,8 +78,10 @@ export function readOpenCodeMessages(handle, sessionId) {
       }
       const text = row.type === "user"
         ? (typeof data.text === "string" ? data.text : "")
-        : (Array.isArray(data.content) ? data.content : [])
-          .filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
+        : [
+          ...(parts?.all(row.id).map((part) => ({ ...parse(part.data), type: part.type })) ?? []),
+          ...(Array.isArray(data.content) ? data.content : []),
+        ].filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
       out.push({ role: row.type, text: text.trim() ? text : errorText(data.error?.message), ts: data.time?.created ?? 0, completed: data.time?.completed != null });
     }
     return out;

@@ -522,7 +522,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 18, "visible set unchanged");
+  assert.equal(run().count, 19, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 
