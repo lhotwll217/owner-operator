@@ -56,6 +56,26 @@ needs-you rows, including parents with active delegated children, then runs the 
 The response's `queuedIds` identifies accepted rows. A timestamp mismatch or Done choice is skipped.
 This route rechecks already summarized visible rows after a reconciliation change without another worker.
 
+## OpenCode
+
+OpenCode's configured store is its legacy `storage/` tree of one JSON file per record. Current
+OpenCode keeps sessions in `opencode.db` in the same data directory
+([database path](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/packages/cli/src/database-path.ts#L4-L13)),
+so authorizing the store authorizes that database too, and either may exist alone. The
+[reader](../packages/core/src/opencode-sessions.mjs) opens it read-only and reads v1 sessions
+(`session`, `message`, `part`) and v2 sessions (`session_v2`, `session_message`); a migrated
+session's v2 rows win over its v1 copy. Each database session is one scan candidate whose
+transcript path is `<db>#<session id>`. The monitor watches the database and its WAL, not the
+`-shm` index that reads also change.
+
+`oo search` leaves OpenCode to agentsview, which indexes `opencode.db` itself: a hit keeps
+agentsview's message ordinal and context. agentsview indexes every OpenCode database it finds, so a
+hit counts only when a configured store's `opencode.db` holds the session, whose `directory` decides
+the blacklist. A hit whose message text lacks the match, such as a tool hit, is dropped. A hit opens with `agentsview session messages opencode:<id> --around <idx>`. Without a
+running agentsview, OpenCode sessions are not searched (`oo search --help`, section Backends).
+
+## Onboarding review
+
 Onboarding presents both catalogs once. Harness formats start selected; the owner marks formats to
 ignore. Host detection supplies attribution only and does not grant transcript access. The marker
 records the reviewed stable IDs and an access contract hash. Harness identity, transcript format,

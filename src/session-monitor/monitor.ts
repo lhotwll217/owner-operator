@@ -1,9 +1,10 @@
 import { watch as fsWatch, type FSWatcher } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   loadActiveWindow,
   loadMonitoredTranscriptStores,
   isOnboarded,
+  openCodeDatabasePath,
   type ScanRow,
   type SessionStateRow,
   type ThreadEnrichment,
@@ -139,20 +140,34 @@ export class SessionMonitor {
 
   private armWatchers(): void {
     if (!this.watching || this.watchers.length > 0) return;
-    const watchedRoots = this.watchRoots ?? (
-      isOnboarded() ? loadMonitoredTranscriptStores().map((store) => store.root) : []
-    );
+    const stores = this.watchRoots ? [] : isOnboarded() ? loadMonitoredTranscriptStores() : [];
+    const watchedRoots = this.watchRoots ?? stores.map((store) => store.root);
     for (const root of new Set(watchedRoots)) {
-      try {
-        const watcher = fsWatch(root, { recursive: true }, (_event, file) => {
-          if (typeof file === "string" && /\.(?:jsonl|ndjson|json)$/.test(file)) this.scheduleReconcile(join(root, file));
-        });
-        watcher.on("error", () => undefined);
-        watcher.unref?.();
-        this.watchers.push(watcher);
-      } catch {
-        // The interval is the fallback for missing roots or unsupported recursive watch.
-      }
+      this.arm(root, { recursive: true }, (file) => {
+        if (/\.(?:jsonl|ndjson|json)$/.test(file)) this.scheduleReconcile(join(root, file));
+      });
+    }
+    // OpenCode writes each turn to its database or WAL; the scan then re-reads its sessions. The
+    // `-shm` index changes on every read, the scan's own included, so it never triggers one.
+    const databases = stores.filter((store) => store.format === "opencode").map((store) => openCodeDatabasePath(store.root));
+    for (const database of new Set(databases)) {
+      const written = new Set([basename(database), `${basename(database)}-wal`]);
+      this.arm(dirname(database), {}, (file) => {
+        if (written.has(file)) this.scheduleReconcile(database);
+      });
+    }
+  }
+
+  private arm(path: string, options: { recursive?: boolean }, onFile: (file: string) => void): void {
+    try {
+      const watcher = fsWatch(path, options, (_event, file) => {
+        if (typeof file === "string") onFile(file);
+      });
+      watcher.on("error", () => undefined);
+      watcher.unref?.();
+      this.watchers.push(watcher);
+    } catch {
+      // The interval is the fallback for missing roots or unsupported recursive watch.
     }
   }
 

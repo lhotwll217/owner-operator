@@ -7,6 +7,7 @@ import assert from "node:assert";
 import { execFile, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -99,6 +100,41 @@ const hits = [
   { session_id: "codex:eeee1111-2222-3333-4444-555555555555", agent: "codex", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-05T10:00:00Z", snippet: NEEDLE },
 ];
 
+// OpenCode keeps sessions in SQLite, not a transcript file. The configured store's opencode.db
+// says which sessions are in scope and where each ran; agentsview's records give the messages.
+// ses_elsewhere is indexed by agentsview but held by no configured store.
+const openCodeSessions: Record<string, { cwd?: string; messages: { ordinal: number; role: string; timestamp: string; content: string }[] }> = {
+  "opencode:ses_visible": {
+    cwd: okCwd,
+    messages: [
+      { ordinal: 0, role: "user", timestamp: "2026-10-07T10:00:00Z", content: "what did OpenCode find?" },
+      { ordinal: 1, role: "assistant", timestamp: "2026-10-07T10:00:01Z", content: `OpenCode found ${NEEDLE}` },
+      { ordinal: 2, role: "user", timestamp: "2026-10-07T10:00:02Z", content: "thanks" },
+    ],
+  },
+  "opencode:ses_private": {
+    cwd: join(privateRoot, "opencode"),
+    messages: [{ ordinal: 0, role: "user", timestamp: "2026-10-07T11:00:00Z", content: `private ${NEEDLE}` }],
+  },
+  "opencode:ses_elsewhere": {
+    messages: [{ ordinal: 0, role: "user", timestamp: "2026-10-07T12:00:00Z", content: `elsewhere ${NEEDLE}` }],
+  },
+};
+const openCodeDb = join(home, ".local", "share", "opencode", "opencode.db");
+mkdirSync(dirname(openCodeDb), { recursive: true });
+const ocDb = new DatabaseSync(openCodeDb);
+ocDb.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL); CREATE TABLE session_message (id TEXT PRIMARY KEY)");
+for (const [id, { cwd }] of Object.entries(openCodeSessions)) {
+  if (cwd) ocDb.prepare("INSERT INTO session_v2 VALUES (?, ?)").run(id.replace(/^opencode:/, ""), cwd);
+}
+ocDb.close();
+const openCodeHits = [
+  { session_id: "opencode:ses_visible", agent: "opencode", location: "message", role: "assistant", ordinal: 1, timestamp: "2026-10-07T10:00:01Z", snippet: `found ${NEEDLE}` },
+  { session_id: "opencode:ses_private", agent: "opencode", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-07T11:00:00Z", snippet: `private ${NEEDLE}` },
+  { session_id: "opencode:ses_elsewhere", agent: "opencode", location: "message", role: "user", ordinal: 0, timestamp: "2026-10-07T12:00:00Z", snippet: `elsewhere ${NEEDLE}` },
+  { session_id: "opencode:ses_visible", agent: "opencode", location: "tool_result", role: "user", ordinal: 0, timestamp: "2026-10-07T10:00:00Z", snippet: `${NEEDLE} in a tool result` },
+];
+
 const requests: URL[] = [];
 const intents: (string | undefined)[] = [];
 let failSemantic = false;
@@ -110,6 +146,15 @@ const server = createServer((req: IncomingMessage, res) => {
   requests.push(url);
   intents.push(req.headers["x-agentsview-search-intent"] as string | undefined);
   res.setHeader("content-type", "application/json");
+  const messagesRoute = /^\/api\/v1\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
+  if (messagesRoute) {
+    const session = openCodeSessions[decodeURIComponent(messagesRoute[1])];
+    const around = Number(url.searchParams.get("around"));
+    const from = around - Number(url.searchParams.get("before"));
+    const to = around + Number(url.searchParams.get("after"));
+    res.end(JSON.stringify({ messages: session.messages.filter(({ ordinal }) => ordinal >= from && ordinal <= to) }));
+    return;
+  }
   if (failSemantic && url.searchParams.get("mode") === "semantic") {
     res.statusCode = 400;
     res.end(JSON.stringify({ error: "semantic search is not enabled" }));
@@ -157,7 +202,7 @@ try {
   const request = requests.at(-1)!;
   assert.equal(request.pathname, "/api/v1/search/content");
   assert.equal(request.searchParams.get("in"), "messages,thinking", "tool content stays out unless --include-tools");
-  assert.equal(request.searchParams.get("agent"), "claude,codex,pi", "only formats session-grep can open");
+  assert.equal(request.searchParams.get("agent"), "claude,codex,pi,opencode", "the configured formats, OpenCode included");
   assert.equal(request.searchParams.get("include_children"), "true", "subagent transcripts are searched, as session-grep does");
 
   const byId = new Map(found.matches.map((match: { id: string }) => [match.id, match]));
@@ -268,6 +313,42 @@ try {
   assert.deepEqual(blank.matches, [], "a hit with an empty snippet is not mapped to an arbitrary message");
   assert.equal(blank.unmappedDropped, 1, "it is dropped and counted");
   respond = null;
+
+  // OpenCode hits keep agentsview's numbering and context, and its cwd decides the blacklist.
+  respond = () => ({ matches: openCodeHits, next_cursor: 0 });
+  const openCode = await json(fakeBin, ["--query", NEEDLE, "--target-type", "opencode"]);
+  const lastSearch = () => requests.filter((url) => url.pathname === "/api/v1/search/content").at(-1)!;
+  assert.equal(lastSearch().searchParams.get("agent"), "opencode");
+  assert.deepEqual(openCode.matches.map(({ source, id, index, namespace, path, before, after }: Record<string, unknown>) =>
+    ({ source, id, index, namespace, path, before, after })), [{
+    source: "opencode",
+    id: "ses_visible",
+    index: 1,
+    namespace: "coding",
+    path: undefined,
+    before: [{ role: "user", text: "what did OpenCode find?", timestamp: "2026-10-07T10:00:00Z" }],
+    after: [{ role: "user", text: "thanks", timestamp: "2026-10-07T10:00:02Z" }],
+  }], "an OpenCode hit is scoped by its configured store and read through agentsview");
+  assert.equal(openCode.blacklistedDropped, 1, "an OpenCode session in a blacklisted cwd is dropped");
+  assert.equal(openCode.outsideSourcesDropped, 1, "an OpenCode session no configured store holds is dropped");
+  assert.equal(openCode.unmappedDropped, 1, "a tool hit whose message content lacks it is dropped, not shown with unrelated text");
+  const openCodeCandidates = await json(fakeBin, ["--query", NEEDLE, "--candidates"]);
+  assert.deepEqual(openCodeCandidates.candidates.map(({ id, repo }: { id: string; repo: string }) => [id, repo]), [["ses_visible", "repo"]]);
+  assert.match((await run(fakeBin, ["--query", NEEDLE])).stdout,
+    /open an OpenCode hit with `agentsview session messages opencode:ID --around IDX`/, "the text names the drill-in for OpenCode hits");
+  respond = null;
+  const openCodeDown = await run(stoppedBin, ["--query", NEEDLE, "--target-type", "opencode"]);
+  assert.notEqual(openCodeDown.code, 0, "OpenCode has no session-grep fallback");
+  assert.match(openCodeDown.stderr, /--target-type opencode: agentsview not running/);
+  assert.match((await run(fakeBin, ["--query", NEEDLE, "--target-type", "opencode", "--any"])).stderr,
+    /--target-type opencode needs agentsview, which does not support --any/);
+  assert.match((await run(fakeBin, ["--skim", "ses_visible", "--target-type", "opencode"])).stderr,
+    /supports discovery only; open a hit with `agentsview session messages/);
+  writeFileSync(join(ooHome, "session_sources.json"), JSON.stringify({ disable: ["opencode"] }));
+  await json(fakeBin, ["--query", NEEDLE]);
+  assert.equal(lastSearch().searchParams.get("agent"), "claude,codex,pi", "a disabled OpenCode source is not searched");
+  assert.match((await run(fakeBin, ["--query", NEEDLE, "--target-type", "opencode"])).stderr, /OpenCode session source is disabled/);
+  rmSync(join(ooHome, "session_sources.json"));
 
   const refused = await json(refusedBin, ["--query", NEEDLE]);
   assert.equal(refused.backend.name, "session-grep", "a reported daemon that refuses connections falls back");

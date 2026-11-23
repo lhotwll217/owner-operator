@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { SESSION_SEARCH_PASSTHROUGH_VALUE_FLAGS } from "./flags.mjs";
 import { SEARCH_HELP } from "./help.mjs";
 import {
+  agentsviewMessages,
   detectAgentsview,
   hitMatcher,
   messageForHit,
@@ -24,9 +25,15 @@ import {
   latestOwnerOperatorProvenance,
   resolveRepo,
 } from "../../packages/core/src/session-cwd.mjs";
+import {
+  openCodeDatabasePath,
+  openCodeSessionDirectory,
+  openOpenCodeDatabase,
+} from "../../packages/core/src/opencode-sessions.mjs";
 
 // session-grep.mjs CONTEXT_PREVIEW_CHARS: the preview length of a hit's neighboring messages.
 const CONTEXT_PREVIEW_CHARS = 180;
+const OPENCODE_DRILL_IN = "`agentsview session messages opencode:ID --around IDX`";
 const primitive = fileURLToPath(new URL("./vendor/session-grep/session-grep.mjs", import.meta.url));
 const ooHome = process.env.OO_HOME ?? path.join(os.homedir(), ".owner-operator");
 const callerSessionId = process.env.OO_CALLER_SESSION_ID?.trim() || null;
@@ -79,16 +86,26 @@ for (let index = 0; index < input.length; index += 1) {
   }
 }
 
-if (!["all", "claude", "codex", "pi"].includes(targetType)) fail("--target-type must be all, claude, codex, or pi");
+if (!["all", "claude", "codex", "pi", "opencode"].includes(targetType)) fail("--target-type must be all, claude, codex, pi, or opencode");
 if (!Number.isInteger(limit) || limit < 1) fail("--limit must be a positive integer");
 if (!Number.isInteger(maxChars) || maxChars < 500) fail("--max-chars must be an integer of at least 500");
 if (!["auto", "agentsview", "session-grep"].includes(backend)) fail("--backend must be auto, agentsview, or session-grep");
 if (semantic && hybrid) fail("--semantic and --hybrid are mutually exclusive");
 if ((semantic || hybrid) && !hasQuery) fail("--semantic and --hybrid need --query");
 if ((semantic || hybrid) && passthrough.includes("--regex")) fail("--regex cannot be combined with --semantic or --hybrid");
-const codingSources = loadSessionSources(ooHome)
+const configuredSources = loadSessionSources(ooHome);
+const codingSources = configuredSources
   .filter((source) => ["claude", "codex", "pi"].includes(source.source))
   .map((source) => ({ type: source.source, root: source.root, namespace: "coding" }));
+// OpenCode keeps sessions in SQLite, which session-grep cannot read, so its sessions are searched
+// and read only through agentsview, while its configured store is not disabled.
+const openCodeInScope = !ownerOperator && ["all", "opencode"].includes(targetType)
+  && configuredSources.some((source) => source.source === "opencode");
+if (targetType === "opencode" && !openCodeInScope) fail("--target-type opencode: the OpenCode session source is disabled");
+const agentsviewRequiredBy = targetType === "opencode" ? "--target-type opencode"
+  : backend === "agentsview" ? "--backend agentsview"
+  : null;
+if (targetType === "opencode" && backend === "session-grep") fail("--target-type opencode needs the agentsview backend");
 const productStore = ownerOperatorTranscriptStore(ooHome);
 const productSource = {
   type: productStore.format,
@@ -185,6 +202,9 @@ const engine = browse ? { name: "session-grep" }
   // With no --query there is nothing to send agentsview; session-grep reports the usage error.
   : !hasQuery ? { name: "session-grep" }
   : chooseEngine();
+if (targetType === "opencode" && engine.name !== "agentsview") {
+  fail(`--target-type opencode supports discovery only; open a hit with ${OPENCODE_DRILL_IN}`);
+}
 if (engine.name === "session-grep" && (semantic || hybrid)) passthrough.push("--any");
 const sourceArgs = ["--sources-file", sourceFile];
 const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType];
@@ -213,7 +233,7 @@ try {
       try {
         ({ output, blacklistedDropped } = await agentsviewOutput(engine.url));
       } catch (error) {
-        if (backend === "agentsview") fail(`agentsview search failed: ${error.message}`);
+        if (agentsviewRequiredBy) fail(`agentsview search failed: ${error.message}`);
         fallbackReason = `agentsview search failed: ${error.message}`;
         if (semantic || hybrid) passthrough.push("--any");
       }
@@ -298,20 +318,21 @@ function chooseEngine() {
     : (valueOf("--sort") ?? "newest") !== "newest" ? `--sort ${valueOf("--sort")}`
     : null;
   if (unsupported) {
-    if (backend === "agentsview") fail(`--backend agentsview does not support ${unsupported}`);
+    if (agentsviewRequiredBy) fail(`${agentsviewRequiredBy} needs agentsview, which does not support ${unsupported}`);
     return { name: "session-grep", reason: `agentsview does not support ${unsupported}` };
   }
   const detected = detectAgentsview();
   if (detected.url) return { name: "agentsview", url: detected.url };
-  if (backend === "agentsview") fail(`--backend agentsview: agentsview ${detected.unavailable}`);
+  if (agentsviewRequiredBy) fail(`${agentsviewRequiredBy}: agentsview ${detected.unavailable}`);
   return { name: "session-grep", reason: `agentsview ${detected.unavailable}` };
 }
 
 /** Discovery through agentsview, shaped like the primitive's JSON so the wrapper's budget and
  * rendering stay shared. agentsview ranks the hits; each one is located in Owner Operator's own
  * transcript stores, checked against the blacklist, and numbered as session-grep numbers it, so
- * its id and idx open the same message with `--session ID --at IDX`. Hits that cannot be located
- * or numbered are dropped and counted, never shown without a working pointer. */
+ * its id and idx open the same message with `--session ID --at IDX`. OpenCode keeps no transcript
+ * file, so its hits keep agentsview's own numbering and open through agentsview. Hits that cannot
+ * be located or numbered are dropped and counted, never shown without a working pointer. */
 async function agentsviewOutput(url) {
   const query = valueOf("--query");
   const regex = passthrough.includes("--regex");
@@ -331,7 +352,7 @@ async function agentsviewOutput(url) {
     query: regex && !query.startsWith("(?i)") ? `(?i)${query}` : query,
     mode,
     limit: Math.min(500, limit * (candidates ? 5 : 3)),
-    agent: targetType === "all" ? "claude,codex,pi" : targetType,
+    agent: targetType === "all" ? ["claude", "codex", "pi", ...(openCodeInScope ? ["opencode"] : [])].join(",") : targetType,
     includeTools,
     // agentsview filters by session activity, a superset of the messages in the window; the
     // per-message bounds below make the window exact.
@@ -343,6 +364,8 @@ async function agentsviewOutput(url) {
   const matcherFor = hitMatcher({ mode, query });
   const transcripts = transcriptIndex();
   const parsed = new Map();
+  let openCodeStores;
+  const openCodeTranscripts = new Map();
   const seen = new Set();
   const located = [];
   let blacklistedDropped = 0;
@@ -359,27 +382,70 @@ async function agentsviewOutput(url) {
     const page = await searchAgentsview(url, { ...request, cursor });
     cursor = page.nextCursor;
     pages += 1;
-    locate(page.matches);
+    await locate(page.matches);
   } while (cursor && pages < 4 && wanted() < limit);
 
-  function locate(hits) {
+  // agentsview indexes every OpenCode database it finds, so a hit counts only when a configured
+  // store's database holds the session, and that row's directory decides the blacklist.
+  function openCodeTranscript(id) {
+    openCodeStores ??= configuredSources.filter((source) => source.source === "opencode")
+      .map((source) => openOpenCodeDatabase(openCodeDatabasePath(source.root))).filter(Boolean);
+    if (!openCodeTranscripts.has(id)) {
+      const cwd = openCodeStores.map((store) => openCodeSessionDirectory(store, id)).find((directory) => directory != null);
+      let transcript = null;
+      if (cwd != null) {
+        let repo = null;
+        let blocked = true;
+        try {
+          repo = cwd ? resolveRepo(cwd) : null;
+          blocked = !cwd || isBlacklisted(blacklist, { cwd, repo });
+        } catch { /* fail closed, as fileBlacklisted does */ }
+        transcript = { type: "opencode", identity: { namespace: "coding" }, repo, blocked };
+      }
+      openCodeTranscripts.set(id, transcript);
+    }
+    return openCodeTranscripts.get(id);
+  }
+
+  async function locate(hits) {
   for (const hit of hits) {
     const id = stableIdOf(hit.session_id);
     if (discoverySessionIds.includes(id)) continue;
-    const transcript = transcripts.get(id);
-    if (!transcript) {
-      outsideSourcesDropped += 1;
-      continue;
+    let transcript;
+    let messages;
+    let found;
+    if (hit.agent === "opencode") {
+      transcript = openCodeTranscript(id);
+      if (!transcript) {
+        outsideSourcesDropped += 1;
+        continue;
+      }
+      if (transcript.blocked) {
+        blacklistedDropped += 1;
+        continue;
+      }
+      messages = (await agentsviewMessages(url, hit.session_id, { around: hit.ordinal, before, after }))
+        .map(({ ordinal, role, timestamp, content }) => ({ index: ordinal, role, timestamp, time: Date.parse(timestamp), text: content?.trim() ? content : null }));
+      // agentsview's message content holds no tool output, so a tool hit finds no message here.
+      const contains = matcherFor(hit);
+      const message = messages.find((candidate) => candidate.index === hit.ordinal && candidate.text && contains(candidate.text));
+      found = message ? { message } : null;
+    } else {
+      transcript = transcripts.get(id);
+      if (!transcript) {
+        outsideSourcesDropped += 1;
+        continue;
+      }
+      if (fileBlacklisted(transcript.file) || slugExclusions.some((pattern) => pattern.test(transcript.file))) {
+        blacklistedDropped += 1;
+        continue;
+      }
+      if (!parsed.has(transcript.file)) {
+        parsed.set(transcript.file, transcriptMessages(transcript.file, transcript.type, { includeTools }));
+      }
+      messages = parsed.get(transcript.file);
+      found = messageForHit(messages, hit, matcherFor(hit));
     }
-    if (fileBlacklisted(transcript.file) || slugExclusions.some((pattern) => pattern.test(transcript.file))) {
-      blacklistedDropped += 1;
-      continue;
-    }
-    if (!parsed.has(transcript.file)) {
-      parsed.set(transcript.file, transcriptMessages(transcript.file, transcript.type, { includeTools }));
-    }
-    const messages = parsed.get(transcript.file);
-    const found = messageForHit(messages, hit, matcherFor(hit));
     if (!found) {
       unmappedDropped += 1;
       continue;
@@ -429,8 +495,8 @@ async function agentsviewOutput(url) {
       ...(hit.score != null ? { score: hit.score } : {}),
       path: transcript.file,
       match: { role: message.role, text: keepSpan(message.text, terms(hit), preview), timestamp: message.timestamp },
-      ...sourceIdentity(transcript.file),
-      repo: repoOf(transcript.file),
+      ...(transcript.identity ?? sourceIdentity(transcript.file)),
+      repo: transcript.file ? repoOf(transcript.file) : transcript.repo,
     }));
     output.candidateSessionsAtLeast = sessions.size;
   } else {
@@ -453,7 +519,7 @@ async function agentsviewOutput(url) {
         before: preceding,
         match: { role: message.role, text: keepSpan(message.text, terms(hit), preview), timestamp: message.timestamp },
         after: following,
-        ...sourceIdentity(transcript.file),
+        ...(transcript.identity ?? sourceIdentity(transcript.file)),
       };
     });
     output.matchesAtLeast = located.length;
@@ -708,6 +774,9 @@ function renderText(output, context) {
     say(output.backend?.name === "agentsview"
       ? "\nhint: candidates group the hits agentsview returned by stable session id; use --skim ID or --session ID --at BEST_IDX to inspect one"
       : "\nhint: candidates group all ranked message hits by stable session id before limits; use --skim ID or --session ID --at BEST_IDX to inspect one");
+  }
+  if ([...output.matches ?? [], ...output.candidates ?? []].some((entry) => entry.source === "opencode")) {
+    say(`\nhint: OpenCode sessions have no transcript file for --session or --skim; open an OpenCode hit with ${OPENCODE_DRILL_IN}`);
   }
   return `${lines.join("\n")}\n`;
 }

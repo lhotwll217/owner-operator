@@ -1,4 +1,4 @@
-// Native-command contract: exact v1 routing survives real ACPX initialization, selection and
+// Native-command contract: exact v1/v2 routing survives real ACPX initialization, selection and
 // disposal. Fake ACP subprocesses prove OO integration, not release compatibility.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -187,17 +187,25 @@ try {
       }
     }
     rmSync(join(root, "capabilities.json"));
-    writeFileSync(
+    const withVersion = (output: string) => writeFileSync(
       join(bin, harness),
-      fixture
-        .replace("__IDENTITY__", JSON.stringify(harness))
-        .replace("console.log('1.18.31')", "console.log('opencode v2.0.5')"),
+      fixture.replace("__IDENTITY__", JSON.stringify(harness)).replace("console.log('1.18.31')", `console.log('${output}')`),
       { mode: 0o755 },
     );
+    // v2 ships under the same `opencode` command and ACP agent identity.
+    withVersion("opencode v2.4.0");
     const inspectedV2 = await readHarnessDetails({ harnesses: [AgentRunHarness.OpenCode] });
-    assert.equal(inspectedV2.capabilities.harnesses[0]!.runtime, null);
-    assert.match(inspectedV2.capabilities.harnesses[0]!.error!, /expected opencode v1/);
-    const launchedV2 = await gateway.delegateAgent({
+    assert.equal(inspectedV2.capabilities.harnesses[0]!.error, null);
+    assert.equal(inspectedV2.capabilities.harnesses[0]!.runtime?.backend.version, "opencode v2.4.0");
+    const launchedV2 = await gateway.delegateAgent({ harness, model, effort: null, cwd: root, task: "answer", timeoutSeconds: 20 });
+    const doneV2 = await settledAgentRun(gateway, launchedV2.id, 20);
+    assert.equal(doneV2.status, "completed", doneV2.error ?? "");
+    // An unknown major version still fails explicitly at inspection and at launch.
+    withVersion("opencode v3.0.0");
+    const inspectedV3 = await readHarnessDetails({ harnesses: [AgentRunHarness.OpenCode] });
+    assert.equal(inspectedV3.capabilities.harnesses[0]!.runtime, null);
+    assert.match(inspectedV3.capabilities.harnesses[0]!.error!, /expected opencode v1 or v2/);
+    const launchedV3 = await gateway.delegateAgent({
       harness,
       model,
       effort: null,
@@ -205,16 +213,16 @@ try {
       task: "never sent",
       timeoutSeconds: 20,
     });
-    const rejectedV2 = await settledAgentRun(gateway, launchedV2.id, 20);
-    assert.equal(rejectedV2.status, "failed");
-    assert.equal(rejectedV2.childSessionId, null);
-    assert.match(rejectedV2.error!, /expected opencode v1/);
+    const rejectedV3 = await settledAgentRun(gateway, launchedV3.id, 20);
+    assert.equal(rejectedV3.status, "failed");
+    assert.equal(rejectedV3.childSessionId, null);
+    assert.match(rejectedV3.error!, /expected opencode v1 or v2/);
   } finally {
     gateway.close();
     await daemon.close();
   }
   assert.deepEqual(readdirSync(join(root, "agent-runs", "process-leases")), [], "all probes released their leases");
-  process.stdout.write("ok — OpenCode v1 uses real ACPX selection and its exact native path\n");
+  process.stdout.write("ok — OpenCode v1 and v2 use real ACPX selection and its exact native path\n");
 } finally {
   process.env = previousEnv;
   rmSync(root, { recursive: true, force: true });

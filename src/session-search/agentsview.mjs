@@ -42,24 +42,38 @@ export async function searchAgentsview(url, { query, mode, limit, agent, include
   if (activeSince) params.set("active_since", activeSince);
   if (activeUntil) params.set("date_to", activeUntil);
   if (cursor) params.set("cursor", String(cursor));
-  const response = await fetch(`${url.replace(/\/$/, "")}/api/v1/search/content?${params}`, {
-    headers: { "X-AgentsView-Search-Intent": "semantic" },
-    // Owner ruling 2026-11-08: 10 s. Measured searches took 0.8-2.6 s under load; a hung daemon
-    // then costs 10 s before the session-grep fallback instead of a minute.
-    signal: AbortSignal.timeout(10_000),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? body.detail ?? `HTTP ${response.status}`);
+  const body = await getJson(url, `/api/v1/search/content?${params}`, { "X-AgentsView-Search-Intent": "semantic" });
   // A body without a matches list is not agentsview's search answer; reading it as zero hits
   // would report a false absence instead of falling back.
   if (!Array.isArray(body.matches)) throw new Error("unexpected search response");
   return { matches: body.matches ?? [], nextCursor: body.next_cursor ?? 0 };
 }
 
+/** The messages agentsview numbers from `around - before` to `around + after`, oldest first, each
+ * with its `ordinal`, `role`, `timestamp`, and `content`. */
+export async function agentsviewMessages(url, sessionId, { around, before, after }) {
+  const params = new URLSearchParams({ around: String(around), before: String(before), after: String(after) });
+  const body = await getJson(url, `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages?${params}`);
+  if (!Array.isArray(body.messages)) throw new Error("unexpected messages response");
+  return body.messages;
+}
+
+async function getJson(url, route, headers = {}) {
+  const response = await fetch(`${url.replace(/\/$/, "")}${route}`, {
+    headers,
+    // Owner ruling 2026-11-08: 10 s. Measured searches took 0.8-2.6 s under load; a hung daemon
+    // then costs 10 s before the session-grep fallback instead of a minute.
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error ?? body.detail ?? `HTTP ${response.status}`);
+  return body;
+}
+
 /** The Owner Operator stable session id for an agentsview session id (`codex:<uuid>`,
- * `pi:<uuid>`, or a bare Claude id). */
+ * `pi:<uuid>`, `opencode:<ses_id>`, or a bare Claude id). */
 export function stableIdOf(agentsviewSessionId) {
-  return String(agentsviewSessionId).replace(/^(?:codex|pi):/, "");
+  return String(agentsviewSessionId).replace(/^(?:codex|pi|opencode):/, "");
 }
 
 /** Every message in a transcript, numbered exactly as session-grep numbers them

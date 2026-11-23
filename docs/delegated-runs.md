@@ -112,7 +112,7 @@ new task to a replacement conversation.
 | Claude Code | Live recall with `opus[1m]` | The pinned adapter [interrupts the turn](https://github.com/agentclientprotocol/claude-agent-acp/blob/d571358e267ed21ed0ec9ec2622fda8935535d57/src/acp-agent.ts#L6398-L6413) and [loads or resumes the saved session](https://github.com/agentclientprotocol/claude-agent-acp/blob/d571358e267ed21ed0ec9ec2622fda8935535d57/src/acp-agent.ts#L2201-L2225). Exact model confirmation still applies after loading. |
 | Codex | Live recall with `gpt-6-astra`, high effort | The pinned adapter [interrupts the session's active turn](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L3376-L3385) and [restores the session](https://github.com/agentclientprotocol/codex-acp/blob/b1b8490cd165c18626dc3fe83836cdacdef94cd3/src/CodexAcpServer.ts#L791-L834). |
 | Cursor | Protocol docs only; live recall blocked by authentication | Its native [ACP interface](https://prod.cursor.com/docs/cli/acp) supports `session/cancel` and `session/load`. Authentication must remain available. |
-| OpenCode | Source plus fixture; live recall blocked by subscription access | The v1 service [aborts the active turn](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L351-L354) and [loads saved messages](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L211-L236). OO also requires the saved session's continuation capabilities, as described [below](#opencode). |
+| OpenCode | Source plus fixture; v2.4.0 live `initialize` only; live recall blocked by subscription access | The v1 service [aborts the active turn](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L351-L354) and [loads saved messages](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L211-L236). OO also requires the saved session's continuation capabilities, as described [below](#opencode). |
 | Antigravity | Live `initialize` only; continuation unproven | `agy acp` (CLI 1.5.13) advertises `loadSession` and `sessionCapabilities.resume`. |
 
 The opt-in [live cancellation test](../src/agent-runs/resume-cancelled.live.test.ts) drives
@@ -371,24 +371,26 @@ baseline candidate.
 
 ### OpenCode
 
-Owner Operator supports only the v1 `opencode` identity. It runs the installed native `acp`
-command through ACPX's registry override, resolving `opencode` from PATH followed by
-`~/.opencode/bin` and `~/.local/bin`. Resolving the installed executable instead of ACPX's default
-`npx -y opencode-ai acp` lets inspection report the actual path and version without downloading a
-backend. The v2 `opencode2` identity is not in the delegated-harness roster because v2 stores
-sessions in SQLite, while the [session scanner](../src/session-monitor/scan-active-transcripts.mjs)
-admits OpenCode's v1 per-record JSON layout.
+OpenCode v1 and v2 share one `opencode` identity: v2 ships under the same `opencode` command
+and native `acp` subcommand. OO runs that command through ACPX's registry override, resolving
+`opencode` from PATH followed by `~/.opencode/bin` and `~/.local/bin`. Resolving the installed
+executable instead of ACPX's default `npx -y opencode-ai acp` lets inspection report the actual
+path and version without downloading a backend. The
+[session scanner](../src/session-monitor/scan-active-transcripts.mjs) reads both generations'
+sessions from `opencode.db` ([Sessions](sessions.md#opencode)).
 
-Inspection and launch require a v1 version signature: either bare `1.x.y` or
-`opencode v1.x.y`. Provenance includes the executable path, its real path, and verbatim version
+Inspection and launch require a v1 or v2 version signature: bare `1.x.y`, or `opencode v1.x.y` or
+`opencode v2.x.y`. Provenance includes the executable path, its real path, and verbatim version
 output. This trusts the installed executable's output; an arbitrary wrapper can lie about its
-identity or change after inspection, so it is not binary attestation. Unknown or non-v1 signatures
-fail explicitly. OO also clears inherited `OPENCODE_BIN_PATH` during launch so the resolved v1
-executable remains the only OpenCode backend path. Provider accounts and allowance stay unknown.
+identity or change after inspection, so it is not binary attestation. Unknown signatures, including
+any other major version, fail explicitly. OO also clears inherited `OPENCODE_BIN_PATH` during
+launch so the resolved executable remains the only OpenCode backend path. Provider accounts and
+allowance stay unknown.
 
 The observer exposes initialize capabilities retained by ACPX. The
 [v1 ACP service](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/acp/service.ts#L112-L135)
-advertises continuation. Source support and advertised models do not establish local installation,
+advertises continuation; a live `initialize` from `opencode v2.4.0` advertised `loadSession` and
+`sessionCapabilities.resume`. Source support and advertised models do not establish local installation,
 authentication, model entitlement, or successful inference. Exact model IDs and nullable effort
 use the shared selection contract above; no OpenCode-specific model catalog or effort translation
 is applied.

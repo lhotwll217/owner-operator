@@ -37,7 +37,7 @@ Query flags:
                             (both need the agentsview backend; on session-grep they run as --any)
 Scope and output:
   --owner-operator          Owner Operator history only
-  --target-type claude|codex|pi|all   one transcript format (--source is an alias)
+  --target-type claude|codex|pi|opencode|all   one transcript format (--source is an alias)
   --target-root DIR         a configured transcript-store root; a project cwd is not one, so with
                             a DB session id use --skim ID instead
   --limit N                 max matching messages (sessions with --candidates), default 20
@@ -53,8 +53,10 @@ backend_note. --any, --case-sensitive, --include-skill-bodies, --sort oldest|fil
 --owner-operator, --skim, and --session always run on session-grep. agentsview reports lower
 bounds instead of totals (message_matches_at_least or candidate_sessions_at_least, plus
 more_available) and counts the hits it cannot point at or that session-grep would hide
-(tool_hits_dropped, skill_body_hits_dropped, outside_sources_dropped, unmapped_dropped). Every hit's id and idx open with
---session ID --at IDX on either backend; use --backend session-grep for exact totals.
+(tool_hits_dropped, skill_body_hits_dropped, outside_sources_dropped, unmapped_dropped). A Claude, Codex, or Pi hit's id and idx
+open with --session ID --at IDX on either backend; use --backend session-grep for exact totals. OpenCode
+sessions live in a database session-grep cannot read, so only agentsview searches them, and an
+OpenCode hit opens with agentsview session messages opencode:ID --around IDX.
 
 Choose the lightest mode:
   Known session          use its stable id directly: a scoped query for one fact, --skim for a
