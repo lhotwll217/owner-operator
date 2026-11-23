@@ -54,6 +54,7 @@ let backend = "auto";
 let semantic = false;
 let hybrid = false;
 let sourceFile = null;
+let openCodeMirror = null;
 const passthrough = [];
 for (let index = 0; index < input.length; index += 1) {
   const arg = input[index];
@@ -94,9 +95,9 @@ if ((semantic || hybrid) && !hasQuery) fail("--semantic and --hybrid need --quer
 if ((semantic || hybrid) && passthrough.includes("--regex")) fail("--regex cannot be combined with --semantic or --hybrid");
 const blacklist = loadBlacklist(ooHome);
 const configuredSources = loadSessionSources(ooHome);
-const openCodeMirror = !ownerOperator && ["all", "opencode"].includes(targetType)
-  ? mirrorOpenCode(configuredSources.filter((source) => source.source === "opencode"))
-  : null;
+if (!ownerOperator && ["all", "opencode"].includes(targetType)) {
+  openCodeMirror = mirrorOpenCode(configuredSources.filter((source) => source.source === "opencode"));
+}
 const codingSources = [
   ...configuredSources
     .filter((source) => ["claude", "codex", "pi"].includes(source.source))
@@ -301,7 +302,7 @@ try {
     }
   }
 } finally {
-  try { fs.unlinkSync(sourceFile); } catch { /* best effort */ }
+  removeTemporaryFiles();
 }
 
 function chooseEngine() {
@@ -319,6 +320,11 @@ function chooseEngine() {
   if (unsupported) {
     if (backend === "agentsview") fail(`--backend agentsview does not support ${unsupported}`);
     return { name: "session-grep", reason: `agentsview does not support ${unsupported}` };
+  }
+  // The same evidence for default scope. --semantic and --hybrid run only on agentsview, so they
+  // stay there and see the OpenCode sessions it has indexed.
+  if (openCodeMirror && backend === "auto" && !semantic && !hybrid) {
+    return { name: "session-grep", reason: "agentsview has not indexed every OpenCode session" };
   }
   const detected = detectAgentsview();
   if (detected.url) return { name: "agentsview", url: detected.url };
@@ -757,43 +763,40 @@ function sourceIdentity(file) {
   };
 }
 
-/** Refresh the Pi-format mirror of every OpenCode session under OO_HOME/search/opencode and
- * return its root, or null when no configured OpenCode database opens. The databases are opened
- * read-only; a session is rewritten only when its updated time moved, and mirrors of deleted or
- * blacklisted sessions are removed. */
+/** Write a Pi-format mirror of every non-blacklisted OpenCode session into a private (0700)
+ * temporary directory and return it, or null when no configured OpenCode database opens. The
+ * databases are opened read-only. The mirror is rebuilt for every search and removed when it
+ * ends, so no transcript copy outlives a search or misses a message OpenCode rewrote in place. */
 function mirrorOpenCode(stores) {
   const handles = [...new Set(stores.map(({ root }) => openCodeDatabasePath(root)))]
     .map((database) => openOpenCodeDatabase(database)).filter(Boolean);
   if (!handles.length) return null;
-  const dir = path.join(ooHome, "search", "opencode");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const kept = new Set();
-  for (const handle of handles) {
-    try {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oo-session-search-opencode-"));
+  try {
+    for (const handle of handles) {
       for (const session of listOpenCodeSessions(handle)) {
         if (isBlacklisted(blacklist, { cwd: session.directory, repo: resolveRepo(session.directory) })) continue;
-        const file = path.join(dir, `${session.id}.jsonl`);
-        kept.add(file);
-        let mtime = null;
-        try { mtime = Math.round(fs.statSync(file).mtimeMs); } catch { /* not mirrored yet */ }
-        if (mtime === session.updatedAt) continue;
         const at = (ms) => new Date(ms || session.createdAt).toISOString();
         const records = [{ type: "session", id: session.id, cwd: session.directory, timestamp: at(session.createdAt) }];
         for (const message of readOpenCodeMessages(handle, session.id)) {
           if (!message.text.trim()) continue;
           records.push({ type: "message", timestamp: at(message.ts), message: { role: message.role, content: [{ type: "text", text: message.text }] } });
         }
-        fs.writeFileSync(file, records.map((record) => JSON.stringify(record)).join("\n") + "\n", { mode: 0o600 });
-        fs.utimesSync(file, new Date(session.updatedAt), new Date(session.updatedAt));
+        fs.writeFileSync(path.join(dir, `${session.id}.jsonl`), records.map((record) => JSON.stringify(record)).join("\n") + "\n", { mode: 0o600 });
       }
-    } finally {
-      handle.close();
     }
-  }
-  for (const name of fs.readdirSync(dir)) {
-    if (!kept.has(path.join(dir, name))) fs.rmSync(path.join(dir, name), { force: true });
+  } catch (error) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw error;
+  } finally {
+    for (const handle of handles) handle.close();
   }
   return dir;
+}
+
+function removeTemporaryFiles() {
+  if (sourceFile) try { fs.unlinkSync(sourceFile); } catch { /* best effort */ }
+  if (openCodeMirror) fs.rmSync(openCodeMirror, { recursive: true, force: true });
 }
 
 function searchCwdFromFile(file) {
@@ -828,7 +831,7 @@ function escapeRegex(value) {
 }
 
 function fail(message) {
-  if (sourceFile) try { fs.unlinkSync(sourceFile); } catch { /* best effort */ }
+  removeTemporaryFiles();
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }

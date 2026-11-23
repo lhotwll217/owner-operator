@@ -5,7 +5,7 @@
 // Needs ripgrep, like the skill — skips cleanly if absent.
 import assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -215,9 +215,53 @@ try {
   assert.equal(defaultOpenCodeMatch?.namespace, "coding", "OpenCode results retain their coding namespace");
   assert.deepEqual(idsOf(run("--target-type", "opencode")), [openCodeId], "an explicit OpenCode target searches only OpenCode");
   assert.ok(!idsOf(defaultMatches).includes(privateOpenCodeId), "a blacklisted OpenCode session is never returned");
-  assert.ok(!existsSync(join(ooHome, "search", "opencode", `${privateOpenCodeId}.jsonl`)), "a blacklisted OpenCode session is never mirrored");
+  assert.ok(!existsSync(join(ooHome, "search")), "no OpenCode mirror persists under OO_HOME");
   assert.match(execFileSync(process.execPath, [GREP, "--skim", openCodeId], { env: { ...process.env, HOME: home, OO_HOME: ooHome }, encoding: "utf8" }),
     new RegExp(`skim id=${openCodeId} messages=2`), "an OpenCode session id opens its mirrored transcript");
+
+  // The OpenCode mirror lives for one search: each search reads the database afresh, and no copy
+  // outlives it to escape a later blacklist or an unavailable database.
+  const ocHome = mkdtempSync(join(tmpdir(), "oo-grep-oc-home-"));
+  const ocOoHome = mkdtempSync(join(tmpdir(), "oo-grep-oc-oohome-"));
+  const ocTmp = mkdtempSync(join(tmpdir(), "oo-grep-oc-tmp-"));
+  try {
+    const ocCwd = join(ocHome, "dev", "app");
+    const ocData = join(ocHome, ".local", "share", "opencode");
+    mkdirSync(ocData, { recursive: true });
+    // An empty Owner Operator store keeps a search valid once the database is gone.
+    mkdirSync(join(ocOoHome, "sessions"));
+    const ocDb = new DatabaseSync(join(ocData, "opencode.db"));
+    ocDb.exec(`
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
+    `);
+    const ocId = "ses_lifecycle";
+    const ocAt = Date.parse("2026-11-20T10:00:00.000Z");
+    ocDb.prepare("INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?)").run(ocId, ocCwd, "lifecycle", ocAt, ocAt);
+    const answer = (text: string) => JSON.stringify({ time: { created: ocAt }, content: [{ type: "text", text }] });
+    ocDb.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run("a1", ocId, "assistant", 1, answer("streaming ZZOCFIRSTZZ"));
+    const ocEnv = { ...process.env, HOME: ocHome, OO_HOME: ocOoHome, TMPDIR: ocTmp };
+    const ocSearch = (needle: string, ...extra: string[]) => JSON.parse(execFileSync(process.execPath,
+      [GREP, "--query", needle, "--json", ...extra], { env: ocEnv, encoding: "utf8" })).matches as { id: string }[];
+    const filesUnder = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+      .flatMap((entry) => entry.isDirectory() ? filesUnder(join(dir, entry.name)) : [join(dir, entry.name)]);
+    const copies = () => [...filesUnder(ocOoHome), ...filesUnder(ocTmp)]
+      .filter((file) => /ZZOC(FIRST|SECOND)ZZ/.test(readFileSync(file, "utf8")));
+
+    assert.deepEqual(idsOf(ocSearch("ZZOCFIRSTZZ", "--target-type", "opencode")), [ocId]);
+    assert.deepEqual(filesUnder(ocTmp), [], "the search's temporary files are removed when it ends");
+    // OpenCode 2.4.0 rewrites a streaming message without advancing session_v2.time_updated.
+    ocDb.prepare("UPDATE session_message SET data = ? WHERE id = 'a1'").run(answer("finished ZZOCSECONDZZ"));
+    assert.deepEqual(idsOf(ocSearch("ZZOCSECONDZZ")), [ocId], "a message change without a session timestamp change is searchable");
+    ocDb.close();
+
+    writeFileSync(join(ocOoHome, "blacklist.json"), JSON.stringify({ paths: [ocCwd], repos: [] }));
+    renameSync(join(ocData, "opencode.db"), join(ocHome, "opencode.db.away"));
+    assert.deepEqual(idsOf(ocSearch("ZZOCSECONDZZ")), [], "a session blacklisted after a search is not found");
+    assert.deepEqual(copies(), [], "no copy of a blacklisted OpenCode transcript remains readable");
+  } finally {
+    for (const dir of [ocHome, ocOoHome, ocTmp]) rmSync(dir, { recursive: true, force: true });
+  }
   const codingPiMatches = run("--target-type", "pi");
   assert.ok(!idsOf(codingPiMatches).includes(openCodeId), "an explicit Pi target excludes the OpenCode mirror");
   assert.ok(idsOf(codingPiMatches).includes(externalPiId), "an explicit Pi target searches standalone Pi coding history");
