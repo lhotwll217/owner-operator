@@ -49,10 +49,17 @@ export function listOpenCodeSessions(handle, since = 0) {
   return [...v2, ...v1].map((row) => ({ ...row, title: row.title ?? null }));
 }
 
+/** The working directory OpenCode recorded for a session, or null when this database lacks it. */
+export function openCodeSessionDirectory(handle, sessionId) {
+  const row = (handle.v2 && handle.db.prepare("SELECT directory FROM session_v2 WHERE id = ?").get(sessionId))
+    || (handle.v1 && handle.db.prepare("SELECT directory FROM session WHERE id = ?").get(sessionId));
+  return row ? row.directory : null;
+}
+
 /** A session's user and assistant turns in order: `{ role, text, ts, completed }`. `completed` is
  * false for an assistant message OpenCode has not finished (still streaming or running tools). An
- * assistant message that failed before writing text carries its error message as its text, so a
- * failed turn reads as the agent's answer rather than an unanswered prompt. */
+ * assistant message that failed or was interrupted before writing text carries that outcome as its
+ * text, so the ended turn reads as the agent's answer rather than an unanswered prompt. */
 export function readOpenCodeMessages(handle, sessionId) {
   const inV2 = handle.v2 && handle.db.prepare("SELECT 1 FROM session_v2 WHERE id = ?").get(sessionId);
   const out = [];
@@ -66,13 +73,16 @@ export function readOpenCodeMessages(handle, sessionId) {
       const data = parse(row.data);
       if (!data) continue;
       // An `idle` row ends the turn: it closes an assistant message an interrupt left without
-      // time.completed. A turn that failed before the model answered (e.g. `provider.no-route`)
-      // records only this row, so its error is the answer.
+      // time.completed. A turn that failed or was interrupted before the model wrote text
+      // (e.g. `provider.no-route`) has only this row to say how it ended, so that is the answer.
       if (row.type === "idle") {
         const last = out.at(-1);
-        if (last?.role === "assistant") last.completed = true;
-        else if (last && data.outcome === "failed") {
-          out.push({ role: "assistant", text: errorText(data.error?.message), ts: data.time?.created ?? 0, completed: true });
+        const outcome = errorText(data.error?.message) || (data.outcome === "interrupted" ? "Interrupted." : "");
+        if (last?.role === "assistant") {
+          last.completed = true;
+          if (!last.text.trim()) last.text = outcome;
+        } else if (last && outcome) {
+          out.push({ role: "assistant", text: outcome, ts: data.time?.created ?? 0, completed: true });
         }
         continue;
       }
