@@ -9,6 +9,7 @@
 
 import assert from "node:assert";
 import { execFileSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -266,6 +267,50 @@ writeFileSync(join(ocStorage, "message", ocId, "msg_b.json"),
 writeFileSync(join(ocStorage, "part", "msg_b", "prt_2.json"),
   JSON.stringify({ id: "prt_2", sessionID: ocId, messageID: "msg_b", type: "text", text: "Queue refactored; workers drain cleanly." }));
 
+// opencode.db beside storage/: a v2 session mid-turn (assistant without time.completed), a
+// v1-only session, and a session migrated to v2 that keeps a copy of its turns in the v1 tables.
+const ocDb = new DatabaseSync(join(dirname(ocStorage), "opencode.db"));
+ocDb.exec(`
+  CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
+  CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
+  CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
+`);
+const ocV2 = "ses_dbv2", ocV1 = "ses_dbv1", ocMigrated = "ses_dbmigrated", ocFailed = "ses_dbfailed", ocNoRoute = "ses_dbnoroute", ocInterrupted = "ses_dbinterrupted";
+const ocSession = (table: string, id: string, created: number, updated: number) =>
+  ocDb.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?)`).run(id, ocCwd, id, ocMs(created), ocMs(updated));
+const ocV2Message = (sessionId: string, seq: number, type: string, data: object) =>
+  ocDb.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run(`${sessionId}-${seq}`, sessionId, type, seq, JSON.stringify(data));
+const ocV1Message = (sessionId: string, id: string, role: string, created: number, text: string) => {
+  ocDb.prepare("INSERT INTO message VALUES (?, ?, ?, ?)").run(id, sessionId, ocMs(created), JSON.stringify({ role, time: { created: ocMs(created), completed: ocMs(created) } }));
+  ocDb.prepare("INSERT INTO part VALUES (?, ?, ?, ?)").run(`${id}-p`, id, sessionId, JSON.stringify({ type: "text", text }));
+};
+ocSession("session_v2", ocV2, 15, 3);
+ocV2Message(ocV2, 1, "user", { time: { created: ocMs(15) }, text: "migrate the billing tables" });
+ocV2Message(ocV2, 2, "system", { time: { created: ocMs(15) }, text: "injected instructions" });
+ocV2Message(ocV2, 3, "assistant", { time: { created: ocMs(4), completed: ocMs(4) }, content: [{ type: "reasoning", text: "hidden" }, { type: "text", text: "Planning the migration." }] });
+ocV2Message(ocV2, 4, "assistant", { time: { created: ocMs(3) }, content: [{ type: "tool", name: "shell" }] });
+ocSession("session", ocV1, 40, 30);
+ocV1Message(ocV1, "msg_v1a", "user", 40, "audit the cache headers");
+ocV1Message(ocV1, "msg_v1b", "assistant", 30, "Cache headers audited.");
+ocSession("session", ocMigrated, 50, 45);
+ocSession("session_v2", ocMigrated, 50, 45);
+ocV1Message(ocMigrated, "msg_m1", "user", 50, "rename the queue");
+ocV2Message(ocMigrated, 1, "user", { time: { created: ocMs(50) }, text: "rename the queue" });
+ocV2Message(ocMigrated, 2, "assistant", { time: { created: ocMs(45), completed: ocMs(45) }, content: [{ type: "text", text: "Queue renamed." }] });
+ocSession("session_v2", ocFailed, 8, 7);
+ocV2Message(ocFailed, 1, "user", { time: { created: ocMs(8) }, text: "say ok" });
+ocV2Message(ocFailed, 2, "assistant", { time: { created: ocMs(7), completed: ocMs(7) }, content: [], error: { type: "provider.auth", message: "This API key has expired." } });
+ocSession("session_v2", ocNoRoute, 9, 9);
+ocV2Message(ocNoRoute, 1, "user", { time: { created: ocMs(9) }, text: "say ok" });
+ocV2Message(ocNoRoute, 2, "idle", { time: { created: ocMs(9) }, outcome: "failed", error: { type: "provider.no-route", message: "Model unavailable: opencode/big-pickle" } });
+ocSession("session_v2", ocInterrupted, 10, 10);
+ocV2Message(ocInterrupted, 1, "user", { time: { created: ocMs(10) }, text: "long task" });
+ocV2Message(ocInterrupted, 2, "assistant", { time: { created: ocMs(10) }, content: [{ type: "text", text: "Starting." }] });
+ocV2Message(ocInterrupted, 3, "idle", { time: { created: ocMs(10) }, outcome: "interrupted" });
+ocDb.close();
+
 // Antigravity brain transcript: one step per line. USER_EXPLICIT USER_INPUT = the owner,
 // PLANNER_RESPONSE = the agent; the brain/<id> dir is the session id. The history.jsonl
 // index beside brain/ shares the extension but is NOT a session — it must be filtered out.
@@ -308,7 +353,7 @@ const byId = (res: { threads: ScanThread[] }, id: string): ScanThread | undefine
 try {
   // No owner state yet → all candidates pass, resolved from scan facts alone.
   const fresh = run();
-  assert.equal(fresh.count, 12, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode, Antigravity, and Grok Build sessions");
+  assert.equal(fresh.count, 18, "scan finds the Claude, Codex, Cursor, PostHog Code (local + cloud), Conductor, pi, opencode (files + database), Antigravity, and Grok Build sessions");
   const claude = byId(fresh, sid)!;
   assert.equal(claude.state, "idle", "assistant yielded → quiet, not an owner obligation");
   assert.equal(claude.ui, "Superset App", "worktree host wins app detection");
@@ -386,6 +431,28 @@ try {
   assert.deepEqual(oc.firstMessages.map((m) => m.role), ["user", "assistant"], "parts join into turns");
   assert.ok(oc.firstMessages[0].text.includes("refactor the job queue"), "user text from its part file");
 
+  // The opencode database finder: v2 and v1-only sessions, a migrated session read once from v2.
+  const ocV2Thread = byId(fresh, ocV2)!;
+  assert.equal(ocV2Thread.ui, "OpenCode");
+  assert.equal(ocV2Thread.repo, "oc-app", "repo from the session row's directory");
+  assert.equal(ocV2Thread.working, true, "newest assistant message without time.completed → working");
+  assert.deepEqual(ocV2Thread.firstMessages.map((m) => m.text), ["migrate the billing tables", "Planning the migration."],
+    "user text and assistant text parts only: no system rows, reasoning, or tool parts");
+  const ocV1Thread = byId(fresh, ocV1)!;
+  assert.equal(ocV1Thread.state, "idle", "v1 assistant time.completed present → yielded");
+  assert.ok(ocV1Thread.firstMessages[0].text.includes("cache headers"), "v1 text from its part rows");
+  assert.deepEqual(byId(fresh, ocMigrated)!.firstMessages.map((m) => m.text), ["rename the queue", "Queue renamed."],
+    "a migrated session reads its v2 history once, not the v1 copy");
+  const ocFailedThread = byId(fresh, ocFailed)!;
+  assert.equal(ocFailedThread.state, "idle", "a turn that failed before writing text is answered, not pending");
+  assert.equal(ocFailedThread.firstMessages[1]?.text, "Error: This API key has expired.", "the failure is the agent's answer");
+  const ocNoRouteThread = byId(fresh, ocNoRoute)!;
+  assert.equal(ocNoRouteThread.state, "idle", "a turn that failed before any assistant message is answered, not pending");
+  assert.equal(ocNoRouteThread.firstMessages[1]?.text, "Error: Model unavailable: opencode/big-pickle", "the idle row's failure is the agent's answer");
+  assert.equal(byId(fresh, ocInterrupted)!.working, false, "an idle row closes the interrupted assistant message");
+  const ocDrill = run("--thread", ocV2, "--file", join(dirname(ocStorage), "opencode.db"));
+  assert.equal(byId(ocDrill, ocV2)?.working, true, "a changed database re-reads its sessions");
+
   // The Antigravity finder: brain transcript steps → turns; the history index is filtered out.
   const ag = byId(fresh, agId)!;
   assert.equal(ag.ui, "Antigravity", "antigravity source → Antigravity app");
@@ -442,7 +509,7 @@ try {
   const blocked = run("--all");
   assert.equal(byId(blocked, slugId), undefined, "blacklisted tree skipped unread (slug layer)");
   assert.equal(byId(blocked, deepId), undefined, "lower-level repo dropped post-parse — even --all");
-  assert.equal(run().count, 12, "visible set unchanged");
+  assert.equal(run().count, 18, "visible set unchanged");
   assert.equal(run("--thread", slugId).count, 0, "--thread drill-in cannot reach a blacklisted thread");
   assert.equal(run("--thread", deepId).count, 0, "--thread drill-in cannot reach a lower-level one either");
 

@@ -57,9 +57,9 @@ export async function searchAgentsview(url, { query, mode, limit, agent, include
 }
 
 /** The Owner Operator stable session id for an agentsview session id (`codex:<uuid>`,
- * `pi:<uuid>`, or a bare Claude id). */
+ * `pi:<uuid>`, `opencode:<ses_id>`, or a bare Claude id). */
 export function stableIdOf(agentsviewSessionId) {
-  return String(agentsviewSessionId).replace(/^(?:codex|pi):/, "");
+  return String(agentsviewSessionId).replace(/^(?:codex|pi|opencode):/, "");
 }
 
 /** Every message in a transcript, numbered exactly as session-grep numbers them

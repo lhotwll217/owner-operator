@@ -574,14 +574,14 @@ export function cursorAcpAgentCommand(): string {
   return `${JSON.stringify(cursorAgentBinaryPath())} acp`;
 }
 
-/** Use ACPX's existing registry override with the exact installed v1 executable, never an npx
- * download or the incompatible v2 command. */
+/** Use ACPX's existing registry override with the exact installed executable, never an npx
+ * download. */
 export function openCodeAcpAgentCommand(executablePath: string = resolveOpenCodeRuntime().executablePath): string {
   return `'${executablePath.replaceAll("'", "'\\''")}' acp`;
 }
 
-/** Identify the supported v1 CLI by version signature, not merely by filename. A user-supplied
- * wrapper can still lie about its version. */
+/** Identify a supported (v1 or v2) CLI by version signature, not merely by filename. A
+ * user-supplied wrapper can still lie about its version. */
 export function resolveOpenCodeRuntime() {
   const executablePath = openCodeBinaryPath();
   const realPath = realpathSync(executablePath);
@@ -590,12 +590,12 @@ export function resolveOpenCodeRuntime() {
   const version = execFileSync(executablePath, ["--version"], {
     env, encoding: "utf8", timeout: 5_000, maxBuffer: 64 * 1024, stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-  // OpenCode v1 reports either bare semver or `opencode v<semver>`.
+  // OpenCode reports either bare semver (early v1) or `opencode v<semver>` (later v1 and v2).
   // Sources and the deliberate local-executable trust boundary: docs/delegated-runs.md, OpenCode.
-  const v1 = "1\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?";
-  const name = new RegExp(`^(?:opencode v)?${v1}$`).test(version) ? "opencode" : null;
+  const supported = "[12]\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?";
+  const name = new RegExp(`^(?:opencode v)?${supported}$`).test(version) ? "opencode" : null;
   if (!name) {
-    throw new Error(`opencode v1 backend identity could not be confirmed: ${executablePath} resolves to ${realPath} and reports ${JSON.stringify(version)}; expected opencode v1`);
+    throw new Error(`opencode backend identity could not be confirmed: ${executablePath} resolves to ${realPath} and reports ${JSON.stringify(version)}; expected opencode v1 or v2`);
   }
   return { name, version, executablePath, realPath };
 }
@@ -614,7 +614,7 @@ export function openCodeBinaryPath(): string {
       // Continue searching only for this exact executable name.
     }
   }
-  throw new Error("opencode v1 CLI not found on PATH, ~/.opencode/bin or ~/.local/bin; install opencode-ai@1 with native ACP support");
+  throw new Error("opencode CLI not found on PATH, ~/.opencode/bin or ~/.local/bin; install opencode with native ACP support");
 }
 
 /** Resolve a locally installed CLI launcher to an absolute path: the daemon's PATH need not

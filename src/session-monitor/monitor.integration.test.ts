@@ -35,7 +35,10 @@ try {
 
   const watchedRoot = join(dir, "sessions");
   mkdirSync(watchedRoot, { recursive: true });
-  saveSessionRoots(dir, [{ source: "claude", root: watchedRoot }]);
+  // OpenCode's storage/ tree need not exist: its database beside it is watched directly.
+  const openCodeData = join(dir, "opencode");
+  mkdirSync(openCodeData);
+  saveSessionRoots(dir, [{ source: "claude", root: watchedRoot }, { source: "opencode", root: join(openCodeData, "storage") }]);
   let watcherScanCalls = 0;
   const scannedFiles: string[][] = [];
   const watcherMonitor = new SessionMonitor(state, {
@@ -54,6 +57,12 @@ try {
   await waitFor(() => watcherScanCalls > 1, 1_000, "watcher to arm after onboarding");
   assert.deepEqual(scannedFiles[0], [], "the first poll scans every store");
   assert.deepEqual(scannedFiles[1], [changed], "a watched change scans only the file that changed");
+  writeFileSync(join(openCodeData, "opencode.db-shm"), "read index");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(watcherScanCalls, 2, "a read's -shm write never triggers a scan");
+  writeFileSync(join(openCodeData, "opencode.db-wal"), "turn");
+  await waitFor(() => watcherScanCalls > 2, 1_000, "OpenCode database watcher");
+  assert.deepEqual(scannedFiles[2], [join(openCodeData, "opencode.db")], "a WAL write rescans the database");
   watcherMonitor.stop();
 
   let inFlight = 0;

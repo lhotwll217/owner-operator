@@ -34,6 +34,8 @@ export type {
   TranscriptStore,
 } from "./session-sources.mjs";
 
+export { openCodeDatabasePath } from "./opencode-sessions.mjs";
+
 // Transcript transport context must not become a visible topic. Shared by the scanner and
 // durable state projection so legacy rows follow the current classification too.
 export { isSessionBoilerplate } from "./session-text.mjs";

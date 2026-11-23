@@ -24,6 +24,12 @@ import {
   latestOwnerOperatorProvenance,
   resolveRepo,
 } from "../../packages/core/src/session-cwd.mjs";
+import {
+  listOpenCodeSessions,
+  openCodeDatabasePath,
+  openOpenCodeDatabase,
+  readOpenCodeMessages,
+} from "../../packages/core/src/opencode-sessions.mjs";
 
 // session-grep.mjs CONTEXT_PREVIEW_CHARS: the preview length of a hit's neighboring messages.
 const CONTEXT_PREVIEW_CHARS = 180;
@@ -79,16 +85,27 @@ for (let index = 0; index < input.length; index += 1) {
   }
 }
 
-if (!["all", "claude", "codex", "pi"].includes(targetType)) fail("--target-type must be all, claude, codex, or pi");
+if (!["all", "claude", "codex", "pi", "opencode"].includes(targetType)) fail("--target-type must be all, claude, codex, pi, or opencode");
 if (!Number.isInteger(limit) || limit < 1) fail("--limit must be a positive integer");
 if (!Number.isInteger(maxChars) || maxChars < 500) fail("--max-chars must be an integer of at least 500");
 if (!["auto", "agentsview", "session-grep"].includes(backend)) fail("--backend must be auto, agentsview, or session-grep");
 if (semantic && hybrid) fail("--semantic and --hybrid are mutually exclusive");
 if ((semantic || hybrid) && !hasQuery) fail("--semantic and --hybrid need --query");
 if ((semantic || hybrid) && passthrough.includes("--regex")) fail("--regex cannot be combined with --semantic or --hybrid");
-const codingSources = loadSessionSources(ooHome)
-  .filter((source) => ["claude", "codex", "pi"].includes(source.source))
-  .map((source) => ({ type: source.source, root: source.root, namespace: "coding" }));
+const blacklist = loadBlacklist(ooHome);
+const configuredSources = loadSessionSources(ooHome);
+const openCodeMirror = !ownerOperator && ["all", "opencode"].includes(targetType)
+  ? mirrorOpenCode(configuredSources.filter((source) => source.source === "opencode"))
+  : null;
+const codingSources = [
+  ...configuredSources
+    .filter((source) => ["claude", "codex", "pi"].includes(source.source))
+    .map((source) => ({ type: source.source, root: source.root, namespace: "coding" })),
+  // OpenCode keeps sessions in SQLite, which the primitive cannot read. A Pi-format mirror of
+  // its sessions lets every search mode, the blacklist, and agentsview mapping apply unchanged;
+  // `format` restores the real source name in results.
+  ...(openCodeMirror ? [{ type: "pi", format: "opencode", root: openCodeMirror, namespace: "coding" }] : []),
+];
 const productStore = ownerOperatorTranscriptStore(ooHome);
 const productSource = {
   type: productStore.format,
@@ -100,7 +117,7 @@ const sources = ownerOperator
   ? [productSource]
   : targetType === "all"
     ? [...codingSources, productSource]
-    : codingSources;
+    : codingSources.filter((source) => (source.format ?? source.type) === targetType);
 if (targetRoot) {
   const wanted = path.resolve(targetRoot);
   if (!sources.some((source) => path.resolve(source.root) === wanted)) {
@@ -111,7 +128,6 @@ if (targetRoot) {
 sourceFile = path.join(os.tmpdir(), `oo-session-search-${process.pid}.json`);
 fs.writeFileSync(sourceFile, JSON.stringify(sources));
 
-const blacklist = loadBlacklist(ooHome);
 const excludePatterns = pathSlugs(blacklist).map((slug) => {
   const escaped = escapeRegex(slug);
   return `(?:^|/)${escaped}(?:-[^/]*)?/[^/]+\\.jsonl$`;
@@ -187,7 +203,7 @@ const engine = browse ? { name: "session-grep" }
   : chooseEngine();
 if (engine.name === "session-grep" && (semantic || hybrid)) passthrough.push("--any");
 const sourceArgs = ["--sources-file", sourceFile];
-const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType];
+const typeArgs = ownerOperator || targetType === "all" ? [] : ["--target-type", targetType === "opencode" ? "pi" : targetType];
 const excludeArgs = excludePatterns.flatMap((pattern) => ["--exclude-re", pattern]);
 
 try {
@@ -296,6 +312,9 @@ function chooseEngine() {
     : passthrough.includes("--case-sensitive") ? "--case-sensitive"
     : passthrough.includes("--include-skill-bodies") ? "--include-skill-bodies"
     : (valueOf("--sort") ?? "newest") !== "newest" ? `--sort ${valueOf("--sort")}`
+    // On the owner's machine (2026-11-23) agentsview 0.46.1 held 15 of opencode.db's 300
+    // sessions, none after 2026-09-18; the mirror holds them all.
+    : targetType === "opencode" ? "--target-type opencode"
     : null;
   if (unsupported) {
     if (backend === "agentsview") fail(`--backend agentsview does not support ${unsupported}`);
@@ -331,7 +350,7 @@ async function agentsviewOutput(url) {
     query: regex && !query.startsWith("(?i)") ? `(?i)${query}` : query,
     mode,
     limit: Math.min(500, limit * (candidates ? 5 : 3)),
-    agent: targetType === "all" ? "claude,codex,pi" : targetType,
+    agent: targetType === "all" ? ["claude", "codex", "pi", ...(openCodeMirror ? ["opencode"] : [])].join(",") : targetType,
     includeTools,
     // agentsview filters by session activity, a superset of the messages in the window; the
     // per-message bounds below make the window exact.
@@ -732,9 +751,49 @@ function sourceIdentity(file) {
     }
   }
   return {
+    ...(best?.format ? { source: best.format } : {}),
     namespace: best?.namespace ?? "unknown",
     ...(best?.app ? { app: best.app } : {}),
   };
+}
+
+/** Refresh the Pi-format mirror of every OpenCode session under OO_HOME/search/opencode and
+ * return its root, or null when no configured OpenCode database opens. The databases are opened
+ * read-only; a session is rewritten only when its updated time moved, and mirrors of deleted or
+ * blacklisted sessions are removed. */
+function mirrorOpenCode(stores) {
+  const handles = [...new Set(stores.map(({ root }) => openCodeDatabasePath(root)))]
+    .map((database) => openOpenCodeDatabase(database)).filter(Boolean);
+  if (!handles.length) return null;
+  const dir = path.join(ooHome, "search", "opencode");
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const kept = new Set();
+  for (const handle of handles) {
+    try {
+      for (const session of listOpenCodeSessions(handle)) {
+        if (isBlacklisted(blacklist, { cwd: session.directory, repo: resolveRepo(session.directory) })) continue;
+        const file = path.join(dir, `${session.id}.jsonl`);
+        kept.add(file);
+        let mtime = null;
+        try { mtime = Math.round(fs.statSync(file).mtimeMs); } catch { /* not mirrored yet */ }
+        if (mtime === session.updatedAt) continue;
+        const at = (ms) => new Date(ms || session.createdAt).toISOString();
+        const records = [{ type: "session", id: session.id, cwd: session.directory, timestamp: at(session.createdAt) }];
+        for (const message of readOpenCodeMessages(handle, session.id)) {
+          if (!message.text.trim()) continue;
+          records.push({ type: "message", timestamp: at(message.ts), message: { role: message.role, content: [{ type: "text", text: message.text }] } });
+        }
+        fs.writeFileSync(file, records.map((record) => JSON.stringify(record)).join("\n") + "\n", { mode: 0o600 });
+        fs.utimesSync(file, new Date(session.updatedAt), new Date(session.updatedAt));
+      }
+    } finally {
+      handle.close();
+    }
+  }
+  for (const name of fs.readdirSync(dir)) {
+    if (!kept.has(path.join(dir, name))) fs.rmSync(path.join(dir, name), { force: true });
+  }
+  return dir;
 }
 
 function searchCwdFromFile(file) {

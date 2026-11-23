@@ -41,6 +41,12 @@ import {
 import { loadActiveWindow, parseWindowMs } from "../../packages/core/src/settings.mjs";
 import { isInjectedOwnerText, isSessionBoilerplate } from "../../packages/core/src/session-text.mjs";
 import { ownerOperatorProvenance } from "../../packages/core/src/session-cwd.mjs";
+import {
+  listOpenCodeSessions,
+  openCodeDatabasePath,
+  openOpenCodeDatabase,
+  readOpenCodeMessages,
+} from "../../packages/core/src/opencode-sessions.mjs";
 
 // Every catalog format must be named here and exercised by its parser fixture. A catalog-only
 // addition fails on module load rather than appearing as a selectable but unreadable harness.
@@ -119,7 +125,24 @@ const opencodeInfoFile = (root, f) => {
 // watches; the product descriptor stays outside session_sources.json authorization.
 const roots = loadMonitoredTranscriptStores(ooHome);
 const candidates = [];
+// Current OpenCode keeps sessions in opencode.db beside its legacy storage/ tree. Each session
+// is one candidate whose `file` is `<db>#<id>`: unique per session, and still under the db path
+// the monitor reports when the database changes.
+const openCodeDatabases = new Map();
 for (const { root, format: source, app, namespace } of roots) {
+  if (source === "opencode") {
+    const database = openCodeDatabasePath(root);
+    if (!openCodeDatabases.has(database)) {
+      const handle = openOpenCodeDatabase(database);
+      openCodeDatabases.set(database, handle);
+      for (const session of handle ? listOpenCodeSessions(handle, cutoff) : []) {
+        candidates.push({
+          file: `${database}#${session.id}`, source, mtime: session.updatedAt, btime: session.createdAt, app, namespace,
+          openCode: { handle, database, id: session.id, directory: session.directory },
+        });
+      }
+    }
+  }
   if (!existsSync(root)) continue;
   const files = [];
   walk(root, files);
@@ -353,9 +376,9 @@ function posthogMainLog() {
 }
 
 // ---------- parse one session ----------
-function parseSession({ file, source, mtime, btime, app, namespace }) {
-  let raw;
-  try { raw = readFileSync(file, "utf8"); } catch { return null; }
+function parseSession({ file, source, mtime, btime, app, namespace, openCode }) {
+  let raw = "";
+  if (!openCode) { try { raw = readFileSync(file, "utf8"); } catch { return null; } }
   const msgs = [];                 // substantive text turns: {role, text, ts, stop?}
   let project = null, sessionId = null, entrypoint = null, firstTs = 0, lastTs = 0, lastLifecycle = null;
   let originator = null, srcHint = null;   // codex session_meta provenance (→ detectUi)
@@ -375,12 +398,25 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
 
   if (source === "cursor") project = cursorProject(file); // cwd lives in the dir slug, not the records
 
-  // opencode is not line-based: the candidate file is the session INFO record; the turns live
+  // opencode is not line-based. A database candidate reads its turns from opencode.db.
+  if (source === "opencode" && openCode) {
+    sessionId = openCode.id;
+    if (openCode.directory) project = openCode.directory;
+    firstTs = btime;
+    lastTs = mtime;
+    let turns;
+    try { turns = readOpenCodeMessages(openCode.handle, openCode.id); } catch { return null; }
+    let lastAsstTs = -1;
+    for (const m of turns) {
+      if (m.ts) { if (!firstTs || m.ts < firstTs) firstTs = m.ts; if (m.ts > lastTs) lastTs = m.ts; }
+      if (m.role === "assistant" && m.ts >= lastAsstTs) { lastAsstTs = m.ts; ocAsstOpen = !m.completed; }
+      if (m.text.trim()) msgs.push({ role: m.role, text: m.text, ts: m.ts });
+    }
+  // Legacy file layout: the candidate file is the session INFO record; the turns live
   // in one-JSON-per-message files (with the text in one-JSON-per-part files) hanging off the
   // storage root. Gen-2 keeps them at storage/{message,part}/, the legacy layout under
-  // storage/session/{message,part}/. (The newest opencode stores sessions in SQLite —
-  // opencode.db — which a zero-install scan can't read; those installs surface nothing here.)
-  if (source === "opencode") {
+  // storage/session/{message,part}/.
+  } else if (source === "opencode") {
     let info; try { info = JSON.parse(raw); } catch { return null; }
     if (!info || typeof info !== "object" || typeof info.id !== "string") return null;
     sessionId = info.id;
@@ -673,15 +709,18 @@ function parseSession({ file, source, mtime, btime, app, namespace }) {
 
 let threads;
 if (changedFiles.size) {
-  const changed = candidates.filter((c) => changedFiles.has(c.file)).map(parseSession).filter(Boolean);
+  // A changed OpenCode database re-reads every session it holds in the window.
+  const isChanged = (c) => changedFiles.has(c.file) || changedFiles.has(c.openCode?.database);
+  const changed = candidates.filter(isChanged).map(parseSession).filter(Boolean);
   const ids = changed.map((t) => t.id);
   const siblings = candidates
-    .filter((c) => !changedFiles.has(c.file) && ids.some((id) => c.file.includes(id)))
+    .filter((c) => !isChanged(c) && ids.some((id) => c.file.includes(id)))
     .map(parseSession).filter(Boolean);
   threads = [...changed, ...siblings];
 } else {
   threads = candidates.map(parseSession).filter(Boolean);
 }
+for (const handle of openCodeDatabases.values()) handle?.close();
 // Blacklist, second layer: cwd + resolved repo name — catches Codex/Cursor sessions and
 // worktrees of a blacklisted repo living elsewhere. Applies before --thread/--all/limit:
 // no flag reaches a blacklisted thread.
