@@ -1,7 +1,7 @@
 // An explicit turn end in the transcript decides a session's state before the last speaker does,
 // through the daemon's real path: SessionMonitor runs the real scanner over a temp $HOME and State
-// resolves and persists each row. Record sequences mirror the session-event contract's S0, S3, and
-// S3b fixtures, captured from Claude Code 2.1.280 and `codex exec`, with invented text.
+// resolves and persists each row. Record sequences mirror the session-event contract's S0, S3, S3b,
+// and S4b fixtures, captured from Claude Code 2.1.280 and `codex exec`, with invented text.
 import assert from "node:assert";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +18,7 @@ markOnboarded(dir, { via: "test" });
 const ago = (seconds: number): string => new Date(Date.now() - seconds * 1000).toISOString();
 const ID = {
   ended: "55555555-5555-4555-8555-555555555555",
+  failed: "44444444-4444-4444-8444-444444444444",
   interrupted: "11111111-1111-4111-8111-111111111111",
   interruptedText: "12121212-1212-4121-8121-121212121212",
   quoted: "88888888-8888-4888-8888-888888888888",
@@ -40,6 +41,8 @@ const toolUse = { type: "tool_use", id: "t1", name: "Bash", input: { command: "m
 const toolResult = user([{ type: "tool_result", tool_use_id: "t1", content: "interrupted" }]);
 
 writeClaude(ID.ended, [user("Summarise the build log"), assistant("end_turn", [{ type: "text", text: "Summary written." }])]);
+writeClaude(ID.failed, [user("Summarise the build log"),
+  { ...assistant("stop_sequence", [{ type: "text", text: "API Error: the request failed." }]), isApiErrorMessage: true, error: "model_not_found", apiErrorStatus: 404 }]);
 const interruptedRecords = [user("Run the long build"), assistant("tool_use", [{ type: "text", text: "Starting." }, toolUse]),
   toolResult, user([{ type: "text", text: "[Request interrupted by user for tool use]" }])];
 writeClaude(ID.interrupted, interruptedRecords);
@@ -65,6 +68,7 @@ writeCodex(ID.codexCompleted, ["task_complete"]);
 try {
   const { State } = await import("../state/state");
   const { SessionMonitor } = await import("./monitor");
+  const { runTranscriptScan } = await import("./scan");
   const state = new State(join(dir, "state.db"));
   const monitor = new SessionMonitor(state, { since: "1d", limit: 0 });
   try {
@@ -76,6 +80,10 @@ try {
 
     let rows = await monitor.poll();
     assert.equal(stateOf(rows, ID.ended), "idle", "S0 a normal Claude end reads idle");
+    assert.equal(stateOf(rows, ID.failed), "idle", "S4b a Claude turn that failed on an API error reads idle");
+    const turnEndOf = async (id: string) => (await runTranscriptScan(["--thread", id, "--since", "1d"])).threads[0]?.turnEnd;
+    assert.equal(await turnEndOf(ID.failed), "failed", "S4b the scanner records the API error as a failed turn end");
+    assert.equal(await turnEndOf(ID.ended), null, "S0 a normal Claude end records no explicit turn end");
     assert.equal(stateOf(rows, ID.interrupted), "idle", "S3 a Claude interrupt during a tool ends the turn with the owner last");
     assert.equal(stateOf(rows, ID.interruptedText), "idle", "a Claude interrupt before any reply ends the turn");
     assert.equal(stateOf(rows, ID.codexAborted), "idle", "S3b a Codex turn_aborted before any reply ends the turn");
@@ -90,7 +98,7 @@ try {
     monitor.stop();
     state.close();
   }
-  process.stdout.write("ok — explicit turn ends reach State: Claude interrupt markers, Codex lifecycle, quoted marker, resumed turn\n");
+  process.stdout.write("ok — explicit turn ends reach State: Claude interrupt markers and API errors, Codex lifecycle, quoted marker, resumed turn\n");
 } finally {
   cleanup();
   rmSync(home, { recursive: true, force: true });
