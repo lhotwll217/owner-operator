@@ -8,7 +8,7 @@ import { holdsDone, resolveState, isActiveState, resolveCandidates } from "./res
 const AT = "2026-06-09T10:05:00.000Z";
 const NEWER = "2026-06-09T10:06:00.000Z";
 
-const cand = (over: Partial<{ id: string; lastRole: string; secondsSinceLastMessage: number; working: boolean; lastMessageAt: string }> = {}) => ({
+const cand = (over: Partial<{ id: string; lastRole: string; secondsSinceLastMessage: number; working: boolean; lastMessageAt: string; turnEnd: "completed" | "interrupted" | "failed" | null }> = {}) => ({
   id: "a", lastRole: "assistant", secondsSinceLastMessage: 60, working: false, lastMessageAt: AT, ...over,
 });
 const doneAt = (lastMessageAt: string) => ({ id: "a", state: "done" as const, lastMessageAt });
@@ -24,6 +24,12 @@ assert.equal(holdsDone({ id: "a", state: "idle" as const, lastMessageAt: AT }, c
 assert.equal(resolveState(doneAt(AT), cand()), "done", "held done resolves done");
 assert.equal(resolveState(doneAt(AT), cand({ lastMessageAt: NEWER })), "idle", "woken thread resolves from scan facts");
 assert.equal(resolveState(undefined, cand({ lastRole: "user" })), "working", "no persisted state → derived state");
+
+// --- turnEnd: a turn the record says ended is not Working, whoever spoke last ---
+assert.equal(resolveState(undefined, cand({ lastRole: "user", turnEnd: "interrupted" })), "idle", "an interrupt after the owner's message ends the turn");
+assert.equal(resolveState(undefined, cand({ lastRole: "user", turnEnd: "completed" })), "idle", "a completed turn with no assistant reply ends the turn");
+assert.equal(resolveState(undefined, cand({ lastRole: "user", turnEnd: "interrupted", working: true })), "working", "a turn open after the end still reads working");
+assert.equal(resolveState(undefined, cand({ lastRole: "user", turnEnd: null })), "working", "no recorded end keeps the last-speaker rule");
 
 // --- isActiveState: done leaves active surfaces, everything else stays ---
 assert.equal(isActiveState("done"), false);
