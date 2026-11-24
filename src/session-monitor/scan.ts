@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ScanActiveTranscriptsResult } from "./scan-active-transcripts.mjs";
-import { AgentRunStatus, isOnboarded, type AgentRun, type EnrichmentCandidate } from "@owner-operator/core";
+import { AgentRunStatus, isOnboarded, type AgentRun, type EnrichmentCandidate, type TurnEnd } from "@owner-operator/core";
 import type { Turn } from "../agent/needs-you";
 
 const execFileAsync = promisify(execFile);
@@ -56,16 +56,38 @@ async function skim(threadId: string, maxChars: number): Promise<{ stdout: strin
   return { stdout, position: Number.isInteger(messages) && messages > 0 ? messages - 1 : null };
 }
 
+/** A turn end other than a normal stop, as the turn that closes the sample. A completed turn adds
+ * nothing the classifier's prompt does not already state. */
+const TURN_END_TURNS: Partial<Record<TurnEnd, Turn>> = {
+  interrupted: { role: "owner", text: "[Turn ended: the owner interrupted it.]" },
+  failed: { role: "agent", text: "[Turn ended: the turn failed with an error.]" },
+};
+
 /** The owner's last two messages and the agent's last two, oldest first, each kept whole: the
- * evidence the Need You classifier reads. Tool calls and results are left out. Two of each
- * reaches the request a side question followed; more messages scored no better. */
+ * evidence the Need You classifier reads. Two of each reaches the request a side question
+ * followed; more messages scored no better. Tool results and interrupt markers between them are
+ * kept, and an interrupted or failed turn ends with its turn end: without them an answered
+ * question that the owner then interrupted scored 0.95 for Need You, and 0.05 with them (PR #220).
+ * Tool results are dropped oldest first to stay inside the enrichment sample's 24,000 characters. */
 export async function sampleTurns(threadId: string): Promise<Turn[]> {
   const scan = await runTranscriptScan([
     "--thread", threadId, "--last-per-role", "2", "--truncate", "1000000000", "--since", "1970-01-01",
   ]);
   const thread = scan.threads[0];
   if (scan.threads.length !== 1 || thread.id !== threadId) throw new Error(`expected one authorized transcript for ${threadId}`);
-  return thread.recentMessages.map((message): Turn => ({ role: message.role === "user" ? "owner" : "agent", text: message.text }));
+  const turnEnd = thread.turnEnd ? TURN_END_TURNS[thread.turnEnd] : undefined;
+  let excess = thread.recentMessages.reduce((sum, message) => sum + message.text.length, 0) - 24_000;
+  const messages = thread.recentMessages.filter((message) => {
+    if (excess <= 0 || message.role !== "tool") return true;
+    excess -= message.text.length;
+    return false;
+  });
+  return [
+    ...messages.map((message): Turn => message.role === "tool"
+      ? { role: "agent", text: `[tool result] ${message.text}` }
+      : { role: message.role === "user" ? "owner" : "agent", text: message.text }),
+    ...(turnEnd ? [turnEnd] : []),
+  ];
 }
 
 export interface EnrichmentSample {

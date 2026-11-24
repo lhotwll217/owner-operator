@@ -17,7 +17,8 @@
 //   --limit N        caps external and product-owned slices; 0 returns every candidate
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --last-per-role N  instead keeps the owner's last N messages and the agent's last N, from the
-//                    whole conversation, in order; text injected in the owner's role is not the owner's
+//                    whole conversation, in order; text injected in the owner's role is not the owner's.
+//                    Claude tool results and interrupt markers after the first kept message ride along
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
 //   --file <path>    parses only that transcript (repeatable) plus files sharing its session id
@@ -180,6 +181,15 @@ const CLAUDE_INTERRUPT_MARKERS = new Set(["[Request interrupted by user]", "[Req
 const isClaudeInterrupt = (content) =>
   Array.isArray(content) && content.length === 1 && content[0]?.type === "text" &&
   CLAUDE_INTERRUPT_MARKERS.has(String(content[0].text).trim());
+
+function claudeToolResultText(content) {
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((c) => {
+    if (c?.type !== "tool_result") return [];
+    if (typeof c.content === "string") return [c.content];
+    return Array.isArray(c.content) ? c.content.filter((part) => part?.type === "text").map((part) => part.text) : [];
+  }).join(" ");
+}
 
 function claudeText(content) {
   if (typeof content === "string") return content;
@@ -472,7 +482,10 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
         if (o.isMeta) continue; // canonical flag for injected/meta turns (divmgl/clancey, constellos/claude-code)
         const text = claudeText(o.message?.content);
         // stop_reason marks turn boundaries: "tool_use" = mid loop (working); "end_turn" = done.
-        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason, interrupt: o.type === "user" && isClaudeInterrupt(o.message?.content) });
+        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason,
+          interrupt: o.type === "user" && isClaudeInterrupt(o.message?.content), apiError: o.type === "assistant" && !!o.isApiErrorMessage });
+        const toolResult = o.type === "user" ? claudeToolResultText(o.message?.content) : "";
+        if (toolResult.trim()) msgs.push({ role: "tool", text: toolResult, ts });
       }
     } else if (source === "cursor") {
       // Cursor CLI transcript: { role, message: { content: [text|tool_use blocks] } } —
@@ -601,7 +614,8 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
     : project === "(unknown)" ? "(unknown)" : realRepo(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
-  const convo = msgs.filter((m) => !isSessionBoilerplate(m.text));
+  const records = msgs.filter((m) => !isSessionBoilerplate(m.text));
+  const convo = records.filter((m) => m.role !== "tool");
   if (convo.length === 0) {
     // A launched PostHog Code task that hasn't streamed a turn yet — typically a cloud run
     // still provisioning its sandbox (only _posthog/* telemetry so far). Surface it as a
@@ -653,6 +667,7 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
   // The explicit end event of the latest turn, when the record has one.
   let turnEnd = null;
   if (source === "claude" && lastMsg.interrupt) turnEnd = "interrupted";
+  else if (source === "claude" && lastMsg.apiError) turnEnd = "failed";
   else if (source === "codex" && lastLifecycle === "turn_aborted") turnEnd = "interrupted";
   else if (source === "codex" && lastLifecycle === "task_complete") turnEnd = "completed";
 
@@ -677,11 +692,12 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
   let firstMessages, recentMessages, omittedMessageCount;
   if (lastPerRole > 0) {
     const authored = convo.filter((m) => m.role !== "user" || !isInjectedOwnerText(m.text));
-    const kept = new Set(["user", "assistant"].flatMap((role) =>
-      authored.flatMap((m, i) => (m.role === role ? [i] : [])).slice(-lastPerRole)));
+    const kept = new Set(["user", "assistant"].flatMap((role) => authored.filter((m) => m.role === role).slice(-lastPerRole)));
+    const start = records.findIndex((m) => kept.has(m));
+    const recent = start < 0 ? [] : records.slice(start).filter((m) => kept.has(m) || m.role === "tool" || m.interrupt);
     firstMessages = [];
-    recentMessages = authored.filter((_, i) => kept.has(i)).map(shape);
-    omittedMessageCount = convo.length - recentMessages.length;
+    recentMessages = recent.map(shape);
+    omittedMessageCount = convo.length - recent.filter((m) => m.role !== "tool").length;
   } else if (sampleSize <= 0) { firstMessages = []; recentMessages = []; omittedMessageCount = convo.length; }
   else if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
   else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
