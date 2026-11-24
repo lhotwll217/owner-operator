@@ -86,13 +86,17 @@ export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<
   const active = candidate.children.filter((child) => child.status === AgentRunStatus.Pending || child.status === AgentRunStatus.Running);
   const terminal = candidate.children.filter((child) => child.status !== AgentRunStatus.Pending && child.status !== AgentRunStatus.Running);
   const header = (child: EnrichmentCandidate["children"][number]) => `\n\nDelegated child ${child.id}, run ${child.runId}, status ${child.status}\n`;
+  // A child with no message time has no transcript the monitor has read, so its run status is
+  // all the evidence there is.
+  const evidence = async (child: EnrichmentCandidate["children"][number], budget: number) => header(child) +
+    (child.lastMessageAt === null ? "No transcript observed for this child; its status is from the run ledger." : await sampleTranscript(child.id, child.source, budget));
   const coverage = "\n\nChild transcript excerpts are bounded, not complete verification of the children's work.";
   let remaining = 24_000 - coverage.length - 200;
   const activeHeaders = active.reduce((sum, child) => sum + header(child).length, 0);
   const activeBudget = Math.min(8_000, Math.floor((remaining - activeHeaders) / Math.max(1, active.length)));
   if (activeBudget < 1_000) throw new Error("active child evidence exceeds the bounded context; parent status summary remains eligible");
   for (const child of active) {
-    const sample = header(child) + await sampleTranscript(child.id, child.source, activeBudget);
+    const sample = await evidence(child, activeBudget);
     samples.push(sample);
     remaining -= sample.length;
   }
@@ -100,7 +104,7 @@ export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<
   for (const child of terminal) {
     const budget = Math.min(8_000, remaining - header(child).length);
     if (budget < 1_000) break;
-    const sample = header(child) + await sampleTranscript(child.id, child.source, budget);
+    const sample = await evidence(child, budget);
     samples.push(sample);
     remaining -= sample.length;
     includedTerminal++;
