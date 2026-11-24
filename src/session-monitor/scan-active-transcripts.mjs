@@ -173,6 +173,14 @@ const clip = (s, n = truncate) => {
 // transcript records them only as the input of this tool call.
 const NEXT_STEP_BOX_TOOL = "mcp__ccd_turn__wrap_up";
 
+// Claude Code records a stopped turn as a user record whose sole content block is one of these
+// texts. A closed set, never a prefix, so a message that quotes a marker is not an interrupt
+// (agent-canonical, src/parsers/claude-code/incremental.ts:33-36 at 1494f86c).
+const CLAUDE_INTERRUPT_MARKERS = new Set(["[Request interrupted by user]", "[Request interrupted by user for tool use]"]);
+const isClaudeInterrupt = (content) =>
+  Array.isArray(content) && content.length === 1 && content[0]?.type === "text" &&
+  CLAUDE_INTERRUPT_MARKERS.has(String(content[0].text).trim());
+
 function claudeText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -464,7 +472,7 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
         if (o.isMeta) continue; // canonical flag for injected/meta turns (divmgl/clancey, constellos/claude-code)
         const text = claudeText(o.message?.content);
         // stop_reason marks turn boundaries: "tool_use" = mid loop (working); "end_turn" = done.
-        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason });
+        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason, interrupt: o.type === "user" && isClaudeInterrupt(o.message?.content) });
       }
     } else if (source === "cursor") {
       // Cursor CLI transcript: { role, message: { content: [text|tool_use blocks] } } —
@@ -642,6 +650,12 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
     default: working = lastMsg.role === "assistant" && !!lastAsst && lastAsst.stop === "tool_use";
   }
 
+  // The explicit end event of the latest turn, when the record has one.
+  let turnEnd = null;
+  if (source === "claude" && lastMsg.interrupt) turnEnd = "interrupted";
+  else if (source === "codex" && lastLifecycle === "turn_aborted") turnEnd = "interrupted";
+  else if (source === "codex" && lastLifecycle === "task_complete") turnEnd = "completed";
+
   // PostHog Code: a cloud task whose stream died/finished mid-provision leaves a frozen session log
   // (no repo, stuck "in_progress"). Backfill ONLY those gaps from the app's main.log, by task-run id
   // (== sessionId) — the session stream stays authoritative for everything it actually recorded.
@@ -696,6 +710,7 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
     secondsSinceLastMessage: Math.max(0, Math.round((Date.now() - lastMsgTs) / 1000)),
     secondsSinceActivity: Math.max(0, Math.round((Date.now() - lastActivityTs) / 1000)),
     working,                                           // a turn is in progress (reasoning/tools)
+    turnEnd,
     automated,
     _subagent: cursorSubagent || (source === "claude" && file.includes("/subagents/")),
     link: guiLink(source, sessionId, project),

@@ -61,6 +61,7 @@ async function scanTranscripts(since: string, limit: number, files: readonly str
     secondsSinceLastMessage: Number(thread.secondsSinceLastMessage ?? 0),
     secondsSinceActivity: Number(thread.secondsSinceActivity ?? thread.secondsSinceLastMessage ?? 0),
     working: Boolean(thread.working),
+    turnEnd: thread.turnEnd ?? null,
     link: typeof thread.link === "string" ? thread.link : null,
     ...(typeof thread.diffAdded === "number" ? { diffAdded: thread.diffAdded } : {}),
     ...(typeof thread.diffDeleted === "number" ? { diffDeleted: thread.diffDeleted } : {}),

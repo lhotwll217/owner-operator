@@ -1,7 +1,7 @@
 // Hand-written declarations for resolve.mjs (plain ESM so the scan skill can import it
 // without a build step). Keep in lockstep with resolve.mjs — it's ~5 small functions.
 
-import type { ThreadState } from "./status";
+import type { ThreadState, TurnEnd } from "./status";
 
 /** Raw scan facts the resolver needs from a candidate row. */
 export interface CandidateRow {
@@ -9,6 +9,8 @@ export interface CandidateRow {
   lastRole: string;
   secondsSinceLastMessage: number;
   working: boolean;
+  /** The latest turn's recorded end, or null when the record shows none. */
+  turnEnd?: TurnEnd | null;
   lastMessageAt: string; // ISO
 }
 
@@ -22,7 +24,7 @@ export interface PersistedThread {
 export declare const IDLE_AFTER_SECONDS: number;
 
 export declare function deriveState(
-  row: Pick<CandidateRow, "lastRole" | "secondsSinceLastMessage" | "working">,
+  row: Pick<CandidateRow, "lastRole" | "secondsSinceLastMessage" | "working" | "turnEnd">,
 ): ThreadState;
 
 export declare function holdsDone(

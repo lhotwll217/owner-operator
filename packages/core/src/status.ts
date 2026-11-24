@@ -25,6 +25,9 @@ export {
  */
 export type ThreadState = "needs-you" | "working" | "idle" | "done";
 
+/** The explicit end event a session recorded for its latest turn. */
+export type TurnEnd = "completed" | "interrupted" | "failed";
+
 /** The subset of a raw scan row (`scan-active-transcripts --json`) the state machine needs. */
 export interface ScanRow {
   id: string;
@@ -48,6 +51,8 @@ export interface ScanRow {
   secondsSinceActivity: number;
   /** A turn is in progress (Codex task running / Claude tool-loop) — the agent hasn't yielded. */
   working: boolean;
+  /** The latest turn's recorded end, or null when the record shows none. */
+  turnEnd?: TurnEnd | null;
   link?: string | null;
   /** Workspace line delta vs the repo's base branch (scan-gathered), when there is one. */
   diffAdded?: number;

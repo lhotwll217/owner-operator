@@ -1,10 +1,11 @@
-import type { ScanRow } from "@owner-operator/core";
+import type { ScanRow, TurnEnd } from "@owner-operator/core";
 
 export interface ScannedTranscript extends Omit<ScanRow, "app" | "transcriptPath"> {
   /** Load-bearing scanner/search namespace; monitor-to-State projection intentionally omits it. */
   namespace?: string;
   ui: string;
   file: string;
+  turnEnd: TurnEnd | null;
   firstMessages: Array<{ role: string; text: string }>;
   recentMessages: Array<{ role: string; text: string }>;
   omittedMessageCount: number;
