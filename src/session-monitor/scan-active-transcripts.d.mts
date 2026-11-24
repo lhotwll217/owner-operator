@@ -1,4 +1,5 @@
 import type { ScanRow, TurnEnd } from "@owner-operator/core";
+import type { Turn } from "../agent/needs-you";
 
 export interface ScannedTranscript extends Omit<ScanRow, "app" | "transcriptPath"> {
   /** Load-bearing scanner/search namespace; monitor-to-State projection intentionally omits it. */
@@ -9,6 +10,7 @@ export interface ScannedTranscript extends Omit<ScanRow, "app" | "transcriptPath
   firstMessages: Array<{ role: string; text: string }>;
   recentMessages: Array<{ role: string; text: string }>;
   omittedMessageCount: number;
+  classifierTurns?: Turn[];
 }
 
 export interface ScanActiveTranscriptsResult {
