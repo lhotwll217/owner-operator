@@ -50,6 +50,16 @@ try {
   writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [join(dir, "older-running")], repos: [] }));
   await assert.rejects(sampleEnrichment(candidate), /authorized evidence|blacklist|No session/i, "active priority cannot bypass transcript privacy");
   writeFileSync(join(dir, "blacklist.json"), JSON.stringify({ paths: [], repos: [] }));
+
+  transcript("ledger-parent");
+  for (const id of ["unscanned-completed", "unscanned-pending"]) {
+    const run = state.createAgentRun({ harness: AgentRunHarness.Codex, task: id, cwd: dir, parentThreadId: "ledger-parent", childSessionId: id, depth: 1, timeoutSeconds: 60 });
+    if (id === "unscanned-completed") state.finishAgentRun(run.id, { status: AgentRunStatus.Completed, resultTail: "Complete", error: null });
+  }
+  const ledgerOnly = await sampleEnrichment(state.listEnrichmentCandidates().find(({ id }) => id === "ledger-parent")!);
+  assert.match(ledgerOnly.sample, /Delegated child unscanned-completed, run \S+, status completed/, "a finished child known only to the ledger is reported with its status");
+  assert.match(ledgerOnly.sample, /Delegated child unscanned-pending, run \S+, status pending/, "an active child known only to the ledger is reported with its status");
+
   for (let i = 0; i < 24; i++) {
     const id = `pending-${i}`;
     transcript(id);
