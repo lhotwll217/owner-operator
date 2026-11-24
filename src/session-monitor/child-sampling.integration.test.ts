@@ -42,7 +42,7 @@ try {
   assert.ok(sample.indexOf("Delegated child older-running") < sample.indexOf("Delegated child completed"));
   assert.match(sample, /completed-19 RESULT_TAIL_SENTINEL/, "a finished child is assessed from the end of its stored result");
   assert.ok(sample.length <= 48_000, "parent, children, headers and omission notice fit the context bound");
-  assert.match(sample, /terminal child transcripts omitted.*context limit/i, "omitted evidence is explicitly identified as incomplete");
+  assert.match(sample, /terminal child results omitted.*context limit/i, "omitted evidence is explicitly identified as incomplete");
   const details = { topic: "Active child progress", statusSummary: "Active children continue; terminal history was omitted from the bounded sample.", attention: "idle" as const };
   assert.ok(state.appendEnrichment(candidate.id, details, candidate.lastMessageAt!, candidate.children));
   transcript("completed-0");
