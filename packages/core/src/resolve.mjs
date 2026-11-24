@@ -18,6 +18,7 @@ export const IDLE_AFTER_SECONDS = 30 * 60;
  * "stopped", so it wins. Then quiet too long → `idle` — by MESSAGE time, never file
  * activity: GUI apps append housekeeping events (mode/meta lines) that keep the file's
  * mtime forever fresh, which made 8-hour-old threads read "2m ago" and never idle.
+ * Then a turn end the record states (interrupt, completion) → `idle`, even with the owner last.
  * Otherwise: user spoke last → `working`; an assistant turn that yielded → `idle`.
  *
  * `needs-you` is never derived here. It states that the current task is unfinished and the next
@@ -28,6 +29,7 @@ export const IDLE_AFTER_SECONDS = 30 * 60;
 export function deriveState(row) {
   if (row.working) return "working";
   if (row.secondsSinceLastMessage >= IDLE_AFTER_SECONDS) return "idle";
+  if (row.turnEnd) return "idle";
   return row.lastRole === "assistant" ? "idle" : "working";
 }
 
