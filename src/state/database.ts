@@ -59,14 +59,6 @@ const WORKING_REASSESS_MS = 4 * 60 * 1_000;
  * drifting apart. */
 const LIVE_AGENT_RUN_STATUS_SQL = `('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}')`;
 
-/** One State-owned definition of an active delegated child. Every persisted owner-attention
- * projection embeds this predicate instead of growing a parallel run lifecycle. */
-const HAS_ACTIVE_CHILD_SQL = `EXISTS (
-  SELECT 1 FROM agent_runs active_child
-  WHERE active_child.parent_thread_id = t.id
-    AND active_child.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
-)`;
-
 /** When one run's delegated work ended. `finished_at` is that moment for a status the run
  * reached through its own lifecycle. For `interrupted` and `lost` it is instead the clock of the
  * sweep that noticed, which runs whenever the next daemon starts and can land long after the
@@ -96,6 +88,11 @@ const THREADS_ABOVE_LIVE_RUN_SQL = `(
   SELECT thread_id FROM ancestor
 )`;
 
+/** One State-owned definition of live delegated work below a thread, at any depth. Every
+ * persisted owner-attention projection embeds this predicate instead of growing a parallel run
+ * lifecycle. */
+const HAS_LIVE_WORK_BELOW_SQL = `t.id IN ${THREADS_ABOVE_LIVE_RUN_SQL}`;
+
 /** This thread is a delegated child, every run that issued it has reached a terminal status, and
  * no run below it is live. The run ledger is the only place that knows the child's work ended. A
  * transcript scan sees a yielded turn, and the classifier that writes `thread_details` guessed
@@ -112,7 +109,7 @@ const CHILD_RUN_FINISHED_SQL = `(EXISTS (
   WHERE live_run.child_session_id = t.id AND live_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 ) AND COALESCE(t.last_message_at, '') <= (
   SELECT MAX(${AGENT_RUN_WORK_ENDED_SQL}) FROM agent_runs ended_run WHERE ended_run.child_session_id = t.id
-) AND t.id NOT IN ${THREADS_ABOVE_LIVE_RUN_SQL})`;
+) AND NOT ${HAS_LIVE_WORK_BELOW_SQL})`;
 
 /** The session is the child of a live run an outside caller started. The ledger, not the
  * transcript, knows that run is still going. */
@@ -122,11 +119,11 @@ const HAS_ACTIVE_ORIGIN_RUN_SQL = `EXISTS (
     AND origin_run.status IN ${LIVE_AGENT_RUN_STATUS_SQL}
 )`;
 
-/** A live child outranks the finished run that issued this thread, so Done never hides delegated
- * work still in flight. */
+/** Live work below outranks the finished run that issued this thread, so Done never hides
+ * delegated work still in flight. */
 const EFFECTIVE_THREAD_STATE_SQL = `CASE
   WHEN detail.state = 'done' THEN 'done'
-  WHEN ${HAS_ACTIVE_CHILD_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} THEN 'working'
+  WHEN ${HAS_LIVE_WORK_BELOW_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} THEN 'working'
   WHEN ${CHILD_RUN_FINISHED_SQL} THEN 'done'
   ELSE detail.state
 END`;
@@ -890,7 +887,7 @@ export class ThreadDb {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.resolutionRow(threadId);
-      const working = current?.state === "working" || this.hasActiveChild(threadId);
+      const working = current?.state === "working" || this.hasLiveWorkBelow(threadId);
       // Guards that reject an assessment: the owner closed the thread, a stopped session has no
       // lifecycle answer, or it was made against evidence that has since moved. A repeat
       // assessment of the same evidence is accepted — it advances the reassessment clock and
@@ -1017,7 +1014,7 @@ export class ThreadDb {
     const where = options.activeSince
       ? `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'
            AND (t.last_active_at >= $since OR ${EFFECTIVE_THREAD_STATE_SQL} = 'needs-you'
-             OR ${HAS_ACTIVE_CHILD_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
+             OR ${HAS_LIVE_WORK_BELOW_SQL} OR ${HAS_ACTIVE_ORIGIN_RUN_SQL} OR ${AWAITING_HOLDS_SQL} OR ${SNOOZE_HOLDS_SQL} OR t.snoozed_until >= $since)`
       : `WHERE ${EFFECTIVE_THREAD_STATE_SQL} != 'done'`;
     const statement = this.db.prepare(
       `SELECT t.id, COALESCE(t.source, '') AS source,
@@ -1772,9 +1769,9 @@ export class ThreadDb {
     ).run(threadId, worktreeId, selectedAt);
   }
 
-  private hasActiveChild(threadId: string): boolean {
+  private hasLiveWorkBelow(threadId: string): boolean {
     return Boolean(this.db.prepare(
-      `SELECT 1 FROM threads t WHERE t.id = ? AND ${HAS_ACTIVE_CHILD_SQL}`,
+      `SELECT 1 FROM threads t WHERE t.id = ? AND ${HAS_LIVE_WORK_BELOW_SQL}`,
     ).get(threadId));
   }
 

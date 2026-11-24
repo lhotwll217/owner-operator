@@ -12,6 +12,7 @@ import {
   isTerminalAgentRunStatus,
   validateAgentRunResumeTask,
   type AgentRun,
+  type AgentRunActivityUpdate,
   type AgentRunCreateInput,
   type AgentRunFinalStatus,
   type AgentRunLaunchRequest,
@@ -324,6 +325,18 @@ export class AgentRunExecutor {
       controller.abort(new Error(`run timed out after ${run.timeoutSeconds}s`));
     }, run.timeoutSeconds * 1_000);
     timeout.unref?.();
+    // The child's work outranks the ledger's record of it: a failed write here (a full disk) is
+    // logged, never thrown into the launcher, where it would end a live turn. An unrecorded
+    // activity update carries forward, so a lifecycle fact such as the prompt receipt lands with
+    // the next write that succeeds, at the latest just before the run is finalized.
+    let unrecorded: AgentRunActivityUpdate = {};
+    const recordActivity = (update: AgentRunActivityUpdate): void => {
+      const pending = { ...unrecorded, ...update };
+      unrecorded = this.recordDuringTurn(run.id, () => this.state.recordAgentRunActivity(run.id, pending)) ? {} : pending;
+    };
+    const flushActivity = (): void => {
+      if (Object.keys(unrecorded).length) recordActivity({});
+    };
     try {
       const retriedRun = run.retryOfRunId ? this.state.agentRunById(run.retryOfRunId) : undefined;
       const resumedRun = run.resumeOfRunId ? this.state.agentRunById(run.resumeOfRunId) : undefined;
@@ -332,13 +345,10 @@ export class AgentRunExecutor {
         run,
         turnIntent,
         signal: controller.signal,
-        onActivity: (update) => {
-          this.state.recordAgentRunActivity(run.id, update);
-        },
-        onEvent: (event) => {
-          this.state.appendAgentRunEvent(run.id, event);
-        },
+        onActivity: recordActivity,
+        onEvent: (event) => { this.recordDuringTurn(run.id, () => this.state.appendAgentRunEvent(run.id, event)); },
       });
+      flushActivity();
       // An abort intent always wins over the launcher's own outcome — status AND reason. Launchers
       // differ on how they report an abort (the acpx bridge resolves with `cancelled`, a throwing
       // launcher rejects), so a timed-out or stopped run must be recorded with the executor's
@@ -353,6 +363,7 @@ export class AgentRunExecutor {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      flushActivity();
       this.finish(run.id, {
         status: entry.intent ? this.statusForIntent(entry.intent) : AgentRunStatus.Failed,
         resultTail: null,
@@ -363,6 +374,17 @@ export class AgentRunExecutor {
       this.active.delete(run.id);
       if (!this.stopping) this.continueOwedParents();
       this.pump();
+    }
+  }
+
+  private recordDuringTurn(runId: string, write: () => unknown): boolean {
+    try {
+      write();
+      return true;
+    } catch (error) {
+      this.logger({ event: AgentRunExecutorLogEvent.LoopFailed,
+        error: `recording activity of ${runId}: ${error instanceof Error ? error.message : String(error)}` });
+      return false;
     }
   }
 
