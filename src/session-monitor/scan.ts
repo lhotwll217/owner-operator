@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ScanActiveTranscriptsResult } from "./scan-active-transcripts.mjs";
-import { AgentRunStatus, isOnboarded, type EnrichmentCandidate } from "@owner-operator/core";
+import { AgentRunStatus, isOnboarded, type AgentRun, type EnrichmentCandidate } from "@owner-operator/core";
 import type { Turn } from "../agent/needs-you";
 
 const execFileAsync = promisify(execFile);
@@ -75,7 +75,9 @@ export interface EnrichmentSample {
   bookmark?: { index: number; messageAt: string };
 }
 
-export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<EnrichmentSample> {
+/** `runById` reads the run ledger. A finished child is assessed from the end of its stored
+ * result, which exists whether or not the monitor ever scanned the child's transcript. */
+export async function sampleEnrichment(candidate: EnrichmentCandidate, runById: (runId: string) => AgentRun | undefined): Promise<EnrichmentSample> {
   const bookmark = await (async () => {
     if (!["claude", "codex", "pi"].includes(candidate.source) || !candidate.lastMessageAt) return undefined;
     const { position } = await skim(candidate.id, 500);
@@ -86,13 +88,22 @@ export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<
   const active = candidate.children.filter((child) => child.status === AgentRunStatus.Pending || child.status === AgentRunStatus.Running);
   const terminal = candidate.children.filter((child) => child.status !== AgentRunStatus.Pending && child.status !== AgentRunStatus.Running);
   const header = (child: EnrichmentCandidate["children"][number]) => `\n\nDelegated child ${child.id}, run ${child.runId}, status ${child.status}\n`;
-  const coverage = "\n\nChild transcript excerpts are bounded, not complete verification of the children's work.";
+  // An active child with no message time has no transcript the monitor has read, so its run
+  // status is all the evidence there is.
+  const activeEvidence = async (child: EnrichmentCandidate["children"][number], budget: number) => header(child) +
+    (child.lastMessageAt === null ? "No transcript observed for this child; its status is from the run ledger." : await sampleTranscript(child.id, child.source, budget));
+  const terminalEvidence = (child: EnrichmentCandidate["children"][number], budget: number) => {
+    const run = runById(child.runId);
+    const result = [run?.resultTail, run?.error && `Error: ${run.error}`].filter(Boolean).join("\n");
+    return header(child) + (result ? `End of the run's stored result:\n${result.slice(-budget)}` : "No result recorded for this run.");
+  };
+  const coverage = "\n\nChild transcript excerpts and run results are bounded, not complete verification of the children's work.";
   let remaining = 24_000 - coverage.length - 200;
   const activeHeaders = active.reduce((sum, child) => sum + header(child).length, 0);
   const activeBudget = Math.min(8_000, Math.floor((remaining - activeHeaders) / Math.max(1, active.length)));
   if (activeBudget < 1_000) throw new Error("active child evidence exceeds the bounded context; parent status summary remains eligible");
   for (const child of active) {
-    const sample = header(child) + await sampleTranscript(child.id, child.source, activeBudget);
+    const sample = await activeEvidence(child, activeBudget);
     samples.push(sample);
     remaining -= sample.length;
   }
@@ -100,12 +111,12 @@ export async function sampleEnrichment(candidate: EnrichmentCandidate): Promise<
   for (const child of terminal) {
     const budget = Math.min(8_000, remaining - header(child).length);
     if (budget < 1_000) break;
-    const sample = header(child) + await sampleTranscript(child.id, child.source, budget);
+    const sample = terminalEvidence(child, budget);
     samples.push(sample);
     remaining -= sample.length;
     includedTerminal++;
   }
   samples.push(coverage);
-  if (includedTerminal < terminal.length) samples.push(`\n${terminal.length - includedTerminal} terminal child transcripts omitted by the context limit; their work is not assessed here.`);
+  if (includedTerminal < terminal.length) samples.push(`\n${terminal.length - includedTerminal} terminal child results omitted by the context limit; their work is not assessed here.`);
   return { sample: samples.join(""), ...(bookmark ? { bookmark } : {}) };
 }

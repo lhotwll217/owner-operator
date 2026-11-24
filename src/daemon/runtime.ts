@@ -88,7 +88,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
               return classifyStoppedSession({ turns: await sampleTurns(candidate.id), statusSummaries });
             })(),
             (async () => {
-              const { sample, bookmark } = await sampleEnrichment(candidate);
+              const { sample, bookmark } = await sampleEnrichment(candidate, (runId) => state.agentRunById(runId));
               const { enrichThread, STATUS_SUMMARY_HISTORY_LIMIT } = await import("../agent/enrichment");
               const written = await enrichThread(sample, {
                 currentTitle: candidate.generatedTopic,

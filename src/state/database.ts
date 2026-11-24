@@ -141,12 +141,15 @@ const SNOOZE_HOLDS_SQL = `(t.snoozed_through_message_at IS NOT NULL
   AND COALESCE(t.last_message_at, '') <= t.snoozed_through_message_at
   AND (t.snoozed_until IS NULL OR t.snoozed_until > $now))`;
 
+/** A parent's delegated runs, read from the ledger. A child the monitor never scanned, such as
+ * one under another harness home, still appears, with its run's harness and no message time. */
 const CHILD_EVIDENCE_SQL = `(SELECT json_group_array(json_object(
   'id', id, 'source', source, 'lastMessageAt', last_message_at, 'runId', run_id, 'status', status
 )) FROM (
-  SELECT child.id, child.source, child.last_message_at, run.id AS run_id, run.status
-  FROM agent_runs run JOIN threads child ON child.id = run.child_session_id
-  WHERE run.parent_thread_id = t.id
+  SELECT run.child_session_id AS id, COALESCE(child.source, run.harness) AS source, child.last_message_at,
+    run.id AS run_id, run.status
+  FROM agent_runs run LEFT JOIN threads child ON child.id = run.child_session_id
+  WHERE run.parent_thread_id = t.id AND run.child_session_id IS NOT NULL
   ORDER BY run.status IN ('${AgentRunStatus.Pending}', '${AgentRunStatus.Running}') DESC,
     run.created_at DESC, run.id
 ))`;

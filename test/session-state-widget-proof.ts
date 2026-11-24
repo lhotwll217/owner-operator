@@ -129,7 +129,7 @@ export async function runSessionStateWidgetProof(options: {
       attempts.push(candidate.id);
       if (candidate.id === "partial" && failOnce) { failOnce = false; throw new Error("controlled transient outage"); }
       const { sampleEnrichment } = await import("../src/session-monitor/scan");
-      const { sample, bookmark } = await sampleEnrichment(candidate);
+      const { sample, bookmark } = await sampleEnrichment(candidate, (runId) => daemon!.state.agentRunById(runId));
       if (candidate.id === "parent") {
         assert.ok(sample.includes("Use the replacement agent."), "working summary sees the first owner message");
         assert.ok(sample.includes("Continue with the replacement"), "working summary sees the latest owner message");
