@@ -56,16 +56,16 @@ async function skim(threadId: string, maxChars: number): Promise<{ stdout: strin
   return { stdout, position: Number.isInteger(messages) && messages > 0 ? messages - 1 : null };
 }
 
-/** The owner's last two messages and the agent's last two, oldest first, each kept whole: the
- * evidence the Need You classifier reads. Tool calls and results are left out. Two of each
- * reaches the request a side question followed; more messages scored no better. */
+/** The latest two authored messages per role reach the request a side question followed.
+ * Turn-end and tool evidence distinguish an answered question from an unfinished one (PR #220). */
 export async function sampleTurns(threadId: string): Promise<Turn[]> {
-  const scan = await runTranscriptScan([
-    "--thread", threadId, "--last-per-role", "2", "--truncate", "1000000000", "--since", "1970-01-01",
-  ]);
-  const thread = scan.threads[0];
-  if (scan.threads.length !== 1 || thread.id !== threadId) throw new Error(`expected one authorized transcript for ${threadId}`);
-  return thread.recentMessages.map((message): Turn => ({ role: message.role === "user" ? "owner" : "agent", text: message.text }));
+  // Allow room for JSON escaping and turn wrappers around the scanner's bounded text.
+  const { stdout } = await execFileAsync(process.execPath, [
+    scanScript, "--classifier-sample", "--thread", threadId, "--since", "1970-01-01",
+  ], { encoding: "utf8", maxBuffer: 256 * 1024 });
+  const turns: Turn[] | null = JSON.parse(stdout);
+  if (turns === null) throw new Error(`expected one authorized transcript for ${threadId}`);
+  return turns;
 }
 
 export interface EnrichmentSample {

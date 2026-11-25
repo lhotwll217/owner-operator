@@ -55,9 +55,46 @@ try {
   assert.equal(claude.working, false, "a turn that ended after the next-step box is not working");
   assert.deepEqual((await sampleTurns(sessionId)).filter((turn) => turn.role === "agent").map((turn) => turn.text), [
     "The port carries hand edits in 57 files. Should I cut the port to the scripted rewrites plus one shim file?",
+    "[tool result] Shown in the next-step box.",
     "My recommendation: keep the scripted rewrites and drop the hand edits.",
-  ], "the question asked in the next-step box is part of the agent's turn");
-  console.log("ok - Need You sampling takes each side's last two messages from the whole conversation");
+  ], "the question asked in the next-step box is part of the agent's turn, and a normal end adds no turn end");
+
+  // Record sequences mirror the session-event contract's S3 and S4b fixtures (Claude Code 2.1.280).
+  const writeClaude = (id: string, records: Record<string, unknown>[]) => writeFileSync(join(project, `${id}.jsonl`),
+    records.map((row) => JSON.stringify({ ...row, sessionId: id })).join("\n"));
+  const interruptedId = "22222222-3333-4444-8555-666666666666";
+  writeClaude(interruptedId, [
+    record("user", [{ type: "text", text: "What does the build script do?" }], 10),
+    record("assistant", [{ type: "text", text: "Reading it." }, { type: "tool_use", id: "t1", name: "Bash", input: { command: "cat build.sh" } }], 11, "tool_use"),
+    record("user", [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "echo building" }] }], 12),
+    record("assistant", [{ type: "text", text: "It prints building and exits." }], 13, "end_turn"),
+    record("user", [{ type: "text", text: "Run it" }], 14),
+    record("assistant", [{ type: "text", text: "Running it." }, { type: "tool_use", id: "t2", name: "Bash", input: { command: "./build.sh" } }], 15, "tool_use"),
+    record("user", [{ type: "tool_result", tool_use_id: "t2", content: "The user doesn't want to proceed with this tool use." }], 16),
+    record("user", [{ type: "text", text: "[Request interrupted by user for tool use]" }], 17),
+  ]);
+  assert.deepEqual(await sampleTurns(interruptedId), [
+    { role: "owner", text: "What does the build script do?" },
+    { role: "agent", text: "[tool result] echo building" },
+    { role: "agent", text: "It prints building and exits." },
+    { role: "owner", text: "Run it" },
+    { role: "agent", text: "Running it." },
+    { role: "agent", text: "[tool result] The user doesn't want to proceed with this tool use." },
+    { role: "owner", text: "[Request interrupted by user for tool use]" },
+    { role: "owner", text: "[Turn ended: the owner interrupted it.]" },
+  ], "an interrupted turn keeps its tool results and the interrupt marker, and ends with the turn end");
+
+  const failedId = "33333333-4444-4555-8666-777777777777";
+  writeClaude(failedId, [
+    record("user", [{ type: "text", text: "Summarise the build log" }], 20),
+    { ...record("assistant", [{ type: "text", text: "API Error: the request failed." }], 21, "stop_sequence"), isApiErrorMessage: true, error: "model_not_found" },
+  ]);
+  assert.deepEqual(await sampleTurns(failedId), [
+    { role: "owner", text: "Summarise the build log" },
+    { role: "agent", text: "API Error: the request failed." },
+    { role: "agent", text: "[Turn ended: the turn failed with an error.]" },
+  ], "a failed turn ends with the turn end");
+  console.log("ok - Need You sampling takes each side's last two messages from the whole conversation, with tool results, interrupt markers, and the turn end");
 } finally {
   if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
   cleanup();

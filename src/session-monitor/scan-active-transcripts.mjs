@@ -17,7 +17,9 @@
 //   --limit N        caps external and product-owned slices; 0 returns every candidate
 //   --sample N       keeps the first N + most-recent N messages of each thread
 //   --last-per-role N  instead keeps the owner's last N messages and the agent's last N, from the
-//                    whole conversation, in order; text injected in the owner's role is not the owner's
+//                    whole conversation, in order; text injected in the owner's role is not the owner's.
+//                    Claude tool results and interrupt markers after the first kept message ride along
+//   --classifier-sample  with an exact --thread id, emits only the bounded classifier turns as JSON
 //   --thread <id>    drills into ONE thread (id prefix ok); pair with a bigger --sample to
 //                    expand just that thread's ends. (--bookends / --last alias --sample.)
 //   --file <path>    parses only that transcript (repeatable) plus files sharing its session id
@@ -73,7 +75,8 @@ const ooHome = process.env.OO_HOME ?? join(homedir(), ".owner-operator");
 const sinceArg = String(val("since", null) ?? loadActiveWindow(ooHome));
 // How many messages to keep from each end of a thread (opening N + most-recent N).
 const sampleSize = parseInt(val("sample", val("bookends", val("last", "4"))), 10);
-const lastPerRole = parseInt(val("last-per-role", "0"), 10);
+const classifierSample = has("classifier-sample");
+const lastPerRole = classifierSample ? 2 : parseInt(val("last-per-role", "0"), 10);
 // Drill into ONE thread by id (prefix ok). Expands just that thread — pair with a bigger
 // --sample — without re-scanning/reprinting everything. Bypasses the automated/limit cuts.
 const threadArg = val("thread", val("id", null));
@@ -165,10 +168,59 @@ for (const { root, format: source, app, namespace } of roots) {
 }
 
 // ---------- helpers ----------
-const clip = (s, n = truncate) => {
-  s = String(s ?? "").replace(/\s+/g, " ").trim();
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+const normalizeText = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+const clipText = (text, n) => text.length > n ? text.slice(0, n - 1) + "…" : text;
+const clip = (text, n = truncate) => clipText(normalizeText(text), n);
+
+const CLASSIFIER_SAMPLE_CHARS = 24_000;
+const TOOL_RESULT_PREFIX = "[tool result] ";
+const TURN_END_TURNS = {
+  interrupted: { role: "owner", text: "[Turn ended: the owner interrupted it.]" },
+  failed: { role: "agent", text: "[Turn ended: the turn failed with an error.]" },
 };
+
+function sampleClassifierTurns(recent, turnEnd) {
+  const end = TURN_END_TURNS[turnEnd];
+  let remaining = CLASSIFIER_SAMPLE_CHARS - (end?.text.length ?? 0);
+  const authored = [];
+  const interrupts = [];
+  const kept = [];
+  for (const [index, message] of recent.entries()) {
+    if (message.role === "tool") continue;
+    const turn = { role: message.role === "user" ? "owner" : "agent", text: normalizeText(message.text) };
+    (message.interrupt ? interrupts : authored).push({ index, turn });
+  }
+
+  const keep = (index, turn) => {
+    kept.push({ index, turn });
+    remaining -= turn.text.length;
+  };
+  const latestInterrupt = interrupts.pop();
+  if (latestInterrupt) keep(latestInterrupt.index, latestInterrupt.turn);
+
+  // Give short authored turns their full text before dividing the remaining space among long ones.
+  authored.sort((a, b) => a.turn.text.length - b.turn.text.length);
+  for (const [offset, { index, turn }] of authored.entries()) {
+    const share = Math.floor(remaining / (authored.length - offset));
+    keep(index, { ...turn, text: clipText(turn.text, share) });
+  }
+  for (const { index, turn } of interrupts.reverse()) {
+    if (turn.text.length <= remaining) keep(index, turn);
+  }
+
+  // Keep the newest suffix of tool results, dropping older ones first when space runs out.
+  for (let index = recent.length - 1; index >= 0 && remaining > TOOL_RESULT_PREFIX.length; index--) {
+    if (recent[index].role !== "tool") continue;
+    const text = TOOL_RESULT_PREFIX + normalizeText(recent[index].text);
+    if (text.length > remaining) break;
+    keep(index, { role: "agent", text });
+  }
+
+  const turns = kept.sort((a, b) => a.index - b.index).map(({ turn }) => turn);
+  if (end) turns.push(end);
+  return turns;
+}
+
 // The Claude desktop app shows a turn's recap and closing question in a next-step box; the
 // transcript records them only as the input of this tool call.
 const NEXT_STEP_BOX_TOOL = "mcp__ccd_turn__wrap_up";
@@ -180,6 +232,15 @@ const CLAUDE_INTERRUPT_MARKERS = new Set(["[Request interrupted by user]", "[Req
 const isClaudeInterrupt = (content) =>
   Array.isArray(content) && content.length === 1 && content[0]?.type === "text" &&
   CLAUDE_INTERRUPT_MARKERS.has(String(content[0].text).trim());
+
+function claudeToolResultText(content) {
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((c) => {
+    if (c?.type !== "tool_result") return [];
+    if (typeof c.content === "string") return [c.content];
+    return Array.isArray(c.content) ? c.content.filter((part) => part?.type === "text").map((part) => part.text) : [];
+  }).join(" ");
+}
 
 function claudeText(content) {
   if (typeof content === "string") return content;
@@ -472,7 +533,10 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
         if (o.isMeta) continue; // canonical flag for injected/meta turns (divmgl/clancey, constellos/claude-code)
         const text = claudeText(o.message?.content);
         // stop_reason marks turn boundaries: "tool_use" = mid loop (working); "end_turn" = done.
-        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason, interrupt: o.type === "user" && isClaudeInterrupt(o.message?.content) });
+        if (text && text.trim()) msgs.push({ role: o.type, text, ts, stop: o.message?.stop_reason,
+          interrupt: o.type === "user" && isClaudeInterrupt(o.message?.content), apiError: o.type === "assistant" && !!o.isApiErrorMessage });
+        const toolResult = o.type === "user" ? claudeToolResultText(o.message?.content) : "";
+        if (toolResult.trim()) msgs.push({ role: "tool", text: toolResult, ts });
       }
     } else if (source === "cursor") {
       // Cursor CLI transcript: { role, message: { content: [text|tool_use blocks] } } —
@@ -590,6 +654,7 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
     else if (cursorSubagent) sessionId = file.split("/agent-transcripts/")[1].split("/")[0];
     else sessionId = basename(file).replace(/\.(jsonl|ndjson)$/, "");
   }
+  if (classifierSample && sessionId !== threadArg) return null;
   if (!project) project = "(unknown)";
   // Repo name. For a git worktree (e.g. a Conductor workspace) the cwd's leaf is a random
   // codename ("bandung"), so resolve the *real* repo via the worktree's .git pointer. A
@@ -601,7 +666,8 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
     : project === "(unknown)" ? "(unknown)" : realRepo(project);
 
   // real user-facing conversation (drop injected boilerplate turns)
-  const convo = msgs.filter((m) => !isSessionBoilerplate(m.text));
+  const records = msgs.filter((m) => !isSessionBoilerplate(m.text));
+  const convo = records.filter((m) => m.role !== "tool");
   if (convo.length === 0) {
     // A launched PostHog Code task that hasn't streamed a turn yet — typically a cloud run
     // still provisioning its sandbox (only _posthog/* telemetry so far). Surface it as a
@@ -653,6 +719,7 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
   // The explicit end event of the latest turn, when the record has one.
   let turnEnd = null;
   if (source === "claude" && lastMsg.interrupt) turnEnd = "interrupted";
+  else if (source === "claude" && lastMsg.apiError) turnEnd = "failed";
   else if (source === "codex" && lastLifecycle === "turn_aborted") turnEnd = "interrupted";
   else if (source === "codex" && lastLifecycle === "task_complete") turnEnd = "completed";
 
@@ -674,14 +741,16 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
   // --sample 0 (the monitor's metadata-only mode) keeps NONE — slice(-0) would dump the
   // whole tail, so it gets its own branch.
   const shape = (m) => ({ role: m.role, text: clip(m.text), at: m.ts ? iso(m.ts) : null });
-  let firstMessages, recentMessages, omittedMessageCount;
+  let firstMessages, recentMessages, omittedMessageCount, classifierTurns;
   if (lastPerRole > 0) {
     const authored = convo.filter((m) => m.role !== "user" || !isInjectedOwnerText(m.text));
-    const kept = new Set(["user", "assistant"].flatMap((role) =>
-      authored.flatMap((m, i) => (m.role === role ? [i] : [])).slice(-lastPerRole)));
+    const kept = new Set(["user", "assistant"].flatMap((role) => authored.filter((m) => m.role === role).slice(-lastPerRole)));
+    const start = records.findIndex((m) => kept.has(m));
+    const recent = start < 0 ? [] : records.slice(start).filter((m) => kept.has(m) || m.role === "tool" || m.interrupt);
     firstMessages = [];
-    recentMessages = authored.filter((_, i) => kept.has(i)).map(shape);
-    omittedMessageCount = convo.length - recentMessages.length;
+    recentMessages = classifierSample ? [] : recent.map(shape);
+    if (classifierSample) classifierTurns = sampleClassifierTurns(recent, turnEnd);
+    omittedMessageCount = convo.length - recent.filter((m) => m.role !== "tool").length;
   } else if (sampleSize <= 0) { firstMessages = []; recentMessages = []; omittedMessageCount = convo.length; }
   else if (convo.length <= sampleSize * 2) { firstMessages = convo.map(shape); recentMessages = []; omittedMessageCount = 0; }
   else { firstMessages = convo.slice(0, sampleSize).map(shape); recentMessages = convo.slice(-sampleSize).map(shape); omittedMessageCount = convo.length - sampleSize * 2; }
@@ -718,6 +787,7 @@ function parseSession({ file, source, mtime, btime, app, namespace, openCode }) 
     firstMessages,          // earliest messages in the thread (array)
     recentMessages,         // most-recent messages in the thread (array)
     omittedMessageCount,    // messages skipped between the two ends
+    ...(classifierTurns ? { classifierTurns } : {}),
     _sort: lastMsgTs,
   };
 }
@@ -782,7 +852,9 @@ const result = { since: sinceArg, count: threads.length, threads };
 if (!emit) return result;
 
 // ---------- output ----------
-if (asJson) {
+if (classifierSample) {
+  process.stdout.write(JSON.stringify(threads[0]?.classifierTurns ?? null) + "\n");
+} else if (asJson) {
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 } else {
   const rel = (s) => {
